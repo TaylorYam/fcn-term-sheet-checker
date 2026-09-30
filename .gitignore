@@ -1,0 +1,45 @@
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.*
+credentials.*
+
+# Local runtime data and databases
+/data/
+/runtime/
+/.local/
+*.db
+*.sqlite
+*.sqlite3
+
+# Common generated files
+node_modules/
+dist/
+build/
+coverage/
+.coverage
+htmlcov/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Operating system and editor state
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/*.local.json
