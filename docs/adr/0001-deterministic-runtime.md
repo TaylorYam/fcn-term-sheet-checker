@@ -5,7 +5,7 @@
 
 ## Context
 
-使用者已指定正式核對流程不依賴 LLM，先針對固定 issuer／範本建立可稽核流程。本次只建置架構文件；不代表解析品質或業務規則已驗證。來源：[初始化 Issue #1](https://github.com/TaylorYam/fcn-term-sheet-checker/issues/1)。
+使用者已指定正式核對流程不依賴 LLM，先針對固定 issuer／範本建立可稽核流程。本次只建置架構文件；不代表解析品質或業務規則已驗證。決策紀錄：[ADR 提案 #2](https://github.com/TaylorYam/fcn-term-sheet-checker/issues/2)。來源：[初始化 Issue #1](https://github.com/TaylorYam/fcn-term-sheet-checker/issues/1)。
 
 ## Decision
 
