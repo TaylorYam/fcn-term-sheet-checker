@@ -7,7 +7,7 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 1
+version = 2
 effective_date = 2026-10-01
 
 [distributor]
@@ -35,10 +35,27 @@ RR1~RR5，RR1、RR2為保守型，RR3、RR4為穩健型，RR5為積極型，本�
 依受託機構審核適合投資本產品)(下稱「OSU客戶」) (專業投資人與OSU客戶以下合稱「投資人」)。"""
 fixed_warning_occurrences = 3
 
+# 依上手不同的固定警語版本（鍵為上手代號小寫）。未列出的上手使用上面的 fixed_warning。
+# HSBC：前 4 處「受託機構」寫成「受託或銷售機構」，第 5 處「依受託機構審核」不變（2026-10-01 確認視為正確）。
+# HSBC 範本中同樣出現 3 次：封面警語 1、第一章第 2 條、第三章。
+[risk.fixed_warning_by_issuer]
+hsbc = """\
+本商品風險程度等級為【RR4】。根據受託或銷售機構的風險等級分類，由於本商品並不保本，連結標的為【證券交易所交易證券】，\
+在綜合評量包括但不僅限於產品天期、發行機構信用評等與前述因素後，根據受託或銷售機構受託買賣境外商品審查管理辦法之\
+境外結構型商品風險及適合度評估標準將本商品在風險等級中歸類為【RR4】。*投資人請注意，受託或銷售機構將風險等級區分為\
+RR1~RR5，RR1、RR2為保守型，RR3、RR4為穩健型，RR5為積極型，本商品風險等級由受託或銷售機構釐定及提供，發行機構及/或\
+總代理人不對此評級之準確性負任何責任。受託對象僅限依據境外結構型商品管理規則(下稱「管理規則」)投資本商品之\
+專業投資人或依據國際證券業務分公司(下稱「OSU」)辦理受託買賣相關規定允許投資本商品之中華民國境外客戶(此類客戶\
+依受託機構審核適合投資本產品)(下稱「OSU客戶」) (專業投資人與OSU客戶以下合稱「投資人」)。"""
+
 [wording]
 # 「受託投資」須改為「受託買賣」；但法規原文片語「受託投資或受託買賣」允許出現。
 forbidden = ["受託投資"]
-allowed_phrases = ["受託投資或受託買賣"]
+allowed_phrases = [
+    "受託投資或受託買賣",
+    # HSBC 封面警語 7 與第三章：境外結構型商品管理規則的列舉寫法（2026-10-01 確認允許）
+    "受託投資、受託買賣或為投資型保單",
+]
 
 [product_name.barc]
 # 商品名稱格式（依最新 5 份 BARC 說明書，2026-10-01 確認）
@@ -49,6 +66,19 @@ memory_zh = "記憶式"
 memory_en = "Memory "
 # 半形／全形括號差異不視為錯誤（比對前統一為全形）
 normalize_brackets = true
+
+[product_name.hsbc]
+# 商品名稱格式（依 8 份 HSBC 說明書推得，2026-10-01 確認照此核對）
+# 佔位符同 BARC；{maxi_en} 標的數 ≥ 2 時填入、{daily_en} 提前出場每日觀察時填入
+zh = "香港上海滙豐銀行{tenor}個月{ccy_zh}計價{memory_zh}自動提前到期固定配息股權連結（無保證機構無擔保）（不保本）結構型商品（以下簡稱「本商品」）"
+en = "{maxi_en}{daily_en}{memory_en}Autocallable Fixed Coupon Notes (Non Guaranteed, Unsecured)"
+memory_zh = "記憶式"
+memory_en = "Memory "
+maxi_en = "Maxi "
+daily_en = "Daily "
+normalize_brackets = true
+# 英文名稱在 PDF 換行處常黏字（例 CouponNotes），比對時忽略所有空白
+ignore_whitespace_en = true
 
 [currency]
 # 說明書中文幣別 → ISO 代碼

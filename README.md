@@ -20,7 +20,8 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 ## 目前進度（2026-10-01）
 
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
-- 下單資料來源：各家上手原始格式（每家一份格式設定）。BARC 為詢價表，一筆交易一個檔，以儲存格 B3 的商品代號配對：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。舊整理表 `FCN參考條件.xlsx` 已停用。
+- 下單資料來源：各家上手原始格式（每家一份格式設定）。BARC 為詢價表，一筆交易一個檔，以儲存格 B3 的商品代號配對：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。舊整理表 `FCN參考條件.xlsx` 已停用（HSBC 暫用新版整理表，見下）。
+- 第二家上手（規格階段）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。尚未實作。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
 ## 安裝
