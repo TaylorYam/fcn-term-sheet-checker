@@ -10,11 +10,11 @@ def test_pip_reads_constraints_with_cp950_locale():
     probe = """
 import locale
 import sys
-from pathlib import Path
-from pip._internal.utils.encoding import auto_decode
+import runpy
 locale.getpreferredencoding = lambda do_setlocale=True: 'cp950'
-raw = Path(sys.argv[1]).read_bytes()
-assert auto_decode(raw) == raw.decode('utf-8')
+constraints = sys.argv[1]
+sys.argv = ['pip', 'install', '--dry-run', '--no-deps', '--no-index', '-c', constraints, 'pip']
+runpy.run_module('pip', run_name='__main__')
 """
     result = subprocess.run(
         [sys.executable, "-c", probe, str(constraints)],
