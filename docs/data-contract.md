@@ -21,7 +21,7 @@
 | trade_date、issue_date、maturity_date | ISO 日期 | 不等同觀察日／付款日；不猜模糊日期 |
 | observation_schedule、payment_schedule | 日期清單與語意 | 跨頁表格、營業日調整、順序與重複值 |
 
-第一個範本（BCY）的實際欄位、變化型態與 Excel 對照見 [BCY 範本規格](templates/bcy-zh-product-description.md) 與 [BCY 核對規則](rules/bcy-fcn-reference-check.md)。BCY 樣本中觀察到：KI 有「無／到期觀察／每日觀察」三種、提前出場有「定日／期間」兩種觀察方式，且月配息率為主值、年利率由其推得。
+第一個範本（BARC）的實際欄位、變化型態與 Excel 對照見 [BARC 範本規格](templates/barc-zh-product-description.md) 與 [BARC 核對規則](rules/barc-fcn-reference-check.md)。BARC 樣本中觀察到：KI 有「無／到期觀察／每日觀察」三種、提前出場有「定日／期間」兩種觀察方式，且月配息率為主值、年利率由其推得。
 
 未使用 KI 的產品不應被強迫補值。產品範本需明確定義適用欄位與必要條件。首個 slice 只實作選定必核欄位；不聲稱已完整核對整份法律文件。
 
