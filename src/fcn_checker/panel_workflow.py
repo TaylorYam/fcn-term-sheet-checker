@@ -1,8 +1,10 @@
-"""PANEL 公開工作流程：來源預覽、核對及失效檢查；不保存報告。"""
+"""PANEL 公開工作流程：來源預覽、核對及失效檢查及手動保存報告。"""
 
 from __future__ import annotations
 
 import datetime as dt
+import json
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -14,7 +16,32 @@ from .ingestion import IngestionError, open_pdf, sha256_of
 from .orders.inquiry import load_inquiry
 from .parsers import barc
 from .parsers.layout import Document
+from .reporting import to_json, to_markdown
 from .schema import CheckResult, CheckStatus, Evidence
+
+
+@dataclass(frozen=True)
+class SaveReceipt:
+    paths: tuple[Path, ...] = ()
+    error: str = ""
+    cancelled: bool = False
+    source_changed: bool = False
+
+    @property
+    def complete(self) -> bool:
+        return len(self.paths) == 2 and not self.error and not self.source_changed
+
+    @property
+    def summary(self) -> str:
+        if self.cancelled:
+            return "已取消儲存，核對結果仍保留。"
+        saved = {p.suffix: p for p in self.paths}
+        lines = [f"{label}：{saved.get(ext, '未儲存')}" for label, ext in (("JSON", ".json"), ("Markdown", ".md"))]
+        if self.error:
+            lines.append("儲存失敗：" + self.error)
+        if self.source_changed:
+            lines.append("儲存期間來源已變更；已寫入檔案屬於先前核對，請重新載入。")
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -203,3 +230,38 @@ class PanelSession:
         except IngestionError as e:
             self.message = str(e)
             raise
+
+    def save_report(self, out_dir: Path | None) -> SaveReceipt:
+        if out_dir is None:
+            return SaveReceipt(cancelled=True)
+        outcome = self.outcome
+        if outcome is None:
+            raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
+        # 每次保存使用新名稱，exclusive create 也防止碰撞時覆蓋。
+        stem = "FCN_" + dt.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex
+        saved: list[Path] = []
+        error = ""
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            contents = (
+                ("json", json.dumps(to_json(outcome.report), ensure_ascii=False, indent=2) + "\n"),
+                ("md", to_markdown(outcome.report)),
+            )
+            for extension, content in contents:
+                path = out_dir / f"{stem}.check.{extension}"
+                created = False
+                try:
+                    with path.open("x", encoding="utf-8") as stream:
+                        created = True
+                        stream.write(content)
+                except OSError:
+                    if created:
+                        try:
+                            path.unlink()
+                        except OSError as cleanup_error:
+                            error = f"未完成的檔案無法移除：{path}（{cleanup_error}）；"
+                    raise
+                saved.append(path)
+        except OSError as failure:
+            error += str(failure)
+        return SaveReceipt(tuple(saved), error, source_changed=self.outcome is not outcome)

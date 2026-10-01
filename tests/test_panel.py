@@ -221,3 +221,77 @@ def test_unreliable_pdf_code_is_not_guessed(tmp_path, kind):
     preview = session.load_preview()
     assert preview.product_code is None
     assert preview.product_code_note
+
+
+def test_manual_save_cancel_failure_and_stale(tmp_path):
+    import json
+
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(tmp_path / "order.xlsx", Spec())
+    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
+    session.select(pdf, excel)
+    with pytest.raises(IngestionError):
+        session.save_report(tmp_path / "reports")
+    session.load_preview()
+    outcome = session.start_check()
+    assert session.save_report(None).cancelled
+    assert not (tmp_path / "reports").exists()
+    receipt = session.save_report(tmp_path / "reports")
+    assert receipt.complete
+    assert len(receipt.paths) == 2
+    data = json.loads(receipt.paths[0].read_text(encoding="utf-8"))
+    assert data["metadata"] == outcome.report.metadata
+    assert data["not_covered"]
+    assert "PDF" in receipt.paths[1].read_text(encoding="utf-8")
+    second = session.save_report(tmp_path / "reports")
+    assert second.complete and second.paths != receipt.paths
+    blocked = tmp_path / "blocked"
+    blocked.write_text("keep")
+    failed = session.save_report(blocked)
+    assert not failed.complete and failed.error
+    assert session.outcome is outcome
+    assert blocked.read_text() == "keep"
+    excel.unlink()
+    with pytest.raises(IngestionError):
+        session.save_report(tmp_path / "reports")
+    assert len(list((tmp_path / "reports").iterdir())) == 4
+
+
+def test_save_collision_and_partial_failure(tmp_path, monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(tmp_path / "order.xlsx", Spec())
+    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
+    session.select(pdf, excel)
+    session.load_preview()
+    outcome = session.start_check()
+    monkeypatch.setattr("uuid.uuid4", lambda: SimpleNamespace(hex="fixed"))
+    directory = tmp_path / "reports"
+    directory.mkdir()
+    original_open = Path.open
+
+    def fail_markdown(path, mode="r", *args, **kwargs):
+        if mode == "x" and path.suffix == ".md":
+            raise PermissionError("synthetic denied")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_markdown)
+    partial = session.save_report(directory)
+    assert not partial.complete and len(partial.paths) == 1
+    assert "synthetic denied" in partial.error
+    assert "Markdown：未儲存" in partial.summary
+    assert session.outcome is outcome
+    original = partial.paths[0].read_bytes()
+
+    # Collision at filesystem boundary, independent of clock timing.
+    def collide(path, mode="r", *args, **kwargs):
+        if mode == "x":
+            return original_open(partial.paths[0], mode, *args, **kwargs)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", collide)
+    collision = session.save_report(directory)
+    assert not collision.complete and collision.error and not collision.paths
+    assert partial.paths[0].read_bytes() == original
