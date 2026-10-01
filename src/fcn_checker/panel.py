@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import sys
 import tkinter as tk
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +18,24 @@ def display_value(value: object) -> str:
     return "未提供" if value is None else str(value)
 
 
+def enable_windows_dpi_awareness() -> None:
+    """在建立 Tk 視窗前啟用 system DPI awareness，避免 Windows 點陣放大。
+
+    Tk 8.6 不在此處承諾跨螢幕動態 DPI 排版；已由宿主設定 awareness 時維持其設定。
+    """
+    if sys.platform != "win32":
+        return
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    try:
+        set_awareness = user32.SetProcessDpiAwarenessContext
+    except AttributeError:
+        user32.SetProcessDPIAware()
+        return
+    set_awareness.argtypes = [ctypes.c_void_p]
+    set_awareness.restype = ctypes.c_bool
+    set_awareness(ctypes.c_void_p(-2))  # DPI_AWARENESS_CONTEXT_SYSTEM_AWARE
+
+
 class PanelWindow:
     def __init__(self, root: tk.Tk, session: PanelSession):
         self.root, self.session = root, session
@@ -26,8 +46,15 @@ class PanelWindow:
         self.closed = False
         self.shown: Preview | None = None
         root.title("FCN Term Sheet 核對 — 來源預覽")
-        root.geometry("1080x780")
-        root.minsize(780, 680)
+        scale = root.winfo_fpixels("1i") / 96
+
+        def pixels(value):
+            return round(value * scale)
+
+        width = min(pixels(1080), root.winfo_screenwidth() - pixels(40))
+        height = min(pixels(780), root.winfo_screenheight() - pixels(80))
+        root.geometry(f"{width}x{height}")
+        root.minsize(min(pixels(780), width), min(pixels(680), height))
         root.configure(background="#f4f6f8")
         root.protocol("WM_DELETE_WINDOW", self.close)
         style = ttk.Style(root)
@@ -37,15 +64,15 @@ class PanelWindow:
         style.configure("Heading.TLabel", font=("Microsoft JhengHei UI", 20, "bold"))
         style.configure("Section.TLabel", font=("Microsoft JhengHei UI", 12, "bold"))
         style.configure("TButton", font=("Microsoft JhengHei UI", 11), padding=(12, 7))
-        style.configure("Treeview", font=("Microsoft JhengHei UI", 11), rowheight=30)
+        style.configure("Treeview", font=("Microsoft JhengHei UI", 11), rowheight=pixels(30))
         style.configure("Treeview.Heading", font=("Microsoft JhengHei UI", 11, "bold"))
         style.map("Treeview", background=[("selected", "#d9e9f2")], foreground=[("selected", "#172b3a")])
-        frame = ttk.Frame(root, padding=20)
+        frame = ttk.Frame(root, padding=pixels(20))
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(9, weight=1)
         ttk.Label(frame, text="核對來源預覽", style="Heading.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
-        ttk.Label(frame, text="先確認商品標題與 Excel 條件，再進行後續核對。").grid(
+        ttk.Label(frame, text="先確認商品代號與 Excel 條件，再進行後續核對。").grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 10)
         )
         selectors = ttk.Frame(frame)
@@ -78,8 +105,8 @@ class PanelWindow:
         self.reload = ttk.Button(frame, text="載入／重新載入預覽", command=self.load)
         self.reload.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 10))
         self.controls.append(self.reload)
-        ttk.Label(frame, text="PDF 商品標題", style="Section.TLabel").grid(row=6, column=0, columnspan=3, sticky="w")
-        self.title = tk.Text(
+        ttk.Label(frame, text="PDF 商品代號", style="Section.TLabel").grid(row=6, column=0, columnspan=3, sticky="w")
+        self.product_code_text = tk.Text(
             frame,
             height=2,
             wrap="word",
@@ -90,8 +117,8 @@ class PanelWindow:
             padx=12,
             pady=8,
         )
-        self.title.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(6, 10))
-        self._title_text("選取 PDF 與 Excel 後，載入預覽以查看完整商品標題。")
+        self.product_code_text.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(6, 10))
+        self._show_product_code("選取 PDF 與 Excel 後，載入預覽以查看完整商品代號。")
         ttk.Label(frame, text="Excel 條件（唯讀）", style="Section.TLabel").grid(
             row=8, column=0, columnspan=3, sticky="w"
         )
@@ -108,7 +135,7 @@ class PanelWindow:
             ("source", "來源儲存格", 260),
         ):
             self.table.heading(column, text=label)
-            self.table.column(column, width=width, minwidth=120, anchor="w")
+            self.table.column(column, width=pixels(width), minwidth=pixels(120), anchor="w")
         self.table.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.table.yview)
         scroll.grid(row=0, column=1, sticky="ns")
@@ -140,15 +167,15 @@ class PanelWindow:
         self._set_templates()
         self._selection_changed()
 
-    def _title_text(self, text):
-        self.title.configure(state="normal")
-        self.title.delete("1.0", "end")
-        self.title.insert("1.0", text)
-        self.title.configure(state="disabled")
+    def _show_product_code(self, text):
+        self.product_code_text.configure(state="normal")
+        self.product_code_text.delete("1.0", "end")
+        self.product_code_text.insert("1.0", text)
+        self.product_code_text.configure(state="disabled")
 
     def _clear(self):
         self.shown = None
-        self._title_text("尚未載入有效預覽。")
+        self._show_product_code("尚未載入有效預覽。")
         self.table.delete(*self.table.get_children())
         self.details.set("")
 
@@ -200,7 +227,9 @@ class PanelWindow:
         try:
             preview = future.result()
             self.shown = preview
-            self._title_text(preview.title or "未找到完整商品標題，請人工確認。" + preview.title_note)
+            self._show_product_code(
+                preview.product_code or "無法可靠擷取商品代號，請人工確認。" + preview.product_code_note
+            )
             for condition in preview.conditions:
                 self.table.insert("", "end", values=(condition.label, display_value(condition.value), condition.source))
             self.status.set(self.session.message + ("\n" + "；".join(preview.warnings) if preview.warnings else ""))
@@ -247,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         "--order-format", type=Path, default=Path("config/order_formats/barc.toml"), help="BARC 詢價格式設定檔"
     )
     args = parser.parse_args(argv)
+    enable_windows_dpi_awareness()
     root = tk.Tk()
     PanelWindow(root, PanelSession(args.order_format))
     root.mainloop()

@@ -11,7 +11,7 @@ from fcn_checker.panel_workflow import PanelSession
 from synth import ORDER_FORMAT, Spec, build_inquiry, build_not_barc_pdf, build_pdf
 
 
-def test_preview_shows_cover_title_and_readonly_conditions(tmp_path):
+def test_preview_shows_pdf_product_code_and_readonly_conditions(tmp_path):
     spec = Spec(currency_zh="日幣", tenor=7)
     pdf = build_pdf(tmp_path / "ts.pdf", spec)
     excel = build_inquiry(tmp_path / "inquiry.xlsx", spec)
@@ -19,10 +19,7 @@ def test_preview_shows_cover_title_and_readonly_conditions(tmp_path):
     session.select(pdf, excel)
     preview = session.load_preview()
 
-    assert preview.title == (
-        "英商巴克萊銀行7個月日幣計價連結股權記憶式自動提前出場結構型商品（不保本）（無擔保及無保證機構）"
-    )
-    assert preview.title_evidence[0].page == 1
+    assert preview.product_code_evidence[0].page == 1
     assert preview.product_code == "029199990001"
     coupon = next(row for row in preview.conditions if row.label == "Coupon p.a. (%)")
     assert coupon.value == Decimal("12")
@@ -90,7 +87,7 @@ def test_invalid_inputs_never_leave_valid_preview(tmp_path, kind):
     assert session.message
 
 
-def test_missing_title_is_explicit_and_never_replaced_by_filename(tmp_path):
+def test_heading_is_not_used_for_product_code(tmp_path):
     pdf = build_pdf(tmp_path / "misleading-title.pdf", Spec())
     with fitz.open(pdf) as doc:
         page = doc[0]
@@ -102,5 +99,34 @@ def test_missing_title_is_explicit_and_never_replaced_by_filename(tmp_path):
     session = PanelSession(ORDER_FORMAT)
     session.select(pdf, excel)
     preview = session.load_preview()
-    assert preview.title is None
-    assert "未找到" in preview.title_note
+    assert preview.product_code == "029199990001"
+
+
+def test_pdf_code_is_not_replaced_by_excel_code(tmp_path):
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec(product_code="029199990002"))
+    session = PanelSession(ORDER_FORMAT)
+    session.select(pdf, excel)
+    preview = session.load_preview()
+    assert preview.product_code == "029199990001"
+    assert preview.conditions[0].value == "029199990002"
+
+
+@pytest.mark.parametrize("kind", ["missing", "ambiguous"])
+def test_unreliable_pdf_code_is_not_guessed(tmp_path, kind):
+    pdf = build_pdf(tmp_path / "029199990003.pdf", Spec())
+    with fitz.open(pdf) as doc:
+        page = doc[0]
+        if kind == "missing":
+            page.add_redact_annot(page.search_for("029199990001")[0])
+            page.apply_redactions()
+        else:
+            page.insert_text((41, 820), "商品代號:", fontname="china-t", fontsize=10)
+            page.insert_text((301, 820), "029199990004", fontsize=10)
+        doc.saveIncr()
+    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
+    session = PanelSession(ORDER_FORMAT)
+    session.select(pdf, excel)
+    preview = session.load_preview()
+    assert preview.product_code is None
+    assert preview.product_code_note
