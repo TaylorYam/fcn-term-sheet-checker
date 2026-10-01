@@ -3,7 +3,7 @@
 - 文件側：[BARC 範本規格](../templates/barc-zh-product-description.md)
 - 下單側：上手原始詢價格式，見 [BARC 詢價格式](../order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）
 - 會隨時間改變的基準（審查通過日期、固定警語、負責人、名稱格式、面額預設值等）見 [審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
-- 狀態：規則已與使用者確認（2026-10-01），尚待實作；§6.2 擱置、§6.4 需更多詢價表樣本驗證
+- 狀態：規則已與使用者確認（2026-10-01）；第一階段已實作（Issue #7，`src/fcn_checker/rules/barc.py`，實作對照見 §8），第二階段（配息表、提前出場表、保證配息期等）待另開 Issue；§6.2 擱置、§6.4 需更多詢價表樣本驗證
 - 舊的整理表 `FCN參考條件.xlsx` 已停用，見 [fcn-reference-legacy.md](../order-formats/fcn-reference-legacy.md)
 
 ## 1. 下單資料來源（2026-10-01 起）
@@ -226,3 +226,24 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 | 2026-10-01 | Guaranteed Periods = 保證配息期（不會被 KO 的期數） |
 | 2026-10-01 | MKI = Monthly KI；Period End 型保證配息期 = 註記「非自動提前出場評價日」的期數（例 11），無註記為 0 |
 | 2026-10-01 | 其他詢價表型態暫無樣本，先依規則推得 |
+
+## 8. 第一階段實作對照（Issue #7）
+
+| rule_id | 規則 | 本文件 |
+|---|---|---|
+| `template.barc` | 範本辨識（範本規格 §8） | §4 |
+| `order.unknown_column`／`order.missing_column` | 詢價表欄名不在格式設定／設定欄名不在檔案 → 人工覆核 | §1 |
+| `field.*` | 商品代號、幣別、標的、執行／KO／KI %、KO Type、Barrier Type、年利率、天期、四個日期、發行日偏移 | §3.2、§3.3、§3.6 |
+| `derive.monthly_coupon` | 月配息率推算，容差 ≤ 0.0001 | §3.5 |
+| `doc.coupon_consistency` | 月配息率（§9、§14、§15(2)、§17）與年利率（§9、§14、§17）文件內一致 | §3.5 |
+| `derive.prices` | 執行／KO／下限價 = 最初價格 × %（half-up 4 位） | §3.4 |
+| `doc.denomination` | 面額 = 幣別預設值，否則轉人工 | §3.2 |
+| `doc.subscription_start_date`／`doc.print_date` | D1、E2 | §3.8 |
+| `standard.*` | 審查通過日期、負責人、風險等級、固定警語、禁用語、商品名稱 | §3.9、審查標準 |
+
+第一階段的實作決定：
+
+- **月配息率的期數**：配息表解析屬第二階段，期數暫以詢價表「天期 ÷ Observation Frequency」計算（不能整除 → 人工覆核）。第二階段改用說明書配息表列數並交叉驗證。
+- **商品名稱樣板的參數**：用說明書自身的天期（§13(1)）、幣別（封面）與是否記憶式（§15 觸發名詞）組出預期名稱，只檢查名稱格式；參數本身是否與詢價表一致由 `field.*` 規則負責，避免同一差異重複報告。§15 觸發名詞與名稱是否含「記憶式」不一致時轉人工覆核。
+- **Monthly KI**：詢價表或說明書任一方判定為 Monthly KI 時，`field.ki_type` 轉人工覆核（尚無樣本）。
+- **未涵蓋規則**：以固定清單列在報告「未涵蓋」區（`rules/barc.py` 的 `NOT_COVERED`），不影響整體狀態，也不代表通過。

@@ -2,7 +2,7 @@
 
 FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料轉成相同資料結構，以可追溯規則產生差異與人工覆核清單。
 
-**目前狀態：只有架構與工作規劃，尚無可執行的核對功能。** 第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
+**目前狀態：第一階段可用——BARC 中文產品說明書（文字型 PDF）× BARC 詢價表的本機核對 CLI。** 配息表與提前出場表等第二階段規則尚未實作，會列在報告的「未涵蓋」區。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
 
 ## 預定流程
 
@@ -23,12 +23,51 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - 下單資料來源：各家上手原始格式（每家一份格式設定）。BARC 為詢價表，一筆交易一個檔，以儲存格 B3 的商品代號配對：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。舊整理表 `FCN參考條件.xlsx` 已停用。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
-## 下一步
+## 安裝
 
-1. 依 TODO 建立第一個實作 Issue，再從最新 `main` 建立分支；完成 BARC 文字型 PDF ＋ 詢價表的最小端到端流程。
-2. 建立合成 PDF／詢價表 fixture，加入測試與 Python CI，經 PR review／CI 通過後合併。
+需要 Python ≥ 3.11。PDF 擷取使用 PyMuPDF（AGPL-3.0；本工具僅限公司內部本機使用），Excel 讀取使用 openpyxl；已驗證版本鎖定在 `constraints.txt`。
 
-尚未選定套件版本與 Python 最低版本，沒有安裝或執行指令；第一個實作 Issue 會補齊環境設定、依賴鎖定及 CLI 使用方式。
+```bash
+python -m pip install -c constraints.txt -e ".[dev]"
+```
+
+## 使用方式
+
+在專案根目錄執行（審查標準與詢價格式預設讀 `config/`）：
+
+```bash
+fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/reports
+```
+
+| 參數 | 說明 |
+|---|---|
+| 第 1 個 | 說明書 PDF（BARC 中文產品說明書） |
+| 第 2 個 | BARC 詢價表 Excel（一筆交易一個檔，B3 為商品代號） |
+| `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
+| `--order-format` | 詢價格式設定檔，預設 `config/order_formats/barc.toml` |
+| `--out` | 報告輸出資料夾，預設 `runtime/reports`（被 Git 忽略） |
+
+輸出 `<PDF 檔名>.check.json`（完整逐項結果、證據與執行 metadata）與 `<PDF 檔名>.check.md`（人看的報告：先列不一致與需人工覆核項目，再列未涵蓋規則與通過項目）。每項結果附詢價表值、說明書值、說明書頁碼與原文、詢價表儲存格位置。
+
+| 結束碼 | 整體狀態 |
+|---|---|
+| 0 | `PASS`：已涵蓋的規則全部通過（未涵蓋規則仍須人工核對） |
+| 1 | 有 `MISMATCH`（不一致）或 `REVIEW_REQUIRED`（需人工覆核） |
+| 2 | `ERROR`：PDF 損毀／加密、檔案不存在、設定檔錯誤等 |
+
+整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非 BARC 範本、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
+
+## 開發與測試
+
+```bash
+pytest -q
+```
+
+```bash
+ruff check src tests
+```
+
+測試只透過兩個切點驗證：核對入口 `fcn_checker.checker.run_check`（合成說明書 PDF 與合成詢價表，於測試時由 `tests/synth.py` 產生，數值皆虛構）與 `fcn-check` CLI。`tests/test_real_samples.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過。
 
 ## 文件與開發規則
 
@@ -40,11 +79,11 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
 
-開發流程：Issue → branch/worktree → plan → implementation → validation → commit/push → PR → review/CI → merge。目前 CI 僅檢查 patch 空白，不能代表金融欄位或核對邏輯已驗證。
+開發流程：Issue → branch/worktree → plan → implementation → validation → commit/push → PR → review/CI → merge。CI 檢查 patch 空白、ruff lint／format 與 pytest（Python 3.11、3.13，只用合成資料）。
 
 ## 資料管理
 
-真實 PDF、下單檔、擷取文字、OCR 影像與報告放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：TS 放 `data/ts/`、下單 Excel 放 `data/`、探勘輸出與暫存檔放 `data/tmp/`。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
+真實 PDF、下單檔、擷取文字、OCR 影像與報告放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：TS 放 `data/ts/`、下單 Excel 放 `data/`、探勘輸出與暫存檔放 `data/tmp/`、核對報告預設輸出到 `runtime/reports/`。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
 
 ## 範本來源
 

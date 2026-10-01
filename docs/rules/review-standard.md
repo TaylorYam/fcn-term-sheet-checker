@@ -1,7 +1,7 @@
 # 審查標準（Review Standard）
 
 - 設定檔：[`config/review_standard.toml`](../../config/review_standard.toml)
-- 狀態：2026-10-01 與使用者確認，尚待實作；探勘腳本已在本機以 14 份 BARC 樣本驗證可用
+- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）
 
 ## 1. 為什麼要獨立成設定檔
 

@@ -4,7 +4,7 @@
 
 協助作業人員將 FCN Term Sheet 與已確認的下單資料逐欄比對，輸出可回溯到原文件的例外清單。第一階段先支援一家 issuer 的一個文字型 PDF 範本；不做產品定價、交易執行、法律條款解釋或無人覆核的交易放行。
 
-本文件描述目標設計；目前尚未建立 runtime 模組。
+第一階段（Issue #7）已實作 BARC 文字型 PDF ＋ 詢價表的端到端流程；OCR 與更多範本仍為目標設計。
 
 ## 系統資料流
 
@@ -34,19 +34,21 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 
 ## 建議模組邊界
 
-以下是未來目錄規劃，不代表已有可 import 的套件。
+第一階段實際模組如下（OCR adapter 尚未建立）。
 
 | 預定路徑 | 職責 | 邊界 |
 |---|---|---|
-| `src/fcn_checker/ingestion/` | 文件識別、hash、大小／加密／破損檢查 | 不解析金融欄位；不嘗試繞過密碼 |
-| `src/fcn_checker/extraction/` | PyMuPDF/pdfplumber 與日後 OCR adapter | 輸出頁碼、座標、文字；不判斷核對結果 |
-| `src/fcn_checker/parsers/` | issuer／範本版本偵測、欄位與表格定位 | 使用錨點、座標與有限 regex；多重命中不任選 |
-| `src/fcn_checker/schema/` | 標準化型別與欄位驗證 | 缺值／未適用／不合法分開；保留來源證據 |
-| `src/fcn_checker/orders/` | 下單 CSV/JSON 等來源映射 | 實際來源待確認；禁止用文件值填補預期值 |
-| `src/fcn_checker/rules/` | 版本化規則與明確容差 | 不讀 PDF、不呼叫模型、不自動修改來源值 |
-| `src/fcn_checker/reporting/` | JSON 與本地人可讀報告 | 呈現差異、證據、失敗原因及覆核項目 |
-| `src/fcn_checker/cli.py` | 本機批次流程與結束狀態 | 第一階段無 Web UI、資料庫或雲端服務 |
-| `tests/fixtures/` | 合成／經核准去識別案例 | 不提交真實客戶交易資料 |
+| `src/fcn_checker/ingestion.py` | 文件 hash、加密／破損檢查 | 不解析金融欄位；不嘗試繞過密碼 |
+| `src/fcn_checker/extraction.py` | PyMuPDF 逐頁文字行、頁碼、bbox；排除頁碼雜訊 | 輸出頁碼、座標、文字；不判斷核對結果 |
+| `src/fcn_checker/parsers/` | `layout.py` 章／條／子項定位；`barc.py` 範本辨識與欄位、價格表擷取 | 使用錨點、座標與有限 regex；多重命中轉歧義，不任選 |
+| `src/fcn_checker/schema.py` | 標準化型別：`ParsedField`、`Evidence`、`CheckResult` | 缺值／歧義／不合法／不適用分開；保留來源證據 |
+| `src/fcn_checker/config.py` | 載入審查標準與上手詢價格式設定（TOML） | 會隨時間改變的基準只在設定檔 |
+| `src/fcn_checker/orders/` | 上手原始詢價表 adapter（目前 BARC） | 未知欄名回報覆核；禁止用文件值填補預期值 |
+| `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；未涵蓋規則清單 | 不讀檔、不呼叫模型、不自動修改來源值 |
+| `src/fcn_checker/checker.py` | 核對入口 `run_check`：串接上述模組並產生完整結果與 metadata | 測試切點 1 |
+| `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
+| `src/fcn_checker/cli.py` | `fcn-check` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
+| `tests/synth.py` | 測試時產生合成說明書 PDF 與詢價表 | 數值皆虛構；不提交真實客戶交易資料 |
 
 PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版面需要；實際採用順序應由樣本與授權條件評估，首版不必同時依賴兩者。純文字攤平可能破壞欄位關係，應保留列、區塊及跨頁資訊。OCR adapter 待文字流程穩定後加入，不預先綁定引擎。
 
@@ -70,4 +72,4 @@ PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版�
 
 未來 LLM fallback 若獲批准，只能作為 extraction adapter 提供候選欄位與來源證據；不得修改預期下單值或取代 rule engine。需另立 ADR、資料傳送政策與驗證門檻；第一版無相關 SDK、開關或外部呼叫。
 
-決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)。
+決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)。

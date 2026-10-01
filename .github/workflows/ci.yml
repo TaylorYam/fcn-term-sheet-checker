@@ -36,3 +36,31 @@ jobs:
           else
             git diff --check "${BEFORE_SHA}...HEAD"
           fi
+
+  python:
+    name: Lint and test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and dev dependencies
+        run: python -m pip install -c constraints.txt -e ".[dev]"
+
+      - name: Lint
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      # 真實樣本測試只在本機 data/ 存在時執行；CI 沒有 data/，會自動略過
+      - name: Test
+        run: pytest -q
