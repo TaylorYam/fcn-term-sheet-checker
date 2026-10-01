@@ -112,8 +112,9 @@ ruff check src tests
 - [架構與模組邊界](docs/architecture.md)
 - [資料契約草案](docs/data-contract.md)
 - [分階段 TODO 與待確認項目](docs/TODO.md)
+- [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
 - [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式](docs/order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- [ADR：第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)
+- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新](docs/adr/0003-public-github-panel-update.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
 
