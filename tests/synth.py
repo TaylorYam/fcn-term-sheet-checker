@@ -1,0 +1,591 @@
+"""合成測試資料：仿 BARC 中文產品說明書版面的 PDF 與 BARC 詢價表 Excel。
+
+所有數值、代號、名稱皆為虛構；不含任何真實交易資料。版面座標依範本規格
+docs/templates/barc-zh-product-description.md 觀察值設定。
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import tomllib
+from dataclasses import dataclass, field, replace
+from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
+from typing import Any
+
+import fitz
+import openpyxl
+
+ROOT = Path(__file__).resolve().parents[1]
+REVIEW_STANDARD = ROOT / "config" / "review_standard.toml"
+ORDER_FORMAT = ROOT / "config" / "order_formats" / "barc.toml"
+
+_STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
+FIXED_WARNING = _STD["risk"]["fixed_warning"]
+CURRENCY_ISO = dict(_STD["currency"])
+FONT = "china-t"
+Q4 = Decimal("0.0001")
+
+
+@dataclass
+class UL:
+    name: str
+    exchange: str
+    ticker: str
+    initial: Decimal
+
+
+DEFAULT_ULS = (
+    UL("甲乙丙科技股份有限公司ADR", "紐約證券交易所", "ZZA UN", Decimal("123.4500")),
+    UL("Zeta Quantum Holdings Inc", "那斯達克證券交易所", "ZQH UW", Decimal("87.2000")),
+    UL("丁戊電子公司", "那斯達克證券交易所", "DWE UW", Decimal("1234.5600")),
+)
+
+
+@dataclass
+class Spec:
+    """合成說明書與詢價表的共同參數。預設兩者完全一致。"""
+
+    product_code: str = "029199990001"
+    currency_zh: str = "美元"
+    tenor: int = 6
+    memory: bool = True
+    ko_obs: str = "D"  # D 期間每日／P 期末定日
+    ki: str = "none"  # none／AM／D／M
+    strike: Decimal = Decimal("70.00")
+    ko: Decimal = Decimal("100.00")
+    ki_pct: Decimal = Decimal("60.00")
+    annual: Decimal = Decimal("12.00")
+    monthly: Decimal | None = None  # None → 由年利率推算
+    trade_date: dt.date = dt.date(2030, 1, 7)
+    issue_date: dt.date = dt.date(2030, 1, 14)
+    final_date: dt.date = dt.date(2030, 7, 8)
+    maturity_date: dt.date = dt.date(2030, 7, 11)
+    denomination: int | None = None  # None → 幣別預設值
+    underlyings: tuple[UL, ...] = DEFAULT_ULS
+    # ---- 說明書專用的變化 ----
+    price_overrides: dict[tuple[int, str], str] = field(default_factory=dict)  # (標的序, 欄) → 文字
+    approval_date: dt.date = dt.date(2026, 6, 11)
+    print_date: dt.date | None = None  # None → 交易日 +1
+    subscription_date: dt.date | None = None  # None → 交易日
+    chairman: str = "林晋輝"
+    warnings: tuple[str, ...] | None = None  # 三處警語文字；None → 審查標準原文 ×3
+    rr: str = "RR4"
+    extra_text: str = ""  # 額外插入第五章的文字
+    name_zh: str | None = None
+    name_en: str | None = None
+    issuer_cover: str = "英商巴克萊銀行股份有限公司（Barclays Bank PLC）"
+    cross_page_price_table: bool = False
+    mention_overrides: dict[str, str] = field(default_factory=dict)  # "§9"/"§15"/"§17" → 月配息率文字
+    omit: frozenset[str] = frozenset()  # 例：{"trade_date"}
+    extra_strike_def: str | None = None  # 第二個執行價格定義（歧義）
+
+    def with_(self, **kw: Any) -> Spec:
+        return replace(self, **kw)
+
+    @property
+    def ccy(self) -> str:
+        return CURRENCY_ISO[self.currency_zh]
+
+    @property
+    def monthly_value(self) -> Decimal:
+        if self.monthly is not None:
+            return self.monthly
+        return (self.annual * self.tenor / 12 / self.tenor).quantize(Q4, ROUND_HALF_UP)
+
+    @property
+    def denom(self) -> int:
+        return self.denomination or {"USD": 10000, "JPY": 1000000, "CNH": 100000}[self.ccy]
+
+    def expected_name_zh(self) -> str:
+        mem = "記憶式" if self.memory else ""
+        return (
+            f"英商巴克萊銀行{self.tenor}個月{self.currency_zh}計價連結股權{mem}自動提前出場結構型商品"
+            "（不保本）（無擔保及無保證機構）（下稱「本商品」）"
+        )
+
+    def expected_name_en(self) -> str:
+        mem = "Memory " if self.memory else ""
+        return (
+            f"{self.tenor} Months {self.ccy} {mem}Autocallable Equity Linked Note issued by Barclays Bank PLC "
+            "(unsecured and non-guaranteed)"
+        )
+
+
+def zh_date(d: dt.date) -> str:
+    return f"{d.year} 年{d.month} 月{d.day} 日"
+
+
+def fmt_price(v: Decimal) -> str:
+    return f"{v:,.4f}"
+
+
+def price(initial: Decimal, pct: Decimal) -> Decimal:
+    return (initial * pct / 100).quantize(Q4, ROUND_HALF_UP)
+
+
+# ---------------------------------------------------------------- PDF 寫入器
+
+
+class _Writer:
+    TOP, BOTTOM = 80.0, 770.0
+
+    def __init__(self) -> None:
+        self.doc = fitz.open()
+        self.page: fitz.Page
+        self.y = 0.0
+        self.new_page()
+
+    def new_page(self) -> None:
+        self.page = self.doc.new_page(width=595, height=842)
+        self.y = self.TOP
+
+    def need(self, h: float) -> None:
+        if self.y + h > self.BOTTOM:
+            self.new_page()
+
+    def put(self, x: float, y: float, text: str, size: float = 10) -> None:
+        """西文字元（Latin-1）用 Helvetica、其餘用 CJK 字型，逐段相接排版，避免全形寬度造成溢出或重疊。"""
+        for western, run in _runs(text):
+            if western:
+                self.page.insert_text((x, y + size), run, fontname="helv", fontsize=size)
+                x += fitz.get_text_length(run, fontname="helv", fontsize=size)
+            else:
+                self.page.insert_text((x, y + size), run, fontname=FONT, fontsize=size)
+                x += size * len(run)
+
+    def line(self, x: float, text: str, size: float = 10, gap: float = 13) -> None:
+        self.need(gap)
+        self.put(x, self.y, text, size)
+        self.y += gap
+
+    def row(self, cells: list[tuple[float, str]], gap: float = 20, size: float = 10) -> None:
+        self.need(gap)
+        for x, t in cells:
+            self.put(x, self.y, t, size)
+        self.y += gap
+
+    def para(self, x: float, text: str, width: int = 40, size: float = 10, gap: float = 13) -> None:
+        for k in range(0, len(text), width):
+            self.line(x, text[k : k + width], size, gap)
+
+    def numbered(self, n: str, x_num: float, x_body: float, title: str, gap: float = 20) -> None:
+        self.need(gap)
+        self.put(x_num, self.y, n)
+        self.put(x_body, self.y, title)
+        self.y += gap
+
+    def space(self, h: float = 8) -> None:
+        self.y += h
+
+    def finish(self, path: Path) -> Path:
+        n = self.doc.page_count
+        for i, page in enumerate(self.doc):
+            if i == 0:
+                page.insert_text((508.7, 792), f"Page 1 of {n}", fontname=FONT, fontsize=8)
+            else:
+                page.insert_text((295.5, 806), str(i + 1), fontname=FONT, fontsize=8)
+        self.doc.save(path)
+        return path
+
+
+# ---------------------------------------------------------------- 說明書
+
+
+def _is_western(ch: str) -> bool:
+    try:
+        ch.encode("latin-1")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _runs(text: str) -> list[tuple[bool, str]]:
+    out: list[tuple[bool, str]] = []
+    for ch in text:
+        w = _is_western(ch)
+        if out and out[-1][0] == w:
+            out[-1] = (w, out[-1][1] + ch)
+        else:
+            out.append((w, ch))
+    return out
+
+
+def _coupon_dates(s: Spec) -> list[tuple[dt.date, dt.date]]:
+    """虛構的每期評價日／支付日；末期 = 最終評價日／到期日。"""
+    out = []
+    for t in range(1, s.tenor + 1):
+        if t == s.tenor:
+            out.append((s.final_date, s.maturity_date))
+        else:
+            v = s.trade_date + dt.timedelta(days=30 * t)
+            out.append((v, v + dt.timedelta(days=3)))
+    return out
+
+
+def build_pdf(path: Path, s: Spec) -> Path:
+    w = _Writer()
+    warnings = s.warnings or (FIXED_WARNING,) * 3
+    warnings = tuple(x.replace("RR4", s.rr) for x in warnings)
+    name_zh = s.name_zh or s.expected_name_zh()
+    name_en = s.name_en or s.expected_name_en()
+    monthly = s.monthly_value
+    m = {k: s.mention_overrides.get(k, f"{monthly}") for k in ("§9", "§15", "§17")}
+    ko_term = "自動提前出場觸發價格" if s.memory else "觸發水準"
+
+    # ---- p1 封面 ----
+    w.line(255.6, "中文產品說明書", size=12, gap=16)
+    w.para(45.4, name_zh.replace("（下稱「本商品」）", ""), width=42, size=12, gap=16)
+    w.space(6)
+
+    def cover(label: str, value_lines: list[str]) -> None:
+        w.need(13 * len(value_lines) + 6)
+        w.put(41.0, w.y, label)
+        for k, v in enumerate(value_lines):
+            w.put(301.4, w.y + 13 * k, v)
+        w.y += 13 * len(value_lines) + 6
+
+    cover("商品代號:", [s.product_code])
+    cover("受託或銷售機構商品代號:", [s.product_code])
+    cover("ISIN:", ["XS0000000000"])
+    cover("商品中文名稱:", [name_zh[k : k + 25] for k in range(0, len(name_zh), 25)])
+    cut = name_en.index("issued")
+    cover("商品英文名稱:", [name_en[:cut].strip(), name_en[cut:]])
+    cover("商品種類:", ["股權連結債券"])
+    cover("發行機構:", [s.issuer_cover])
+    cover("計價幣別:", [s.currency_zh])
+    cover("受託或銷售機構審查通過之日期:", [zh_date(s.approval_date)])
+    w.line(41.0, "警語：", size=12, gap=18)
+    w.numbered("1.", 41.0, 69.4, warnings[0][:40], gap=13)
+    w.para(69.4, warnings[0][40:])
+    w.numbered("2.", 41.0, 69.4, "本商品係複雜的金融商品，必須經過符合資格的人員解說後再進行投資。", gap=16)
+    w.numbered("3.", 41.0, 69.4, "本商品係依境外結構型商品管理規則於中華民國境內受託投資或受託買賣之投資標的。", gap=16)
+    w.para(69.4, "OSU 依據國際金融業務條例辦理受託投資或受託買賣所允許之投資標的。")
+    w.space()
+    print_date = s.print_date or s.trade_date + dt.timedelta(days=1)
+    w.line(41.0, f"本中文產品說明書刊印日期：{zh_date(print_date)}", gap=16)
+
+    # ---- 第一章 ----
+    w.new_page()
+    w.line(41.0, "第一章 商品基本資料", size=12, gap=22)
+
+    def article(n: int, title: str) -> None:
+        w.numbered(f"{n}.", 41.0, 69.4, title)
+
+    def sub(n: int, title: str, x_num: float = 69.4, x_body: float = 97.7) -> None:
+        w.numbered(f"({n})", x_num, x_body, title)
+
+    article(1, f"商品名稱：{name_zh[:40]}")
+    w.para(69.4, name_zh[40:])
+    article(2, "商品風險程度:" + warnings[1][:34])
+    w.para(69.4, warnings[1][34:], width=44)
+    article(3, "發行機構名稱及其長期債務信用評等：英商巴克萊銀行股份有限公司（Barclays Bank PLC）")
+    article(4, "商品之發行評等：不適用。")
+    article(5, f"計價幣別：{s.currency_zh}")
+    article(6, f"商品面額與發行價格：每單位商品面額為{s.denom:,} {s.currency_zh}。發行價格為商品面額之100%。")
+    article(7, "計價貨幣本金保本率：無，本商品為不保障本金之境外結構型商品。")
+    article(8, "投資本金達成100％保本之各項條件：不適用。")
+    article(9, "主要給付項目及其計算方式：")
+    sub(1, "配息金額：")
+    w.line(81.0, "以本商品未發生提前贖回或終止為前提，發行機構將於每一個「配息支付日t」支付每單位商品面額乘以每")
+    w.line(81.0, f"月之配息率（為{m['§9']}%(顯示至小數點後第4 位)，即年利率為{s.annual}%）所計算之配息金額。")
+    sub(2, "到期贖回：")
+    w.line(81.0, "有關到期贖回之詳細說明，請參閱本章第15 條之說明。")
+    article(10, "連結標的資產及其相對權重、與投資績效之關連情形：")
+    w.line(56.0, "(1) 連結標的資產：係指下表所示之標的資產（合稱「一籃子標的資產」）。", gap=19)
+    w.row([(108.6, "標的資產"), (284.7, "交易所"), (418.6, "彭博代號（僅供參考）")], gap=22)
+    for u in s.underlyings:
+        w.row([(60.0, u.name[:14]), (254.7, u.exchange), (433.0, f"{u.ticker} Equity")], gap=24)
+    w.line(71.1, "ADR 即存託憑證。", gap=19)
+    w.line(56.0, "(2) 相對權重：不適用。", gap=19)
+    w.line(56.0, "(3) 投資績效之關連情形：請參閱本章第15 條之說明。", gap=19)
+    article(11, "連結標的資產之相關說明：")
+    w.line(81.0, "標的資產之相關資訊請參閱發行機構網站。")
+    article(12, "標的資產調整：")
+    w.line(81.0, "計算代理機構得依相關規定調整標的資產。")
+
+    article(13, "商品年期、發行日、到期日及其他依商品性質而定之日期：")
+    sub(1, f"商品年期：{s.tenor} 個月")
+    if "trade_date" not in s.omit:
+        sub(2, f"交易日：{zh_date(s.trade_date)}")
+    else:
+        sub(2, "交易日：另行公告")
+    sub(3, f"發行日：{zh_date(s.issue_date)}")
+    sub(4, f"最終評價日**：係指{zh_date(s.final_date)}，應視為評價日，如該日為「中斷日」應適用評價日有關")
+    w.line(97.7, "「中斷日」之順延規定（並請參閱本條第(9)項之說明）")
+    sub(5, f"到期日或最終實物贖回日†*：{zh_date(s.maturity_date)}（並請參閱本條第(9)項之說明）")
+    dates = _coupon_dates(s)
+    if s.ko_obs == "D" and not s.memory:
+        sub(6, "配息支付日†*：依下表「觀察期」所示（並請參閱本條第(9)項之說明）")
+        w.row([(58.1, "t"), (130.5, "期始日(含)t"), (284.3, "期末日(含)t"), (436.9, "配息支付日t")])
+        prev = None
+        for t, (v, p) in enumerate(dates, 1):
+            start = "N/A" if prev is None else zh_date(prev + dt.timedelta(days=1))
+            w.row([(58.1, str(t)), (118.0, start), (271.9, zh_date(v)), (425.7, zh_date(p))])
+            prev = v
+    else:
+        hdr = "評價日t" if (s.ko_obs == "P" and not s.memory) else "配息評價日t"
+        sub(6, "配息支付日†*：依下表所示（並請參閱本條第(9)項之說明）")
+        w.row([(68.7, "t"), (142.8, hdr), (281.8, "配息支付日t")])
+        for t, (v, p) in enumerate(dates, 1):
+            w.row([(68.7, str(t)), (131.7, zh_date(v)), (270.6, zh_date(p))])
+    sub(7, "指定提前贖回事件：係指倘若所有標的資產之相關價格等於或大於其觸發價格，發行機構應提前贖回本商品。")
+    w.line(97.7, "指定提前現金贖回日：係指定提前贖回事件發生後第三個營業日。")
+    if s.memory and s.ko_obs == "D":
+        w.line(97.7, "自動提前出場評價日：指自動提前出場觀察期內之各一籃子預定交易日。")
+        w.line(69.4, "觀察期：")
+        w.line(246.4, "自動提前出場觀察期")
+        w.row([(58.1, "t"), (130.5, "期始日(含)t"), (284.3, "期末日(含)t"), (409.4, "自動提前出場觸發百分比")])
+        prev = None
+        for t, (v, _) in enumerate(dates, 1):
+            start = "N/A" if prev is None else zh_date(prev + dt.timedelta(days=1))
+            w.row([(58.1, str(t)), (118.0, start), (271.9, zh_date(v)), (447.0, f"{s.ko}%")])
+            prev = v
+    elif s.memory and s.ko_obs == "P":
+        w.line(97.7, "自動提前出場評價日：依下表所示：")
+        w.row(
+            [
+                (74.5, "t"),
+                (139.1, "自動提前出場評價日"),
+                (272.0, "自動提前出場觸發百分比"),
+                (424.9, "指定提前現金贖回日"),
+            ]
+        )
+        for t, (v, p) in enumerate(dates, 1):
+            w.row([(74.5, str(t)), (145.5, zh_date(v)), (309.5, f"{s.ko}%"), (428.7, zh_date(p))])
+    sub(8, "評價日：指各配息評價日、自動提前出場評價日及最終評價日。")
+    sub(9, "附註及相關定義：")
+    w.line(81.0, "「營業日」係指倫敦及紐約之商業銀行開門營業之日。")
+
+    article(14, "配息資料及其計算公式：")
+    w.line(81.0, "每單位商品面額 × 配息率")
+    w.line(81.0, f"「配息率」係指每月之配息率為{monthly}%(顯示至小數點後第4 位)（即年利率為{s.annual}%）。")
+
+    article(15, "到期贖回計算公式，最低保證配息率及參與率:")
+    sub(1, "到期贖回：", x_num=67.7, x_body=96.0)
+    multi = len(s.underlyings) > 1
+    if multi:
+        w.line(67.7, "「最終價格」就某標的資產而言，指該標的資產於「最終評價日」之「相關價格」；")
+    else:
+        w.line(67.7, "「最終價格」指標的資產於「最終評價日」之「相關價格」；")
+    w.line(67.7, "「最初價格」詳見下表所示；", gap=23)
+    if "strike_def" not in s.omit:
+        w.line(67.7, f"「執行價格」詳見下表所示（為最初價格的{s.strike}%）；", gap=23)
+    if s.extra_strike_def:
+        w.line(67.7, f"「執行價格」詳見下表所示（為最初價格的{s.extra_strike_def}%）；", gap=23)
+    if s.ki == "D":
+        w.line(66.0, "「觸及生效事件」係指於任一觸及生效評價日，如任一標的資產的「相關價格」小於其「觸")
+        w.line(66.0, "及生效價格」，則視為發生「觸及生效事件」；", gap=23)
+        w.line(67.7, "「觸及生效評價日」指所有標的資產自交易日起（含）至最終評價日止（含）之各預定交易日；", gap=23)
+    if s.ki == "M":
+        w.line(67.7, "「觸及生效評價日」指各配息評價日；", gap=23)
+    if s.ki != "none":
+        w.line(67.7, f"「觸及生效價格」詳見下表所示（為最初價格的{s.ki_pct}%)；", gap=23)
+    w.line(67.7, f"「{ko_term}」詳見下表所示（為最初價格的{s.ko}%）；", gap=23)
+
+    cols = [("initial", 173.3), ("strike", 251.4), ("ko", 354.5)] + ([("ki", 457.5)] if s.ki != "none" else [])
+    head = {
+        "initial": ["最初價格"],
+        "strike": ["執行價格（為最初價", f"格的{s.strike}%）(四捨", "五入至小數點後第4", "位)"],
+        "ko": (
+            ["自動提前出場觸發價", "格（為最初價格乘以", "自動提前出場觸發百", "分比）(四捨五入至"]
+            if s.memory
+            else ["觸發水準（為最初價", f"格的{s.ko}%）(四捨", "五入至小數點後第4", "位)"]
+        ),
+        "ki": ["觸及生效價格（為最", f"初價格的{s.ki_pct}%）(", "四捨五入至小數點後", "第4 位)"],
+    }
+    if s.cross_page_price_table:
+        w.y = w.BOTTOM - 26  # 表頭前兩行在本頁底部，其餘在下一頁
+    w.need(26)
+    for k in range(4):
+        if k == 2 and s.cross_page_price_table:
+            w.new_page()
+        w.need(13)
+        for key, x in cols:
+            if k < len(head[key]):
+                w.put(x, w.y, head[key][k])
+        if k == 0:
+            w.put(71.5, w.y, "標的資產")
+        w.y += 13
+    w.space(10)
+    pcts = {"strike": s.strike, "ko": s.ko, "ki": s.ki_pct}
+    for i, u in enumerate(s.underlyings, 1):
+        vals = {"initial": fmt_price(u.initial)}
+        for key in ("strike", "ko", "ki"):
+            vals[key] = fmt_price(price(u.initial, pcts[key]))
+        vals.update({k: v for (idx, k), v in s.price_overrides.items() if idx == i})
+        w.need(40)
+        y = w.y
+        w.put(174.6, y, vals["initial"])
+        w.put(277.7, y, vals["strike"])
+        w.put(380.8, y, vals["ko"])
+        if s.ki != "none":
+            w.put(483.8, y, vals["ki"])
+        name_lines = _wrap_name(u.name)
+        for k, part in enumerate(name_lines):
+            w.put(51.6, y + 1 + 13 * k, part)
+        w.y += max(24, 13 * len(name_lines) + 12)
+    if multi:
+        w.line(67.7, "「表現最差之標的資產」指於最終評價日當日價值最低之標的資產。")
+    w.line(96.0, "發行機構應以實物交割時，將根據發行機構及相關結算機構規則進行交割活動。")
+    sub(2, "最低保證配息率：發行機構將於每一個配息支付日支付依下列公式計算之配息金額：", x_num=67.7, x_body=96.0)
+    w.line(182.5, f"每單位商品面額 × {m['§15']}%(顯示至小數點後第4 位)")
+    sub(3, "參與率：不適用。", x_num=67.7, x_body=96.0)
+    article(16, "投資收益計算方法，包含本金虧損之機率及以情境分析解說最大可能獲利、損失：")
+    w.line(81.0, "情境分析結果不保證未來績效。")
+    article(17, "平均年化報酬率：")
+    sub(1, "平均年化報酬率：本商品於各配息支付日支付之配息金額，")
+    w.line(97.7, f"均以每月之配息率（為{m['§17']}%，即年利率為{s.annual}%）乘以每單位商品面額計算。")
+    article(18, "提前贖回事件：")
+    w.line(81.0, "發行機構於發生違約事件時得提前贖回本商品。")
+
+    # ---- 第二章 ----
+    w.new_page()
+    w.line(41.0, "第二章 相關機構事業概況", size=12, gap=22)
+    for n, title, boss in [
+        (1, "發行機構：", "Alex Example（CFO）"),
+        (2, "總代理人：", "王小明（董事長）"),
+        (3, "保證機構：", "無"),
+        (4, "計算代理機構：", "Casey Sample（CFO）"),
+        (5, "受託或銷售機構：", s.chairman),
+        (6, "報價機構：", "Robin Test"),
+    ]:
+        article(n, title)
+        sub(1, "事業名稱：範例股份有限公司", x_num=67.7, x_body=96.0)
+        sub(2, "設立日期：2000 年1 月1 日", x_num=67.7, x_body=96.0)
+        sub(3, "營業所在地：範例市範例路1 號", x_num=67.7, x_body=96.0)
+        sub(4, f"負責人姓名：{boss}", x_num=67.7, x_body=96.0)
+
+    # ---- 第三章 ----
+    w.new_page()
+    w.line(41.0, "第三章 商品風險揭露", size=12, gap=22)
+    article(1, "投資風險警語：")
+    w.numbered("(1)", 69.4, 97.7, warnings[2][:38], gap=13)
+    w.para(97.7, warnings[2][38:], width=38)
+
+    # ---- 第四章 ----
+    w.new_page()
+    w.line(41.0, "第四章 一般交易事項", size=12, gap=22)
+    w.numbered("1.", 35.4, 59.5, "商品開始受理申購、開始受理贖回日期及後續受理贖回日期：")
+    subscription = s.subscription_date or s.trade_date
+    w.numbered("(1)", 59.5, 83.7, f"商品開始受理申購日期：{zh_date(subscription)}。")
+    w.numbered("(2)", 59.5, 83.7, "開始受理投資人提前贖回日期：於發行日後的次一個營業日。")
+
+    # ---- 第五章 ----
+    w.new_page()
+    w.line(41.0, "第五章 特別記載事項", size=12, gap=22)
+    w.line(41.0, "本商品之其他事項依銷售說明書辦理。")
+    if s.extra_text:
+        w.para(41.0, s.extra_text)
+    return w.finish(path)
+
+
+def _wrap_name(name: str) -> list[str]:
+    if name.isascii():
+        out, cur = [], ""
+        for word in name.split():
+            if cur and len(cur) + 1 + len(word) > 18:
+                out.append(cur)
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        return [*out, cur]
+    return [name[k : k + 9] for k in range(0, len(name), 9)]
+
+
+def build_not_barc_pdf(path: Path) -> Path:
+    w = _Writer()
+    w.line(255.6, "中文產品說明書", size=12, gap=16)
+    w.line(41.0, "法商範例銀行12 個月美元計價連結股權結構型商品（不保本）")
+    w.line(41.0, "商品代號:")
+    w.put(301.4, w.y - 13, "037199990001")
+    w.line(41.0, "發行機構:")
+    w.put(301.4, w.y - 13, "法商範例銀行（Example Bank SA）")
+    return w.finish(path)
+
+
+# ---------------------------------------------------------------- 詢價表
+
+INQUIRY_HEADERS = [
+    "Product",
+    "Currency",
+    "Guaranteed Periods (m)",
+    "BBG Code 1",
+    "BBG Code 2",
+    "BBG Code 3",
+    "BBG Code 4",
+    "BBG Code 5",
+    "Strike (%)",
+    "KO Type",
+    "KO Barrier (%)",
+    "Coupon p.a. (%)",
+    "Upfront / Note Price (%)",
+    "Tenor (m)",
+    "Barrier Type",
+    "KI Barrier (%)",
+    "Observation Frequency (m)",
+    "OTC",
+    "Funding Spread (bps)",
+    "Effective Date offset",
+    "Notional",
+    "Trade Date",
+    "Issue Date",
+    "Final Valuation Date",
+    "Maturity Date",
+    "Quote ID",
+]
+
+
+def inquiry_row(s: Spec) -> dict[str, Any]:
+    ko_type = ("Daily" if s.ko_obs == "D" else "Period End") + (" Memory" if s.memory else "")
+    barrier = {"none": "None", "AM": "EKI", "D": "AKI", "M": "MKI"}[s.ki]
+    row: dict[str, Any] = {
+        "Product": "FCN",
+        "Currency": s.ccy,
+        "Guaranteed Periods (m)": 0,
+        "Strike (%)": float(s.strike),
+        "KO Type": ko_type,
+        "KO Barrier (%)": float(s.ko),
+        "Coupon p.a. (%)": float(s.annual),
+        "Upfront / Note Price (%)": 98.5,
+        "Tenor (m)": s.tenor,
+        "Barrier Type": barrier,
+        "KI Barrier (%)": float(s.ki_pct) if s.ki != "none" else 0,
+        "Observation Frequency (m)": 1,
+        "OTC": "Note",
+        "Funding Spread (bps)": 50,
+        "Effective Date offset": (s.issue_date - s.trade_date).days,
+        "Notional": 1000000,
+        "Trade Date": dt.datetime.combine(s.trade_date, dt.time()),
+        "Issue Date": dt.datetime.combine(s.issue_date, dt.time()),
+        "Final Valuation Date": dt.datetime.combine(s.final_date, dt.time()),
+        "Maturity Date": dt.datetime.combine(s.maturity_date, dt.time()),
+        "Quote ID": "Q-SYNTH-0001",
+    }
+    for i in range(1, 6):
+        row[f"BBG Code {i}"] = s.underlyings[i - 1].ticker if i <= len(s.underlyings) else None
+    return row
+
+
+def build_inquiry(
+    path: Path,
+    s: Spec,
+    overrides: dict[str, Any] | None = None,
+    extra_columns: dict[str, Any] | None = None,
+    product_code: str | None = None,
+) -> Path:
+    row = inquiry_row(s)
+    row.update(overrides or {})
+    headers = INQUIRY_HEADERS + list(extra_columns or {})
+    row.update(extra_columns or {})
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "詢價表格"
+    ws["A1"] = "BARC 詢價表（合成測試資料）"
+    ws["A3"] = "TDCC Code"
+    ws["B3"] = product_code if product_code is not None else s.product_code
+    for k, h in enumerate(headers):
+        ws.cell(row=4, column=2 + k, value=h)
+        ws.cell(row=5, column=2 + k, value=row.get(h))
+    wb.save(path)
+    return path

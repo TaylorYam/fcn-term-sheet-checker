@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fcn-checker"
+version = "0.1.0"
+description = "FCN Term Sheet 核對工具：說明書 PDF × 上手詢價表（本機 CLI，規則式，不使用 LLM）"
+requires-python = ">=3.11"
+dependencies = [
+    "pymupdf>=1.24,<2",
+    "openpyxl>=3.1,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+fcn-check = "fcn_checker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "real_samples: 只在本機 data/ 有真實樣本時執行；CI 自動略過",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# 行長由 ruff format 管理；中文訊息字串不強制斷行
+ignore = ["E501"]
