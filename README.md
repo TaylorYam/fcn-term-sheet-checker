@@ -17,13 +17,17 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - 未知範本、欄位缺漏、值衝突、OCR 不可靠：進人工覆核，不猜值、不自動通過。
 - 未來 LLM fallback 僅記錄擴充邊界；第一版不安裝 SDK、不設定金鑰、不呼叫模型。
 
-## 明天開工（2026-10-01）
+## 目前進度（2026-10-01）
 
-1. 閱讀 [AGENTS.md](AGENTS.md)、[架構](docs/architecture.md) 與 [TODO](docs/TODO.md)。
-2. 選定一家 issuer、一個範本版本，確認人工核准的下單資料來源及第一批必核欄位。
-3. 將可合法使用的去識別樣本放在本機 `data/`；Git 只放經檢查的合成 fixture。
-4. 依 TODO 建立第一個實作 Issue，再從最新 `main` 建立分支；完成一份文字型 PDF 的最小端到端流程。
-5. 加入對應測試與 Python CI，經 PR review／CI 通過後合併。
+- 第一個 issuer：巴克萊（BCY）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BCY 範本規格](docs/templates/bcy-zh-product-description.md)。
+- 下單資料來源：`FCN參考條件.xlsx`，以 `TDCC Code` 配對；欄位對照與已確認的核對規則：[核對規則](docs/rules/bcy-fcn-reference-check.md)。
+- 本機探勘比對 8 份樣本共 360 項，除月配息率進位外沒有實質不一致；仍有 3 個待確認事項（核對規則 §6）。
+
+## 下一步
+
+1. 決定核對規則 §6 的待確認事項。
+2. 依 TODO 建立第一個實作 Issue，再從最新 `main` 建立分支；完成 BCY 文字型 PDF ＋ Excel 的最小端到端流程。
+3. 建立合成 PDF／Excel fixture，加入測試與 Python CI，經 PR review／CI 通過後合併。
 
 尚未選定套件版本與 Python 最低版本，沒有安裝或執行指令；第一個實作 Issue 會補齊環境設定、依賴鎖定及 CLI 使用方式。
 
@@ -32,6 +36,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - [架構與模組邊界](docs/architecture.md)
 - [資料契約草案](docs/data-contract.md)
 - [分階段 TODO 與待確認項目](docs/TODO.md)
+- [BCY 範本規格](docs/templates/bcy-zh-product-description.md)、[BCY 核對規則](docs/rules/bcy-fcn-reference-check.md)
 - [ADR：第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
@@ -40,7 +45,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 
 ## 資料管理
 
-真實 PDF、下單檔、擷取文字、OCR 影像與報告放在被 Git 忽略的 `data/` 或 `runtime/`。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
+真實 PDF、下單檔、擷取文字、OCR 影像與報告放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：TS 放 `data/ts/`、下單 Excel 放 `data/`、探勘輸出與暫存檔放 `data/tmp/`。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
 
 ## 範本來源
 
