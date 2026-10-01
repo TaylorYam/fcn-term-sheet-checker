@@ -168,6 +168,8 @@ class PanelWindow:
         height = min(pixels(780), root.winfo_screenheight() - pixels(80))
         root.geometry(f"{width}x{height}")
         root.minsize(min(pixels(780), width), min(pixels(720), height))
+        if sys.platform == "win32":
+            root.state("zoomed")
         root.configure(background="#f4f6f8")
         root.protocol("WM_DELETE_WINDOW", self.close)
         style = ttk.Style(root)
