@@ -106,7 +106,7 @@ class PanelWindow:
         self.reload.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 10))
         self.controls.append(self.reload)
         ttk.Label(frame, text="PDF 商品代號", style="Section.TLabel").grid(row=6, column=0, columnspan=3, sticky="w")
-        self.title = tk.Text(
+        self.product_code_text = tk.Text(
             frame,
             height=2,
             wrap="word",
@@ -117,8 +117,8 @@ class PanelWindow:
             padx=12,
             pady=8,
         )
-        self.title.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(6, 10))
-        self._title_text("選取 PDF 與 Excel 後，載入預覽以查看完整商品代號。")
+        self.product_code_text.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(6, 10))
+        self._show_product_code("選取 PDF 與 Excel 後，載入預覽以查看完整商品代號。")
         ttk.Label(frame, text="Excel 條件（唯讀）", style="Section.TLabel").grid(
             row=8, column=0, columnspan=3, sticky="w"
         )
@@ -167,15 +167,15 @@ class PanelWindow:
         self._set_templates()
         self._selection_changed()
 
-    def _title_text(self, text):
-        self.title.configure(state="normal")
-        self.title.delete("1.0", "end")
-        self.title.insert("1.0", text)
-        self.title.configure(state="disabled")
+    def _show_product_code(self, text):
+        self.product_code_text.configure(state="normal")
+        self.product_code_text.delete("1.0", "end")
+        self.product_code_text.insert("1.0", text)
+        self.product_code_text.configure(state="disabled")
 
     def _clear(self):
         self.shown = None
-        self._title_text("尚未載入有效預覽。")
+        self._show_product_code("尚未載入有效預覽。")
         self.table.delete(*self.table.get_children())
         self.details.set("")
 
@@ -227,7 +227,9 @@ class PanelWindow:
         try:
             preview = future.result()
             self.shown = preview
-            self._title_text(preview.product_code or "未找到完整商品代號，請人工確認。" + preview.product_code_note)
+            self._show_product_code(
+                preview.product_code or "無法可靠擷取商品代號，請人工確認。" + preview.product_code_note
+            )
             for condition in preview.conditions:
                 self.table.insert("", "end", values=(condition.label, display_value(condition.value), condition.source))
             self.status.set(self.session.message + ("\n" + "；".join(preview.warnings) if preview.warnings else ""))
