@@ -2,7 +2,7 @@
 
 - 設定檔：[`config/order_formats/barc.toml`](../../config/order_formats/barc.toml)
 - 核對規則：[BARC 核對規則](../rules/barc-check-rules.md) §3.2、§3.3
-- 狀態：2026-10-01 依 1 份真實樣本建立（本機 `data/BARC詢價格式.xlsx`，不進 Git）
+- 狀態：2026-10-01 依 1 份真實樣本建立（本機 `data/BARC詢價格式.xlsx`，不進 Git）；其他型態暫無樣本，依規則推得（見核對規則 §5）
 - 檔案單位：一筆交易一個檔（暫定）
 
 ## 1. 版面
@@ -24,7 +24,7 @@
 |---|---|---|---|
 | B | Product | — | 例 `FCN`；不核對 |
 | C | Currency | 幣別 | ISO 代碼 |
-| D | Guaranteed Periods (m) | 保證配息期 | 保證配息、不會被 KO 的期數 |
+| D | Guaranteed Periods (m) | 保證配息期 | 保證配息、不會被 KO 的期數；與 PDF 的對應見核對規則 §3.3 |
 | E–I | BBG Code 1～5 | 標的 1～5 | 彭博代號，不含 ` Equity`，例 `XXX UN` |
 | J | Strike (%) | 執行 % | |
 | K | KO Type | KO 觀察方式＋記憶式 | 值見 §3 |
@@ -58,7 +58,7 @@
 | Barrier Type | `None` | 無 KI |
 | | `EKI` | 到期觀察 KI |
 | | `AKI` | 每日觀察 KI |
-| | `MKI` | 語意待確認，暫時轉人工 |
+| | `MKI` | Monthly KI：每月觀察 KI（尚無樣本，PDF 判斷方式為推測） |
 
 其他值 → 轉人工覆核。
 

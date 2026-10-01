@@ -22,7 +22,8 @@
 - [ ] 擷取文字區塊／頁碼／座標，辨識範本版本；未知／多重命中回報覆核。
 - [ ] 實作最小 schema 與來源證據；欄位範圍依 [核對規則](rules/barc-check-rules.md) §3。
 - [ ] 導入下單資料 adapter：依 `config/order_formats/<上手>.toml` 讀取上手原始格式（先做 BARC 詢價表）；測試用合成 Excel，不提交真實檔案。
-- [ ] 確認 BARC 詢價表待確認事項（MKI 語意、Period End 型保證配息期的對應；[核對規則](rules/barc-check-rules.md) §6.4），並收集更多詢價表樣本。
+- [x] BARC 詢價表：MKI = Monthly KI、Period End 型保證配息期規則已確認。
+- [ ] 收集更多 BARC 詢價表樣本（Period End、有 KI、日幣／人民幣、Monthly KI），驗證目前推得的規則（[核對規則](rules/barc-check-rules.md) §6.4）。
 - [ ] 版本化規則、逐欄結果、JSON 與人可讀例外報告；明示核對範圍與未支援欄位。
 - [ ] README 補安裝、CLI 範例、輸入輸出及錯誤狀態；不得用未執行的指令冒充可用功能。
 

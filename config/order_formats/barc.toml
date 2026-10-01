@@ -48,11 +48,11 @@ ignored = ["Product", "Upfront / Note Price (%)", "OTC", "Funding Spread (bps)",
 "Period End Memory" = { observation = "P", memory = true }
 "Period End" = { observation = "P", memory = false }
 
-# Barrier Type：KI 型態（none 無／AM 到期觀察／D 每日觀察）
-# MKI 的語意待確認，暫時轉人工覆核
+# Barrier Type：KI 型態（none 無／AM 到期觀察／D 每日觀察／M 每月觀察）
+# MKI = Monthly KI（每月觀察；尚無樣本，PDF 判斷方式為推測）
 [values.ki_type]
 "None" = "none"
 "NONE" = "none"
 "EKI" = "AM"
 "AKI" = "D"
-"MKI" = "review"
+"MKI" = "M"
