@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 fcn-check = "fcn_checker.cli:main"
+fcn-panel = "fcn_checker.panel:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

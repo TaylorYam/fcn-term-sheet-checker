@@ -57,6 +57,25 @@ fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/repo
 
 整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非 BARC 範本、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
 
+## 本機 PANEL：來源預覽
+
+完成上述 Python 安裝後，Windows 可雙擊根目錄的 `launch_panel.pyw` 開啟程式視窗（需已設定 Python 的 `.pyw` 檔案關聯），或在專案根目錄執行：
+
+```bash
+python -m fcn_checker.panel
+```
+
+重新執行 editable 安裝後也可使用 `fcn-panel`。PANEL 使用 Python 內建 Tkinter；Windows 官方 Python 安裝須包含 Tcl/Tk。目前提供 **BARC 選檔與唯讀預覽**，不執行條件核對或保存報告；這兩項分別由 Issue #14、#15 接續完成。CLI 仍可照原方式核對。
+
+1. 選取 BARC issuer 與中文產品說明書模板。
+2. 選取 TS PDF 與現有 BARC Excel 詢價表（沿用 B3 商品代號）。Outlook 條件由使用者整理到詢價表，不直接讀取信件。
+3. 按「載入／重新載入預覽」，查看 PDF「中文產品說明書」後的完整商品標題，以及 Excel 條件、值與來源儲存格。選取條件列可在表格下方查看完整內容。
+4. 預覽只能查看。更換來源會清除舊預覽；外部修改或刪除 PDF、Excel 或格式設定時，畫面偵測後會清除預覽並要求重新載入。
+
+檔案讀取失敗、非 BARC 模板或 issuer 設定不符時，畫面顯示原因，不保留有效預覽。商品標題無法可靠擷取時明示未找到，不以檔名替代。預覽不代表核對通過；Excel 空值顯示「未提供」，未知／缺漏／重複欄名另附提示。資料只在本機處理，不需要伺服器或網路。
+
+自訂格式設定路徑可用 `--order-format <路徑>`；非 BARC 設定會被拒絕。目前只支援文字型 PDF，掃描檔不會自動 OCR。
+
 ## 開發與測試
 
 ```bash
