@@ -12,12 +12,21 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ..schema import Evidence, FieldStatus, Line, ParsedField
+from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from . import barc_schedule as schedule
-from .layout import Document, Span, TextIndex, join_text, parse_date, squash
+from .layout import Document, LayoutSpec, Span, TextIndex, join_text, parse_date, squash
 
 TEMPLATE_ID = "barc-zh-pd"
 PARSER_VERSION = "1"
+
+# 章名「第一章 商品基本資料」、條號「1.」、子項「(1)」（範本規格 §3）
+LAYOUT = LayoutSpec(
+    chapter_pattern=r"第{zh}章\s*{name}",
+    article_re=re.compile(r"^(\d{1,2})\.$"),
+    article_max_x=62.0,
+    subitem_re=re.compile(r"^\((\d{1,2})\)\s*(.*)$"),
+    subitem_max_x=100.0,
+)
 
 # 第一章 §13 子項順序（範本規格 §2.2）
 S13_LABELS = (
@@ -45,13 +54,6 @@ PRICE_COLUMNS = (
     ("ko", re.compile(r"^(自動提前出場觸發價|觸發水準（)")),
     ("ki", re.compile(r"^觸及生效價格（")),
 )
-
-
-@dataclass
-class DetectionResult:
-    matched: bool
-    failed: list[str] = field(default_factory=list)
-    evidence: list[Evidence] = field(default_factory=list)
 
 
 @dataclass
@@ -150,6 +152,10 @@ def _cover_field(name: str, lines: list[Line], label: str, convert: Callable[[st
 
 
 # ---------------------------------------------------------------- 範本辨識
+
+
+def document(lines: Sequence[Line]) -> Document:
+    return Document(lines, LAYOUT)
 
 
 def detect(doc: Document) -> DetectionResult:
@@ -503,7 +509,7 @@ def _chairman(doc: Document) -> ParsedField:
 
 
 def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
-    doc = Document(lines)
+    doc = document(lines)
     det = detect(doc)
     flds: dict[str, ParsedField] = {}
     all_lines = list(lines)

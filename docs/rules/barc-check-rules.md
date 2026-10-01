@@ -231,7 +231,8 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 
 | rule_id | 規則 | 本文件 |
 |---|---|---|
-| `template.barc` | 範本辨識（範本規格 §8） | §4 |
+| `template.detect` | 範本辨識（範本規格 §8）；所有已註冊上手中恰好 BARC 命中才繼續 | §4 |
+| `order.issuer` | 詢價格式設定的上手不是 BARC → 人工覆核 | §1 |
 | `order.unknown_column`／`order.missing_column` | 詢價表欄名不在格式設定／設定欄名不在檔案 → 人工覆核 | §1 |
 | `field.*` | 商品代號、幣別、標的、執行／KO／KI %、KO Type、Barrier Type、年利率、天期、四個日期、發行日偏移 | §3.2、§3.3、§3.6 |
 | `derive.monthly_coupon` | 月配息率推算，容差 ≤ 0.0001 | §3.5 |

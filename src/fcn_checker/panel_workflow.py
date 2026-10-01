@@ -13,9 +13,8 @@ from .checker import CheckReport, run_check
 from .config import load_order_format
 from .extraction import extract_lines
 from .ingestion import IngestionError, open_pdf, sha256_of
+from .issuers import REGISTRY, Issuer
 from .orders.inquiry import load_inquiry
-from .parsers import barc
-from .parsers.layout import Document
 from .reporting import to_json, to_markdown
 from .schema import CheckResult, CheckStatus, Evidence
 
@@ -51,7 +50,11 @@ class TemplateChoice:
     label: str
 
 
-SUPPORTED_TEMPLATES = (TemplateChoice("BARC", barc.TEMPLATE_ID, "BARC 中文產品說明書"),)
+SUPPORTED_TEMPLATES = tuple(TemplateChoice(i.code, i.template_id, i.label) for i in REGISTRY)
+
+
+def _issuer_for(issuer: str, template: str) -> Issuer | None:
+    return next((i for i in REGISTRY if i.code == issuer and i.template_id == template), None)
 
 
 @dataclass(frozen=True)
@@ -105,20 +108,46 @@ class PanelOutcome:
 class PanelSession:
     """UI 與測試共用的單筆工作階段；任何來源變更都使預覽失效。"""
 
-    def __init__(self, order_format: Path, review_standard: Path = Path("config/review_standard.toml")):
-        self.order_format = Path(order_format).resolve()
+    def __init__(
+        self,
+        order_format: Path | None = None,
+        review_standard: Path = Path("config/review_standard.toml"),
+        order_formats_dir: Path | None = None,
+    ):
+        """order_format 未指定時，依選取的上手使用預設詢價格式設定。
+
+        order_formats_dir 指定時從該資料夾取各上手設定檔（雙擊入口用，不依賴工作目錄）。
+        """
+        self._order_format = Path(order_format).resolve() if order_format is not None else None
+        base = Path(order_formats_dir) if order_formats_dir is not None else None
+        self._default_formats = {
+            i.code: ((base / i.order_format.name) if base else i.order_format).resolve() for i in REGISTRY
+        }
         self.review_standard = Path(review_standard).resolve()
         self.term_sheet: Path | None = None
         self.order: Path | None = None
-        self.issuer = "BARC"
-        self.template = barc.TEMPLATE_ID
+        self.issuer = SUPPORTED_TEMPLATES[0].issuer
+        self.template = SUPPORTED_TEMPLATES[0].template
         self.message = "請選取 TS PDF 與 Excel 詢價表。"
         self._preview: Preview | None = None
         self._hashes: tuple[str, ...] = ()
         self._outcome: PanelOutcome | None = None
         self._review_hash: str | None = None
 
-    def select(self, term_sheet: Path | None, order: Path | None, *, issuer="BARC", template=barc.TEMPLATE_ID):
+    @property
+    def order_format(self) -> Path:
+        if self._order_format is not None:
+            return self._order_format
+        return self._default_formats.get(self.issuer, self._default_formats[REGISTRY[0].code])
+
+    def select(
+        self,
+        term_sheet: Path | None,
+        order: Path | None,
+        *,
+        issuer=SUPPORTED_TEMPLATES[0].issuer,
+        template=SUPPORTED_TEMPLATES[0].template,
+    ):
         self.term_sheet = Path(term_sheet).resolve() if term_sheet is not None else None
         self.order = Path(order).resolve() if order is not None else None
         self.issuer, self.template = issuer, template
@@ -150,10 +179,10 @@ class PanelSession:
         self._preview, self._hashes = None, ()
         self._outcome, self._review_hash = None, None
         try:
-            if (self.issuer, self.template) not in {(c.issuer, c.template) for c in SUPPORTED_TEMPLATES}:
-                raise IngestionError(
-                    "template_unsupported", "目前只支援 BARC 中文產品說明書，請重新選取 issuer 與模板。"
-                )
+            chosen = _issuer_for(self.issuer, self.template)
+            if chosen is None:
+                supported = "、".join(c.label for c in SUPPORTED_TEMPLATES)
+                raise IngestionError("template_unsupported", f"目前只支援 {supported}，請重新選取 issuer 與模板。")
             if self.term_sheet is None or self.order is None:
                 raise IngestionError("selection_missing", "請先選取 TS PDF 與 Excel 詢價表。")
             before = self._fingerprints()
@@ -162,10 +191,12 @@ class PanelSession:
                 raise IngestionError("issuer_mismatch", "Excel 格式設定的 issuer 與目前選取不符。")
             with open_pdf(self.term_sheet) as doc:
                 lines = extract_lines(doc)
-            detection = barc.detect(Document(lines))
+            detection = chosen.detect(lines)
             if not detection.matched:
-                raise IngestionError("template_mismatch", "PDF 不符合選取的 BARC 模板：" + "；".join(detection.failed))
-            code = barc.product_code(lines)
+                raise IngestionError(
+                    "template_mismatch", f"PDF 不符合選取的 {chosen.code} 模板：" + "；".join(detection.failed)
+                )
+            code = chosen.product_code(lines)
             record = load_inquiry(self.order, fmt)
             rows = [Condition("商品代號", record.product_code.value, record.product_code.source)]
             for label, name in fmt.columns.items():

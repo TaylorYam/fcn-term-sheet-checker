@@ -19,7 +19,7 @@ EXIT = {CheckStatus.PASS: 0, CheckStatus.MISMATCH: 1, CheckStatus.REVIEW_REQUIRE
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="fcn-check",
-        description="核對 BARC 中文產品說明書（PDF）與 BARC 詢價表（Excel），輸出 JSON 與 Markdown 報告。",
+        description="核對上手中文產品說明書（PDF）與該上手詢價表（Excel），輸出 JSON 與 Markdown 報告。",
     )
     p.add_argument("term_sheet", type=Path, help="說明書 PDF")
     p.add_argument("order", type=Path, help="詢價表 Excel（.xlsx）")
@@ -32,8 +32,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--order-format",
         type=Path,
-        default=Path("config/order_formats/barc.toml"),
-        help="詢價格式設定檔（預設 config/order_formats/barc.toml）",
+        default=None,
+        help="詢價格式設定檔（預設依辨識到的上手，例如 BARC → config/order_formats/barc.toml）",
     )
     p.add_argument("--out", type=Path, default=Path("runtime/reports"), help="報告輸出資料夾（預設 runtime/reports）")
     return p
