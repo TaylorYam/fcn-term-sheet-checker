@@ -21,6 +21,8 @@ class PanelWindow:
         self.root, self.session = root, session
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.pending: Future[Preview] | None = None
+        self.validation: Future[Preview | None] | None = None
+        self.checking_for: Preview | None = None
         self.closed = False
         self.shown: Preview | None = None
         root.title("FCN Term Sheet 核對 — 來源預覽")
@@ -197,9 +199,6 @@ class PanelWindow:
         self._busy(False)
         try:
             preview = future.result()
-            if self.session.preview is None:
-                self.status.set(self.session.message)
-                return
             self.shown = preview
             self._title_text(preview.title or "未找到完整商品標題，請人工確認。" + preview.title_note)
             for condition in preview.conditions:
@@ -219,10 +218,22 @@ class PanelWindow:
     def _watch_sources(self):
         if self.closed:
             return
-        if self.pending is None and self.shown is not None and self.session.preview is None:
-            self._clear()
-            self.status.set(self.session.message)
-        self.root.after(1500, self._watch_sources)
+        if self.validation is not None and self.validation.done():
+            try:
+                valid = self.validation.result() is not None
+            except Exception:
+                valid = False
+            if self.pending is None and self.shown is self.checking_for and not valid:
+                self._clear()
+                self.status.set(self.session.message)
+            self.validation = None
+            self.checking_for = None
+            self.root.after(1500, self._watch_sources)
+            return
+        if self.pending is None and self.shown is not None and self.validation is None:
+            self.checking_for = self.shown
+            self.validation = self.executor.submit(lambda: self.session.preview)
+        self.root.after(100 if self.validation is not None else 1500, self._watch_sources)
 
     def close(self):
         self.closed = True
