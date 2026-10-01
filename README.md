@@ -20,13 +20,13 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 ## 目前進度（2026-10-01）
 
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
-- 下單資料來源：`FCN參考條件.xlsx`，以 `TDCC Code` 配對；欄位對照與已確認的核對規則：[核對規則](docs/rules/barc-fcn-reference-check.md)。
-- 本機探勘比對 8 份樣本共 342 項，套用已確認規則後沒有不一致；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
+- 下單資料來源：各家上手原始格式（每家一份格式設定）。BARC 為詢價表，一筆交易一個檔，以儲存格 B3 的商品代號配對：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。舊整理表 `FCN參考條件.xlsx` 已停用。
+- 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
 ## 下一步
 
-1. 依 TODO 建立第一個實作 Issue，再從最新 `main` 建立分支；完成 BARC 文字型 PDF ＋ Excel 的最小端到端流程。
-2. 建立合成 PDF／Excel fixture，加入測試與 Python CI，經 PR review／CI 通過後合併。
+1. 依 TODO 建立第一個實作 Issue，再從最新 `main` 建立分支；完成 BARC 文字型 PDF ＋ 詢價表的最小端到端流程。
+2. 建立合成 PDF／詢價表 fixture，加入測試與 Python CI，經 PR review／CI 通過後合併。
 
 尚未選定套件版本與 Python 最低版本，沒有安裝或執行指令；第一個實作 Issue 會補齊環境設定、依賴鎖定及 CLI 使用方式。
 
@@ -35,7 +35,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - [架構與模組邊界](docs/architecture.md)
 - [資料契約草案](docs/data-contract.md)
 - [分階段 TODO 與待確認項目](docs/TODO.md)
-- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 核對規則](docs/rules/barc-fcn-reference-check.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
+- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式](docs/order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
 - [ADR：第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。

@@ -56,6 +56,13 @@ normalize_brackets = true
 "日幣" = "JPY"
 "人民幣" = "CNH"
 
+[denomination]
+# 每單位商品面額預設值（依計價幣別）。客戶可要求不同面額，
+# 因此說明書面額不等於預設值時「轉人工審查」，不直接判為錯誤。
+USD = 10000
+JPY = 1000000
+CNH = 100000
+
 [dates]
 # 中文產品說明書刊印日期：交易日當天或之後 N 個日曆日內
 print_date_max_days_after_trade = 1

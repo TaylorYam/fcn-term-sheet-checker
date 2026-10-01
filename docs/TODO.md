@@ -4,13 +4,13 @@
 
 - [x] 選一家 issuer、一個範本版本；確認樣本為文字／掃描／混合 PDF。→ 巴克萊（BARC）中文產品說明書，14 份樣本皆為文字型 PDF。見 [BARC 範本規格](templates/barc-zh-product-description.md)。
 - [ ] 取得可合法使用且去識別的樣本，建立人工標註的 expected output；真實樣本留在 Git 外。（真實樣本已放本機 `data/ts/`；去識別 fixture 尚未建立）
-- [x] 確認權威下單來源（CSV、Excel、系統匯出或其他）與交易配對方式。→ `FCN參考條件.xlsx`，以 `TDCC Code` 配對。見 [核對規則](rules/barc-fcn-reference-check.md)。
+- [x] 確認權威下單來源（CSV、Excel、系統匯出或其他）與交易配對方式。→ 各家上手原始格式；BARC 為詢價表，以 B3 商品代號配對。見 [BARC 詢價格式](order-formats/barc-inquiry.md)。（原 `FCN參考條件.xlsx` 已停用）
 - [ ] 與作業人員確認首批必核欄位、年率／期率、門檻語意、日期與容差規則。（交易條款、文件資訊與日期規則皆已確認；標的中文名稱核對擱置，見核對規則 §6.2）
 - [ ] 確認本機 Python 版本、套件授權與作業環境；鎖定依賴。（本機有 Python 3.13、PyMuPDF 1.27 可用於探勘；尚未評估授權與鎖定）
 
 - [x] 月配息率容差（≤ 0.0001）已確認；標的只核對彭博英文代號（含交易所尾碼）。
 - [x] 文件資訊、日期規則與[審查標準](rules/review-standard.md)已確認（`config/review_standard.toml`）。
-- [ ] （擱置）標的中文名稱與交易所的對照表來源與維護方式（[核對規則](rules/barc-fcn-reference-check.md) §6.2）。
+- [ ] （擱置）標的中文名稱與交易所的對照表來源與維護方式（[核對規則](rules/barc-check-rules.md) §6.2）。
 
 上述選擇在對應實作 Issue 解決，不阻擋本次文件初始化。
 
@@ -20,8 +20,9 @@
 
 - [ ] 建立 Python package、可重現安裝方式、CLI 與 pytest／lint CI；保留既有 whitespace check。
 - [ ] 擷取文字區塊／頁碼／座標，辨識範本版本；未知／多重命中回報覆核。
-- [ ] 實作最小 schema 與來源證據；欄位範圍依 [核對規則](rules/barc-fcn-reference-check.md) §3。
-- [ ] 導入下單 Excel adapter（`FCN參考條件.xlsx` 格式）；測試用合成 Excel，不提交真實檔案。
+- [ ] 實作最小 schema 與來源證據；欄位範圍依 [核對規則](rules/barc-check-rules.md) §3。
+- [ ] 導入下單資料 adapter：依 `config/order_formats/<上手>.toml` 讀取上手原始格式（先做 BARC 詢價表）；測試用合成 Excel，不提交真實檔案。
+- [ ] 確認 BARC 詢價表待確認事項（MKI 語意、Period End 型保證配息期的對應；[核對規則](rules/barc-check-rules.md) §6.4），並收集更多詢價表樣本。
 - [ ] 版本化規則、逐欄結果、JSON 與人可讀例外報告；明示核對範圍與未支援欄位。
 - [ ] README 補安裝、CLI 範例、輸入輸出及錯誤狀態；不得用未執行的指令冒充可用功能。
 

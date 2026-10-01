@@ -1,0 +1,58 @@
+# 下單資料格式：BARC 詢價表（上手原始格式）
+#
+# 每家上手的下單／詢價 Excel 格式不同，各自一份設定。
+# 規則說明見 docs/order-formats/barc-inquiry.md。
+# 一筆交易一個檔（2026-10-01 暫定）。
+
+issuer = "BARC"
+version = 1
+effective_date = 2026-10-01
+
+[layout]
+sheet = "詢價表格"
+product_code_cell = "B3"   # 商品代號（TDCC），用來配對 PDF
+header_row = 4
+data_row = 5
+
+# Excel 欄名 → 標準欄位
+[columns]
+"Currency" = "currency"
+"Guaranteed Periods (m)" = "guaranteed_periods"
+"BBG Code 1" = "underlying_1"
+"BBG Code 2" = "underlying_2"
+"BBG Code 3" = "underlying_3"
+"BBG Code 4" = "underlying_4"
+"BBG Code 5" = "underlying_5"
+"Strike (%)" = "strike_pct"
+"KO Type" = "ko_type"
+"KO Barrier (%)" = "ko_pct"
+"Coupon p.a. (%)" = "coupon_pa_pct"
+"Tenor (m)" = "tenor_months"
+"Barrier Type" = "ki_type"
+"KI Barrier (%)" = "ki_pct"
+"Observation Frequency (m)" = "observation_frequency_months"
+"Effective Date offset" = "issue_date_offset_days"
+"Trade Date" = "trade_date"
+"Issue Date" = "issue_date"
+"Final Valuation Date" = "final_valuation_date"
+"Maturity Date" = "maturity_date"
+
+# TS 沒有對應資料，不核對
+ignored = ["Product", "Upfront / Note Price (%)", "OTC", "Funding Spread (bps)", "Notional", "Quote ID"]
+
+# KO Type：觀察方式（D 期間每日／P 期末定日）＋是否記憶式
+# 不在表內的值 → 轉人工覆核
+[values.ko_type]
+"Daily Memory" = { observation = "D", memory = true }
+"Daily" = { observation = "D", memory = false }
+"Period End Memory" = { observation = "P", memory = true }
+"Period End" = { observation = "P", memory = false }
+
+# Barrier Type：KI 型態（none 無／AM 到期觀察／D 每日觀察）
+# MKI 的語意待確認，暫時轉人工覆核
+[values.ki_type]
+"None" = "none"
+"NONE" = "none"
+"EKI" = "AM"
+"AKI" = "D"
+"MKI" = "review"
