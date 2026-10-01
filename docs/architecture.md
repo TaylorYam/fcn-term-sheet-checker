@@ -4,7 +4,7 @@
 
 協助作業人員將 FCN Term Sheet 與已確認的下單資料逐欄比對，輸出可回溯到原文件的例外清單。第一階段先支援一家 issuer 的一個文字型 PDF 範本；不做產品定價、交易執行、法律條款解釋或無人覆核的交易放行。
 
-第一階段（Issue #7）已實作 BARC 文字型 PDF ＋ 詢價表的端到端流程；OCR 與更多範本仍為目標設計。
+已實作 BARC 文字型 PDF ＋ 詢價表的端到端流程（Issue #7、#9）；OCR 與更多範本仍為目標設計。
 
 ## 系統資料流
 
@@ -40,7 +40,7 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 |---|---|---|
 | `src/fcn_checker/ingestion.py` | 文件 hash、加密／破損檢查 | 不解析金融欄位；不嘗試繞過密碼 |
 | `src/fcn_checker/extraction.py` | PyMuPDF 逐頁文字行、頁碼、bbox；排除頁碼雜訊 | 輸出頁碼、座標、文字；不判斷核對結果 |
-| `src/fcn_checker/parsers/` | `layout.py` 章／條／子項定位；`barc.py` 範本辨識與欄位、價格表擷取 | 使用錨點、座標與有限 regex；多重命中轉歧義，不任選 |
+| `src/fcn_checker/parsers/` | `layout.py` 章／條／子項定位；`barc.py` 範本辨識與欄位、價格表擷取；`barc_schedule.py` §13 配息表與提前出場表 | 使用錨點、座標與有限 regex；多重命中轉歧義，不任選 |
 | `src/fcn_checker/schema.py` | 標準化型別：`ParsedField`、`Evidence`、`CheckResult` | 缺值／歧義／不合法／不適用分開；保留來源證據 |
 | `src/fcn_checker/config.py` | 載入審查標準與上手詢價格式設定（TOML） | 會隨時間改變的基準只在設定檔 |
 | `src/fcn_checker/orders/` | 上手原始詢價表 adapter（目前 BARC） | 未知欄名回報覆核；禁止用文件值填補預期值 |

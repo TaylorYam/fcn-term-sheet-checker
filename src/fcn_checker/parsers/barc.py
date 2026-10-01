@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from ..schema import Evidence, FieldStatus, Line, ParsedField
+from . import barc_schedule as schedule
 from .layout import Document, Span, TextIndex, join_text, parse_date, squash
 
 TEMPLATE_ID = "barc-zh-pd"
@@ -76,6 +77,7 @@ class BarcTermSheet:
     coupon_mentions: dict[str, list[Mention]]  # monthly / annual
     full_text: TextIndex
     document: Document
+    scenario_rows: list[PriceRow] = field(default_factory=list)
 
     def f(self, name: str) -> ParsedField:
         return self.fields[name]
@@ -307,23 +309,25 @@ def _underlyings(doc: Document, art10: Span | None) -> ParsedField:
     return ParsedField.present("underlyings", tickers, [lines[h], *cells])
 
 
-def _price_table(lines: list[Line]) -> tuple[ParsedField, list[PriceRow]]:
-    """§15 各標的價格表。表格可能跨頁；欄位依表頭第一行的 x 中心指派。"""
-    name = "price_table"
-    starts = [i for i, ln in enumerate(lines) if ln.text.startswith("「最初價格」詳見下表所示")]
+_PRICE_START = r"^「最初價格」詳見下表所示"
+_PRICE_END = r"^(「表現最差之標的資產」指|發行機構應以實物交割時)"
+_SCENARIO_START = r"本商品標的資產之相關資訊"
+_SCENARIO_END = r"^情境分析結果不保證"
+
+
+def _price_table(
+    lines: list[Line], name: str = "price_table", start: str = _PRICE_START, end_pat: str = _PRICE_END
+) -> tuple[ParsedField, list[PriceRow]]:
+    """各標的價格表（§15；§16(3) 情境分析重印）。表格可能跨頁；欄位依表頭第一行的 x 中心指派。"""
+    starts = [i for i, ln in enumerate(lines) if re.search(start, ln.text)]
     if len(starts) != 1:
         if not starts:
-            return ParsedField.missing(name, "§15 找不到「最初價格」詳見下表所示"), []
+            return ParsedField.missing(name, "找不到價格表開始錨點"), []
         return ParsedField.ambiguous(name, [], [lines[i] for i in starts], "價格表開始錨點出現多次"), []
     s = starts[0]
-    end = next(
-        (
-            i
-            for i in range(s + 1, len(lines))
-            if re.match(r"^(「表現最差之標的資產」指|發行機構應以實物交割時)", lines[i].text)
-        ),
-        len(lines),
-    )
+    end = next((i for i in range(s + 1, len(lines)) if re.match(end_pat, lines[i].text)), None)
+    if end is None:
+        return ParsedField.missing(name, "找不到價格表結束錨點"), []
     seg = lines[s:end]
     cols: dict[str, Line] = {}
     for ln in seg:
@@ -465,6 +469,12 @@ def _labelled_date(lines: Sequence[Line], pattern: str, name: str, where: str) -
     return _distinct(name, hits, f"找不到{where}")
 
 
+def _amount(lines: Sequence[Line], pattern: str, name: str) -> ParsedField:
+    ti = TextIndex(lines)
+    hits = [(int(m.group(1).replace(",", "")), ti.lines_for(m.start(), m.end())) for m in ti.finditer(pattern)]
+    return _distinct(name, hits, "第四章找不到此金額")
+
+
 def _chairman(doc: Document) -> ParsedField:
     arts = doc.articles(2)
     target = [sp for sp in arts.values() if sp.title.startswith("受託或銷售機構")]
@@ -518,14 +528,26 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds["ki_pct"] = _definition_pct("ki_pct", s15, "觸及生效價格")
     flds["ki_type"] = _ki_type(s15, flds["ki_pct"], flds["strike_pct"])
     flds["price_table"], rows = _price_table(s15)
+    flds["scenario_price_table"], scenario_rows = _price_table(
+        doc.span_lines(arts.get(16)), "scenario_price_table", _SCENARIO_START, _SCENARIO_END
+    )
+
+    tables = schedule.find_tables(doc, arts.get(13))
+    flds["coupon_table"] = schedule.coupon_table(tables)
+    flds["ko_table"] = schedule.ko_table(tables, flds["ko_observation"])
+    flds["guaranteed_periods"] = schedule.guaranteed_periods(flds["ko_table"])
+    flds["guaranteed_periods_text"] = schedule.guaranteed_periods_text(doc, arts.get(13))
 
     flds["subscription_start_date"] = _labelled_date(
         doc.chapter_lines(4), r"^商品開始受理申購日期[:：]", "subscription_start_date", "第四章「商品開始受理申購日期」"
     )
     flds["chairman"] = _chairman(doc)
+    ch4 = doc.chapter_lines(4)
+    flds["min_subscription"] = _amount(ch4, r"最低申購金額依受託或銷售機構規定，至少為([\d,]+)", "min_subscription")
+    flds["min_redemption"] = _amount(ch4, r"最低贖回商品面額為([\d,]+)", "min_redemption")
 
     mentions = {
         "monthly": _mentions(doc, arts, _MONTHLY_PATTERNS),
         "annual": _mentions(doc, arts, _ANNUAL_PATTERNS),
     }
-    return det, BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc)
+    return det, BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc, scenario_rows)
