@@ -1,3 +1,4 @@
+# coding: utf-8
 # 依賴鎖定（已驗證版本）。安裝：pip install -c constraints.txt -e ".[dev]"
 # 執行期
 PyMuPDF==1.27.2.2
