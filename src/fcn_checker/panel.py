@@ -152,6 +152,8 @@ class PanelWindow:
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.pending: Future[Preview] | None = None
         self.check_pending: Future[PanelOutcome] | None = None
+        self.save_pending = None
+        self.has_result = False
         self.validation: Future[Preview | None] | None = None
         self.checking_for: Preview | None = None
         self.closed = False
@@ -219,6 +221,8 @@ class PanelWindow:
         self.reload.pack(side="left", padx=(0, 12))
         self.check_button = ttk.Button(actions, text="開始核對", command=self.start_check, state="disabled")
         self.check_button.pack(side="left")
+        self.save_button = ttk.Button(actions, text="儲存報告…", command=self.save_report, state="disabled")
+        self.save_button.pack(side="left", padx=(12, 0))
         self.controls.append(self.reload)
         ttk.Label(frame, text="PDF 商品代號", style="Section.TLabel").grid(row=6, column=0, columnspan=3, sticky="w")
         self.product_code_text = tk.Text(
@@ -277,7 +281,7 @@ class PanelWindow:
         self.status = tk.StringVar(value=session.message)
         self.status_label = ttk.Label(frame, textvariable=self.status, wraplength=960)
         self.status_label.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(8, 10))
-        ttk.Label(frame, text="結果僅在畫面呈現，不會自動保存；有差異或待處理項目請交由人工核對。").grid(
+        ttk.Label(frame, text="按「儲存報告」才會保存到本機；有差異或待處理項目請交由人工核對。").grid(
             row=12, column=0, columnspan=3, sticky="w"
         )
         root.bind("<Configure>", self._resize)
@@ -311,6 +315,8 @@ class PanelWindow:
         self._clear_results()
 
     def _clear_results(self):
+        self.has_result = False
+        self.save_button.configure(state="disabled")
         self.results.clear()
         self.tabs.tab(self.not_covered, text="待處理")
         self.pending_text.configure(state="normal")
@@ -340,6 +346,7 @@ class PanelWindow:
             self._selection_changed()
 
     def _busy(self, busy):
+        self.save_button.configure(state="disabled" if busy or not self.has_result else "normal")
         for control in self.controls:
             control.configure(
                 state="disabled" if busy else "readonly" if isinstance(control, ttk.Combobox) else "normal"
@@ -347,7 +354,7 @@ class PanelWindow:
         self.check_button.configure(state="disabled" if busy or self.shown is None else "normal")
 
     def load(self):
-        if self.pending is not None or self.check_pending is not None:
+        if self.pending is not None or self.check_pending is not None or self.save_pending is not None:
             return
         self._clear()
         self._busy(True)
@@ -380,7 +387,12 @@ class PanelWindow:
             self.status.set("預覽讀取失敗，請確認檔案與格式設定後重新載入。")
 
     def start_check(self):
-        if self.pending is not None or self.check_pending is not None or self.shown is None:
+        if (
+            self.pending is not None
+            or self.check_pending is not None
+            or self.save_pending is not None
+            or self.shown is None
+        ):
             return
         self._clear_results()
         self.details.set("")
@@ -400,6 +412,7 @@ class PanelWindow:
         try:
             outcome = future.result()
             self.results.show(outcome)
+            self.has_result = True
             self.pending_text.configure(state="normal")
             self.pending_text.insert("1.0", "\n\n".join(n["description"] for n in outcome.report.not_covered))
             self.pending_text.configure(state="disabled")
@@ -410,6 +423,38 @@ class PanelWindow:
             self.status.set(str(e))
         except Exception:
             self.status.set("核對失敗，請確認檔案與設定後重新載入預覽。")
+        self._busy(False)
+
+    def save_report(self):
+        if not self.has_result or self.save_pending is not None or self.check_pending is not None:
+            return
+        self._busy(True)
+        destination = filedialog.askdirectory(parent=self.root, title="選取報告保存資料夾")
+        if not destination:
+            self.status.set("已取消儲存，核對結果仍保留。")
+            self._busy(False)
+            return
+        self.status.set("儲存報告中…")
+        self.save_pending = self.executor.submit(self.session.save_report, Path(destination))
+        self.root.after(80, self._finish_save)
+
+    def _finish_save(self):
+        if self.closed or self.save_pending is None:
+            return
+        if not self.save_pending.done():
+            self.root.after(80, self._finish_save)
+            return
+        future, self.save_pending = self.save_pending, None
+        try:
+            receipt = future.result()
+            if receipt.source_changed:
+                self._clear()
+            self.status.set(receipt.summary)
+        except IngestionError as error:
+            self._clear()
+            self.status.set(str(error))
+        except Exception as error:
+            self.status.set(f"儲存失敗，核對結果仍保留：{error}")
         self._busy(False)
 
     def _condition_selected(self, _):
@@ -426,14 +471,26 @@ class PanelWindow:
                 valid = self.validation.result() is not None
             except Exception:
                 valid = False
-            if self.pending is None and self.check_pending is None and self.shown is self.checking_for and not valid:
+            if (
+                self.pending is None
+                and self.check_pending is None
+                and self.save_pending is None
+                and self.shown is self.checking_for
+                and not valid
+            ):
                 self._clear()
                 self.status.set(self.session.message)
             self.validation = None
             self.checking_for = None
             self.root.after(1500, self._watch_sources)
             return
-        if self.pending is None and self.check_pending is None and self.shown is not None and self.validation is None:
+        if (
+            self.pending is None
+            and self.check_pending is None
+            and self.save_pending is None
+            and self.shown is not None
+            and self.validation is None
+        ):
             self.checking_for = self.shown
             self.validation = self.executor.submit(lambda: self.session.preview)
         self.root.after(100 if self.validation is not None else 1500, self._watch_sources)
