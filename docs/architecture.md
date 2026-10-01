@@ -76,7 +76,7 @@ Issue #13 新增本機 Tkinter PANEL，#17 改為預覽第一頁商品代號，#
 
 PDF、Excel 與格式設定的 hash 在載入前後、核對前後及結果使用時檢查，結果另綁定審查標準 hash；來源或標準變更即使預覽與結果失效。讀檔與失效檢查在背景執行，UI 更新只在主執行緒，核對期間不能重複提交。所有資料仍在本機處理，僅在使用者按儲存後寫入本機 JSON／Markdown，沒有 Web UI、資料庫或雲端服務。#15 的保存流程沿用 reporting 序列化，以 exclusive create 禁止覆蓋；逐份回報保存狀態，部分失敗不清除當次結果。CLI 輸出命名與行為維持相容。Windows 透過專案獨立 .venv 安裝與雙擊啟動。
 
-新增 issuer 時加入獨立且版本化的 parser 與對應 fixtures，不把所有文件塞入一組通用 regex。未知格式保留人工覆核入口。
+新增 issuer 時加入獨立且版本化的 parser 與對應 fixtures，不把所有文件塞入一組通用 regex。未知格式保留人工覆核入口。步驟、交付物與驗收門檻見[新增上手實作規範](issuer-onboarding.md)；目前核對入口、CLI、PANEL 與名稱樣板仍寫死 BARC，第二家上手前須依規範 §6 改為依上手分派。
 
 未來 LLM fallback 若獲批准，只能作為 extraction adapter 提供候選欄位與來源證據；不得修改預期下單值或取代 rule engine。需另立 ADR、資料傳送政策與驗證門檻；第一版無相關 SDK、開關或外部呼叫。
 
