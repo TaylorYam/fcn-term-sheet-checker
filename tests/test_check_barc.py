@@ -32,11 +32,12 @@ def check(
     overrides=None,
     extra_columns=None,
     product_code=None,
+    stop_on_pairing_failure=False,
 ):
     spec = spec or Spec()
     pdf = build_pdf(tmp_path / "ts.pdf", pdf_spec or spec)
     inq = build_inquiry(tmp_path / "inquiry.xlsx", spec, overrides, extra_columns, product_code)
-    return run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT)
+    return run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT, stop_on_pairing_failure=stop_on_pairing_failure)
 
 
 def problems(report) -> set[tuple[str, CheckStatus]]:
@@ -157,6 +158,13 @@ def test_ki_pct_mismatch_when_both_have_ki(tmp_path):
 def test_product_code_mismatch(tmp_path):
     report = check(tmp_path, product_code="029199990002")
     assert problems(report) == {("field.product_code", MISMATCH)}
+    assert any(r.rule_id == "field.currency" for r in report.results)
+
+
+def test_product_code_mismatch_stops_when_requested(tmp_path):
+    report = check(tmp_path, product_code="029199990002", stop_on_pairing_failure=True)
+    assert problems(report) == {("field.product_code", MISMATCH)}
+    assert not any(r.rule_id == "field.currency" for r in report.results)
 
 
 # ---------------------------------------------------------------- 推算規則
