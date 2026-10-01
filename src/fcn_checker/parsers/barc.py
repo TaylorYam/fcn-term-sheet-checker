@@ -111,23 +111,9 @@ def _first_date_field(name: str, lines: list[Line], text: str) -> ParsedField:
 # ---------------------------------------------------------------- 封面
 
 
-def cover_title(lines: Sequence[Line]) -> ParsedField:
-    """封面「中文產品說明書」與「商品代號」之間的商品標題，不以名稱欄補值。"""
-    page = sorted((ln for ln in lines if ln.page == 1), key=lambda ln: (ln.y0, ln.x0))
-    anchors = [ln for ln in page if ln.text.strip() == "中文產品說明書"]
-    if len(anchors) != 1:
-        return ParsedField.missing("cover_title", "未找到唯一的封面標題錨點")
-    anchor = anchors[0]
-    ends = [ln for ln in page if ln.y0 > anchor.y0 and re.match(r"^商品代號\s*[:：]", ln.text)]
-    if not ends:
-        return ParsedField.missing("cover_title", "未找到封面標題的結束位置")
-    title_lines = [ln for ln in page if anchor.y1 <= ln.y0 < ends[0].y0]
-    title = join_text(title_lines)
-    if not title.startswith("英商巴克萊銀行") or "自動提前出場結構型商品" not in title:
-        return ParsedField.missing("cover_title", "未找到完整商品標題")
-    if title.count("（") != title.count("）") or title.count("(") != title.count(")"):
-        return ParsedField.invalid("cover_title", title_lines, "商品標題括號不完整")
-    return ParsedField.present("cover_title", title, title_lines)
+def product_code(lines: Sequence[Line]) -> ParsedField:
+    """第一頁商品代號，與正式核對共用擷取及歧義判定。"""
+    return _cover_field("product_code", list(lines), "商品代號", squash)
 
 
 def _cover_value(lines: list[Line], label: str) -> list[tuple[str, list[Line]]]:
@@ -522,7 +508,7 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds: dict[str, ParsedField] = {}
     all_lines = list(lines)
 
-    flds["product_code"] = _cover_field("product_code", all_lines, "商品代號", lambda s: squash(s))
+    flds["product_code"] = product_code(all_lines)
     flds["currency_zh"] = _cover_field("currency_zh", all_lines, "計價幣別", lambda s: squash(s))
     flds["name_zh"] = _cover_field("name_zh", all_lines, "商品中文名稱")
     flds["name_en"] = _cover_field("name_en", all_lines, "商品英文名稱", lambda s: re.sub(r"\s+", " ", s).strip())

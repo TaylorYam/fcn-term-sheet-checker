@@ -35,10 +35,9 @@ class Condition:
 
 @dataclass(frozen=True)
 class Preview:
-    title: str | None
-    title_note: str
-    title_evidence: tuple[Evidence, ...]
     product_code: str | None
+    product_code_note: str
+    product_code_evidence: tuple[Evidence, ...]
     conditions: tuple[Condition, ...]
     warnings: tuple[str, ...]
 
@@ -98,7 +97,7 @@ class PanelSession:
             detection = barc.detect(Document(lines))
             if not detection.matched:
                 raise IngestionError("template_mismatch", "PDF 不符合選取的 BARC 模板：" + "；".join(detection.failed))
-            title = barc.cover_title(lines)
+            code = barc.product_code(lines)
             record = load_inquiry(self.order, fmt)
             rows = [Condition("商品代號", record.product_code.value, record.product_code.source)]
             for label, name in fmt.columns.items():
@@ -113,15 +112,14 @@ class PanelSession:
             if before != self._fingerprints():
                 raise IngestionError("source_changed", "讀取期間來源已變更，請重新載入預覽。")
             self._preview = Preview(
-                title.value if title.ok else None,
-                title.note,
-                tuple(title.evidence),
-                record.product_code.value,
+                code.value if code.ok else None,
+                code.note,
+                tuple(code.evidence),
                 tuple(rows),
                 tuple(warnings),
             )
             self._hashes = before
-            self.message = "預覽已載入，請確認商品標題與 Excel 條件。"
+            self.message = "預覽已載入，請確認 PDF 商品代號與 Excel 條件。"
             return self._preview
         except OSError as e:
             self.message = "來源檔案或設定無法讀取，請確認檔案存在且有讀取權限。"
