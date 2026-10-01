@@ -16,6 +16,7 @@ from typing import Any
 from ..config import OrderFormat, ReviewStandard
 from ..orders.inquiry import OrderRecord
 from ..parsers.barc import BarcTermSheet
+from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
@@ -29,21 +30,7 @@ PRICE_PCT_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}
 
 # 第二階段或暫不核對的規則：列入報告「未涵蓋」區，不影響也不假裝通過
 NOT_COVERED: list[dict[str, str]] = [
-    {
-        "rule_id": "schedule.coupon_dates",
-        "description": "配息評價日／支付日表：期數 = 天期、逐期遞增、評價日 < 支付日（B1、B2）",
-    },
-    {"rule_id": "schedule.final_period", "description": "配息表末期評價日 = 最終評價日、末期支付日 = 到期日（A3、A4）"},
-    {"rule_id": "schedule.autocall_dates", "description": "自動提前出場表日期與配息表的關係（C1–C4）"},
-    {
-        "rule_id": "field.guaranteed_periods",
-        "description": "詢價表 Guaranteed Periods（保證配息期）vs 說明書提前出場表／§13(7) 文字",
-    },
-    {"rule_id": "field.observation_frequency", "description": "詢價表 Observation Frequency vs 說明書配息表期數"},
-    {"rule_id": "doc.autocall_trigger_per_period", "description": "§13(7) 每期觸發百分比 = §15 定義句"},
-    {"rule_id": "doc.scenario_price_table", "description": "§16(3) 情境分析重印價格表 = §15 價格表"},
-    {"rule_id": "field.monthly_ki", "description": "Monthly KI（MKI）說明書判斷方式（尚無樣本）"},
-    {"rule_id": "doc.min_subscription_redemption", "description": "第四章最低申購、最低贖回金額 = 面額"},
+    {"rule_id": "field.monthly_ki", "description": "Monthly KI（MKI）說明書判斷方式（尚無樣本，見 Issue #10）"},
     {"rule_id": "doc.underlying_names", "description": "標的中文名稱與交易所（擱置，見核對規則 §6.2）"},
     {"rule_id": "field.isin", "description": "ISIN（詢價表沒有，暫不核對）"},
 ]
@@ -497,28 +484,19 @@ def issue_date_offset(ctx: Context) -> CheckResult:
 
 
 def monthly_coupon(ctx: Context) -> CheckResult:
-    """月配息率 = 年利率 × 天期 ÷ 12 ÷ 期數（期數 = 天期 ÷ 觀察頻率）；與說明書差 ≤ 0.0001 視為一致。"""
+    """月配息率 = 年利率 × 天期 ÷ 12 ÷ 期數（期數 = 說明書配息表列數）；與說明書差 ≤ 0.0001 視為一致。"""
     rid, field = "derive.monthly_coupon", "monthly_coupon_pct"
-    pf = ctx.ts.f(field)
+    pf, table = ctx.ts.f(field), ctx.ts.f("coupon_table")
     annual, ov_a, p1 = _order_value(ctx, "coupon_pa_pct", rid, field, pf, _to_decimal, "數字")
     tenor, ov_t, p2 = _order_value(ctx, "tenor_months", rid, field, pf, _to_int, "整數")
-    freq, ov_f, p3 = _order_value(ctx, "observation_frequency_months", rid, field, pf, _to_int, "整數")
-    for p in (p1, p2, p3):
+    for p in (p1, p2):
         if p:
             return p
-    if freq <= 0 or tenor % freq:
-        return _result(
-            rid,
-            field,
-            S.REVIEW_REQUIRED,
-            pf=pf,
-            ov=[ov_t, ov_f],
-            reason="order_invalid",
-            message="天期無法被觀察頻率整除，無法推算期數",
-        )
     if not pf.ok:
-        return _doc_review(rid, field, pf, None, [ov_a, ov_t, ov_f])
-    periods = tenor // freq
+        return _doc_review(rid, field, pf, None, [ov_a, ov_t])
+    if not table.ok:
+        return _doc_review(rid, field, table, None, [ov_a, ov_t])
+    periods = len(table.value.rows)
     expected = (annual * tenor / 12 / periods).quantize(Q4, ROUND_HALF_UP)
     ok = abs(expected - pf.value) <= MONTHLY_TOLERANCE
     return _result(
@@ -528,10 +506,10 @@ def monthly_coupon(ctx: Context) -> CheckResult:
         expected=expected,
         actual=pf.value,
         pf=pf,
-        ov=[ov_a, ov_t, ov_f],
+        ov=[ov_a, ov_t],
         reason="" if ok else "value_mismatch",
         tolerance="≤ 0.0001",
-        message=f"推算：{annual}% × {tenor} ÷ 12 ÷ {periods} 期，四捨五入到 4 位",
+        message=f"推算：{annual}% × {tenor} ÷ 12 ÷ {periods} 期（說明書配息表列數），四捨五入到 4 位",
     )
 
 
@@ -884,6 +862,353 @@ def product_name(ctx: Context) -> list[CheckResult]:
     return out
 
 
+# ---------------------------------------------------------------- 配息表與提前出場表（第二階段）
+
+
+def _next_weekday(d: dt.date) -> dt.date:
+    """後 1 個平日（只排除週末；沒有假日曆，核對規則 §3.8）。"""
+    d += dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+
+def _row_ev(rows: list[ScheduleRow]) -> list[Evidence]:
+    return [Evidence.of(ln) for r in rows for ln in r.lines]
+
+
+def _header_ev(table: Table) -> list[Evidence]:
+    return [Evidence.of(h) for h in table.header]
+
+
+def _periods(rows: list[ScheduleRow]) -> str:
+    return "、".join(f"第 {r.t} 期" for r in rows)
+
+
+def observation_frequency(ctx: Context) -> CheckResult:
+    """配息期數：詢價表 天期 ÷ Observation Frequency = 說明書配息表列數。"""
+    rid, field = "field.observation_frequency", "observation_frequency_months"
+    table = ctx.ts.f("coupon_table")
+    tenor, ov_t, p1 = _order_value(ctx, "tenor_months", rid, field, table, _to_int, "整數")
+    freq, ov_f, p2 = _order_value(ctx, field, rid, field, table, _to_int, "整數")
+    for p in (p1, p2):
+        if p:
+            return p
+    if freq <= 0 or tenor % freq:
+        return _result(
+            rid,
+            field,
+            S.REVIEW_REQUIRED,
+            ov=[ov_t, ov_f],
+            reason="order_invalid",
+            message="天期無法被觀察頻率整除，無法推算期數",
+        )
+    if not table.ok:
+        return _doc_review(rid, field, table, tenor // freq, [ov_t, ov_f])
+    n = len(table.value.rows)
+    ok = n == tenor // freq
+    return _result(
+        rid,
+        field,
+        S.PASS if ok else S.MISMATCH,
+        expected=tenor // freq,
+        actual=n,
+        evidence=_header_ev(table.value),
+        ov=[ov_t, ov_f],
+        reason="" if ok else "value_mismatch",
+        message=f"期數：詢價表 {tenor} ÷ {freq}；說明書配息表 {n} 列",
+    )
+
+
+def guaranteed_periods(ctx: Context) -> CheckResult:
+    """保證配息期：詢價表 vs 說明書提前出場表；Daily Memory 另以 §13(7) 定義句交叉驗證。"""
+    rid, field = "field.guaranteed_periods", "guaranteed_periods"
+    pf, text = ctx.ts.f(field), ctx.ts.f("guaranteed_periods_text")
+    v, ov, problem = _order_value(ctx, field, rid, field, pf, _to_int, "整數")
+    if problem:
+        return problem
+    if not pf.ok:
+        return _doc_review(rid, field, pf, v, [ov])
+    if text.status not in (FieldStatus.PRESENT, FieldStatus.MISSING):
+        return _doc_review(rid, field, text, v, [ov])
+    if text.ok and text.value != pf.value:
+        return _result(
+            rid,
+            field,
+            S.REVIEW_REQUIRED,
+            expected=v,
+            actual={"表格": pf.value, "定義句": text.value},
+            evidence=pf.evidence + text.evidence,
+            ov=[ov],
+            reason="document_inconsistent",
+            message="提前出場表與 §13(7)「自動提前出場觀察期」定義句推得的保證配息期不同",
+        )
+    ok = v == pf.value
+    source = "提前出場表與 §13(7) 定義句" if text.ok else "提前出場表"
+    return _result(
+        rid,
+        field,
+        S.PASS if ok else S.MISMATCH,
+        expected=v,
+        actual=pf.value,
+        evidence=pf.evidence + (text.evidence if text.ok else []),
+        ov=[ov],
+        reason="" if ok else "value_mismatch",
+        message=f"說明書值由{source}推得",
+    )
+
+
+def coupon_dates(ctx: Context) -> list[CheckResult]:
+    """B1、B2：期數 = 天期；評價日、支付日逐期遞增；每期評價日 < 支付日。"""
+    rid = "schedule.coupon_dates"
+    table, tenor = ctx.ts.f("coupon_table"), ctx.ts.f("tenor_months")
+    if not table.ok:
+        return [_doc_review(rid, "coupon_table", table)]
+    rows = table.value.rows
+    out = []
+    if not tenor.ok:
+        out.append(_doc_review(rid, "coupon_periods", tenor))
+    else:
+        ok = len(rows) == tenor.value
+        out.append(
+            _result(
+                rid,
+                "coupon_periods",
+                S.PASS if ok else S.MISMATCH,
+                expected=tenor.value,
+                actual=len(rows),
+                evidence=tenor.evidence + _header_ev(table.value),
+                reason="" if ok else "value_mismatch",
+                message="配息表列數須等於天期（每月一期）",
+            )
+        )
+    bad = []
+    for k, r in enumerate(rows):
+        v, p = r.get("valuation"), r.get("payment")
+        if not (isinstance(v, dt.date) and isinstance(p, dt.date)) or v >= p:
+            bad.append(r)
+            continue
+        prev_v, prev_p = (rows[k - 1].get("valuation"), rows[k - 1].get("payment")) if k else (None, None)
+        if k and not (isinstance(prev_v, dt.date) and isinstance(prev_p, dt.date) and prev_v < v and prev_p < p):
+            bad.append(r)
+    out.append(
+        _result(
+            rid,
+            "coupon_date_order",
+            S.MISMATCH if bad else S.PASS,
+            actual=_periods(bad) or None,
+            evidence=_row_ev(bad) or _header_ev(table.value),
+            reason="date_order" if bad else "",
+            message="每期評價日 < 支付日，且評價日、支付日逐期遞增",
+        )
+    )
+    return out
+
+
+def final_period(ctx: Context) -> list[CheckResult]:
+    """A3、A4：末期評價日 = 最終評價日；末期支付日 = 到期日。"""
+    rid = "schedule.final_period"
+    table = ctx.ts.f("coupon_table")
+    out = []
+    for field, key, label in (
+        ("final_valuation_date", "valuation", "末期評價日須等於最終評價日"),
+        ("maturity_date", "payment", "末期支付日須等於到期日"),
+    ):
+        pf = ctx.ts.f(field)
+        bad = next((x for x in (table, pf) if not x.ok), None)
+        if bad is not None:
+            out.append(_doc_review(rid, f"last_{key}", bad))
+            continue
+        last = table.value.rows[-1]
+        ok = last.get(key) == pf.value
+        out.append(
+            _result(
+                rid,
+                f"last_{key}",
+                S.PASS if ok else S.MISMATCH,
+                expected=pf.value,
+                actual=last.get(key),
+                evidence=pf.evidence + _row_ev([last]),
+                reason="" if ok else "value_mismatch",
+                message=label,
+            )
+        )
+    return out
+
+
+def autocall_dates(ctx: Context) -> list[CheckResult]:
+    """C1–C4：自動提前出場表與配息表的日期關係。"""
+    rid = "schedule.autocall_dates"
+    coupon, ko = ctx.ts.f("coupon_table"), ctx.ts.f("ko_table")
+    for x in (coupon, ko):
+        if not x.ok:
+            return [_doc_review(rid, "ko_table", x)]
+    ct, kt = coupon.value, ko.value
+    if kt.kind == "ko_fixed":
+        pairs = (
+            ("ko_valuation", "valuation", "C1 自動提前出場評價日 = 同期配息評價日"),
+            ("early_redemption", "payment", "C2 指定提前現金贖回日 = 同期配息支付日"),
+        )
+    elif kt.kind == "ko_period":
+        pairs = (("end", "valuation", "C3 期末日 = 同期配息評價日"),)
+    elif kt.kind == "coupon":
+        return [
+            _result(
+                rid,
+                "ko_table",
+                S.NOT_APPLICABLE,
+                evidence=_header_ev(kt),
+                message="評價日表兼作自動提前出場評價日，沒有另一張提前出場表可比對",
+            )
+        ]
+    else:
+        pairs = ()  # 觀察期合併表：期末日即配息評價日，只需檢查期始日（C4）
+    out = []
+    for ko_key, c_key, label in pairs:
+        if len(kt.rows) != len(ct.rows):
+            out.append(
+                _result(
+                    rid,
+                    ko_key,
+                    S.MISMATCH,
+                    expected=len(ct.rows),
+                    actual=len(kt.rows),
+                    evidence=_header_ev(kt),
+                    reason="period_count",
+                    message=f"{label}：提前出場表與配息表期數不同",
+                )
+            )
+            continue
+        bad = [k for k, c in zip(kt.rows, ct.rows, strict=True) if k.get(ko_key) not in (NA, c.get(c_key))]
+        out.append(
+            _result(
+                rid,
+                ko_key,
+                S.MISMATCH if bad else S.PASS,
+                actual=_periods(bad) or None,
+                evidence=_row_ev(bad) or _header_ev(kt),
+                reason="value_mismatch" if bad else "",
+                message=label,
+            )
+        )
+    if kt.kind in ("ko_period", "combined"):
+        out.append(_period_starts(ctx, rid, kt))
+    return out
+
+
+def _period_starts(ctx: Context, rid: str, kt: Table) -> CheckResult:
+    """C4：第 1 期期始日為 N/A 或發行日後 1 個平日；之後各期 = 前一期期末日後 1 個平日。
+
+    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。
+    """
+    issue = ctx.ts.f("issue_date")
+    if not issue.ok:
+        return _doc_review(rid, "start", issue)
+    bad = []
+    for k, r in enumerate(kt.rows):
+        start = r.get("start")
+        prev_end = issue.value if k == 0 else kt.rows[k - 1].get("end")
+        if start == NA:
+            if k and prev_end != NA:
+                bad.append(r)
+        elif not isinstance(prev_end, dt.date) or start != _next_weekday(prev_end):
+            bad.append(r)
+    return _result(
+        rid,
+        "start",
+        S.MISMATCH if bad else S.PASS,
+        actual=_periods(bad) or None,
+        evidence=_row_ev(bad) or _header_ev(kt),
+        reason="value_mismatch" if bad else "",
+        tolerance="平日只排除週末（無假日曆）",
+        message="C4 期始日 = 前一期期末日後 1 個平日；第 1 期為 N/A 或發行日後 1 個平日",
+    )
+
+
+def trigger_per_period(ctx: Context) -> CheckResult:
+    """§13(7) 每期觸發百分比 = §15 觸發百分比定義句。"""
+    rid, ko, pct = "doc.autocall_trigger_per_period", ctx.ts.f("ko_table"), ctx.ts.f("ko_pct")
+    if not ko.ok:
+        return _doc_review(rid, "trigger", ko)
+    if "trigger" not in ko.value.columns:
+        return _result(
+            rid,
+            "trigger",
+            S.NOT_APPLICABLE,
+            evidence=_header_ev(ko.value),
+            message="此型態的提前出場表沒有每期觸發百分比欄",
+        )
+    if not pct.ok:
+        return _doc_review(rid, "trigger", pct)
+
+    def callable_(r: ScheduleRow) -> bool:
+        return any(isinstance(r.get(k), dt.date) for k in ("end", "ko_valuation"))
+
+    # 不可提前出場的期別為 N/A；可提前出場的期別必須有百分比且等於定義句
+    bad = [r for r in ko.value.rows if r.get("trigger") != pct.value and (r.get("trigger") != NA or callable_(r))]
+    return _result(
+        rid,
+        "trigger",
+        S.MISMATCH if bad else S.PASS,
+        expected=pct.value,
+        actual=sorted({str(r.get("trigger")) for r in bad}) if bad else pct.value,
+        evidence=pct.evidence + _row_ev(bad),
+        reason="value_mismatch" if bad else "",
+        message="每期觸發百分比須等於 §15 定義句" + (f"；不符：{_periods(bad)}" if bad else ""),
+    )
+
+
+def scenario_price_table(ctx: Context) -> CheckResult:
+    """§16(3) 情境分析重印價格表逐格 = §15 價格表。"""
+    rid, s15, s16 = "doc.scenario_price_table", ctx.ts.f("price_table"), ctx.ts.f("scenario_price_table")
+    for x in (s15, s16):
+        if not x.ok:
+            return _doc_review(rid, "scenario_price_table", x)
+    a, b = ctx.ts.price_rows, ctx.ts.scenario_rows
+    diffs = [] if len(a) == len(b) else [f"列數 {len(a)} ≠ {len(b)}"]
+    for k, (r15, r16) in enumerate(zip(a, b, strict=False), 1):
+        for col in sorted(set(r15.values) | set(r16.values)):
+            if r15.values.get(col) != r16.values.get(col):
+                diffs.append(
+                    f"第 {k} 檔 {PRICE_LABEL.get(col, '最初價格')}：§15 {r15.values.get(col)}／§16 {r16.values.get(col)}"
+                )
+    return _result(
+        rid,
+        "scenario_price_table",
+        S.MISMATCH if diffs else S.PASS,
+        actual=diffs or None,
+        evidence=s16.evidence[:6],
+        reason="value_mismatch" if diffs else "",
+        message="§16(3) 重印價格表須與 §15 價格表逐格相同",
+    )
+
+
+def min_amounts(ctx: Context) -> list[CheckResult]:
+    """第四章最低申購金額、最低贖回商品面額 = §6 面額。"""
+    rid, denom = "doc.min_subscription_redemption", ctx.ts.f("denomination")
+    out = []
+    for field in ("min_subscription", "min_redemption"):
+        pf = ctx.ts.f(field)
+        bad = next((x for x in (pf, denom) if not x.ok), None)
+        if bad is not None:
+            out.append(_doc_review(rid, field, bad))
+            continue
+        ok = pf.value == denom.value
+        out.append(
+            _result(
+                rid,
+                field,
+                S.PASS if ok else S.MISMATCH,
+                expected=denom.value,
+                actual=pf.value,
+                evidence=pf.evidence + denom.evidence,
+                reason="" if ok else "value_mismatch",
+                message="須等於 §6 每單位商品面額",
+            )
+        )
+    return out
+
+
 # ---------------------------------------------------------------- 入口
 
 
@@ -907,8 +1232,16 @@ def run_all(ctx: Context) -> list[CheckResult]:
         _simple(ctx, "field.maturity_date", "maturity_date", date, "日期"),
         issue_date_offset(ctx),
         monthly_coupon(ctx),
+        observation_frequency(ctx),
+        guaranteed_periods(ctx),
         *coupon_consistency(ctx),
         *prices(ctx),
+        *coupon_dates(ctx),
+        *final_period(ctx),
+        *autocall_dates(ctx),
+        trigger_per_period(ctx),
+        scenario_price_table(ctx),
+        *min_amounts(ctx),
         denomination(ctx),
         subscription_start(ctx),
         print_date(ctx),

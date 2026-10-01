@@ -130,7 +130,8 @@ def test_excel_float_tail_is_cleaned(tmp_path):
         ({"KO Barrier (%)": 105.0}, {"field.ko_pct"}),
         # 年利率不同時，由它推算的月配息率也會不符
         ({"Coupon p.a. (%)": 12.5}, {"field.coupon_pa_pct", "derive.monthly_coupon"}),
-        ({"Tenor (m)": 9}, {"field.tenor_months"}),
+        # 天期不同時，期數（天期 ÷ 觀察頻率 vs 配息表列數）與月配息率推算也會不符
+        ({"Tenor (m)": 9}, {"field.tenor_months", "field.observation_frequency", "derive.monthly_coupon"}),
         ({"Trade Date": dt.datetime(2030, 1, 8)}, {"field.trade_date"}),
         ({"Issue Date": dt.datetime(2030, 1, 15)}, {"field.issue_date"}),
         ({"Final Valuation Date": dt.datetime(2030, 7, 9)}, {"field.final_valuation_date"}),

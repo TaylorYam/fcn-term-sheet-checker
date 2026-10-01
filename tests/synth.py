@@ -79,6 +79,16 @@ class Spec:
     mention_overrides: dict[str, str] = field(default_factory=dict)  # "§9"/"§15"/"§17" → 月配息率文字
     omit: frozenset[str] = frozenset()  # 例：{"trade_date"}
     extra_strike_def: str | None = None  # 第二個執行價格定義（歧義）
+    # ---- 第二階段：配息表、提前出場表、§16、第四章 ----
+    guaranteed: int | None = None  # 保證配息期；None → Daily 為 1、Period End 為 0
+    guaranteed_text: int | None = None  # §13(7) 定義句的期數；None → 同 guaranteed
+    coupon_overrides: dict[tuple[int, str], str] = field(default_factory=dict)  # (期, valuation/payment) → 文字
+    ko_overrides: dict[tuple[int, str], str] = field(default_factory=dict)  # (期, start/end/trigger/…) → 文字
+    break_coupon_after: int | None = None  # 表格在第 N 期之後換頁
+    scenario_overrides: dict[tuple[int, str], str] = field(default_factory=dict)  # §16 重印表
+    min_subscription: int | None = None
+    min_redemption: int | None = None
+    ko_header_override: str | None = None  # 定日記憶式提前出場表的「自動提前出場評價日」表頭改寫
 
     def with_(self, **kw: Any) -> Spec:
         return replace(self, **kw)
@@ -92,6 +102,12 @@ class Spec:
         if self.monthly is not None:
             return self.monthly
         return (self.annual * self.tenor / 12 / self.tenor).quantize(Q4, ROUND_HALF_UP)
+
+    @property
+    def guaranteed_value(self) -> int:
+        if self.guaranteed is not None:
+            return self.guaranteed
+        return 1 if self.ko_obs == "D" else 0
 
     @property
     def denom(self) -> int:
@@ -211,16 +227,46 @@ def _runs(text: str) -> list[tuple[bool, str]]:
     return out
 
 
-def _coupon_dates(s: Spec) -> list[tuple[dt.date, dt.date]]:
-    """虛構的每期評價日／支付日；末期 = 最終評價日／到期日。"""
-    out = []
+def next_weekday(d: dt.date) -> dt.date:
+    d += dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+
+def schedule_rows(s: Spec) -> list[dict[str, Any]]:
+    """虛構的每期日期（末期 = 最終評價日／到期日），以及依保證配息期 G 產生的提前出場欄位。"""
+    g = s.guaranteed_value
+    rows: list[dict[str, Any]] = []
     for t in range(1, s.tenor + 1):
         if t == s.tenor:
-            out.append((s.final_date, s.maturity_date))
+            v, p = s.final_date, s.maturity_date
         else:
-            v = s.trade_date + dt.timedelta(days=30 * t)
-            out.append((v, v + dt.timedelta(days=3)))
-    return out
+            v = s.trade_date + dt.timedelta(days=(s.final_date - s.trade_date).days * t // s.tenor)
+            while v.weekday() >= 5:
+                v += dt.timedelta(days=1)
+            p = v + dt.timedelta(days=3)
+        if s.ko_obs == "D":
+            if t < g:
+                start, end = "N/A", "N/A"
+            elif t == g:
+                start, end = "N/A", zh_date(v)
+            else:
+                prev = s.issue_date if t == 1 else rows[-1]["valuation"]
+                start, end = zh_date(next_weekday(prev)), zh_date(v)
+        else:
+            start = end = None
+        rows.append(
+            {
+                "t": t,
+                "valuation": v,
+                "payment": p,
+                "start": start,
+                "end": end,
+                "noncallable": s.ko_obs == "P" and not s.memory and t <= g,
+            }
+        )
+    return rows
 
 
 def build_pdf(path: Path, s: Spec) -> Path:
@@ -314,45 +360,86 @@ def build_pdf(path: Path, s: Spec) -> Path:
     sub(4, f"最終評價日**：係指{zh_date(s.final_date)}，應視為評價日，如該日為「中斷日」應適用評價日有關")
     w.line(97.7, "「中斷日」之順延規定（並請參閱本條第(9)項之說明）")
     sub(5, f"到期日或最終實物贖回日†*：{zh_date(s.maturity_date)}（並請參閱本條第(9)項之說明）")
-    dates = _coupon_dates(s)
+    rows = schedule_rows(s)
+    co, ko_cells = s.coupon_overrides, s.ko_overrides
+
+    def cells(t: int, spec: list[tuple[float, str, str]], over: dict) -> list[tuple[float, str]]:
+        return [(x, over.get((t, key), text)) for x, key, text in spec]
+
+    def table_row(t: int, cs: list[tuple[float, str]], gap: float = 20) -> None:
+        w.row([(58.1 if t < 10 else 55.6, str(t)), *cs], gap=gap)
+        if s.break_coupon_after == t:
+            w.new_page()
+
     if s.ko_obs == "D" and not s.memory:
         sub(6, "配息支付日†*：依下表「觀察期」所示（並請參閱本條第(9)項之說明）")
-        w.row([(58.1, "t"), (130.5, "期始日(含)t"), (284.3, "期末日(含)t"), (436.9, "配息支付日t")])
-        prev = None
-        for t, (v, p) in enumerate(dates, 1):
-            start = "N/A" if prev is None else zh_date(prev + dt.timedelta(days=1))
-            w.row([(58.1, str(t)), (118.0, start), (271.9, zh_date(v)), (425.7, zh_date(p))])
-            prev = v
     else:
         hdr = "評價日t" if (s.ko_obs == "P" and not s.memory) else "配息評價日t"
         sub(6, "配息支付日†*：依下表所示（並請參閱本條第(9)項之說明）")
         w.row([(68.7, "t"), (142.8, hdr), (281.8, "配息支付日t")])
-        for t, (v, p) in enumerate(dates, 1):
-            w.row([(68.7, str(t)), (131.7, zh_date(v)), (270.6, zh_date(p))])
+        for r in rows:
+            val = zh_date(r["valuation"])
+            if r["noncallable"]:  # 註記換行：日期左移、下一行接「前出場評價日)」
+                cs = cells(
+                    r["t"], [(106.7, "valuation", f"{val}(非自動提"), (268.1, "payment", zh_date(r["payment"]))], co
+                )
+                w.put(137.9, w.y + 13, "前出場評價日)")
+                table_row(r["t"], cs, gap=32)
+            else:
+                cs = cells(r["t"], [(131.7, "valuation", val), (270.6, "payment", zh_date(r["payment"]))], co)
+                table_row(r["t"], cs)
     sub(7, "指定提前贖回事件：係指倘若所有標的資產之相關價格等於或大於其觸發價格，發行機構應提前贖回本商品。")
     w.line(97.7, "指定提前現金贖回日：係指定提前贖回事件發生後第三個營業日。")
     if s.memory and s.ko_obs == "D":
+        n, g = s.tenor, s.guaranteed_text if s.guaranteed_text is not None else s.guaranteed_value
+        if g == 0:
+            text = f"自動提前出場觀察期：就t 等於1 至{n} 的情況而言，則指自相關期始日起（含）至相關期末日止（含）之各期間；"
+        else:
+            ordinal = "首個" if g == 1 else f"第{'一二三四五六七八九十'[g - 1]}個"
+            text = (
+                f"自動提前出場觀察期：就{ordinal}（即t 等於{g} 的情況）自動提前出場觀察期而言，指期末日{g}，"
+                f"且就各後續自動提前出場觀察期而言，則指自相關期始日起（含）至相關期末日止（含）之各期間；"
+            )
+        w.para(97.7, text + "上述各期間仍不為調整（如以下「自動提前出場觀察期」一表所示）。", width=42)
         w.line(97.7, "自動提前出場評價日：指自動提前出場觀察期內之各一籃子預定交易日。")
+    if s.ko_obs == "D":
         w.line(69.4, "觀察期：")
-        w.line(246.4, "自動提前出場觀察期")
-        w.row([(58.1, "t"), (130.5, "期始日(含)t"), (284.3, "期末日(含)t"), (409.4, "自動提前出場觸發百分比")])
-        prev = None
-        for t, (v, _) in enumerate(dates, 1):
-            start = "N/A" if prev is None else zh_date(prev + dt.timedelta(days=1))
-            w.row([(58.1, str(t)), (118.0, start), (271.9, zh_date(v)), (447.0, f"{s.ko}%")])
-            prev = v
+        if s.memory:
+            w.line(246.4, "自動提前出場觀察期")
+            w.row([(58.1, "t"), (130.5, "期始日(含)t"), (284.3, "期末日(含)t"), (409.4, "自動提前出場觸發百分比")])
+            spec = [(118.0, "start", None), (271.9, "end", None), (447.0, "trigger", None)]
+        else:
+            w.line(199.5, "觀察期", gap=11)
+            w.put(436.9, w.y, "配息支付日t")  # 實際樣本此表頭比其他表頭高約 11 pt
+            w.y += 11
+            w.row([(58.1, "t"), (130.5, "期始日(含)t"), (284.3, "期末日(含)t")])
+            spec = [(118.0, "start", None), (271.9, "end", None), (425.7, "payment", None)]
+        for r in rows:
+            text = {
+                "start": r["start"],
+                "end": r["end"],
+                "trigger": "N/A" if r["end"] == "N/A" else f"{s.ko}%",
+                "payment": zh_date(r["payment"]),
+            }
+            over = {**ko_cells, **(co if not s.memory else {})}
+            table_row(r["t"], cells(r["t"], [(x, k, text[k]) for x, k, _ in spec], over))
     elif s.memory and s.ko_obs == "P":
         w.line(97.7, "自動提前出場評價日：依下表所示：")
         w.row(
             [
                 (74.5, "t"),
-                (139.1, "自動提前出場評價日"),
+                (139.1, s.ko_header_override or "自動提前出場評價日"),
                 (272.0, "自動提前出場觸發百分比"),
                 (424.9, "指定提前現金贖回日"),
             ]
         )
-        for t, (v, p) in enumerate(dates, 1):
-            w.row([(74.5, str(t)), (145.5, zh_date(v)), (309.5, f"{s.ko}%"), (428.7, zh_date(p))])
+        for r in rows:
+            spec = [
+                (145.5, "ko_valuation", zh_date(r["valuation"])),
+                (309.5, "trigger", f"{s.ko}%"),
+                (428.7, "early_redemption", zh_date(r["payment"])),
+            ]
+            w.row([(74.5, str(r["t"])), *cells(r["t"], spec, ko_cells)])
     sub(8, "評價日：指各配息評價日、自動提前出場評價日及最終評價日。")
     sub(9, "附註及相關定義：")
     w.line(81.0, "「營業日」係指倫敦及紐約之商業銀行開門營業之日。")
@@ -383,48 +470,51 @@ def build_pdf(path: Path, s: Spec) -> Path:
         w.line(67.7, f"「觸及生效價格」詳見下表所示（為最初價格的{s.ki_pct}%)；", gap=23)
     w.line(67.7, f"「{ko_term}」詳見下表所示（為最初價格的{s.ko}%）；", gap=23)
 
-    cols = [("initial", 173.3), ("strike", 251.4), ("ko", 354.5)] + ([("ki", 457.5)] if s.ki != "none" else [])
-    head = {
-        "initial": ["最初價格"],
-        "strike": ["執行價格（為最初價", f"格的{s.strike}%）(四捨", "五入至小數點後第4", "位)"],
-        "ko": (
-            ["自動提前出場觸發價", "格（為最初價格乘以", "自動提前出場觸發百", "分比）(四捨五入至"]
-            if s.memory
-            else ["觸發水準（為最初價", f"格的{s.ko}%）(四捨", "五入至小數點後第4", "位)"]
-        ),
-        "ki": ["觸及生效價格（為最", f"初價格的{s.ki_pct}%）(", "四捨五入至小數點後", "第4 位)"],
-    }
-    if s.cross_page_price_table:
-        w.y = w.BOTTOM - 26  # 表頭前兩行在本頁底部，其餘在下一頁
-    w.need(26)
-    for k in range(4):
-        if k == 2 and s.cross_page_price_table:
-            w.new_page()
-        w.need(13)
-        for key, x in cols:
-            if k < len(head[key]):
-                w.put(x, w.y, head[key][k])
-        if k == 0:
-            w.put(71.5, w.y, "標的資產")
-        w.y += 13
-    w.space(10)
-    pcts = {"strike": s.strike, "ko": s.ko, "ki": s.ki_pct}
-    for i, u in enumerate(s.underlyings, 1):
-        vals = {"initial": fmt_price(u.initial)}
-        for key in ("strike", "ko", "ki"):
-            vals[key] = fmt_price(price(u.initial, pcts[key]))
-        vals.update({k: v for (idx, k), v in s.price_overrides.items() if idx == i})
-        w.need(40)
-        y = w.y
-        w.put(174.6, y, vals["initial"])
-        w.put(277.7, y, vals["strike"])
-        w.put(380.8, y, vals["ko"])
-        if s.ki != "none":
-            w.put(483.8, y, vals["ki"])
-        name_lines = _wrap_name(u.name)
-        for k, part in enumerate(name_lines):
-            w.put(51.6, y + 1 + 13 * k, part)
-        w.y += max(24, 13 * len(name_lines) + 12)
+    def price_table(overrides: dict, cross_page: bool) -> None:
+        cols = [("initial", 173.3), ("strike", 251.4), ("ko", 354.5)] + ([("ki", 457.5)] if s.ki != "none" else [])
+        head = {
+            "initial": ["最初價格"],
+            "strike": ["執行價格（為最初價", f"格的{s.strike}%）(四捨", "五入至小數點後第4", "位)"],
+            "ko": (
+                ["自動提前出場觸發價", "格（為最初價格乘以", "自動提前出場觸發百", "分比）(四捨五入至"]
+                if s.memory
+                else ["觸發水準（為最初價", f"格的{s.ko}%）(四捨", "五入至小數點後第4", "位)"]
+            ),
+            "ki": ["觸及生效價格（為最", f"初價格的{s.ki_pct}%）(", "四捨五入至小數點後", "第4 位)"],
+        }
+        if cross_page:
+            w.y = w.BOTTOM - 26  # 表頭前兩行在本頁底部，其餘在下一頁
+        w.need(26)
+        for k in range(4):
+            if k == 2 and cross_page:
+                w.new_page()
+            w.need(13)
+            for key, x in cols:
+                if k < len(head[key]):
+                    w.put(x, w.y, head[key][k])
+            if k == 0:
+                w.put(71.5, w.y, "標的資產")
+            w.y += 13
+        w.space(10)
+        pcts = {"strike": s.strike, "ko": s.ko, "ki": s.ki_pct}
+        for i, u in enumerate(s.underlyings, 1):
+            vals = {"initial": fmt_price(u.initial)}
+            for key in ("strike", "ko", "ki"):
+                vals[key] = fmt_price(price(u.initial, pcts[key]))
+            vals.update({k: v for (idx, k), v in overrides.items() if idx == i})
+            w.need(40)
+            y = w.y
+            w.put(174.6, y, vals["initial"])
+            w.put(277.7, y, vals["strike"])
+            w.put(380.8, y, vals["ko"])
+            if s.ki != "none":
+                w.put(483.8, y, vals["ki"])
+            name_lines = _wrap_name(u.name)
+            for k, part in enumerate(name_lines):
+                w.put(51.6, y + 1 + 13 * k, part)
+            w.y += max(24, 13 * len(name_lines) + 12)
+
+    price_table(s.price_overrides, s.cross_page_price_table)
     if multi:
         w.line(67.7, "「表現最差之標的資產」指於最終評價日當日價值最低之標的資產。")
     w.line(96.0, "發行機構應以實物交割時，將根據發行機構及相關結算機構規則進行交割活動。")
@@ -432,7 +522,9 @@ def build_pdf(path: Path, s: Spec) -> Path:
     w.line(182.5, f"每單位商品面額 × {m['§15']}%(顯示至小數點後第4 位)")
     sub(3, "參與率：不適用。", x_num=67.7, x_body=96.0)
     article(16, "投資收益計算方法，包含本金虧損之機率及以情境分析解說最大可能獲利、損失：")
-    w.line(81.0, "情境分析結果不保證未來績效。")
+    w.line(77.7, "d) 本商品標的資產之相關資訊：")
+    price_table({**s.price_overrides, **s.scenario_overrides}, False)
+    w.line(77.7, "情境分析結果不保證未來績效。")
     article(17, "平均年化報酬率：")
     sub(1, "平均年化報酬率：本商品於各配息支付日支付之配息金額，")
     w.line(97.7, f"均以每月之配息率（為{m['§17']}%，即年利率為{s.annual}%）乘以每單位商品面額計算。")
@@ -470,6 +562,13 @@ def build_pdf(path: Path, s: Spec) -> Path:
     subscription = s.subscription_date or s.trade_date
     w.numbered("(1)", 59.5, 83.7, f"商品開始受理申購日期：{zh_date(subscription)}。")
     w.numbered("(2)", 59.5, 83.7, "開始受理投資人提前贖回日期：於發行日後的次一個營業日。")
+    min_sub = s.min_subscription or s.denom
+    min_red = s.min_redemption or s.denom
+    w.numbered("4.", 35.4, 59.5, "最低申購金額及累加申購金額：")
+    w.line(59.5, f"最低申購金額依受託或銷售機構規定，至少為{min_sub:,} {s.currency_zh}，最低累加申購金額為1 單位。")
+    w.numbered("8.", 35.4, 59.5, "提前贖回之方式：")
+    w.line(88.5, f"(a) 若投資人透過受託或銷售機構要求發行機構於次級市場提前贖回，最低贖回商品面額為{min_red:,}")
+    w.line(88.5, f"{s.currency_zh}，且須為商品面額之整數倍。")
 
     # ---- 第五章 ----
     w.new_page()
@@ -542,7 +641,7 @@ def inquiry_row(s: Spec) -> dict[str, Any]:
     row: dict[str, Any] = {
         "Product": "FCN",
         "Currency": s.ccy,
-        "Guaranteed Periods (m)": 0,
+        "Guaranteed Periods (m)": s.guaranteed_value,
         "Strike (%)": float(s.strike),
         "KO Type": ko_type,
         "KO Barrier (%)": float(s.ko),
