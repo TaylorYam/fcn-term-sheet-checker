@@ -48,7 +48,7 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/checker.py` | 核對入口 `run_check`：串接上述模組並產生完整結果與 metadata | 測試切點 1 |
 | `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
 | `src/fcn_checker/cli.py` | `fcn-check` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
-| `src/fcn_checker/panel_workflow.py` | PANEL 來源選取、模板驗證、唯讀預覽與來源 hash 失效檢查 | PANEL 工作流程測試切點；不執行核對或寫報告 |
+| `src/fcn_checker/panel_workflow.py` | PANEL 來源預覽、核對工作階段及來源／審查標準 hash 失效檢查 | PANEL 工作流程測試切點；呼叫既有核對入口，不寫報告 |
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗、選檔及預覽呈現 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務 |
 | `tests/synth.py` | 測試時產生合成說明書 PDF 與詢價表 | 數值皆虛構；不提交真實客戶交易資料 |
 
@@ -70,7 +70,9 @@ PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版�
 
 ## 擴充與限制
 
-Issue #13 新增本機 Tkinter PANEL 作為 CLI 以外的操作入口，目前僅選檔與預覽。視窗呼叫獨立工作階段，使用 BARC 模板辨識及 Excel adapter，不執行條件核對。PDF 預覽使用第一頁商品代號欄位，與正式核對共用擷取及歧義判定，保留原文證據；Excel 條件與儲存格來源以不可變資料呈現。PDF、Excel 與格式設定的 hash 在載入前後及預覽使用時檢查，來源變更即失效。讀檔在背景執行，UI 更新只在主執行緒；所有資料仍在本機處理，沒有 Web UI、資料庫或雲端服務。#14、#15 將接續核對與手動保存，不預先建立相關空殼。
+Issue #13 新增本機 Tkinter PANEL，#17 改為預覽第一頁商品代號，#14 接上核對工作階段。唯讀預覽有效後才可核對；視窗呼叫既有核對入口，PANEL 啟用核對入口的配對阻擋選項，先驗證 PDF／Excel 商品代號，一致後才執行一般條件比對；預設入口與 CLI 維持既有行為。核對結果先呈現問題，再列通過／不適用項目，保留完整頁碼、原文及 Excel 來源；未涵蓋規則獨立列為待處理。
+
+PDF、Excel 與格式設定的 hash 在載入前後、核對前後及結果使用時檢查，結果另綁定審查標準 hash；來源或標準變更即使預覽與結果失效。讀檔與失效檢查在背景執行，UI 更新只在主執行緒，核對期間不能重複提交。所有資料仍在本機處理，不寫報告、沒有 Web UI、資料庫或雲端服務；#15 接續手動保存。
 
 新增 issuer 時加入獨立且版本化的 parser 與對應 fixtures，不把所有文件塞入一組通用 regex。未知格式保留人工覆核入口。
 

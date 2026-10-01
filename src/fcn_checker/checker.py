@@ -42,10 +42,19 @@ def _file_meta(path: Path) -> dict[str, Any]:
     return meta
 
 
-def run_check(term_sheet: Path, order: Path, review_standard: Path, order_format: Path) -> CheckReport:
+def run_check(
+    term_sheet: Path,
+    order: Path,
+    review_standard: Path,
+    order_format: Path,
+    *,
+    stop_on_pairing_failure: bool = False,
+) -> CheckReport:
+    """PANEL 可要求配對失敗即停止；預設保持既有 CLI 探勘與核對行為。"""
     term_sheet, order = Path(term_sheet), Path(order)
     review_standard, order_format = Path(review_standard), Path(order_format)
     metadata: dict[str, Any] = {
+        "stop_on_pairing_failure": stop_on_pairing_failure,
         "generated_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "program_version": __version__,
         "extractor": f"PyMuPDF {fitz.VersionBind}",
@@ -114,7 +123,12 @@ def run_check(term_sheet: Path, order: Path, review_standard: Path, order_format
             )
         results.extend(barc_rules.order_format_checks(rec))
         if detection.matched:
-            results.extend(barc_rules.run_all(barc_rules.Context(ts, rec, std, fmt)))
+            context = barc_rules.Context(ts, rec, std, fmt)
+            pairing = barc_rules.product_code(context)
+            if stop_on_pairing_failure and pairing.status != CheckStatus.PASS:
+                results.append(pairing)
+            else:
+                results.extend(barc_rules.run_all(context))
 
     status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
     return CheckReport(status, template, results, list(barc_rules.NOT_COVERED), metadata)

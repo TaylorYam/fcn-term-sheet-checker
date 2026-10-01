@@ -8,7 +8,98 @@ import pytest
 
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel_workflow import PanelSession
-from synth import ORDER_FORMAT, Spec, build_inquiry, build_not_barc_pdf, build_pdf
+from synth import ORDER_FORMAT, REVIEW_STANDARD, Spec, build_inquiry, build_not_barc_pdf, build_pdf
+
+
+def test_confirmed_preview_can_be_checked_without_writing_report(tmp_path):
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
+    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
+    session.select(pdf, excel)
+    with pytest.raises(IngestionError, match="預覽"):
+        session.start_check()
+    session.load_preview()
+    outcome = session.start_check()
+    assert not outcome.stopped
+    assert "已核對項目一致" in outcome.headline
+    assert "人工" in outcome.headline
+    assert {n["rule_id"] for n in outcome.report.not_covered} == {
+        "field.monthly_ki",
+        "doc.underlying_names",
+        "field.isin",
+    }
+    assert session.outcome is outcome
+    assert set(tmp_path.iterdir()) == {pdf, excel}
+
+
+@pytest.mark.parametrize("kind", ["mismatch", "missing_pdf", "missing_excel", "ambiguous"])
+def test_pairing_failure_stops_panel_before_general_checks(tmp_path, kind):
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(
+        tmp_path / "inquiry.xlsx", Spec(product_code="029199990002") if kind == "mismatch" else Spec()
+    )
+    if kind == "missing_excel":
+        import openpyxl
+
+        with_excel = openpyxl.load_workbook(excel)
+        with_excel["詢價表格"]["B3"] = None
+        with_excel.save(excel)
+        with_excel.close()
+    elif kind in ("missing_pdf", "ambiguous"):
+        with fitz.open(pdf) as doc:
+            page = doc[0]
+            if kind == "missing_pdf":
+                page.add_redact_annot(page.search_for("029199990001")[0])
+                page.apply_redactions()
+            else:
+                page.insert_text((41, 820), "商品代號:", fontname="china-t", fontsize=10)
+                page.insert_text((301, 820), "029199990003", fontsize=10)
+            doc.saveIncr()
+    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
+    session.select(pdf, excel)
+    session.load_preview()
+    outcome = session.start_check()
+    assert outcome.stopped
+    assert "停止" in outcome.headline
+    assert not any(r.rule_id == "field.currency" for r in outcome.report.results)
+    assert outcome.report.status.value != "PASS"
+
+
+def test_missing_general_field_continues_and_preserves_other_differences(tmp_path):
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec(omit=frozenset({"trade_date"})))
+    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec(), overrides={"Coupon p.a. (%)": 9})
+    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
+    session.select(pdf, excel)
+    session.load_preview()
+    outcome = session.start_check()
+    assert not outcome.stopped
+    assert outcome.report.status.value == "REVIEW_REQUIRED"
+    trade = next(r for r in outcome.report.results if r.rule_id == "field.trade_date")
+    assert trade.status.value == "REVIEW_REQUIRED" and not trade.document_evidence
+    coupon = next(r for r in outcome.report.results if r.rule_id == "field.coupon_pa_pct")
+    assert coupon.status.value == "MISMATCH" and coupon.document_evidence and coupon.order_source
+    assert outcome.ordered_results[0].status.value == "MISMATCH"
+
+
+@pytest.mark.parametrize("changed", ["selection", "pdf", "standard"])
+def test_changing_sources_clears_check_result_and_requires_new_preview(tmp_path, changed):
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
+    standard = tmp_path / "standard.toml"
+    standard.write_bytes(REVIEW_STANDARD.read_bytes())
+    session = PanelSession(ORDER_FORMAT, standard)
+    session.select(pdf, excel)
+    session.load_preview()
+    session.start_check()
+    if changed == "selection":
+        session.select(pdf, excel)
+    elif changed == "pdf":
+        build_pdf(pdf, Spec(tenor=7))
+    else:
+        standard.write_text(standard.read_text(encoding="utf-8") + "\n# change\n", encoding="utf-8")
+    assert session.outcome is None
+    with pytest.raises(IngestionError, match="預覽"):
+        session.start_check()
 
 
 def test_preview_shows_pdf_product_code_and_readonly_conditions(tmp_path):
