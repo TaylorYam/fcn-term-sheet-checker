@@ -13,6 +13,7 @@ from queue import Empty, SimpleQueue
 from tkinter import filedialog, messagebox, ttk
 
 from .ingestion import IngestionError
+from .issuers import ORDER_FORMAT_DIR
 from .panel_workflow import SUPPORTED_TEMPLATES, PanelOutcome, PanelSession, Preview
 from .reporting import FIELD_ZH, STATUS_ZH
 from .schema import CheckResult, CheckStatus
@@ -600,7 +601,13 @@ def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = No
         "--order-format",
         type=Path,
         default=None,
-        help="詢價格式設定檔（未指定時依選取的上手使用 config/order_formats/<上手>.toml）",
+        help="詢價格式設定檔（未指定時依選取的上手使用 <--order-format-dir>/<上手>.toml）",
+    )
+    parser.add_argument(
+        "--order-format-dir",
+        type=Path,
+        default=ORDER_FORMAT_DIR,
+        help="各上手詢價格式設定所在資料夾（預設 config/order_formats）",
     )
     parser.add_argument(
         "--review-standard", type=Path, default=Path("config/review_standard.toml"), help="審查標準設定檔"
@@ -609,7 +616,11 @@ def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = No
     args = parser.parse_args(argv)
     enable_windows_dpi_awareness()
     root = tk.Tk()
-    PanelWindow(root, PanelSession(args.order_format, args.review_standard), args.install_root)
+    PanelWindow(
+        root,
+        PanelSession(args.order_format, args.review_standard, order_format_dir=args.order_format_dir),
+        args.install_root,
+    )
     if on_ready is not None:
         root.after_idle(on_ready)
     root.mainloop()

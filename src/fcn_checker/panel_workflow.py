@@ -104,9 +104,16 @@ class PanelOutcome:
 class PanelSession:
     """UI 與測試共用的單筆工作階段；任何來源變更都使預覽失效。"""
 
-    def __init__(self, order_format: Path | None = None, review_standard: Path = Path("config/review_standard.toml")):
-        """未指定詢價格式設定時，依選取的上手使用 `config/order_formats/<上手>.toml`。"""
+    def __init__(
+        self,
+        order_format: Path | None = None,
+        review_standard: Path = Path("config/review_standard.toml"),
+        *,
+        order_format_dir: Path = ORDER_FORMAT_DIR,
+    ):
+        """未指定詢價格式設定時，依選取的上手使用 `<order_format_dir>/<上手>.toml`。"""
         self._order_format = Path(order_format).resolve() if order_format is not None else None
+        self._order_format_dir = Path(order_format_dir).resolve()
         self.review_standard = Path(review_standard).resolve()
         self.term_sheet: Path | None = None
         self.order: Path | None = None
@@ -122,7 +129,7 @@ class PanelSession:
     def order_format(self) -> Path:
         if self._order_format is not None:
             return self._order_format
-        return (ORDER_FORMAT_DIR / f"{self.issuer.lower()}.toml").resolve()
+        return self._order_format_dir / f"{self.issuer.lower()}.toml"
 
     def select(
         self,

@@ -93,9 +93,9 @@ def test_panel_choices_and_default_order_format_come_from_registry(tmp_path, mon
     assert [(c.issuer, c.template, c.label) for c in SUPPORTED_TEMPLATES] == [
         (i.code, i.template_id, i.label) for i in ISSUERS
     ]
-    monkeypatch.chdir(ROOT)
+    monkeypatch.chdir(tmp_path)  # 雙擊入口不依賴工作目錄：由 order_format_dir 指定
     pdf, inq = inputs(tmp_path)
-    session = PanelSession(review_standard=REVIEW_STANDARD)
+    session = PanelSession(review_standard=REVIEW_STANDARD, order_format_dir=ORDER_FORMAT.parent)
     assert session.order_format == ORDER_FORMAT.resolve()
     session.select(pdf, inq)
     session.load_preview()

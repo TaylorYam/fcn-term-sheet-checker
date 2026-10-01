@@ -39,8 +39,8 @@ def run(script: str, argv: list[str]) -> None:
 
     main(
         [
-            "--order-format",
-            str(root / "config/order_formats/barc.toml"),
+            "--order-format-dir",
+            str(root / "config/order_formats"),
             "--review-standard",
             str(root / "config/review_standard.toml"),
             "--install-root",
