@@ -12,6 +12,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '套件安裝失敗，請確認公司網路或套件來源。' }
     & '.\.venv\Scripts\python.exe' -c "import tkinter, fcn_checker.panel"
     if ($LASTEXITCODE -ne 0) { throw '安裝驗證失敗。' }
+    & '.\.venv\Scripts\python.exe' -m fcn_checker.updating --record-installation $PSScriptRoot
+    if ($LASTEXITCODE -ne 0) { throw '安裝版本紀錄失敗。' }
     Write-Host '安裝完成。請雙擊 launch_panel.cmd 開啟 PANEL。'
     exit 0
 } catch {

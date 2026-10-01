@@ -58,8 +58,8 @@ jobs:
 
       - name: Lint
         run: |
-          ruff check src tests
-          ruff format --check src tests
+          ruff check src tests panel_bootstrap.py launch_panel.pyw
+          ruff format --check src tests panel_bootstrap.py launch_panel.pyw
 
       # 真實樣本測試只在本機 data/ 存在時執行；CI 沒有 data/，會自動略過
       - name: Test
