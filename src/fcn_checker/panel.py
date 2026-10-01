@@ -595,9 +595,10 @@ class PanelWindow:
 
 
 def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="BARC 本機 PANEL：預覽並核對 TS PDF 與 Excel，不自動保存。")
+    parser = argparse.ArgumentParser(description="FCN 本機 PANEL：預覽並核對 TS PDF 與 Excel，不自動保存。")
+    parser.add_argument("--order-format", type=Path, default=None, help="詢價格式設定檔（預設依選取的上手）")
     parser.add_argument(
-        "--order-format", type=Path, default=Path("config/order_formats/barc.toml"), help="BARC 詢價格式設定檔"
+        "--order-formats-dir", type=Path, help="各上手詢價格式設定檔所在資料夾（預設 config/order_formats）"
     )
     parser.add_argument(
         "--review-standard", type=Path, default=Path("config/review_standard.toml"), help="審查標準設定檔"
@@ -606,7 +607,7 @@ def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = No
     args = parser.parse_args(argv)
     enable_windows_dpi_awareness()
     root = tk.Tk()
-    PanelWindow(root, PanelSession(args.order_format, args.review_standard), args.install_root)
+    PanelWindow(root, PanelSession(args.order_format, args.review_standard, args.order_formats_dir), args.install_root)
     if on_ready is not None:
         root.after_idle(on_ready)
     root.mainloop()

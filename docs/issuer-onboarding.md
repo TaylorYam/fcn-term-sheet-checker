@@ -79,10 +79,11 @@
 
 | 內容 | 路徑 | 說明 |
 |---|---|---|
-| 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`、欄位擷取；`TEMPLATE_ID`、`PARSER_VERSION` |
-| 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名或條號格式不同時擴充參數，不複製一份 |
+| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、規則入口、未涵蓋清單、預設詢價格式設定 |
+| 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`、欄位擷取；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
+| 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 詢價表 adapter | `src/fcn_checker/orders/` | 欄名對應走設定檔；版面差異過大才新增 adapter |
-| 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬規則；通用規則共用（§6） |
+| 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬規則；通用規則用 `rules/common.py`（§6） |
 | 合成測試資料 | `tests/synth_<上手>.py` | 依該上手版面產生虛構 PDF 與詢價表 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |
 
@@ -111,16 +112,16 @@
 
 ## 6. 第二家上手：一次性的多上手架構工作
 
-目前（BARC 為唯一上手）以下位置寫死 BARC，加第二家時須先改為依上手分派。建議放在第二家的第一個實作 Issue，或先開一個小 Issue 處理：
+**已完成（Issue #28）**。下表保留為紀錄；新上手只需依 §5.1 新增 parser、規則、設定並在 `issuers.py` 登記。
 
-| 位置 | 目前 | 調整方向 |
+| 位置 | 原本 | 調整結果 |
 |---|---|---|
-| `checker.py` | 直接呼叫 BARC parser 與規則，`template.barc` | 依序以各上手 `detect` 辨識；恰好一個命中才繼續，零個或多個命中轉人工覆核；結果 `rule_id` 改為通用的 `template.detect` 或依上手區分 |
-| `cli.py` | 預設 `config/order_formats/barc.toml` | 依辨識到的上手選格式設定，或要求指定上手 |
-| `panel.py`、`panel_workflow.py` | 只列 BARC 選項並呼叫 BARC `detect` | 由上手註冊表產生選項 |
-| `config.py`、`review_standard.toml` | `product_name.barc` 寫死 | 依上手讀取 `product_name.<上手>`；其他依上手不同的基準同樣分節，共用基準不變 |
-| `rules/barc.py` | 通用規則（百分比與日期比對、審查標準、報告格式）與 BARC 專屬規則放在一起 | 通用部分抽到共用模組，各上手只寫專屬規則與「未涵蓋」清單 |
-| `parsers/layout.py` | 章名、條號格式依 BARC | 改為參數，由各上手提供 |
+| `checker.py` | 直接呼叫 BARC parser 與規則，`template.barc` | 依序以各上手 `detect` 辨識；恰好一個命中才繼續，零個（`template_unknown`）或多個（`template_ambiguous`）命中轉人工覆核；`rule_id` 為 `template.detect`；詢價格式設定的上手不符 → `order.issuer` 人工覆核 |
+| `cli.py` | 預設 `config/order_formats/barc.toml` | `--order-format` 選填；未指定時依辨識到的上手選格式設定 |
+| `panel.py`、`panel_workflow.py` | 只列 BARC 選項並呼叫 BARC `detect` | 由上手註冊表產生選項；格式設定依選取的上手（雙擊入口傳 `--order-formats-dir`） |
+| `config.py`、`review_standard.toml` | `product_name.barc` 寫死 | 依上手讀取 `product_name.<上手>`；其他依上手不同的基準日後同樣分節，共用基準不變 |
+| `rules/barc.py` | 通用規則與 BARC 專屬規則放在一起 | 通用部分（結果建構、缺值處理、百分比與日期比對、詢價表欄位檢查、審查標準規則）抽到 `rules/common.py`，各上手只寫專屬規則與「未涵蓋」清單 |
+| `parsers/layout.py` | 章名、條號格式依 BARC | `LayoutSpec` 參數，由各上手提供（BARC：`parsers/barc.py` 的 `LAYOUT`） |
 
 架構調整要維持既有 BARC 測試與本機真實樣本測試全部通過（行為不變）。
 
@@ -143,7 +144,7 @@
 - [ ] 探勘完成，所有比對差異都有解釋；待確認問題已由作業人員回覆並記錄日期
 - [ ] 範本規格、詢價格式文件與設定、核對規則、審查標準差異已合併
 - [ ] 實作 Issue 建立；必要時分階段；樣本不足的型態另開 Issue
-- [ ] （第二家起）多上手架構工作完成，BARC 測試不變
+- [ ] 已在 `issuers.py` 登記新上手；既有上手的測試與本機真實樣本測試不變
 - [ ] parser、規則、合成測試、本機真實樣本測試完成；驗收門檻全部達成
 - [ ] 文件同步並合併
 - [ ] 試跑並回饋

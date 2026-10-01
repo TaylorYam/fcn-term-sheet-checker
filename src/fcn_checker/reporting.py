@@ -139,7 +139,7 @@ def to_markdown(report: CheckReport) -> str:
         f"- 詢價表：`{order['file']}`（sha256 `{order['sha256']}`）",
         f"- 審查標準：`{meta['review_standard']['file']}` 版本 {meta['review_standard'].get('version', '—')}"
         f"（生效 {meta['review_standard'].get('effective_date', '—')}）",
-        f"- 詢價格式：`{meta['order_format']['file']}` {meta['order_format'].get('issuer', '—')} "
+        f"- 詢價格式：`{meta['order_format']['file'] or '—'}` {meta['order_format'].get('issuer', '—')} "
         f"版本 {meta['order_format'].get('version', '—')}",
         f"- 程式版本 {meta['program_version']}；{meta['extractor']}；{meta['excel_reader']}；產生時間 {meta['generated_at']}",
         "",

@@ -295,3 +295,27 @@ def test_save_collision_and_partial_failure(tmp_path, monkeypatch):
     collision = session.save_report(directory)
     assert not collision.complete and collision.error and not collision.paths
     assert partial.paths[0].read_bytes() == original
+
+
+def test_issuer_options_and_default_order_format_come_from_registry(tmp_path, monkeypatch):
+    from fcn_checker.issuers import REGISTRY
+    from fcn_checker.panel_workflow import SUPPORTED_TEMPLATES
+    from synth import ROOT
+
+    assert {(c.issuer, c.template) for c in SUPPORTED_TEMPLATES} == {(i.code, i.template_id) for i in REGISTRY}
+    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
+    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
+    monkeypatch.chdir(ROOT)
+    session = PanelSession(review_standard=REVIEW_STANDARD)
+    assert session.order_format == ORDER_FORMAT.resolve()
+    session.select(pdf, excel)
+    session.load_preview()
+    assert not session.start_check().stopped
+
+
+def test_order_formats_dir_does_not_depend_on_working_directory(tmp_path, monkeypatch):
+    from synth import ROOT
+
+    monkeypatch.chdir(tmp_path)
+    session = PanelSession(review_standard=REVIEW_STANDARD, order_formats_dir=ROOT / "config" / "order_formats")
+    assert session.order_format == ORDER_FORMAT.resolve()

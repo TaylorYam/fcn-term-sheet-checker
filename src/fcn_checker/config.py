@@ -12,6 +12,15 @@ from .ingestion import IngestionError, sha256_of
 
 
 @dataclass(frozen=True)
+class ProductNameTemplate:
+    zh: str
+    en: str
+    memory_zh: str
+    memory_en: str
+    normalize_brackets: bool
+
+
+@dataclass(frozen=True)
 class ReviewStandard:
     version: int
     effective_date: dt.date
@@ -22,11 +31,7 @@ class ReviewStandard:
     fixed_warning_occurrences: int
     forbidden: tuple[str, ...]
     allowed_phrases: tuple[str, ...]
-    name_zh: str
-    name_en: str
-    memory_zh: str
-    memory_en: str
-    normalize_brackets: bool
+    product_names: dict[str, ProductNameTemplate]  # 上手代號（小寫）→ 名稱樣板
     currency_zh_to_iso: dict[str, str]
     denomination: dict[str, int]
     print_date_max_days_after_trade: int
@@ -61,7 +66,16 @@ def _load(path: Path, what: str) -> dict[str, Any]:
 def load_review_standard(path: Path) -> ReviewStandard:
     d = _load(path, "審查標準")
     try:
-        name = d["product_name"]["barc"]
+        names = {
+            issuer: ProductNameTemplate(
+                zh=n["zh"],
+                en=n["en"],
+                memory_zh=n["memory_zh"],
+                memory_en=n["memory_en"],
+                normalize_brackets=bool(n.get("normalize_brackets", True)),
+            )
+            for issuer, n in d["product_name"].items()
+        }
         return ReviewStandard(
             version=int(d["version"]),
             effective_date=d["effective_date"],
@@ -72,11 +86,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),
             forbidden=tuple(d["wording"]["forbidden"]),
             allowed_phrases=tuple(d["wording"]["allowed_phrases"]),
-            name_zh=name["zh"],
-            name_en=name["en"],
-            memory_zh=name["memory_zh"],
-            memory_en=name["memory_en"],
-            normalize_brackets=bool(name.get("normalize_brackets", True)),
+            product_names=names,
             currency_zh_to_iso=dict(d["currency"]),
             denomination={k: int(v) for k, v in d["denomination"].items()},
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
