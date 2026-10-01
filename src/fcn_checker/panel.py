@@ -6,14 +6,17 @@ import argparse
 import ctypes
 import sys
 import tkinter as tk
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from tkinter import filedialog, ttk
+from queue import Empty, SimpleQueue
+from tkinter import filedialog, messagebox, ttk
 
 from .ingestion import IngestionError
 from .panel_workflow import SUPPORTED_TEMPLATES, PanelOutcome, PanelSession, Preview
 from .reporting import FIELD_ZH, STATUS_ZH
 from .schema import CheckResult, CheckStatus
+from .updating import PanelUpdater, UpdateError
 
 
 def display_value(value: object) -> str:
@@ -147,13 +150,23 @@ class ResultPane(ttk.Frame):
 
 
 class PanelWindow:
-    def __init__(self, root: tk.Tk, session: PanelSession):
+    def __init__(self, root: tk.Tk, session: PanelSession, install_root: Path | None = None):
         self.root, self.session = root, session
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.pending: Future[Preview] | None = None
         self.check_pending: Future[PanelOutcome] | None = None
         self.save_pending = None
         self.has_result = False
+        self.update_pending = None
+        self.update_phase = ""
+        self.update_progress = SimpleQueue()
+        self.updater = None
+        self.update_error = ""
+        if install_root is not None:
+            try:
+                self.updater = PanelUpdater(install_root, self.update_progress.put)
+            except UpdateError as error:
+                self.update_error = str(error)
         self.validation: Future[Preview | None] | None = None
         self.checking_for: Preview | None = None
         self.closed = False
@@ -225,6 +238,9 @@ class PanelWindow:
         self.check_button.pack(side="left")
         self.save_button = ttk.Button(actions, text="儲存報告…", command=self.save_report, state="disabled")
         self.save_button.pack(side="left", padx=(12, 0))
+        self.update_button = ttk.Button(actions, text="更新 GitHub 最新版", command=self.update_app)
+        self.update_button.pack(side="left", padx=(12, 0))
+        self.controls.append(self.update_button)
         self.controls.append(self.reload)
         ttk.Label(frame, text="PDF 商品代號", style="Section.TLabel").grid(row=6, column=0, columnspan=3, sticky="w")
         self.product_code_text = tk.Text(
@@ -356,7 +372,12 @@ class PanelWindow:
         self.check_button.configure(state="disabled" if busy or self.shown is None else "normal")
 
     def load(self):
-        if self.pending is not None or self.check_pending is not None or self.save_pending is not None:
+        if (
+            self.pending is not None
+            or self.check_pending is not None
+            or self.save_pending is not None
+            or self.update_pending is not None
+        ):
             return
         self._clear()
         self._busy(True)
@@ -393,6 +414,7 @@ class PanelWindow:
             self.pending is not None
             or self.check_pending is not None
             or self.save_pending is not None
+            or self.update_pending is not None
             or self.shown is None
         ):
             return
@@ -428,7 +450,12 @@ class PanelWindow:
         self._busy(False)
 
     def save_report(self):
-        if not self.has_result or self.save_pending is not None or self.check_pending is not None:
+        if (
+            not self.has_result
+            or self.save_pending is not None
+            or self.check_pending is not None
+            or self.update_pending is not None
+        ):
             return
         self._busy(True)
         destination = filedialog.askdirectory(parent=self.root, title="選取報告保存資料夾")
@@ -459,6 +486,65 @@ class PanelWindow:
             self.status.set(f"儲存失敗，核對結果仍保留：{error}")
         self._busy(False)
 
+    def update_app(self):
+        if any(
+            future is not None for future in (self.pending, self.check_pending, self.save_pending, self.update_pending)
+        ):
+            return
+        if self.updater is None:
+            self.status.set(self.update_error or "請從 launch_panel.cmd 開啟 PANEL，才能更新安裝版本。")
+            return
+        self._busy(True)
+        self.status.set("正在檢查 GitHub main 最新版…")
+        self.update_phase = "check"
+        self.update_pending = self.executor.submit(self.updater.check)
+        self.root.after(80, self._finish_update)
+
+    def _install_and_restart(self, info):
+        update = self.updater.install(info)
+        self.update_progress.put("安裝驗證完成，正在重新啟動 PANEL…")
+        self.updater.restart(update)
+
+    def _finish_update(self):
+        if self.closed or self.update_pending is None:
+            return
+        try:
+            while True:
+                self.status.set(self.update_progress.get_nowait())
+        except Empty:
+            pass
+        if not self.update_pending.done():
+            self.root.after(80, self._finish_update)
+            return
+        future, self.update_pending = self.update_pending, None
+        try:
+            result = future.result()
+            if self.update_phase == "install":
+                self.close()
+                return
+            versions = (
+                f"目前：{result.current[:12] if result.current else '尚無版本紀錄'}\nGitHub main：{result.latest[:12]}"
+            )
+            if not result.available:
+                self.status.set("已是 GitHub 最新版。\n" + versions)
+            elif messagebox.askyesno(
+                "更新 GitHub 最新版",
+                versions + "\n\n更新完成會重新啟動，未儲存核對結果將消失。\n請先儲存報告。要現在更新嗎？",
+                parent=self.root,
+            ):
+                self.update_phase = "install"
+                self.status.set("正在下載與安裝新版，可能需要數分鐘…")
+                self.update_pending = self.executor.submit(self._install_and_restart, result)
+                self.root.after(80, self._finish_update)
+                return
+            else:
+                self.status.set("已取消更新，核對結果仍保留。\n" + versions)
+        except UpdateError as error:
+            self.status.set(str(error))
+        except Exception:
+            self.status.set("更新未完成，原視窗與核對結果仍可使用。請重試或聯絡維護人員。")
+        self._busy(False)
+
     def _condition_selected(self, _):
         selected = self.table.selection()
         if selected:
@@ -477,6 +563,7 @@ class PanelWindow:
                 self.pending is None
                 and self.check_pending is None
                 and self.save_pending is None
+                and self.update_pending is None
                 and self.shown is self.checking_for
                 and not valid
             ):
@@ -490,6 +577,7 @@ class PanelWindow:
             self.pending is None
             and self.check_pending is None
             and self.save_pending is None
+            and self.update_pending is None
             and self.shown is not None
             and self.validation is None
         ):
@@ -498,12 +586,15 @@ class PanelWindow:
         self.root.after(100 if self.validation is not None else 1500, self._watch_sources)
 
     def close(self):
+        if self.update_pending is not None:
+            self.status.set("更新正在執行，請等待完成後再關閉 PANEL。")
+            return
         self.closed = True
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = None) -> int:
     parser = argparse.ArgumentParser(description="BARC 本機 PANEL：預覽並核對 TS PDF 與 Excel，不自動保存。")
     parser.add_argument(
         "--order-format", type=Path, default=Path("config/order_formats/barc.toml"), help="BARC 詢價格式設定檔"
@@ -511,10 +602,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--review-standard", type=Path, default=Path("config/review_standard.toml"), help="審查標準設定檔"
     )
+    parser.add_argument("--install-root", type=Path, help="雙擊入口提供的安裝目錄")
     args = parser.parse_args(argv)
     enable_windows_dpi_awareness()
     root = tk.Tk()
-    PanelWindow(root, PanelSession(args.order_format, args.review_standard))
+    PanelWindow(root, PanelSession(args.order_format, args.review_standard), args.install_root)
+    if on_ready is not None:
+        root.after_idle(on_ready)
     root.mainloop()
     return 0
 

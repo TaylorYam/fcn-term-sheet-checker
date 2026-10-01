@@ -48,8 +48,10 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/checker.py` | 核對入口 `run_check`：串接上述模組並產生完整結果與 metadata | 測試切點 1 |
 | `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
 | `src/fcn_checker/cli.py` | `fcn-check` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
-| `src/fcn_checker/panel_workflow.py` | PANEL 來源預覽、核對工作階段及來源／審查標準 hash 失效檢查 | PANEL 工作流程測試切點；呼叫既有核對入口，不寫報告 |
+| `src/fcn_checker/panel_workflow.py` | PANEL 來源預覽、核對工作階段及來源／審查標準 hash 失效檢查 | PANEL 工作流程測試切點；呼叫既有核對入口，按儲存才寫報告 |
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗、選檔及預覽呈現 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務 |
+| `src/fcn_checker/updating.py` | 公開 GitHub main 更新、隔離安裝與原子切換 | `PanelUpdater` 公開測試入口；不讀取或上傳交易資料，不覆寫本機 config |
+| `panel_bootstrap.py` | 穩定的本機更新版本啟動器 | 限定版本資料夾；不連網，維持根目錄 config |
 | `tests/synth.py` | 測試時產生合成說明書 PDF 與詢價表 | 數值皆虛構；不提交真實客戶交易資料 |
 
 PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版面需要；實際採用順序應由樣本與授權條件評估，首版不必同時依賴兩者。純文字攤平可能破壞欄位關係，應保留列、區塊及跨頁資訊。OCR adapter 待文字流程穩定後加入，不預先綁定引擎。
@@ -79,3 +81,5 @@ PDF、Excel 與格式設定的 hash 在載入前後、核對前後及結果使�
 未來 LLM fallback 若獲批准，只能作為 extraction adapter 提供候選欄位與來源證據；不得修改預期下單值或取代 rule engine。需另立 ADR、資料傳送政策與驗證門檻；第一版無相關 SDK、開關或外部呼叫。
 
 決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)。
+
+手動更新決策：[0003：PANEL 以公開 GitHub main 提供手動更新](adr/0003-public-github-panel-update.md)。程式更新與審查設定導入分開；更新成功後重新啟動，未儲存結果不保留，更新前有提示。
