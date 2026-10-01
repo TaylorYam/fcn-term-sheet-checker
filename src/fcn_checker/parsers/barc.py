@@ -111,6 +111,25 @@ def _first_date_field(name: str, lines: list[Line], text: str) -> ParsedField:
 # ---------------------------------------------------------------- 封面
 
 
+def cover_title(lines: Sequence[Line]) -> ParsedField:
+    """封面「中文產品說明書」與「商品代號」之間的商品標題，不以名稱欄補值。"""
+    page = sorted((ln for ln in lines if ln.page == 1), key=lambda ln: (ln.y0, ln.x0))
+    anchors = [ln for ln in page if ln.text.strip() == "中文產品說明書"]
+    if len(anchors) != 1:
+        return ParsedField.missing("cover_title", "未找到唯一的封面標題錨點")
+    anchor = anchors[0]
+    ends = [ln for ln in page if ln.y0 > anchor.y0 and re.match(r"^商品代號\s*[:：]", ln.text)]
+    if not ends:
+        return ParsedField.missing("cover_title", "未找到封面標題的結束位置")
+    title_lines = [ln for ln in page if anchor.y1 <= ln.y0 < ends[0].y0]
+    title = join_text(title_lines)
+    if not title.startswith("英商巴克萊銀行") or "自動提前出場結構型商品" not in title:
+        return ParsedField.missing("cover_title", "未找到完整商品標題")
+    if title.count("（") != title.count("）") or title.count("(") != title.count(")"):
+        return ParsedField.invalid("cover_title", title_lines, "商品標題括號不完整")
+    return ParsedField.present("cover_title", title, title_lines)
+
+
 def _cover_value(lines: list[Line], label: str) -> list[tuple[str, list[Line]]]:
     """p1 兩欄版面：左側標籤、右側數值；多行值以下一個標籤為界。"""
     page1 = [ln for ln in lines if ln.page == 1]
