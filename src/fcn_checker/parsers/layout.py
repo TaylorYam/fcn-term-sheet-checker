@@ -6,7 +6,7 @@ import bisect
 import datetime as dt
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..schema import Line
 
@@ -20,10 +20,21 @@ CHAPTER_NAMES = {
     5: ("五", "特別記載事項"),
 }
 
-_ARTICLE_RE = re.compile(r"^(\d{1,2})\.$")
-_SUBITEM_RE = re.compile(r"^\((\d{1,2})\)\s*(.*)$")
-_ARTICLE_MAX_X = 62.0
-_SUBITEM_MAX_X = 100.0
+
+@dataclass(frozen=True)
+class LayoutSpec:
+    """各上手說明書的骨架格式：章名、條號、子項的寫法與位置門檻。
+
+    `chapter_title` 為章名列的 regex 樣板，`{zh}`、`{name}` 依 `chapter_names` 代入（樣板內不可用 `{n}` 量詞）；
+    條號、子項標號須位於 x0 < 門檻（左側），且編號依序遞增。
+    """
+
+    chapter_title: str
+    article_max_x: float
+    subitem_max_x: float
+    chapter_names: dict[int, tuple[str, str]] = field(default_factory=lambda: dict(CHAPTER_NAMES))
+    article_re: re.Pattern[str] = re.compile(r"^(\d{1,2})\.$")
+    subitem_re: re.Pattern[str] = re.compile(r"^\((\d{1,2})\)\s*(.*)$")
 
 
 def parse_date(text: str) -> dt.date | None:
@@ -89,18 +100,19 @@ class TextIndex:
 
 
 class Document:
-    """BARC 說明書的版面結構：章 → 條 → 子項。"""
+    """說明書的版面結構：章 → 條 → 子項；格式由各上手的 `LayoutSpec` 提供。"""
 
-    def __init__(self, lines: Sequence[Line]):
+    def __init__(self, lines: Sequence[Line], spec: LayoutSpec):
         self.lines = list(lines)
+        self.spec = spec
         self.chapters = self._find_chapters()
 
     # ---- 章 ----
     def _find_chapters(self) -> dict[int, Span]:
         starts: dict[int, list[int]] = {}
         for i, ln in enumerate(self.lines):
-            for n, (zh, name) in CHAPTER_NAMES.items():
-                if re.fullmatch(rf"第{zh}章\s*{name}", ln.text):
+            for n, (zh, name) in self.spec.chapter_names.items():
+                if re.fullmatch(self.spec.chapter_title.format(zh=zh, name=name), ln.text):
                     starts.setdefault(n, []).append(i)
         found: dict[int, Span] = {}
         ordered = sorted((idx[0], n) for n, idx in starts.items() if len(idx) == 1)
@@ -126,8 +138,8 @@ class Document:
         expect = 1
         for i in range(sp.start + 1, sp.end):
             ln = self.lines[i]
-            m = _ARTICLE_RE.match(ln.text)
-            if m and ln.x0 < _ARTICLE_MAX_X and int(m.group(1)) == expect:
+            m = self.spec.article_re.match(ln.text)
+            if m and ln.x0 < self.spec.article_max_x and int(m.group(1)) == expect:
                 marks.append((expect, i))
                 expect += 1
         out: dict[int, Span] = {}
@@ -156,8 +168,8 @@ class Document:
         expect = 1
         for i in range(parent.start + 1, parent.end):
             ln = self.lines[i]
-            m = _SUBITEM_RE.match(ln.text)
-            if m and ln.x0 < _SUBITEM_MAX_X and int(m.group(1)) == expect:
+            m = self.spec.subitem_re.match(ln.text)
+            if m and ln.x0 < self.spec.subitem_max_x and int(m.group(1)) == expect:
                 title = m.group(2).strip()
                 marks.append((expect, i, title))
                 expect += 1

@@ -12,6 +12,17 @@ from .ingestion import IngestionError, sha256_of
 
 
 @dataclass(frozen=True)
+class ProductNameStandard:
+    """`product_name.<上手>` 分節：名稱樣板與佔位符的填入文字（例 memory_zh）。"""
+
+    zh: str
+    en: str
+    placeholders: dict[str, str]
+    normalize_brackets: bool
+    ignore_whitespace_en: bool
+
+
+@dataclass(frozen=True)
 class ReviewStandard:
     version: int
     effective_date: dt.date
@@ -22,15 +33,15 @@ class ReviewStandard:
     fixed_warning_occurrences: int
     forbidden: tuple[str, ...]
     allowed_phrases: tuple[str, ...]
-    name_zh: str
-    name_en: str
-    memory_zh: str
-    memory_en: str
-    normalize_brackets: bool
+    fixed_warning_by_issuer: dict[str, str]  # 鍵為上手代號小寫；未列出的上手用 fixed_warning
+    product_names: dict[str, ProductNameStandard]  # 鍵為上手代號小寫
     currency_zh_to_iso: dict[str, str]
     denomination: dict[str, int]
     print_date_max_days_after_trade: int
     sha256: str
+
+    def fixed_warning_for(self, issuer: str) -> str:
+        return self.fixed_warning_by_issuer.get(issuer.lower(), self.fixed_warning)
 
 
 @dataclass(frozen=True)
@@ -58,10 +69,23 @@ def _load(path: Path, what: str) -> dict[str, Any]:
         raise IngestionError("config_invalid", f"{what}設定檔格式錯誤：{e}") from e
 
 
+def _product_name(d: dict[str, Any]) -> ProductNameStandard:
+    flags = ("normalize_brackets", "ignore_whitespace_en")
+    placeholders = {k: v for k, v in d.items() if k not in ("zh", "en", *flags)}
+    if not all(isinstance(v, str) for v in placeholders.values()):
+        raise TypeError("product_name 佔位符的值必須是文字")
+    return ProductNameStandard(
+        zh=d["zh"],
+        en=d["en"],
+        placeholders=placeholders,
+        normalize_brackets=bool(d.get("normalize_brackets", True)),
+        ignore_whitespace_en=bool(d.get("ignore_whitespace_en", False)),
+    )
+
+
 def load_review_standard(path: Path) -> ReviewStandard:
     d = _load(path, "審查標準")
     try:
-        name = d["product_name"]["barc"]
         return ReviewStandard(
             version=int(d["version"]),
             effective_date=d["effective_date"],
@@ -72,11 +96,8 @@ def load_review_standard(path: Path) -> ReviewStandard:
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),
             forbidden=tuple(d["wording"]["forbidden"]),
             allowed_phrases=tuple(d["wording"]["allowed_phrases"]),
-            name_zh=name["zh"],
-            name_en=name["en"],
-            memory_zh=name["memory_zh"],
-            memory_en=name["memory_en"],
-            normalize_brackets=bool(name.get("normalize_brackets", True)),
+            fixed_warning_by_issuer={k.lower(): v for k, v in d["risk"].get("fixed_warning_by_issuer", {}).items()},
+            product_names={k.lower(): _product_name(v) for k, v in d["product_name"].items()},
             currency_zh_to_iso=dict(d["currency"]),
             denomination={k: int(v) for k, v in d["denomination"].items()},
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),

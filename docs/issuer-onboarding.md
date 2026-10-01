@@ -17,7 +17,7 @@
 | 5. 實作與測試 | 開發者 | parser、規則、合成測試、本機真實樣本測試 | 是（實作 PR） |
 | 6. 試跑 | 作業人員 | 新交易實跑紀錄、誤判回饋 | 回饋開 Issue |
 
-第二家上手前，另需一次性的多上手架構工作（§6）。
+多上手架構已完成（§6）；新增上手時依 §6 的表格接上註冊表。
 
 ## 1. 準備樣本
 
@@ -109,20 +109,20 @@
 - [ ] 已跑 code review 並處理發現。
 - [ ] 文件同步：範本規格狀態、核對規則的實作對照、README、TODO。
 
-## 6. 第二家上手：一次性的多上手架構工作
+## 6. 多上手架構（已完成，Issue #28）
 
-目前（BARC 為唯一上手）以下位置寫死 BARC，加第二家時須先改為依上手分派。建議放在第二家的第一個實作 Issue，或先開一個小 Issue 處理：
+原本寫死 BARC 的位置已改為「上手註冊表＋依辨識結果分派」，BARC 核對行為不變（範本結果 `rule_id` 由 `template.barc` 改為 `template.detect`）。新增上手時依下表接上，不需改核對流程：
 
-| 位置 | 目前 | 調整方向 |
+| 位置 | 現況 | 新增上手時 |
 |---|---|---|
-| `checker.py` | 直接呼叫 BARC parser 與規則，`template.barc` | 依序以各上手 `detect` 辨識；恰好一個命中才繼續，零個或多個命中轉人工覆核；結果 `rule_id` 改為通用的 `template.detect` 或依上手區分 |
-| `cli.py` | 預設 `config/order_formats/barc.toml` | 依辨識到的上手選格式設定，或要求指定上手 |
-| `panel.py`、`panel_workflow.py` | 只列 BARC 選項並呼叫 BARC `detect` | 由上手註冊表產生選項 |
-| `config.py`、`review_standard.toml` | `product_name.barc` 寫死 | 依上手讀取 `product_name.<上手>`；其他依上手不同的基準同樣分節，共用基準不變 |
-| `rules/barc.py` | 通用規則（百分比與日期比對、審查標準、報告格式）與 BARC 專屬規則放在一起 | 通用部分抽到共用模組，各上手只寫專屬規則與「未涵蓋」清單 |
-| `parsers/layout.py` | 章名、條號格式依 BARC | 改為參數，由各上手提供 |
-
-架構調整要維持既有 BARC 測試與本機真實樣本測試全部通過（行為不變）。
+| `issuers.py` | 上手註冊表：代號、範本代號、顯示名稱、parser 版本、`detect`／`parse`、商品代號擷取、規則入口、未涵蓋清單、預設詢價格式設定 `config/order_formats/<上手小寫>.toml` | 登記一筆 `Issuer` |
+| `checker.py` | 依序以所有已註冊上手 `detect`；恰好一個命中才繼續；零個 → `template_unknown`、多個 → `template_ambiguous`，皆轉人工覆核。詢價格式設定的 `issuer` 與辨識結果不符 → `order.issuer` 人工覆核；metadata 的 parser 記錄實際命中的範本 | 不需修改 |
+| `cli.py` | `--order-format` 選填；未指定時依辨識到的上手選格式設定 | 新增 `config/order_formats/<上手>.toml` |
+| `panel.py`、`panel_workflow.py` | 上手與範本選項、預覽辨識與預設格式設定都由註冊表產生 | 不需修改 |
+| `config.py`、`review_standard.toml` | 全部 `product_name.<上手>` 分節依上手載入（`ReviewStandard.product_names`）；固定警語可依上手覆寫（`risk.fixed_warning_by_issuer`）；其餘共用基準不變 | 只新增該上手不同的分節 |
+| `rules/common.py` | 共用：結果建構、說明書／詢價表缺值處理、百分比與日期比對、詢價表欄位檢查、商品代號配對、審查標準規則 | 沿用；`Context` 帶 `issuer` |
+| `rules/<上手>.py` | BARC 只留專屬規則、名稱樣板規則與 `NOT_COVERED` | 寫專屬規則、`run_all` 與未涵蓋清單 |
+| `parsers/layout.py` | 章名格式、條號／子項的位置門檻由 `LayoutSpec` 提供（BARC 為 `parsers/barc.py` 的 `LAYOUT`） | 提供自己的 `LayoutSpec`（例如章名「一、商品基本資料」） |
 
 ## 7. 試跑與維護
 

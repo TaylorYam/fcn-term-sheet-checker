@@ -124,3 +124,12 @@ class CheckResult:
     document_evidence: list[Evidence] = field(default_factory=list)
     order_source: list[str] = field(default_factory=list)
     rule_version: str = "1"
+
+
+@dataclass
+class DetectionResult:
+    """範本辨識結果：全部條件成立才 matched；failed 列出不成立的條件。"""
+
+    matched: bool
+    failed: list[str] = field(default_factory=list)
+    evidence: list[Evidence] = field(default_factory=list)

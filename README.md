@@ -45,7 +45,7 @@ fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/repo
 | 第 1 個 | 說明書 PDF（BARC 中文產品說明書） |
 | 第 2 個 | BARC 詢價表 Excel（一筆交易一個檔，B3 為商品代號） |
 | `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
-| `--order-format` | 詢價格式設定檔，預設 `config/order_formats/barc.toml` |
+| `--order-format` | 詢價格式設定檔；未指定時依說明書辨識到的上手使用 `config/order_formats/<上手>.toml`（目前只有 `barc.toml`） |
 | `--out` | 報告輸出資料夾，預設 `runtime/reports`（被 Git 忽略） |
 
 輸出 `<PDF 檔名>.check.json`（完整逐項結果、證據與執行 metadata）與 `<PDF 檔名>.check.md`（人看的報告：先列不一致與需人工覆核項目，再列未涵蓋規則與通過項目）。每項結果附詢價表值、說明書值、說明書頁碼與原文、詢價表儲存格位置。
@@ -56,7 +56,7 @@ fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/repo
 | 1 | 有 `MISMATCH`（不一致）或 `REVIEW_REQUIRED`（需人工覆核） |
 | 2 | `ERROR`：PDF 損毀／加密、檔案不存在、設定檔錯誤等 |
 
-整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非 BARC 範本、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
+整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、不符合任何已支援範本（`template_unknown`）或同時符合多個範本（`template_ambiguous`）、詢價格式設定的上手與辨識結果不符、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
 
 ## 本機 PANEL：預覽、核對與保存
 
@@ -79,7 +79,7 @@ PANEL 使用 Python 內建 Tkinter，目前提供 BARC 選檔、唯讀預覽、�
 
 Windows 啟動時預設最大化，可使用視窗的「還原」按鈕恢復一般視窗並調整大小。建立視窗前會啟用 system DPI awareness，避免高縮放下整個畫面被點陣放大；視窗與表格尺寸會依系統 DPI 調整。跨不同 DPI 螢幕移動或更改系統縮放後，請關閉再重新開啟 PANEL。
 
-自訂格式設定路徑可用 `--order-format <路徑>`，審查標準可用 `--review-standard <路徑>`；雙擊入口自動使用專案的兩份設定，不依賴啟動工作目錄。非 BARC 格式設定會被拒絕。目前只支援文字型 PDF，掃描檔不會自動 OCR。
+自訂格式設定路徑可用 `--order-format <路徑>`，審查標準可用 `--review-standard <路徑>`；未指定格式設定時依選取的上手使用 `config/order_formats/<上手>.toml`。雙擊入口自動使用專案的設定，不依賴啟動工作目錄。格式設定的 issuer 與選取的上手不符會被拒絕。目前只支援文字型 PDF，掃描檔不會自動 OCR。
 
 ## PANEL 更新 GitHub 最新版
 

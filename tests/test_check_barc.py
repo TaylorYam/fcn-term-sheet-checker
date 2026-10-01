@@ -249,7 +249,7 @@ def test_non_barc_document_requires_review(tmp_path):
     inq = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
     report = run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT)
     assert report.status == REVIEW
-    assert results(report, "template.barc")[0].status == REVIEW
+    assert results(report, "template.detect")[0].status == REVIEW
     assert report.template is None
 
 

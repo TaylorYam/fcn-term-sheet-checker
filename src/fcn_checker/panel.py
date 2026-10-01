@@ -595,9 +595,12 @@ class PanelWindow:
 
 
 def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="BARC 本機 PANEL：預覽並核對 TS PDF 與 Excel，不自動保存。")
+    parser = argparse.ArgumentParser(description="本機 PANEL：預覽並核對 TS PDF 與 Excel，不自動保存。")
     parser.add_argument(
-        "--order-format", type=Path, default=Path("config/order_formats/barc.toml"), help="BARC 詢價格式設定檔"
+        "--order-format",
+        type=Path,
+        default=None,
+        help="詢價格式設定檔（未指定時依選取的上手使用 config/order_formats/<上手>.toml）",
     )
     parser.add_argument(
         "--review-standard", type=Path, default=Path("config/review_standard.toml"), help="審查標準設定檔"

@@ -56,7 +56,7 @@ def test_non_barc_samples_are_not_detected(reports):
     assert others, "本機應有其他上手的負面樣本"
     for r in others:
         assert r.status == CheckStatus.REVIEW_REQUIRED
-        assert [x.rule_id for x in r.results if x.status != CheckStatus.PASS][0] == "template.barc"
+        assert [x.rule_id for x in r.results if x.status != CheckStatus.PASS][0] == "template.detect"
 
 
 def test_document_rules_only_flag_old_format_documents(reports):
