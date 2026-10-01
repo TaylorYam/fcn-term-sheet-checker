@@ -21,11 +21,11 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 
 - 第一個 issuer：巴克萊（BCY）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BCY 範本規格](docs/templates/bcy-zh-product-description.md)。
 - 下單資料來源：`FCN參考條件.xlsx`，以 `TDCC Code` 配對；欄位對照與已確認的核對規則：[核對規則](docs/rules/bcy-fcn-reference-check.md)。
-- 本機探勘比對 8 份樣本共 360 項，除月配息率進位外沒有實質不一致；仍有 3 個待確認事項（核對規則 §6）。
+- 本機探勘比對 8 份樣本共 396 項，套用已確認規則後沒有不一致；剩標的對照表來源與文件資訊規則待定（核對規則 §6）。
 
 ## 下一步
 
-1. 決定核對規則 §6 的待確認事項。
+1. 確定標的對照表來源，並討論文件資訊（刊印日期、審查通過日期等）的核對規則（核對規則 §6）。
 2. 依 TODO 建立第一個實作 Issue，再從最新 `main` 建立分支；完成 BCY 文字型 PDF ＋ Excel 的最小端到端流程。
 3. 建立合成 PDF／Excel fixture，加入測試與 Python CI，經 PR review／CI 通過後合併。
 
