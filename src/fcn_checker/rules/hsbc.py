@@ -1,4 +1,7 @@
-"""HSBC 專屬規則：條件、表格、日期及文件內重複出處。"""
+"""HSBC 專屬規則：說明書內部的條件、表格、日期、文件內重複出處與審查標準。
+
+參考條件表欄位、Non-Call、ISIN 與比價日由各上手共用的 rules/reference.py 核對。
+"""
 
 from __future__ import annotations
 
@@ -7,12 +10,12 @@ import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..config import ReferenceFormat
 from ..parsers.hsbc import HsbcTermSheet
 from ..parsers.layout import squash
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, ParsedField
-from . import common, hsbc_scenario, reference
+from ..standard_fields import AutocallSchedule
+from . import common, hsbc_scenario
 
 ISSUER = "HSBC"
 Q4 = Decimal("0.0001")
@@ -45,15 +48,6 @@ def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
         evidence=[e for p in deps for e in p.evidence],
         reason="" if good else reason,
     )
-
-
-def enum_field(ctx, name, mapping):
-    pf, ov = ctx.ts.f(name), ctx.order.fields.get(name)
-    if ov is None or ov.value not in mapping:
-        return common.order_review("field." + name, name, ov, pf, "order_unknown_value", "整理表值缺漏或不在允許值中")
-    r = check("field." + name, name, [pf], mapping[ov.value], pf.value)
-    r.order_source = [ov.source]
-    return r
 
 
 def first_callable(ts) -> ParsedField:
@@ -92,8 +86,6 @@ def schedules(ctx):
         return [
             common.doc_review(rid, "schedule", bad)
             for rid in [
-                "field.first_callable_period",
-                "field.autocall_dates",
                 "schedule.coupon_dates",
                 "schedule.autocall_dates",
                 "doc.coupon_periods",
@@ -128,26 +120,8 @@ def schedules(ctx):
             and all(a < b for a, b in zip(payments, payments[1:], strict=False)),
         )
     )
-    ov = ctx.order.fields.get("first_callable_period")
-    if ov is None or common.to_int(ov.value) is None:
-        out.append(
-            common.order_review(
-                "field.first_callable_period",
-                "first_callable_period",
-                ov,
-                first,
-                "order_invalid",
-                "首可KO期缺漏或不是整數",
-            )
-        )
-    else:
-        r = check("field.first_callable_period", "first_callable_period", [first], common.to_int(ov.value), first.value)
-        r.order_source = [ov.source]
-        out.append(r)
-    expected_dates = {}
     if obs.value == "D":
         k = first.value
-        expected_dates = {k: ctx.ts.f("ko_start").value, len(rows): rows[-1]["end"]}
         valid = all(a["end"] < b["end"] for a, b in zip(rows, rows[1:], strict=False))
         for i, row in enumerate(rows):
             valid &= row["end"] < row["payment"]
@@ -179,7 +153,6 @@ def schedules(ctx):
                 valid = False
             else:
                 mapped.append(hits[0])
-                expected_dates[hits[0]] = row["decision"]
             valid &= row["decision"] < row["payment"]
         valid &= mapped == list(range(first.value, len(rows) + 1))
         valid &= all(a["decision"] < b["decision"] for a, b in zip(ko.value, ko.value[1:], strict=False))
@@ -193,21 +166,6 @@ def schedules(ctx):
                 ok=valid and final.ok and ko.value[-1]["decision"] == final.value,
             )
         )
-    for i in range(1, 13):
-        key = f"autocall_date_{i}"
-        ov = ctx.order.fields.get(key)
-        expected = expected_dates.get(i)
-        actual = ov.value if ov else None
-        if actual is not None and common.to_date(actual) is None:
-            out.append(
-                common.order_review(
-                    "field.autocall_dates", key, ctx.order.fields.get(key), c, "order_invalid", "比價日不是日期"
-                )
-            )
-            continue
-        r = check("field.autocall_dates", key, [c, first], actual, expected)
-        r.order_source = [ov.source] if ov else []
-        out.append(r)
     return out
 
 
@@ -217,59 +175,18 @@ def prices(ctx):
     if not pf.ok:
         return [
             common.doc_review(rid, "prices", pf)
-            for rid in [
-                "field.underlyings",
-                "field.prices",
-                "derive.prices",
-                "doc.price_header_pct",
-                "doc.scenario_table",
-            ]
+            for rid in ["derive.prices", "doc.price_header_pct", "doc.scenario_table"]
         ]
     rows = pf.value["rows"]
     out = []
-    ovs = [ctx.order.fields.get(f"underlying_{i}") for i in range(1, 6)]
-    values = [None if ov is None or ov.value == ctx.fmt.empty_value else ov.value for ov in ovs]
-    filled = [i for i, v in enumerate(values) if v is not None]
-    expected = [values[i] for i in filled]
-    if not filled or filled != list(range(len(filled))):
-        out.append(
-            common.order_review(
-                "field.underlyings", "underlyings", ovs[0], pf, "order_invalid", "彭博代號缺漏或中間有空白"
-            )
-        )
-    else:
-        r = check("field.underlyings", "underlyings", [pf], expected, [r["ticker"] for r in rows])
-        r.order_source = [ov.source for ov in ovs if ov]
-        out.append(r)
-    for i in range(1, 6):
-        row = rows[i - 1] if i <= len(rows) else None
-        for col in ["initial", "strike", "ko", "ki"]:
-            key = f"underlying_{i}_{col}_price"
-            ov = ctx.order.fields.get(key)
-            actual = row["prices"].get(col) if row else None
-            expected = ov.value if ov else None
-            if isinstance(ctx.fmt, ReferenceFormat) and row and col == "ki" and actual is None and expected is None:
-                out.append(
-                    common.order_review("field.prices", key, ov, pf, "order_missing", "無 KI 的下限價須明填空值寫法")
-                )
+    for i, row in enumerate(rows, start=1):
+        for col in ["strike", "ko", "ki"]:
+            actual = row["prices"].get(col)
+            if actual is None:
                 continue
-            if expected == ctx.fmt.empty_value:
-                expected = None
-            if actual is None and expected is None:
-                out.append(common.result("field.prices", key, S.NOT_APPLICABLE, pf=pf, ov=[ov]))
-                continue
-            value = common.to_decimal(expected)
-            if value is None:
-                out.append(common.order_review("field.prices", key, ov, pf, "order_missing", "整理表價格缺漏或不合法"))
-                continue
-            rounded = value.quantize(Q4, ROUND_HALF_UP)
-            r = check("field.prices", key, [pf], rounded, actual)
-            r.order_source = [ov.source]
-            out.append(r)
-            if row and col != "initial" and actual is not None:
-                pct = ctx.ts.f({"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}[col])
-                exp = (row["prices"]["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP) if pct.ok else None
-                out.append(check("derive.prices", key, [pf, pct], exp, actual))
+            pct = ctx.ts.f(col + "_pct")
+            exp = (row["prices"]["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP) if pct.ok else None
+            out.append(check("derive.prices", f"underlying_{i}_{col}_price", [pf, pct], exp, actual))
     headers = pf.value["headers"]
     for col in ["strike", "ko", "ki"]:
         pct = ctx.ts.f(col + "_pct")
@@ -304,17 +221,6 @@ def document_info(ctx):
     f = ctx.ts.f
     out = []
     iso = ctx.std.currency_zh_to_iso.get(f("currency_zh").value)
-    ov = ctx.order.fields.get("currency")
-    if ov is None or iso is None:
-        out.append(
-            common.order_review(
-                "field.currency", "currency", ov, f("currency_zh"), "currency_unknown", "幣別缺漏或不在審查標準"
-            )
-        )
-    else:
-        r = check("field.currency", "currency", [f("currency_zh")], ov.value, iso)
-        r.order_source = [ov.source]
-        out.append(r)
     out.append(
         check(
             "doc.currency_consistency",
@@ -365,57 +271,9 @@ def document_info(ctx):
     return out
 
 
-def run_all(ctx):
-    out = [reference.product_code(ctx)]
-    for key, convert, what in [
-        ("isin", str, "文字"),
-        ("denomination", common.to_decimal, "數值"),
-        ("trade_date", common.to_date, "日期"),
-        ("issue_date", common.to_date, "日期"),
-        ("final_valuation_date", common.to_date, "日期"),
-        ("maturity_date", common.to_date, "日期"),
-        ("ko_pct", common.to_decimal, "百分比"),
-        ("strike_pct", common.to_decimal, "百分比"),
-        ("coupon_pa_pct", common.to_decimal, "百分比"),
-        ("tenor_months", common.to_int, "整數"),
-    ]:
-        compare = (
-            (
-                lambda a, b: (
-                    a.quantize(Decimal("0.01"), ROUND_HALF_UP) == b.quantize(Decimal("0.01"), ROUND_HALF_UP),
-                    a.quantize(Decimal("0.01"), ROUND_HALF_UP),
-                )
-            )
-            if key == "coupon_pa_pct"
-            else None
-        )
-        out.append(common.simple(ctx, "field." + key, key, convert, what, compare=compare))
-    out.extend(
-        [
-            enum_field(ctx, "ko_observation", ctx.fmt.ko_observation_values),
-            enum_field(ctx, "ko_memory", ctx.fmt.ko_memory_values),
-            enum_field(ctx, "ki_type", ctx.fmt.ki_type_values),
-        ]
-    )
-    ki = ctx.ts.f("ki_pct")
-    ov = ctx.order.fields.get("ki_pct")
-    if ki.status == FieldStatus.NOT_APPLICABLE:
-        out.append(
-            common.result(
-                "field.ki_pct",
-                "ki_pct",
-                S.NOT_APPLICABLE
-                if ov and ov.value == (ctx.fmt.empty_value if isinstance(ctx.fmt, ReferenceFormat) else None)
-                else (S.REVIEW_REQUIRED if ov is None or ov.value is None else S.MISMATCH),
-                expected=ov.value if ov else None,
-                actual=None,
-                pf=ki,
-                ov=[ov],
-            )
-        )
-    else:
-        out.append(common.simple(ctx, "field.ki_pct", "ki_pct", common.to_decimal, "百分比", compare=common.cmp_pct))
-    out.extend(prices(ctx))
+def run_all(ctx: Context) -> list:
+    """參考條件表欄位規則（rules/reference.py）之後執行：說明書內部規則與審查標準。"""
+    out = prices(ctx)
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
     out.extend(
@@ -438,8 +296,6 @@ def run_all(ctx):
 
 def autocall_schedule(ts: HsbcTermSheet) -> ParsedField:
     """提供共用參考條件表流程的期別與比價日，填格政策由 reference 決定。"""
-    from .reference import AutocallSchedule
-
     first, obs, coupons = first_callable(ts), ts.f("ko_observation"), ts.f("coupon_table")
     bad = next((p for p in [first, obs, coupons] if not p.ok), None)
     if bad is not None:
@@ -462,9 +318,3 @@ def autocall_schedule(ts: HsbcTermSheet) -> ParsedField:
         AutocallSchedule(obs.value, first.value, len(coupons.value), dates),
         [e for p in [first, obs, coupons] for e in p.evidence],
     )
-
-
-def reference_rules(ctx: Context) -> list:
-    """批量流程共用所有 HSBC 規則；回填欄位與 Non-Call 交由共用 reference 規則。"""
-    shared = {"field.isin", "field.first_callable_period", "field.autocall_dates"}
-    return [r for r in run_all(ctx) if r.rule_id not in shared]

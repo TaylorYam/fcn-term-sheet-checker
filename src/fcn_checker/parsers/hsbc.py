@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from . import hsbc_tables as tables
 from .layout import Document, LayoutSpec, TextIndex, parse_date, squash
@@ -80,6 +81,18 @@ class HsbcTermSheet:
 
     def f(self, name: str) -> ParsedField:
         return self.fields.get(name, ParsedField.missing(name))
+
+
+def _standard_prices(table: ParsedField) -> ParsedField:
+    """標準欄位 `underlying_prices`：第 12 條價格表各列（代號、四種價格、該列原文）。"""
+    name = "underlying_prices"
+    if not table.ok:
+        return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
+    value = tuple(
+        standard_fields.PriceRow(r["ticker"], dict(r["prices"]), tuple(Evidence.of(ln) for ln in lns))
+        for r, lns in zip(table.value["rows"], table.value["row_lines"], strict=True)
+    )
+    return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
 
 
 def parse(lines: Sequence[Line]) -> tuple[DetectionResult, HsbcTermSheet]:
@@ -176,6 +189,7 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, HsbcTermSheet]:
         if pt.ok
         else ParsedField("underlyings", pt.status, evidence=pt.evidence, note=pt.note)
     )
+    fields["underlying_prices"] = _standard_prices(pt)
     put("tenor_months", sub(15, 1), r"為(\d+)個月", int)
     for name, n, pattern in [
         ("issue_date", 2, r"發行日[:：]" + D),

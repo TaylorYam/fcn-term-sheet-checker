@@ -214,39 +214,6 @@ def column_checks(order: OrderRecord) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 標準欄位比對（HSBC 尚未改用 rules/reference.py）
-
-
-def simple(
-    ctx: Context,
-    rule_id: str,
-    key: str,
-    convert: Callable[[Any], Any],
-    what: str,
-    compare: Callable[[Any, Any], tuple[bool, Any]] | None = None,
-    tolerance: str | None = None,
-    pf_key: str | None = None,
-) -> CheckResult:
-    pf = ctx.ts.f(pf_key or key)
-    v, ov, problem = order_value(ctx, key, rule_id, key, pf, convert, what)
-    if problem:
-        return problem
-    if not pf.ok:
-        return doc_review(rule_id, key, pf, v, [ov])
-    ok, shown = compare(v, pf.value) if compare else (v == pf.value, v)
-    return result(
-        rule_id,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=shown,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        tolerance=tolerance,
-    )
-
-
 # ---------------------------------------------------------------- 審查標準
 
 

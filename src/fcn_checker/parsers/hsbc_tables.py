@@ -29,6 +29,7 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
     start = lines.index(last) + 1
     tokens = lines[start:]
     rows: list[dict] = []
+    row_lines: list[list[Line]] = []
     pending: list[Line] = []
     prices: list[Decimal] = []
     for ln in tokens:
@@ -54,11 +55,12 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
                     "prices": dict(zip(columns, prices, strict=True)),
                 }
             )
+            row_lines.append(pending)
             pending = []
             prices = []
     if pending or not rows:
         return ParsedField.invalid(name, lines, "價格表列不完整或無資料")
-    return ParsedField.present(name, {"rows": rows, "headers": header_pcts}, lines)
+    return ParsedField.present(name, {"rows": rows, "headers": header_pcts, "row_lines": row_lines}, lines)
 
 
 def coupon_table(lines: list[Line], daily: bool) -> ParsedField:
