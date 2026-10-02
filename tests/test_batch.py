@@ -71,7 +71,7 @@ def slots(d: dict) -> list:
 # ---------------------------------------------------------------- 全部一致 → 回填
 
 
-def test_consistent_daily_term_sheet_passes_and_back_fills_isin_and_first_compare_date(tmp_path):
+def test_consistent_daily_term_sheet_passes_and_back_fills_isin_issue_date_and_first_compare_date(tmp_path):
     spec = Spec()  # D 型、天期 6、第 1 期期末日起可提前出場
     outcome, sheet = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
 
@@ -81,6 +81,8 @@ def test_consistent_daily_term_sheet_passes_and_back_fills_isin_and_first_compar
     assert outcome.output == tmp_path / "FCN參考條件_回填_20300203-040506.xlsx"
     d = row_of(outcome.output, spec.product_code)
     assert d["ISIN Code"] == SYNTH_ISIN
+    assert d["發行日"] == dt.datetime.combine(spec.issue_date, dt.time())
+    assert row_of(sheet, spec.product_code)["發行日"] is None, "原檔不動"
     first = schedule_rows(spec)[0]["valuation"]
     assert slots(d) == [first] + ["-"] * 11
 
@@ -116,7 +118,8 @@ def test_period_end_memory_uses_autocall_valuation_dates(tmp_path):
 def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     spec = Spec()
     first = schedule_rows(spec)[0]["valuation"]
-    filled = {"ISIN Code": SYNTH_ISIN, "比價日_1": dt.datetime.combine(first, dt.time())}
+    issue = dt.datetime.combine(spec.issue_date, dt.time())
+    filled = {"ISIN Code": SYNTH_ISIN, "發行日": issue, "比價日_1": dt.datetime.combine(first, dt.time())}
     filled |= {f"比價日_{i}": "-" for i in range(2, 13)}
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **filled)])
 
@@ -124,7 +127,7 @@ def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     assert item.report.status == PASS, problems(item)
     assert {d.action for d in item.report.backfill} == {"match"}
     d = row_of(outcome.output, spec.product_code)
-    assert d["ISIN Code"] == SYNTH_ISIN and slots(d) == [first] + ["-"] * 11
+    assert d["ISIN Code"] == SYNTH_ISIN and d["發行日"] == issue and slots(d) == [first] + ["-"] * 11
 
 
 def test_wrong_existing_compare_date_is_mismatch_and_nothing_is_back_filled(tmp_path):
@@ -155,6 +158,28 @@ def test_wrong_isin_is_mismatch_and_keeps_original(tmp_path):
     r = only(outcome.items[0], "backfill.isin")
     assert (r.status, r.expected, r.actual) == (MISMATCH, "XS9999999999", SYNTH_ISIN)
     assert row_of(outcome.output, spec.product_code)["ISIN Code"] == "XS9999999999"
+
+
+def test_wrong_issue_date_is_mismatch_and_keeps_original(tmp_path):
+    spec = Spec()
+    wrong = dt.datetime(2030, 1, 15)
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行日=wrong)])
+    item = outcome.items[0]
+    r = only(item, "backfill.issue_date")
+    assert (r.status, r.expected, r.actual) == (MISMATCH, wrong.date(), spec.issue_date)
+    assert [d.action for d in item.report.backfill if d.column == "發行日"] == ["mismatch"]
+    assert item.report.status == MISMATCH and not item.filled
+    assert row_of(outcome.output, spec.product_code)["發行日"] == wrong
+
+
+def test_issue_date_missing_from_term_sheet_requires_review_and_is_not_back_filled(tmp_path):
+    spec = Spec(omit=frozenset({"issue_date"}))
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+    item = outcome.items[0]
+    assert only(item, "backfill.issue_date").status == REVIEW
+    assert not [d for d in item.report.backfill if d.column == "發行日"]
+    assert not item.filled
+    assert row_of(outcome.output, spec.product_code)["發行日"] is None
 
 
 def test_non_call_must_be_the_first_callable_period(tmp_path):

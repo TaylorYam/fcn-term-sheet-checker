@@ -35,7 +35,8 @@
 | ISIN | ISIN Code | §27 | 回填欄位：空白 → 整份通過後回填；有值 → 比對（`backfill.isin`） |
 | 幣別 | 承作幣別 | 封面 | 審查標準幣別對照（`field.currency`） |
 | 單位面額 | 單位面額 | §6 | 表上須為整數，非整數轉人工覆核；整數相等（`field.denomination`）。另依審查標準面額預設值，不等於預設值轉人工審查（`doc.denomination`） |
-| 交易日、發行日、最後評價日、到期日 | 交易日／發行日／最終比價日／到期日 | §15 | 日期相等（`field.trade_date` 等） |
+| 發行日 | 發行日 | §15(2) | 回填欄位：空白 → 整份通過後回填；有值 → 比對（`backfill.issue_date`，Issue #64） |
+| 交易日、最後評價日、到期日 | 交易日／最終比價日／到期日 | §15 | 日期相等（`field.trade_date` 等） |
 | KO % | KO(%) | §11(2) | 表上值依說明書顯示位數四捨五入（half-up）後比對（`field.ko_pct`） |
 | KO 觀察方式 | KO(Freq) | §4.2 | `D`／`P`（`field.ko_observation`） |
 | 記憶式 | KO(memo) | §4.1 | `Y`／`N`（`field.ko_memory`） |

@@ -11,6 +11,7 @@ import fitz
 import openpyxl
 import pytest
 
+from fcn_checker.backfill import BackfillAction
 from fcn_checker.batch import check_batch
 from fcn_checker.cli import main
 from fcn_checker.issuers import HSBC, REGISTRY
@@ -78,7 +79,7 @@ def test_supported_types_pass(tmp_path, obs, memory, ki, count):
         ("isin", "XS1999900002", "backfill.isin"),
         ("denomination", 20000, "field.denomination"),
         ("trade_date", "2031-01-07", "field.trade_date"),
-        ("issue_date", "2031-01-14", "field.issue_date"),
+        ("issue_date", dt.date(2031, 1, 14), "backfill.issue_date"),
         ("final_valuation_date", "2031-07-07", "field.final_valuation_date"),
         ("maturity_date", "2031-07-10", "field.maturity_date"),
         ("ko_pct", 101, "field.ko_pct"),
@@ -520,7 +521,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     wb = openpyxl.load_workbook(excel)
     ws = wb.active
     for c in ws[3]:
-        if c.value == "ISIN Code" or str(c.value).startswith("比價日_"):
+        if c.value in ("ISIN Code", "發行日") or str(c.value).startswith("比價日_"):
             ws.cell(4, c.column).value = None
     wb.save(excel)
     wb.close()
@@ -542,6 +543,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     ws = wb["樣本清單"]
     vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
     assert vals["ISIN Code"] == "XS1999900001"
+    assert vals["發行日"] == dt.datetime(2030, 1, 14)
     assert vals["比價日_2"].date() == s.ends[1]
     assert vals["比價日_6"] == ("-" if obs == "D" else dt.datetime.combine(s.ends[-1], dt.time()))
     assert vals["比價日_1"] == "-"
@@ -551,6 +553,36 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     assert all(
         ws.cell(4, c.column).value is None
         for c in ws[3]
-        if c.value == "ISIN Code" or str(c.value).startswith("比價日_")
+        if c.value in ("ISIN Code", "發行日") or str(c.value).startswith("比價日_")
     )
     wb.close()
+
+
+@pytest.mark.parametrize(
+    "sheet_value,action,status,kept",
+    [
+        (None, BackfillAction.FILL, S.PASS, dt.datetime(2030, 1, 14)),
+        (dt.date(2030, 1, 14), BackfillAction.MATCH, S.PASS, dt.datetime(2030, 1, 14)),
+        (dt.date(2030, 1, 15), BackfillAction.MISMATCH, S.MISMATCH, dt.datetime(2030, 1, 15)),
+    ],
+)
+def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, status, kept):
+    from fcn_checker.batch import run_batch
+
+    s = Spec()
+    r = run_batch(
+        [build_pdf(tmp_path / f"{s.code}_TS.pdf", s)],
+        build_inquiry(tmp_path / "order.xlsx", s, {"issue_date": sheet_value}),
+        REVIEW_STANDARD,
+        tmp_path / "reports",
+        reference_format=ROOT / "config/reference_sheet.toml",
+        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
+    )
+    report = r.items[0].report
+    assert only(report, "backfill.issue_date").status == status
+    assert [d.action for d in report.backfill if d.column == "發行日"] == [action]
+    assert report.status == status
+    assert not any(x.rule_id == "field.issue_date" for x in report.results)
+    ws = openpyxl.load_workbook(r.output)["樣本清單"]
+    vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
+    assert vals["發行日"] == kept

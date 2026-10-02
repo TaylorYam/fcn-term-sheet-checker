@@ -39,7 +39,8 @@
 | ISIN Code | `isin` | **回填欄位**（§5） |
 | 單位面額 | `denomination` | 核對；另保留審查標準的「不等於幣別預設值 → 人工審查」 |
 | 承作幣別 | `currency` | 核對 |
-| 交易日／發行日／最終比價日／到期日 | `trade_date`／`issue_date`／`final_valuation_date`／`maturity_date` | 核對 |
+| 發行日 | `issue_date` | **回填欄位**（§5） |
+| 交易日／最終比價日／到期日 | `trade_date`／`final_valuation_date`／`maturity_date` | 核對 |
 | 比價日_1～12 | `autocall_date_1`～`autocall_date_12` | **回填欄位**（§4、§5） |
 | KO(%)、K(%)、KI(%)、Coupon p.a. (%) | `ko_pct`、`strike_pct`、`ki_pct`、`coupon_pa_pct` | 依說明書顯示位數四捨五入後比對；沒有 KI 時 KI(%) 必須是 `-` |
 | KO(Freq) | `ko_observation` | `D` 期間每日觀察、`P` 每期定日觀察 |
@@ -71,10 +72,11 @@
 
 ## 5. 回填
 
-- 回填欄位只有 `ISIN Code` 與 `比價日_1`～`比價日_12`。
+- 回填欄位只有 `ISIN Code`、`發行日`（BARC 第一章 §13(3)、HSBC 第一章 §15(2)；2026-10-02 起，Issue #64）與 `比價日_1`～`比價日_12`。
 - 格子是空白：整份說明書核對 **PASS** 時才回填。
 - 格子已經有值（包括 `-`）：跟說明書比對。相同就通過；不同就是不一致，保留原值。
-- 格式設定沒有回填欄位的欄名，或參考條件表少了該欄（例如沒有 `比價日_3`）：該份說明書的回填規則（`backfill.isin`／`backfill.compare_dates`）轉人工覆核，訊息寫出缺的欄名，不回填（Issue #56）。
+- 說明書抓不到該欄的值（例如發行日）：轉人工覆核，不回填。
+- 格式設定沒有回填欄位的欄名，或參考條件表少了該欄（例如沒有 `比價日_3`）：該份說明書的回填規則（`backfill.isin`／`backfill.issue_date`／`backfill.compare_dates`）轉人工覆核，訊息寫出缺的欄名，不回填（Issue #56）。
 - 儲存前確認參考條件表與核對時相同（比對核對時記錄的 hash）；核對後被改過就不寫新檔，請重新核對。
 - 結果另存成 `<原檔名>_回填_<YYYYMMDD-HHMMSS>.xlsx`，放在原檔同一個資料夾。原檔不動；檔名已經存在就不寫入（不覆蓋）。
 - 新檔保留原檔所有工作表、公式與格式。回填的日期沿用表上既有日期格的顯示格式。
