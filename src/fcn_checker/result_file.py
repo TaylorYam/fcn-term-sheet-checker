@@ -25,7 +25,7 @@ from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .config import ReferenceFormat
-from .ingestion import IngestionError
+from .ingestion import IngestionError, write_new
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
@@ -124,11 +124,4 @@ def _error_sheet(ws: Worksheet, errors: Sequence[ErrorRow]) -> None:
 
 def write(data: bytes, out: Path) -> None:
     """寫出核對結果檔；檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。"""
-    try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with out.open("xb") as f:
-            f.write(data)
-    except FileExistsError as e:
-        raise IngestionError("output_exists", f"核對結果檔 {out.name} 已經存在，不覆蓋") from e
-    except OSError as e:
-        raise IngestionError("output_unwritable", f"無法寫入核對結果檔 {out.name}：{e}") from e
+    write_new(out, data, "核對結果檔")

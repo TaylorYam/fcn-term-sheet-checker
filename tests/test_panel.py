@@ -12,7 +12,7 @@ import openpyxl
 import pytest
 
 from fcn_checker.ingestion import IngestionError
-from fcn_checker.panel import parse_args
+from fcn_checker.panel import parse_args, session_from_args
 from fcn_checker.panel_workflow import PanelSession
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT
 from reference_synth import REFERENCE_FORMAT, build_reference_sheet
@@ -29,7 +29,7 @@ def inputs(tmp_path: Path, *specs: Spec, rows: list[dict] | None = None):
 
 
 def session_for(tmp_path: Path, sheet, pdfs, standard=REVIEW_STANDARD, config_dir=None) -> PanelSession:
-    session = PanelSession(standard, config_dir or ROOT / "config")
+    session = PanelSession(standard, config_dir or ROOT / "config", root=tmp_path)
     session.select(sheet, pdfs)
     return session
 
@@ -191,11 +191,8 @@ def test_save_writes_reports_and_result_file_only_when_asked(tmp_path):
     assert receipt.complete
     assert receipt.output == tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
     assert f"核對結果檔：{receipt.output}" in receipt.summary
-    assert {p.name for p in (tmp_path / "reports").iterdir()} == {
-        f"{pdfs[0].stem}_20300203-040506.check.json",
-        f"{pdfs[0].stem}_20300203-040506.check.md",
-        receipt.output.name,
-    }
+    assert [p.name for p in (tmp_path / "reports").iterdir()] == [receipt.output.name], "選的資料夾只有核對結果檔"
+    assert (tmp_path / "runtime" / "核對紀錄" / "20300203-040506.json").is_file()
     ws = openpyxl.load_workbook(receipt.output)["回填後"]
     assert ws["F4"].value == SYNTH_ISIN
     assert sheet.read_bytes() == original
@@ -215,9 +212,20 @@ def test_save_failure_is_reported_and_result_is_kept(tmp_path):
 
     receipt = session.save(blocked, now=NOW)
     assert not receipt.complete
-    assert "報告未儲存" in receipt.summary
+    assert "無法建立核對結果檔的資料夾" in receipt.summary
     assert blocked.read_text() == "keep"
     assert session.outcome is outcome
+
+
+def test_record_failure_is_reported_and_the_result_file_is_kept(tmp_path):
+    sheet, pdfs = inputs(tmp_path)
+    session = session_for(tmp_path, sheet, pdfs)
+    session.load_preview()
+    session.start_check()
+    (tmp_path / "runtime").write_text("不是資料夾", encoding="utf-8")
+    receipt = session.save(tmp_path / "reports", now=NOW)
+    assert receipt.output is not None and receipt.output.is_file()
+    assert not receipt.complete and "核對紀錄" in receipt.summary
 
 
 def test_save_after_sources_changed_is_refused(tmp_path):
@@ -285,6 +293,7 @@ def test_builtin_config_comes_from_the_launched_release_not_the_package_location
     args = parse_args(captured["argv"])
     assert args.config_dir == root / "config"
     assert args.builtin_config_dir == release / "config"
-    session = PanelSession(args.review_standard, args.config_dir, builtin_config_dir=args.builtin_config_dir)
+    session = session_from_args(args)
+    assert session.root == root.resolve(), "核對紀錄寫到安裝根目錄的 runtime/，不寫進版本資料夾"
     assert session.reference_format == (release / "config" / REFERENCE_FORMAT.name).resolve()
     assert session.issuer_prefixes == (release / "config" / ISSUER_PREFIXES.name).resolve()

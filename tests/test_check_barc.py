@@ -198,12 +198,14 @@ def test_duplicate_order_column_requires_review(tmp_path):
 
 
 def test_whole_number_excel_values_are_shown_plainly(tmp_path):
-    from fcn_checker.reporting import to_markdown
+    import json
+
+    from fcn_checker.reporting import to_json
 
     report = check(tmp_path, Spec(annual=Decimal("10.00"), monthly=Decimal("0.8333")))
     r = results(report, "derive.monthly_coupon")[0]
     assert "E+" not in r.message and "推算：10" in r.message
-    assert "E+" not in to_markdown(report)
+    assert "E+" not in json.dumps(to_json(report))
 
 
 def test_monthly_ki_is_not_supported_in_phase_one(tmp_path):

@@ -1,4 +1,4 @@
-"""測試切點：批量核對入口 run_batch(說明書們, 參考條件表, 審查標準, 輸出資料夾) → 結果、報告與核對結果檔。
+"""測試切點：批量核對入口 run_batch(說明書們, 參考條件表, 審查標準, 輸出資料夾) → 結果、核對結果檔與核對紀錄。
 
 只用合成資料（tests/synth.py）；以 openpyxl 讀回產出的 Excel 觀察回填結果。
 """
@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 import openpyxl
@@ -13,7 +14,9 @@ import pytest
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from fcn_checker import __version__
 from fcn_checker.batch import check_batch, run_batch, save_batch
+from fcn_checker.ingestion import sha256_of
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD
@@ -36,7 +39,7 @@ def pdf_for(tmp_path: Path, spec: Spec, name: str | None = None) -> Path:
 def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], **kw):
     sheet = kw.pop("sheet", None) or build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
     kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES, "now": NOW, **kw}
-    outcome = run_batch(pdfs, sheet, REVIEW_STANDARD, tmp_path / "reports", **kw)
+    outcome = run_batch(pdfs, sheet, REVIEW_STANDARD, tmp_path / "reports", root=tmp_path, **kw)
     return outcome, sheet
 
 
@@ -547,7 +550,7 @@ def test_batch_error_writes_no_result_file(tmp_path):
         tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], reference_format=tmp_path / "missing.toml"
     )
     assert outcome.status == ERROR and outcome.items == [] and outcome.output is None
-    assert not (tmp_path / "reports").exists()
+    assert not (tmp_path / "reports").exists() and not (tmp_path / "runtime").exists()
 
 
 def test_unreadable_pdf_does_not_stop_the_batch(tmp_path):
@@ -571,10 +574,7 @@ def test_unexpected_error_in_one_pdf_is_reported_and_the_batch_continues(tmp_pat
     item = outcome.items[0]
     assert item.report.status == ERROR
     assert only(item, "batch.unexpected").message == "IndexError: synthetic parser failure"
-    assert (
-        outcome.output is not None
-        and (tmp_path / "reports" / f"{spec.product_code}_TS_20300203-040506.check.md").is_file()
-    )
+    assert outcome.output is not None and outcome.record is not None
 
 
 def test_check_writes_nothing_until_saved(tmp_path):
@@ -587,25 +587,8 @@ def test_check_writes_nothing_until_saved(tmp_path):
     assert outcome.status == PASS and outcome.output is None and not outcome.items[0].filled
     assert set(tmp_path.rglob("*")) == before
 
-    save_batch(outcome, tmp_path / "reports", now=NOW)
-    assert outcome.items[0].filled and outcome.output.is_file()
-    assert {p.name for p in outcome.items[0].report_paths} == {
-        f"{pdf.stem}_20300203-040506.check.json",
-        f"{pdf.stem}_20300203-040506.check.md",
-    }
-
-
-def test_existing_reports_are_never_overwritten(tmp_path):
-    spec = Spec()
-    pdf = pdf_for(tmp_path, spec)
-    taken = tmp_path / "reports" / f"{pdf.stem}_20300203-040506.check.json"
-    taken.parent.mkdir()
-    taken.write_text("keep", encoding="utf-8")
-    outcome, _ = batch(tmp_path, [pdf], [reference_row(spec)])
-    item = outcome.items[0]
-    assert taken.read_text(encoding="utf-8") == "keep"
-    assert item.save_error and item.report_paths == ()
-    assert outcome.output is not None, "報告寫不進去不影響核對結果檔"
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
+    assert outcome.items[0].filled and outcome.output.is_file() and outcome.record.is_file()
 
 
 def test_reference_sheet_changed_after_check_writes_nothing(tmp_path):
@@ -615,8 +598,65 @@ def test_reference_sheet_changed_after_check_writes_nothing(tmp_path):
     kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
     outcome = check_batch([pdf], sheet, REVIEW_STANDARD, **kw)
     build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 71})])  # 核對後被改過
-    save_batch(outcome, tmp_path / "reports", now=NOW)
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
     assert outcome.output is None and outcome.status == ERROR
     assert outcome.errors[0].reason_code == "reference_changed"
     assert not outcome.items[0].filled
-    assert not (tmp_path / "reports").exists(), "核對結果檔與報告都不寫"
+    assert not (tmp_path / "reports").exists(), "不寫核對結果檔"
+    assert not (tmp_path / "runtime").exists(), "也不寫核對紀錄"
+
+
+# ---------------------------------------------------------------- 核對紀錄
+
+
+def test_save_writes_one_audit_record_named_like_the_result_file(tmp_path):
+    ok, bad = Spec(), Spec(product_code="029199990002")
+    pdfs = [pdf_for(tmp_path, ok), pdf_for(tmp_path, bad)]
+    outcome, sheet = batch(tmp_path, pdfs, [reference_row(ok), reference_row(bad, **{"K(%)": 71})])
+
+    assert outcome.record == tmp_path / "runtime" / "核對紀錄" / "20300203-040506.json"
+    assert outcome.output.name == "FCN參考條件_核對結果_20300203-040506.xlsx"
+    assert [p.name for p in (tmp_path / "reports").iterdir()] == [outcome.output.name], "輸出資料夾只有核對結果檔"
+    data = json.loads(outcome.record.read_text(encoding="utf-8"))
+    assert (data["status"], data["result_file"]) == ("MISMATCH", str(outcome.output))
+    meta = data["metadata"]
+    assert meta["program_version"] == __version__ and "program_commit" in meta
+    for key, path in (
+        ("review_standard", REVIEW_STANDARD),
+        ("reference_format", REFERENCE_FORMAT),
+        ("issuer_prefixes", ISSUER_PREFIXES),
+    ):
+        assert (meta[key]["path"], meta[key]["sha256"]) == (str(path.resolve()), sha256_of(path)), key
+    assert meta["inputs"]["reference_sheet"]["sha256"] == sha256_of(sheet)
+
+    first, second = data["items"]
+    assert [i["pdf"] for i in data["items"]] == [p.name for p in pdfs]
+    assert first["metadata"]["inputs"]["term_sheet"]["sha256"] == sha256_of(pdfs[0])
+    assert (first["status"], first["filled"], first["reference_row"]) == ("PASS", True, 4)
+    assert {"column": "ISIN Code", "cell": "F4", "action": "fill"}.items() <= first["backfill"][0].items()
+    assert (second["status"], second["filled"]) == ("MISMATCH", False)
+    [strike] = [r for r in second["results"] if r["rule_id"] == "field.strike_pct"]
+    assert strike["status"] == "MISMATCH" and strike["document_evidence"][0]["page"] >= 1
+    assert strike["document_evidence"][0]["text"] and strike["order_source"][0].startswith("樣本清單!")
+
+
+def test_existing_record_is_never_overwritten_and_the_result_file_is_still_written(tmp_path):
+    spec = Spec()
+    taken = tmp_path / "runtime" / "核對紀錄" / "20300203-040506.json"
+    taken.parent.mkdir(parents=True)
+    taken.write_text("keep", encoding="utf-8")
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+    assert taken.read_text(encoding="utf-8") == "keep"
+    assert outcome.output.is_file() and outcome.items[0].filled
+    assert outcome.record is None and outcome.status == ERROR
+    e = outcome.errors[-1]
+    assert (e.rule_id, e.reason_code) == ("output.record", "output_exists") and "核對紀錄" in e.message
+
+
+def test_unwritable_record_folder_is_reported_without_losing_the_result_file(tmp_path):
+    spec = Spec()
+    (tmp_path / "runtime").write_text("不是資料夾", encoding="utf-8")
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+    assert outcome.output.is_file() and outcome.items[0].filled
+    assert outcome.record is None and outcome.status == ERROR
+    assert (outcome.errors[-1].rule_id, outcome.errors[-1].reason_code) == ("output.record", "output_unwritable")

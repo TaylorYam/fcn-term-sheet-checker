@@ -44,7 +44,7 @@ class PanelOutcome:
             f"{unsupported} 份未支援上手",
             f"{counts[CheckStatus.ERROR]} 份執行錯誤",
         ]
-        tail = "按「儲存核對結果」後才會寫出核對結果檔（通過的說明書回填在「回填後」）與報告。"
+        tail = "按「儲存核對結果」後才會寫出核對結果檔（通過的說明書回填在「回填後」）。"
         return f"共 {len(items)} 份：" + "、".join(parts) + "。" + tail
 
 
@@ -52,7 +52,6 @@ class PanelOutcome:
 class SaveReceipt:
     cancelled: bool = False
     output: Path | None = None
-    report_paths: tuple[Path, ...] = ()
     errors: tuple[str, ...] = ()
 
     @property
@@ -64,7 +63,6 @@ class SaveReceipt:
         if self.cancelled:
             return "已取消儲存，核對結果仍保留。"
         lines = [f"核對結果檔：{self.output}" if self.output else "核對結果檔：未儲存"]
-        lines.append(f"報告：已儲存 {len(self.report_paths)} 個檔案")
         lines.extend(self.errors)
         return "\n".join(lines)
 
@@ -79,8 +77,13 @@ class PanelSession:
         *,
         builtin_config_dir: Path | None = None,
         registry: Sequence[Issuer] = REGISTRY,
+        root: Path = Path("."),
     ):
-        """config_dir 有參考條件表格式與上手編號對照就用它的；沒有（舊安裝）就用 builtin_config_dir（版本內建設定）。"""
+        """config_dir 有參考條件表格式與上手編號對照就用它的；沒有（舊安裝）就用 builtin_config_dir（版本內建設定）。
+
+        root 是根目錄（安裝根目錄；直接啟動時為執行目錄），核對紀錄寫到 root/runtime/核對紀錄。
+        """
+        self.root = Path(root).resolve()
         self.review_standard = Path(review_standard).resolve()
         self.reference_format = resolve_config("reference_sheet.toml", config_dir, builtin_config_dir)
         self.issuer_prefixes = resolve_config("issuer_prefixes.toml", config_dir, builtin_config_dir)
@@ -185,16 +188,14 @@ class PanelSession:
         return self._outcome
 
     def save(self, out_dir: Path | None, *, now: dt.datetime | None = None) -> SaveReceipt:
-        """寫報告與核對結果檔到 out_dir；out_dir 為 None 表示使用者取消。"""
+        """寫核對結果檔到 out_dir、核對紀錄到根目錄；out_dir 為 None 表示使用者取消。"""
         if out_dir is None:
             return SaveReceipt(cancelled=True)
         outcome = self.outcome
         if outcome is None:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
-        batch = save_batch(outcome.batch, Path(out_dir), now=now)
-        errors = [f"{i.term_sheet.name} 報告未儲存：{i.save_error}" for i in batch.items if i.save_error]
-        errors += [e.message for e in batch.errors]
+        batch = save_batch(outcome.batch, Path(out_dir), root=self.root, now=now)
+        errors = [e.message for e in batch.errors]
         if self.outcome is not outcome:
             errors.append("儲存期間來源已變更；已寫入的檔案屬於先前核對，請重新載入。")
-        paths = tuple(p for i in batch.items for p in i.report_paths)
-        return SaveReceipt(output=batch.output, report_paths=paths, errors=tuple(errors))
+        return SaveReceipt(output=batch.output, errors=tuple(errors))

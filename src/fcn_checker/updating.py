@@ -130,10 +130,9 @@ def _run(args: list[str], cwd: Path) -> None:
         raise UpdateError("新版安裝無法執行或已逾時；舊版仍可使用。") from error
 
 
-def record_installation(root: Path) -> None:
-    """首次／重新安裝成功後記錄版本；ZIP 安裝若無 Git，版本顯示未知。"""
+def git_revision(root: Path) -> str | None:
+    """root 本身是 Git 工作目錄時回傳 HEAD commit；不是 Git、沒有 git 或查詢失敗時為 None。"""
     root = root.resolve()
-    sha = None
     try:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         repository = subprocess.run(
@@ -154,9 +153,27 @@ def record_installation(root: Path) -> None:
                 creationflags=flags,
             )
             if revision.returncode == 0 and SHA.fullmatch(revision.stdout.strip()):
-                sha = revision.stdout.strip()
+                return revision.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         pass
+    return None
+
+
+def program_commit(root: Path) -> str | None:
+    """執行中程式的 commit：套件所在的 Git 工作目錄優先；PANEL 安裝版沒有 Git，改讀根目錄的版本紀錄；都沒有時為 None。"""
+    source = git_revision(Path(__file__).resolve().parents[2])
+    if source is not None:
+        return source
+    try:
+        return PanelUpdater(root).current
+    except UpdateError:
+        return None
+
+
+def record_installation(root: Path) -> None:
+    """首次／重新安裝成功後記錄版本；ZIP 安裝若無 Git，版本顯示未知。"""
+    root = root.resolve()
+    sha = git_revision(root)
     local = root / ".local"
     local.mkdir(parents=True, exist_ok=True)
     temporary = local / f"installed-{uuid.uuid4().hex}.tmp"

@@ -66,7 +66,7 @@ def environment(tmp_path, monkeypatch, payload=None):
 
 def test_update_pins_commit_installs_isolated_and_preserves_local_files(tmp_path, monkeypatch):
     updater, requests, commands = environment(tmp_path, monkeypatch)
-    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/report.check.json"):
+    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/核對紀錄/20300203-040506.json"):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("local original")
@@ -82,7 +82,7 @@ def test_update_pins_commit_installs_isolated_and_preserves_local_files(tmp_path
     assert installed.release.is_relative_to(tmp_path / ".local/releases")
     assert not (tmp_path / ".venv").exists()
     assert any(command[-6:] == ["-m", "pip", "install", "-c", "constraints.txt", "."] for command in commands)
-    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/report.check.json"):
+    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/核對紀錄/20300203-040506.json"):
         assert (tmp_path / name).read_text() == "local original"
     assert not (tmp_path / ".local/update.lock").exists()
     assert not PanelUpdater(tmp_path).check().available

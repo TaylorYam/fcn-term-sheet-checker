@@ -334,7 +334,7 @@ class PanelWindow:
         self.status_label.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 10))
         ttk.Label(
             frame,
-            text="按「儲存核對結果」才會寫出核對結果檔與報告（原參考條件表不動）；錯誤清單上的說明書請交由人工核對。",
+            text="按「儲存核對結果」才會寫出核對結果檔（原參考條件表不動）；錯誤清單上的說明書請交由人工核對。",
         ).grid(row=9, column=0, columnspan=3, sticky="w")
         root.bind("<Configure>", self._resize)
         root.after(1000, self._watch_sources)
@@ -462,7 +462,7 @@ class PanelWindow:
         if not self.has_result or self._busy_any():
             return
         self._busy(True)
-        destination = filedialog.askdirectory(parent=self.root, title="選取核對結果檔與報告的保存資料夾")
+        destination = filedialog.askdirectory(parent=self.root, title="選取核對結果檔的保存資料夾")
         if not destination:
             self.status.set(self.session.save(None).summary)
             self._busy(False)
@@ -566,7 +566,7 @@ class PanelWindow:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="FCN 本機 PANEL：以參考條件表預覽並核對多份說明書 PDF，按儲存才寫出核對結果檔與報告。"
+        description="FCN 本機 PANEL：以參考條件表預覽並核對多份說明書 PDF，按儲存才寫出核對結果檔。"
     )
     parser.add_argument(
         "--config-dir",
@@ -588,11 +588,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def session_from_args(args: argparse.Namespace) -> PanelSession:
+    """根目錄與設定檔一致：雙擊入口給的安裝根目錄（不是版本資料夾），直接啟動時為執行目錄。"""
+    return PanelSession(
+        args.review_standard,
+        args.config_dir,
+        builtin_config_dir=args.builtin_config_dir,
+        root=args.install_root or Path("."),
+    )
+
+
 def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = None) -> int:
     args = parse_args(argv)
     enable_windows_dpi_awareness()
     root = tk.Tk()
-    session = PanelSession(args.review_standard, args.config_dir, builtin_config_dir=args.builtin_config_dir)
+    session = session_from_args(args)
     PanelWindow(root, session, args.install_root)
     if on_ready is not None:
         root.after_idle(on_ready)

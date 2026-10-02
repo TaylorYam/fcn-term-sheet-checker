@@ -27,11 +27,36 @@ def error_result(rule_id: str, field: str, e: IngestionError) -> CheckResult:
 
 
 def file_meta(path: Path | None) -> dict[str, Any]:
-    """報告 metadata 用的檔名與 sha256；檔案不存在時 sha256 為 None。"""
-    meta: dict[str, Any] = {"file": path.name if path else None, "sha256": None}
+    """核對紀錄 metadata 用的檔名、完整路徑與 sha256；檔案不存在時 sha256 為 None。"""
+    meta: dict[str, Any] = {
+        "file": path.name if path else None,
+        "path": str(path.resolve()) if path else None,
+        "sha256": None,
+    }
     if path is not None and path.is_file():
         meta["sha256"] = sha256_of(path)
     return meta
+
+
+def write_new(path: Path, data: bytes, what: str) -> None:
+    """輸出檔一律新建（exclusive create）：已存在時不覆蓋（output_exists），資料夾或檔案無法寫入時
+    output_unwritable；寫到一半的檔案會移除。`what` 是錯訊裡的檔案名稱，例如「核對結果檔」。"""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)  # 路徑上有同名檔案時 Windows 也丟 FileExistsError
+    except OSError as e:
+        raise IngestionError("output_unwritable", f"無法建立{what}的資料夾 {path.parent}：{e}") from e
+    try:
+        f = path.open("xb")
+    except FileExistsError as e:
+        raise IngestionError("output_exists", f"{what} {path.name} 已經存在，不覆蓋") from e
+    except OSError as e:
+        raise IngestionError("output_unwritable", f"無法寫入{what} {path}：{e}") from e
+    try:
+        with f:
+            f.write(data)
+    except OSError as e:
+        path.unlink(missing_ok=True)
+        raise IngestionError("output_unwritable", f"無法寫入{what} {path}：{e}") from e
 
 
 def sha256_of(path: Path) -> str:
