@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.layout import TextIndex, squash
+from ..parsers.hsbc import ScenarioIndex
 from ..schema import CheckStatus as S
 from ..schema import Evidence
 from . import common
@@ -18,24 +18,9 @@ def number(s):
     return Decimal(s.replace(",", ""))
 
 
-class ScenarioIndex(TextIndex):
-    """保留相鄰數字行的邊界，避免金額尾數與下一項期數相黏。"""
-
-    def __init__(self, lines):
-        self.lines = list(lines)
-        self._starts = []
-        text = ""
-        for line in self.lines:
-            part = squash(line.text)
-            if text and part and text[-1].isdigit() and part[0].isdigit():
-                text += "|"
-            self._starts.append(len(text))
-            text += part
-        self.text = text
-
-
-def run(ctx, first):
+def run(ctx):
     ts = ctx.ts
+    first = ts.f("first_callable_period")
     deps = [
         ts.f(k)
         for k in ["coupon_pa_pct", "tenor_months", "denomination", "currency_zh", "issue_price_pct", "price_table"]
@@ -46,7 +31,7 @@ def run(ctx, first):
             common.doc_review("doc.scenario_parameters", "scenario", bad),
             common.doc_review("doc.scenario_calculations", "scenario", bad),
         ]
-    ti = ScenarioIndex(ts.scenarios)
+    ti = ts.scenario_index
     headings = list(ti.finditer(r"情境分析([一二三四五六])\)"))
     expected_count = 3 if ts.f("ki_type").ok and ts.f("ki_type").value == "none" else 4
     if len(headings) != expected_count or [m[1] for m in headings] != list("一二三四")[:expected_count]:

@@ -11,6 +11,9 @@
 2. 說明書內容辨識出的上手、說明書商品代號前三碼都必須與檔名一致，否則轉人工覆核。
 3. 以商品代號找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
 
+範本辨識與讀出每份說明書各只做一次；配對成功後由單份核對（single_check.py）依序執行所有規則。
+批量入口只負責載入設定與參考條件表、逐份呼叫、單份錯誤隔離與儲存。
+
 只有整份核對 PASS 的說明書才回填；結果另存新檔（原檔不動、不覆蓋既有檔案）。回填流程見 backfill.py。
 """
 
@@ -40,9 +43,10 @@ from .ingestion import IngestionError, error_result, file_meta, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
 from .reporting import STATUS_ZH, write_reports
-from .rules import reference
-from .rules.common import column_checks, doc_review
-from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Line, ParsedField, overall_status
+from .rules.common import doc_review, read_standard
+from .schema import CheckReport, CheckResult, CheckStatus, Evidence, ParsedField, overall_status
+from .single_check import Paired, check_document
+from .standard_fields import TermSheet
 
 RESULT_SHEET = "核對結果"
 UNSUPPORTED = "issuer_unsupported"
@@ -115,8 +119,24 @@ class _Identified:
     issuer: Issuer | None = None
     product_code: ParsedField | None = None
     row: ReferenceRow | None = None
-    lines: list[Line] | None = None
+    ts: TermSheet | None = None  # 讀出結果：同一份說明書只讀一次，核對直接沿用
     pages: int | None = None
+
+    @property
+    def paired(self) -> Paired | None:
+        if self.issuer is None or self.ts is None or self.row is None:
+            return None
+        return Paired(self.issuer, self.ts, self.row)
+
+
+def _unexpected(e: Exception) -> CheckResult:
+    return CheckResult(
+        rule_id="batch.unexpected",
+        field="說明書",
+        status=CheckStatus.ERROR,
+        reason_code="unexpected_error",
+        message=f"{type(e).__name__}: {e}",
+    )
 
 
 def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = None) -> CheckResult:
@@ -138,7 +158,7 @@ def _identify(
     try:
         doc = open_pdf(pdf)
         try:
-            out.lines = extract_lines(doc)
+            lines = extract_lines(doc)
             out.pages = doc.page_count
         finally:
             doc.close()
@@ -159,7 +179,7 @@ def _identify(
         results.append(_review("batch.issuer_prefix", "issuer", UNSUPPORTED, msg))
         return out
 
-    detected, template_result = detect(out.lines, registry)
+    detected, template_result = detect(lines, registry)
     results.append(template_result)
     if detected is None:
         return out
@@ -175,8 +195,13 @@ def _identify(
         )
         return out
     out.issuer = issuer
+    try:
+        out.ts = issuer.read(lines)
+    except Exception as e:  # 上手讀出失敗：這份轉執行錯誤，不中斷整批（預覽也一樣）
+        results.append(_unexpected(e))
+        return out
 
-    pc = out.product_code = issuer.product_code(out.lines)
+    pc = out.product_code = read_standard(out.ts, "product_code")
     if not pc.ok:
         results.append(doc_review("batch.pairing", "product_code", pc))
         return out
@@ -294,32 +319,16 @@ def _check_one(
 ) -> BatchItem:
     metadata = _item_metadata(pdf, meta)
     found = _identify(pdf, sheet, rfmt, prefixes, registry)
-    results = found.results
-    item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, results, [], metadata), issuer=found.issuer_code)
+    issuer = found.issuer
     if found.pages is not None:
         metadata["inputs"]["term_sheet"]["pages"] = found.pages
-    if found.product_code is not None and found.product_code.ok:
-        item.product_code = found.product_code.value
-    issuer, row = found.issuer, found.row
     if issuer is not None:
         metadata["parser"] = {"template": issuer.template_id, "version": issuer.parser_version}
-        item.report.template = issuer.template_id
-    if issuer is not None and row is not None and found.lines is not None:
-        record = sheet.record(row)
-        results.extend(column_checks(record))
-        _, ts = issuer.parse(found.lines)
-        ctx = issuer.context(ts, record, std, rfmt)
-        results.extend(reference.field_rules(ctx))
-        results.extend(issuer.rules(ctx))
-        sched = issuer.autocall_schedule(ts)
-        results.append(reference.first_callable_period(ctx, sched))
-        isin_result, isin_cells = backfill.isin(ctx, rfmt, row, issuer.isin(ts))
-        issue_result, issue_cells = backfill.issue_date(ctx, rfmt, row)
-        dates_result, date_cells = backfill.compare_dates(ctx, rfmt, row, sched)
-        results.extend([isin_result, issue_result, dates_result])
-        item.report.backfill = isin_cells + issue_cells + date_cells
-        item.report.not_covered = [dict(n) for n in issuer.not_covered]
-    item.report.status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
+    template = issuer.template_id if issuer is not None else None
+    report = check_document(found.results, found.paired, sheet, rfmt, std, template, metadata)
+    item = BatchItem(pdf, report, issuer=found.issuer_code)
+    if found.product_code is not None and found.product_code.ok:
+        item.product_code = found.product_code.value
     return item
 
 
@@ -355,14 +364,7 @@ def check_batch(
         try:
             item = _check_one(pdf, sheet, rfmt, std, prefixes, registry, meta)
         except Exception as e:  # 單份非預期錯誤不中斷整批
-            err = CheckResult(
-                rule_id="batch.unexpected",
-                field="說明書",
-                status=CheckStatus.ERROR,
-                reason_code="unexpected_error",
-                message=f"{type(e).__name__}: {e}",
-            )
-            item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [err], [], _item_metadata(pdf, meta)))
+            item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta)))
         items.append(item)
     outcome = BatchOutcome(
         CheckStatus.ERROR, items, reference_sheet, rfmt, reference_sha256=meta["inputs"]["reference_sheet"]["sha256"]

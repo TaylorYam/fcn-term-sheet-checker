@@ -10,8 +10,21 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Protocol
 
+from .parsers.layout import TextIndex
 from .schema import Evidence, FieldStatus, ParsedField
+
+
+class TermSheet(Protocol):
+    """上手 adapter 讀出的說明書：`f(name)` 交出標準欄位（及上手專屬欄位），`full_text` 為全文索引。
+
+    各上手的實作可另外帶該上手規則需要的專屬資料（例：BARC 價格表原文列、HSBC 情境文字索引）。
+    """
+
+    full_text: TextIndex
+
+    def f(self, name: str) -> ParsedField: ...
 
 
 @dataclass(frozen=True)
@@ -67,7 +80,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "ko_observation": "str：D 期間每日觀察／P 每期定日觀察",
     "ko_memory": "bool：是否記憶式",
     "ki_type": "str：none 無 KI／AM 到期觀察／D 每日觀察／M 每月觀察；none 可用 NOT_APPLICABLE 狀態交出",
-    "autocall_schedule": "AutocallSchedule：提前出場排程（目前由上手註冊項目的 autocall_schedule 交出）",
+    "autocall_schedule": "AutocallSchedule：提前出場排程（第一個可提前出場期、期數、各期比價日）",
     "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額的各最低金額出處（最低交易／申購／加購／贖回金額）",
     "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",
     "print_dates": "tuple[Occurrence, ...]：須在交易日當天至允許天數內的刊印日期出處",

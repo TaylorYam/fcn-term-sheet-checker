@@ -5,15 +5,15 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
+from collections import Counter
 
 from fcn_checker.cli import main
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus
 from harness import REVIEW_STANDARD, ROOT
 from reference_synth import build_reference_sheet
-from synth import Spec, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
+from synth import Spec, barc_adapter, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
 
 PASS, REVIEW = CheckStatus.PASS, CheckStatus.REVIEW_REQUIRED
 
@@ -48,7 +48,7 @@ def test_two_issuers_detected_requires_review(tmp_path):
     from harness import ISSUER_PREFIXES
     from reference_synth import REFERENCE_FORMAT
 
-    fake = dataclasses.replace(BARC, code="FAKE", template_id="fake-zh-pd", label="FAKE 測試範本")
+    fake = barc_adapter(code="FAKE", template_id="fake-zh-pd", label="FAKE 測試範本")
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
@@ -70,15 +70,16 @@ def test_two_issuers_detected_requires_review(tmp_path):
 
 def test_adapter_missing_a_standard_field_requires_review_naming_the_field(tmp_path):
     from fcn_checker.batch import check_batch
+    from fcn_checker.parsers import barc as parser
     from harness import ISSUER_PREFIXES
     from reference_synth import REFERENCE_FORMAT
 
-    def parse_without_prices(lines):
-        det, ts = BARC.parse(lines)
+    def read_without_prices(lines):
+        ts = parser.read(lines)
         del ts.fields["underlying_prices"]
-        return det, ts
+        return ts
 
-    adapter = dataclasses.replace(BARC, parse=parse_without_prices)
+    adapter = barc_adapter(read=read_without_prices)
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
@@ -88,6 +89,34 @@ def test_adapter_missing_a_standard_field_requires_review_naming_the_field(tmp_p
     assert (r.status, r.reason_code) == (REVIEW, "document_missing")
     assert "underlying_prices" in r.message
     assert report.status == REVIEW, "缺標準欄位轉人工覆核，不是執行錯誤"
+
+
+def test_each_term_sheet_is_detected_and_read_once_per_check(tmp_path):
+    from fcn_checker.batch import check_batch
+    from fcn_checker.parsers import barc as parser
+    from harness import ISSUER_PREFIXES
+    from reference_synth import REFERENCE_FORMAT
+
+    calls: Counter[str] = Counter()
+
+    def counted(name, fn):
+        def wrapper(lines):
+            calls[name] += 1
+            return fn(lines)
+
+        return wrapper
+
+    adapter = barc_adapter(
+        detect=counted("detect", lambda lines: parser.detect(parser.document(lines))),
+        read=counted("read", parser.read),
+    )
+    specs = [Spec(), Spec(product_code="029199990002")]
+    pdfs = [build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s) for s in specs]
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(s) for s in specs])
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    outcome = check_batch(pdfs, sheet, REVIEW_STANDARD, registry=(adapter,), **kw)
+    assert [i.report.status for i in outcome.items] == [PASS, PASS]
+    assert calls == {"detect": 2, "read": 2}, "每份說明書辨識與讀出各只做一次"
 
 
 def test_review_standard_reads_product_name_per_issuer(tmp_path):

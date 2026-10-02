@@ -154,10 +154,8 @@ def _single(
     )
 
 
-def isin(
-    ctx: Context, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
-) -> tuple[CheckResult, list[CellDecision]]:
-    return _single("backfill.isin", "isin", " ISIN ", fmt, row, pf)
+def isin(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+    return _single("backfill.isin", "isin", " ISIN ", fmt, row, standard_field(ctx, "isin"))
 
 
 def issue_date(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
@@ -166,10 +164,8 @@ def issue_date(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[C
     return _single("backfill.issue_date", key, "發行日", fmt, row, standard_field(ctx, key))
 
 
-def compare_dates(
-    ctx: Context, fmt: ReferenceFormat, row: ReferenceRow, sched: ParsedField
-) -> tuple[CheckResult, list[CellDecision]]:
-    rid, key = "backfill.compare_dates", "compare_dates"
+def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+    rid, key, sched = "backfill.compare_dates", "compare_dates", standard_field(ctx, "autocall_schedule")
     stds = [f"autocall_date_{n}" for n in range(1, SLOTS + 1)]
     ovs = [row.fields.get(s) for s in stds]
     missing = _missing_columns(fmt, row, stds)

@@ -7,14 +7,11 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.hsbc import HsbcTermSheet
 from ..parsers.layout import squash
 from ..schema import CheckStatus as S
-from ..schema import FieldStatus, ParsedField
-from ..standard_fields import AutocallSchedule
+from ..schema import FieldStatus
 from . import common, hsbc_scenario
 
 ISSUER = "HSBC"
@@ -28,10 +25,8 @@ NOT_COVERED = [
 ]
 
 
-@dataclass
-class Context(common.Context):
-    ts: HsbcTermSheet
-    issuer: str = ISSUER
+# 單份核對以共用 Context 呼叫本模組規則；ctx.ts 為 HsbcTermSheet
+Context = common.Context
 
 
 def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
@@ -50,35 +45,8 @@ def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
     )
 
 
-def first_callable(ts) -> ParsedField:
-    coupons, obs = ts.f("coupon_table"), ts.f("ko_observation")
-    deps = [coupons, obs]
-    if obs.ok and obs.value == "D":
-        deps.append(ts.f("ko_start"))
-    else:
-        deps.append(ts.f("ko_table"))
-    bad = next((p for p in deps if not p.ok), None)
-    if bad is not None:
-        return ParsedField("first_callable_period", bad.status, evidence=bad.evidence, note=bad.note)
-    if obs.value == "D":
-        periods = [r["period"] for r in coupons.value if r["end"] == ts.f("ko_start").value]
-    else:
-        first = ts.f("ko_table").value[0]
-        periods = [r["period"] for r in coupons.value if r["payment"] == first["payment"]]
-    ev = [e for p in deps for e in p.evidence]
-    if len(periods) != 1:
-        return ParsedField(
-            "first_callable_period",
-            FieldStatus.AMBIGUOUS,
-            evidence=ev,
-            candidates=periods,
-            note="首個KO日期無法唯一對應配息期別",
-        )
-    return ParsedField("first_callable_period", FieldStatus.PRESENT, periods[0], ev)
-
-
 def schedules(ctx):
-    c, obs, first = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation"), first_callable(ctx.ts)
+    c, obs, first = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation"), ctx.ts.f("first_callable_period")
     deps = [c, obs, first]
     out = []
     if any(not p.ok for p in deps):
@@ -229,9 +197,6 @@ def document_info(ctx):
             f("currency_art5").value,
         )
     )
-    out.append(common.denomination(ctx))
-    out.extend(common.subscription_dates(ctx))
-    out.extend(common.print_dates(ctx))
 
     def norm(s):
         return squash(s).translate(str.maketrans({"(": "（", ")": "）"}))
@@ -250,49 +215,9 @@ def document_info(ctx):
 
 
 def run_all(ctx: Context) -> list:
-    """參考條件表欄位規則（rules/reference.py）之後執行：說明書內部規則與審查標準。"""
+    """說明書內部規則：只用讀出結果與審查標準，不碰參考條件表。"""
     out = prices(ctx)
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
-    out.extend(
-        [
-            common.approval_date(ctx),
-            common.chairman(ctx),
-            common.fixed_warning(ctx),
-            common.risk_level(ctx),
-            common.forbidden_wording(ctx),
-            common.issue_price(ctx),
-        ]
-    )
-    out.extend(common.issuer_name(ctx))
-    out.extend(common.distributor_info(ctx))
-    out.extend(common.fees(ctx))
-    out.extend(common.product_name(ctx))
-    out.extend(hsbc_scenario.run(ctx, first_callable(ctx.ts)))
+    out.extend(hsbc_scenario.run(ctx))
     return out
-
-
-def autocall_schedule(ts: HsbcTermSheet) -> ParsedField:
-    """提供共用參考條件表流程的期別與比價日，填格政策由 reference 決定。"""
-    first, obs, coupons = first_callable(ts), ts.f("ko_observation"), ts.f("coupon_table")
-    bad = next((p for p in [first, obs, coupons] if not p.ok), None)
-    if bad is not None:
-        return ParsedField("autocall_schedule", bad.status, evidence=bad.evidence, note=bad.note)
-    if obs.value == "D":
-        dates = {row["period"]: row["end"] for row in coupons.value if row["period"] >= first.value}
-    else:
-        ko = ts.f("ko_table")
-        if not ko.ok:
-            return ParsedField("autocall_schedule", ko.status, evidence=ko.evidence, note=ko.note)
-        dates = {}
-        for row in ko.value:
-            periods = [c["period"] for c in coupons.value if c["payment"] == row["payment"]]
-            if len(periods) != 1:
-                return ParsedField.invalid("autocall_schedule", [], "KO 付款日無法唯一對應期別")
-            dates[periods[0]] = row["decision"]
-    return ParsedField(
-        "autocall_schedule",
-        FieldStatus.PRESENT,
-        AutocallSchedule(obs.value, first.value, len(coupons.value), dates),
-        [e for p in [first, obs, coupons] for e in p.evidence],
-    )

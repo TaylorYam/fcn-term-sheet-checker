@@ -721,9 +721,9 @@ def _scenario_returns(ti: TextIndex) -> dict[str, ParsedField]:
 # ---------------------------------------------------------------- 入口
 
 
-def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
+def read(lines: Sequence[Line]) -> BarcTermSheet:
+    """讀出標準欄位與 BARC 規則需要的專屬資料（範本辨識另由 `detect` 負責，不在這裡重做）。"""
     doc = document(lines)
-    det = detect(doc)
     flds: dict[str, ParsedField] = {}
     all_lines = list(lines)
 
@@ -776,6 +776,7 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds["guaranteed_periods"] = schedule.guaranteed_periods(flds["ko_table"])
     flds["guaranteed_periods_text"] = schedule.guaranteed_periods_text(doc, arts.get(13))
     flds["observation_t_ranges"] = schedule.observation_t_ranges(doc, arts.get(13))
+    flds["autocall_schedule"] = schedule.autocall_schedule(flds.__getitem__)
 
     s16 = TextIndex(doc.span_lines(arts.get(16)))
     flds["scenario_notional"] = _scenario_notional(s16)
@@ -815,4 +816,4 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
         "annual": _mentions(doc, arts, _ANNUAL_PATTERNS),
         "repeat": _repeat_mentions(doc, arts, s16),
     }
-    return det, BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc, scenario_rows, header_pcts)
+    return BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc, scenario_rows, header_pcts)

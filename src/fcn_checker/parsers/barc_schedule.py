@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from ..schema import Line, ParsedField
+from ..schema import Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import AutocallSchedule
 from .layout import Document, Span, parse_date, squash
 
 # 表頭文字 → 欄位鍵
@@ -280,3 +282,51 @@ def observation_t_ranges(doc: Document, art13: Span | None) -> ParsedField:
     if not ranges:
         return ParsedField.invalid(name, block, "定義句找不到「t 等於…」")
     return ParsedField.present(name, ranges, block)
+
+
+def autocall_schedule(f: Callable[[str], ParsedField]) -> ParsedField:
+    """由 §13 提前出場表推得提前出場排程（第一個可提前出場期、各期比價日）。
+
+    D：Non-Call = 保證配息期 G（第 G 期期始日 N/A、期末日起可提前出場），比價日 = 各期期末日。
+    P：Non-Call = G + 1，比價日 = 各期自動提前出場評價日（或評價日表的評價日）。
+    D 型第 1 期期始日就有日期（G = 0，從第一天開始比價）尚無已確認的填法，轉人工覆核。
+    """
+    name = "autocall_schedule"
+    obs, ko, g, text = (f(k) for k in ("ko_observation", "ko_table", "guaranteed_periods", "guaranteed_periods_text"))
+    for pf in (obs, ko, g):
+        if not pf.ok:
+            return ParsedField(name, pf.status, None, list(pf.evidence), note=pf.note)
+    if text.ok and text.value != g.value:
+        return ParsedField(
+            name,
+            FieldStatus.INVALID,
+            None,
+            g.evidence + text.evidence,
+            note="提前出場表與 §13(7) 定義句推得的保證配息期不同",
+        )
+    table: Table = ko.value
+    if obs.value == "D":
+        if g.value == 0:
+            return ParsedField(
+                name,
+                FieldStatus.INVALID,
+                None,
+                list(g.evidence),
+                note="第 1 期期始日就有日期（從第一天開始比價），比價日填法尚未確認",
+            )
+        first, key = g.value, "end"
+    else:
+        first = g.value + 1
+        key = "ko_valuation" if table.kind == "ko_fixed" else "valuation"
+    dates = {r.t: r.get(key) for r in table.rows if r.t >= first}
+    bad = [t for t, d in dates.items() if not isinstance(d, dt.date)]
+    if bad:
+        return ParsedField(
+            name,
+            FieldStatus.INVALID,
+            None,
+            [Evidence.of(h) for h in table.header],
+            note="以下期別的比價日無法辨識：" + "、".join(f"第 {t} 期" for t in bad),
+        )
+    sched = AutocallSchedule(obs.value, first, len(table.rows), dates)
+    return ParsedField(name, FieldStatus.PRESENT, sched, list(g.evidence))

@@ -1,38 +1,38 @@
-"""上手註冊表：每家上手的範本辨識、擷取、規則入口與參考條件表需要的擷取能力。
+"""上手註冊表：每家上手的識別資料、範本辨識、讀出與說明書內部規則（ADR 0005）。
 
-新增上手時在 `REGISTRY` 登記一筆，並在 `config/issuer_prefixes.toml` 登記上手編號（docs/issuer-onboarding.md §6）；
-批量入口、CLI 與 PANEL 都由這裡分派。
+上手 adapter 只提供這四樣；參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填都是各上手共用的規則，
+由單份核對（single_check.py）依序執行。新增上手時在 `REGISTRY` 登記一筆，並在 `config/issuer_prefixes.toml`
+登記上手編號（docs/issuer-onboarding.md §6）；批量入口、CLI 與 PANEL 都由這裡分派。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
 
-from .config import ReferenceFormat, ReviewStandard
-from .orders.reference import OrderRecord
 from .parsers import barc as barc_parser
 from .parsers import hsbc as hsbc_parser
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
-from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Line, ParsedField
+from .rules.common import Context
+from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Line
+from .standard_fields import TermSheet
 
 
 @dataclass(frozen=True)
 class Issuer:
+    # 識別資料
     code: str  # 上手代號（例：BARC），與上手編號對照、參考條件表「發行機構」設定相同
     template_id: str
     label: str
     parser_version: str
+    not_covered: tuple[dict[str, str], ...]  # 報告「未涵蓋」區的固定清單
+    # 辨識：文字行 → 是否為這家上手的範本（含證據）；一次核對中每份說明書只呼叫一次
     detect: Callable[[Sequence[Line]], DetectionResult]
-    parse: Callable[[Sequence[Line]], tuple[DetectionResult, Any]]
-    product_code: Callable[[Sequence[Line]], ParsedField]
-    context: Callable[[Any, OrderRecord, ReviewStandard, ReferenceFormat], Any]
-    rules: Callable[[Any], list[CheckResult]]  # 說明書內部規則與審查標準（表上欄位見 rules/reference.py）
-    isin: Callable[[Any], ParsedField]  # 說明書 ISIN（含證據）
-    autocall_schedule: Callable[[Any], ParsedField]  # 值為 standard_fields.AutocallSchedule
-    not_covered: tuple[dict[str, str], ...]
+    # 讀出：文字行 → 標準欄位（standard_fields.STANDARD_FIELDS）＋該上手規則需要的專屬資料；每份只呼叫一次
+    read: Callable[[Sequence[Line]], TermSheet]
+    # 說明書內部規則：只用讀出結果與審查標準（例外：BARC 月配息率推算另讀表上年利率與天期，見 Issue #54 決定）
+    rules: Callable[[Context], list[CheckResult]]
 
 
 BARC = Issuer(
@@ -40,14 +40,10 @@ BARC = Issuer(
     template_id=barc_parser.TEMPLATE_ID,
     label="BARC 中文產品說明書",
     parser_version=barc_parser.PARSER_VERSION,
-    detect=lambda lines: barc_parser.detect(barc_parser.document(lines)),
-    parse=barc_parser.parse,
-    product_code=barc_parser.product_code,
-    context=barc_rules.Context,
-    rules=barc_rules.run_all,
-    isin=lambda ts: ts.f("isin"),
-    autocall_schedule=barc_rules.autocall_schedule,
     not_covered=tuple(barc_rules.NOT_COVERED),
+    detect=lambda lines: barc_parser.detect(barc_parser.document(lines)),
+    read=barc_parser.read,
+    rules=barc_rules.run_all,
 )
 
 HSBC = Issuer(
@@ -55,14 +51,10 @@ HSBC = Issuer(
     template_id=hsbc_parser.TEMPLATE_ID,
     label="HSBC 中文產品說明書",
     parser_version=hsbc_parser.PARSER_VERSION,
-    detect=hsbc_parser.detect,
-    parse=hsbc_parser.parse,
-    product_code=hsbc_parser.product_code,
-    context=hsbc_rules.Context,
-    rules=hsbc_rules.run_all,
-    isin=lambda ts: ts.f("isin"),
-    autocall_schedule=hsbc_rules.autocall_schedule,
     not_covered=tuple(hsbc_rules.NOT_COVERED),
+    detect=hsbc_parser.detect,
+    read=hsbc_parser.read,
+    rules=hsbc_rules.run_all,
 )
 
 REGISTRY: tuple[Issuer, ...] = (BARC, HSBC)

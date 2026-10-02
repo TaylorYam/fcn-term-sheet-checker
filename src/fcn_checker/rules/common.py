@@ -12,22 +12,14 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any
 
 from ..config import NAME_FLAGS, IssuerStandard, ReferenceFormat, ReviewStandard
 from ..orders.reference import OrderRecord
-from ..parsers.layout import TextIndex, squash
+from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import STANDARD_FIELDS, Occurrence
-
-
-class TermSheet(Protocol):
-    """各上手 parser 的擷取結果：標準欄位與全文索引。"""
-
-    full_text: TextIndex
-
-    def f(self, name: str) -> ParsedField: ...
+from ..standard_fields import STANDARD_FIELDS, Occurrence, TermSheet
 
 
 @dataclass
@@ -46,13 +38,17 @@ class Context:
 # ---------------------------------------------------------------- 共用
 
 
-def standard_field(ctx: Context, name: str) -> ParsedField:
+def read_standard(ts: TermSheet, name: str) -> ParsedField:
     """讀說明書標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
     assert name in STANDARD_FIELDS, f"{name} 不是標準欄位"
     try:
-        return ctx.ts.f(name)
+        return ts.f(name)
     except KeyError:
         return ParsedField.missing(name, f"上手未提供標準欄位「{name}」")
+
+
+def standard_field(ctx: Context, name: str) -> ParsedField:
+    return read_standard(ctx.ts, name)
 
 
 def result(
@@ -642,3 +638,25 @@ def product_name(ctx: Context) -> list[CheckResult]:
             )
         )
     return out
+
+
+# ---------------------------------------------------------------- 入口
+
+
+def review_standard_rules(ctx: Context) -> list[CheckResult]:
+    """審查標準規則：各上手共用，依上手代號取得已解析的審查標準；只用說明書，不碰參考條件表。"""
+    return [
+        denomination(ctx),
+        *subscription_dates(ctx),
+        *print_dates(ctx),
+        approval_date(ctx),
+        chairman(ctx),
+        fixed_warning(ctx),
+        risk_level(ctx),
+        forbidden_wording(ctx),
+        *product_name(ctx),
+        *issuer_name(ctx),
+        *distributor_info(ctx),
+        *fees(ctx),
+        issue_price(ctx),
+    ]
