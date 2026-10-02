@@ -427,8 +427,8 @@ def field_rules(ctx: Context) -> list[CheckResult]:
 # ---------------------------------------------------------------- Non-Call
 
 
-def first_callable_period(ctx: Context, sched: ParsedField) -> CheckResult:
-    rid, key = "field.first_callable_period", "first_callable_period"
+def first_callable_period(ctx: Context) -> CheckResult:
+    rid, key, sched = "field.first_callable_period", "first_callable_period", standard_field(ctx, "autocall_schedule")
     v, ov, problem = order_value(ctx, key, rid, key, sched, to_int, "整數")
     if problem:
         return problem

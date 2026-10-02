@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD
 from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
-from synth import SYNTH_ISIN, Spec, build_pdf, reference_row, schedule_rows
+from synth import SYNTH_ISIN, Spec, barc_adapter, build_pdf, reference_row, schedule_rows
 
 PASS, MISMATCH, REVIEW, ERROR = (
     CheckStatus.PASS,
@@ -239,9 +238,7 @@ def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
 
 
 def test_term_sheet_content_of_another_issuer_requires_review(tmp_path):
-    other = dataclasses.replace(
-        BARC, code="FAKE", template_id="fake-zh-pd", detect=lambda lines: DetectionResult(False)
-    )
+    other = barc_adapter(code="FAKE", template_id="fake-zh-pd", detect=lambda lines: DetectionResult(False))
     spec = Spec(product_code="777199990001")
     outcome, _ = batch(
         tmp_path,
@@ -432,10 +429,10 @@ def test_unreadable_pdf_does_not_stop_the_batch(tmp_path):
 
 
 def test_unexpected_error_in_one_pdf_is_reported_and_the_batch_continues(tmp_path):
-    def broken_parse(lines):
+    def broken_read(lines):
         raise IndexError("synthetic parser failure")
 
-    broken = dataclasses.replace(BARC, parse=broken_parse)
+    broken = barc_adapter(read=broken_read)
     spec = Spec()
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], registry=(broken,))
     item = outcome.items[0]

@@ -72,12 +72,29 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
     return DetectionResult(not failed, failed, [Evidence.of(x) for x in doc.before_chapter1()[:2]])
 
 
+class ScenarioIndex(TextIndex):
+    """保留相鄰數字行的邊界，避免金額尾數與下一項期數相黏。"""
+
+    def __init__(self, lines):
+        self.lines = list(lines)
+        self._starts = []
+        text = ""
+        for line in self.lines:
+            part = squash(line.text)
+            if text and part and text[-1].isdigit() and part[0].isdigit():
+                text += "|"
+            self._starts.append(len(text))
+            text += part
+        self.text = text
+
+
 @dataclass
 class HsbcTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
     scenarios: list[Line]
+    scenario_index: ScenarioIndex  # 第 18 條情境文字（保留相鄰數字行的邊界）
 
     def f(self, name: str) -> ParsedField:
         return self.fields.get(name, ParsedField.missing(name))
@@ -95,7 +112,8 @@ def _standard_prices(table: ParsedField) -> ParsedField:
     return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
 
 
-def parse(lines: Sequence[Line]) -> tuple[DetectionResult, HsbcTermSheet]:
+def read(lines: Sequence[Line]) -> HsbcTermSheet:
+    """讀出標準欄位與 HSBC 規則需要的專屬資料（範本辨識另由 `detect` 負責，不在這裡重做）。"""
     doc = document(lines)
     art = doc.articles(1)
     cover = doc.before_chapter1()
@@ -268,4 +286,62 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, HsbcTermSheet]:
         fields["scenario_table"] = tables.price_table("scenario_table", scenarios[a:b])
     else:
         fields["scenario_table"] = ParsedField.missing("scenario_table", "情境價格表錨點缺漏／重複")
-    return detect(lines), HsbcTermSheet(fields, TextIndex(doc.lines), doc, scenarios)
+    f = fields.get
+    fields["first_callable_period"] = first_callable(lambda k: f(k, ParsedField.missing(k)))
+    fields["autocall_schedule"] = autocall_schedule(
+        lambda k: f(k, ParsedField.missing(k)), fields["first_callable_period"]
+    )
+    return HsbcTermSheet(fields, TextIndex(doc.lines), doc, scenarios, ScenarioIndex(scenarios))
+
+
+def first_callable(f: Callable[[str], ParsedField]) -> ParsedField:
+    coupons, obs = f("coupon_table"), f("ko_observation")
+    deps = [coupons, obs]
+    if obs.ok and obs.value == "D":
+        deps.append(f("ko_start"))
+    else:
+        deps.append(f("ko_table"))
+    bad = next((p for p in deps if not p.ok), None)
+    if bad is not None:
+        return ParsedField("first_callable_period", bad.status, evidence=bad.evidence, note=bad.note)
+    if obs.value == "D":
+        periods = [r["period"] for r in coupons.value if r["end"] == f("ko_start").value]
+    else:
+        first = f("ko_table").value[0]
+        periods = [r["period"] for r in coupons.value if r["payment"] == first["payment"]]
+    ev = [e for p in deps for e in p.evidence]
+    if len(periods) != 1:
+        return ParsedField(
+            "first_callable_period",
+            FieldStatus.AMBIGUOUS,
+            evidence=ev,
+            candidates=periods,
+            note="首個KO日期無法唯一對應配息期別",
+        )
+    return ParsedField("first_callable_period", FieldStatus.PRESENT, periods[0], ev)
+
+
+def autocall_schedule(f: Callable[[str], ParsedField], first: ParsedField) -> ParsedField:
+    """標準欄位 `autocall_schedule`：期別與比價日；比價日填法由共用回填規則決定。"""
+    obs, coupons = f("ko_observation"), f("coupon_table")
+    bad = next((p for p in [first, obs, coupons] if not p.ok), None)
+    if bad is not None:
+        return ParsedField("autocall_schedule", bad.status, evidence=bad.evidence, note=bad.note)
+    if obs.value == "D":
+        dates = {row["period"]: row["end"] for row in coupons.value if row["period"] >= first.value}
+    else:
+        ko = f("ko_table")
+        if not ko.ok:
+            return ParsedField("autocall_schedule", ko.status, evidence=ko.evidence, note=ko.note)
+        dates = {}
+        for row in ko.value:
+            periods = [c["period"] for c in coupons.value if c["payment"] == row["payment"]]
+            if len(periods) != 1:
+                return ParsedField.invalid("autocall_schedule", [], "KO 付款日無法唯一對應期別")
+            dates[periods[0]] = row["decision"]
+    return ParsedField(
+        "autocall_schedule",
+        FieldStatus.PRESENT,
+        standard_fields.AutocallSchedule(obs.value, first.value, len(coupons.value), dates),
+        [e for p in [first, obs, coupons] for e in p.evidence],
+    )

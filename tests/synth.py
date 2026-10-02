@@ -14,6 +14,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
+from fcn_checker.issuers import Issuer
 from harness import REVIEW_STANDARD, check_rows
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import make_row
@@ -673,3 +674,21 @@ def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = N
     spec = spec or Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
     return check_pdf(tmp_path, pdf, spec, overrides=overrides, headers=headers)
+
+
+def barc_adapter(**overrides: Any) -> Issuer:
+    """依上手 adapter interface 建立以 BARC parser 為底的測試用上手；overrides 換掉其中幾項。"""
+    from fcn_checker.parsers import barc as parser
+    from fcn_checker.rules import barc as rules
+
+    fields: dict[str, Any] = {
+        "code": "BARC",
+        "template_id": parser.TEMPLATE_ID,
+        "label": "BARC 測試 adapter",
+        "parser_version": "test",
+        "not_covered": (),
+        "detect": lambda lines: parser.detect(parser.document(lines)),
+        "read": parser.read,
+        "rules": rules.run_all,
+    }
+    return Issuer(**{**fields, **overrides})

@@ -8,31 +8,18 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.barc import BarcTermSheet
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..parsers.layout import squash
-from ..schema import CheckResult, Evidence, FieldStatus, ParsedField
+from ..schema import CheckResult, Evidence, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import AutocallSchedule
 from . import common
 from .common import (
-    approval_date,
-    chairman,
-    distributor_info,
     doc_ki,
     doc_review,
-    fees,
-    fixed_warning,
-    forbidden_wording,
-    issue_price,
-    issuer_name,
     order_value,
-    product_name,
     result,
-    risk_level,
     to_decimal,
     to_int,
 )
@@ -60,10 +47,8 @@ NOT_COVERED: list[dict[str, str]] = [
 ISSUER = "BARC"
 
 
-@dataclass
-class Context(common.Context):
-    ts: BarcTermSheet
-    issuer: str = ISSUER
+# 單份核對以共用 Context 呼叫本模組規則；ctx.ts 為 BarcTermSheet
+Context = common.Context
 
 
 # ---------------------------------------------------------------- 推算規則
@@ -726,59 +711,6 @@ def observation_t_range(ctx: Context) -> CheckResult:
     )
 
 
-# ---------------------------------------------------------------- 提前出場排程（給 rules/reference.py）
-
-
-def autocall_schedule(ts: BarcTermSheet) -> ParsedField:
-    """由 §13 提前出場表推得提前出場排程（第一個可提前出場期、各期比價日）。
-
-    D：Non-Call = 保證配息期 G（第 G 期期始日 N/A、期末日起可提前出場），比價日 = 各期期末日。
-    P：Non-Call = G + 1，比價日 = 各期自動提前出場評價日（或評價日表的評價日）。
-    D 型第 1 期期始日就有日期（G = 0，從第一天開始比價）尚無已確認的填法，轉人工覆核。
-    """
-    name = "autocall_schedule"
-    obs, ko, g, text = (
-        ts.f(k) for k in ("ko_observation", "ko_table", "guaranteed_periods", "guaranteed_periods_text")
-    )
-    for pf in (obs, ko, g):
-        if not pf.ok:
-            return ParsedField(name, pf.status, None, list(pf.evidence), note=pf.note)
-    if text.ok and text.value != g.value:
-        return ParsedField(
-            name,
-            FieldStatus.INVALID,
-            None,
-            g.evidence + text.evidence,
-            note="提前出場表與 §13(7) 定義句推得的保證配息期不同",
-        )
-    table: Table = ko.value
-    if obs.value == "D":
-        if g.value == 0:
-            return ParsedField(
-                name,
-                FieldStatus.INVALID,
-                None,
-                list(g.evidence),
-                note="第 1 期期始日就有日期（從第一天開始比價），比價日填法尚未確認",
-            )
-        first, key = g.value, "end"
-    else:
-        first = g.value + 1
-        key = "ko_valuation" if table.kind == "ko_fixed" else "valuation"
-    dates = {r.t: r.get(key) for r in table.rows if r.t >= first}
-    bad = [t for t, d in dates.items() if not isinstance(d, dt.date)]
-    if bad:
-        return ParsedField(
-            name,
-            FieldStatus.INVALID,
-            None,
-            _header_ev(table),
-            note="以下期別的比價日無法辨識：" + "、".join(f"第 {t} 期" for t in bad),
-        )
-    sched = AutocallSchedule(obs.value, first, len(table.rows), dates)
-    return ParsedField(name, FieldStatus.PRESENT, sched, list(g.evidence))
-
-
 # ---------------------------------------------------------------- 入口
 
 
@@ -788,7 +720,7 @@ def run_all(ctx: Context) -> list[CheckResult]:
 
 
 def document_rules(ctx: Context) -> list[CheckResult]:
-    """說明書內部規則與審查標準：不使用參考條件表的值。"""
+    """說明書內部規則：不使用參考條件表的值。"""
     return [
         *coupon_consistency(ctx),
         *prices(ctx),
@@ -805,17 +737,4 @@ def document_rules(ctx: Context) -> list[CheckResult]:
         *coupon_repeats(ctx),
         *scenario_returns(ctx),
         observation_t_range(ctx),
-        common.denomination(ctx),
-        *common.subscription_dates(ctx),
-        *common.print_dates(ctx),
-        approval_date(ctx),
-        chairman(ctx),
-        fixed_warning(ctx),
-        risk_level(ctx),
-        forbidden_wording(ctx),
-        *product_name(ctx),
-        *issuer_name(ctx),
-        *distributor_info(ctx),
-        *fees(ctx),
-        issue_price(ctx),
     ]

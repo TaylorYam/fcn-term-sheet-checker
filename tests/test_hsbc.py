@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 import json
 from decimal import Decimal
@@ -241,7 +240,19 @@ def test_ambiguous_registry_and_damaged_pdf(tmp_path):
     s = Spec()
     pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
-    fake = dataclasses.replace(HSBC, code="FAKE")
+    from fcn_checker.issuers import Issuer
+    from fcn_checker.parsers import hsbc as parser
+
+    fake = Issuer(
+        code="FAKE",
+        template_id="fake-zh-pd",
+        label="FAKE 測試範本",
+        parser_version="test",
+        not_covered=(),
+        detect=parser.detect,
+        read=parser.read,
+        rules=lambda ctx: [],
+    )
     r = run_check(pdf, excel, REVIEW_STANDARD, ORDER_FORMAT, registry=(HSBC, fake))
     assert any(x.reason_code == "template_ambiguous" for x in r.results)
     pdf.write_bytes(b"broken pdf")
