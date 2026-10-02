@@ -393,7 +393,7 @@ def test_result_sheet_lists_every_pdf(tmp_path):
         "報告檔名": f"{pdfs[0].stem}_20300203-040506.check.md",
     }
     assert rows[1]["整體狀態"] == "MISMATCH（不一致）" and rows[1]["已回填"] == "否"
-    assert "field.strike_pct" in rows[1]["問題摘要"]
+    assert rows[1]["問題摘要"] == "K(%)對不起來：參考條件表 71.00／說明書 70.00", "問題摘要用中文錯訊，不含 rule_id"
     assert (tmp_path / "reports" / f"{pdfs[1].stem}_20300203-040506.check.json").is_file()
 
 

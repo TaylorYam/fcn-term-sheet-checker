@@ -14,14 +14,36 @@ from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
 from .ingestion import IngestionError
+from .messages import problem_message, subject
 from .panel_workflow import PanelOutcome, PanelSession, SaveReceipt
-from .reporting import FIELD_ZH, STATUS_ZH
+from .reporting import STATUS_ZH
 from .schema import CheckResult, CheckStatus
 from .updating import PanelUpdater, UpdateError
 
 
 def display_value(value: object) -> str:
     return "未提供" if value is None else str(value)
+
+
+_DETAIL_DEFAULTS = {
+    CheckStatus.PASS: "此已核對項目一致。",
+    CheckStatus.NOT_APPLICABLE: "依明確規則，此項目不適用。",
+}
+
+
+def result_detail(row: CheckResult) -> str:
+    """結果明細：有問題的項目用共用錯訊（不含 rule_id），再列雙方值、來源、容差與 PDF 原文。"""
+    reason = problem_message(row) if row.status.is_problem else row.message or _DETAIL_DEFAULTS[row.status]
+    evidence = (
+        "\n".join(f"第 {e.page} 頁：{e.text}" for e in row.document_evidence) or "無法定位：沒有可用的 PDF 原文證據。"
+    )
+    return (
+        f"{subject(row)}｜{STATUS_ZH[row.status]}\n"
+        f"原因：{reason}\n"
+        f"參考條件表／標準值：{display_value(row.expected)}\nPDF 值：{display_value(row.actual)}\n"
+        f"參考條件表來源：{'、'.join(row.order_source) or '非參考條件表欄位，依審查標準或文件內部規則核對。'}\n"
+        f"容差：{row.tolerance or '未設定'}\nPDF 原文：\n{evidence}"
+    )
 
 
 def enable_windows_dpi_awareness() -> None:
@@ -161,7 +183,7 @@ class ResultPane(ttk.Frame):
                 "end",
                 values=(
                     STATUS_ZH[row.status],
-                    FIELD_ZH.get(row.field, row.field),
+                    subject(row),
                     display_value(row.expected),
                     display_value(row.actual),
                     pages,
@@ -185,26 +207,7 @@ class ResultPane(ttk.Frame):
         selection = self.table.selection()
         if not selection or selection[0] not in self.rows:
             return
-        row = self.rows[selection[0]]
-        defaults = {
-            CheckStatus.PASS: "此已核對項目一致。",
-            CheckStatus.MISMATCH: "兩份來源值不一致，依明定容差比對。",
-            CheckStatus.REVIEW_REQUIRED: "無法可靠判定，請人工覆核。",
-            CheckStatus.NOT_APPLICABLE: "依明確規則，此項目不適用。",
-            CheckStatus.ERROR: "執行失敗，請確認來源與設定。",
-        }
-        evidence = (
-            "\n".join(f"第 {e.page} 頁：{e.text}" for e in row.document_evidence)
-            or "無法定位：沒有可用的 PDF 原文證據。"
-        )
-        _write(
-            self.detail,
-            f"{FIELD_ZH.get(row.field, row.field)}｜{STATUS_ZH[row.status]}\n"
-            f"原因：{row.message or defaults[row.status]}\n"
-            f"參考條件表／標準值：{display_value(row.expected)}\nPDF 值：{display_value(row.actual)}\n"
-            f"參考條件表來源：{'、'.join(row.order_source) or '非參考條件表欄位，依審查標準或文件內部規則核對。'}\n"
-            f"規則：{row.rule_id}；容差：{row.tolerance or '未設定'}\nPDF 原文：\n{evidence}",
-        )
+        _write(self.detail, result_detail(self.rows[selection[0]]))
 
 
 class PanelWindow:

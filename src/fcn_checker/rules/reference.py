@@ -34,6 +34,7 @@ __all__ = ["AutocallSchedule", "field_rules", "first_callable_period"]
 Q4 = Decimal("0.0001")
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
 OBS_LABEL = {"D": "期間每日觀察", "P": "期末定日觀察"}
+UNDERLYINGS = "標的"  # UL_1～UL_5 合起來核對，錯訊用這個名稱
 PRICE_COLUMNS = (
     ("initial", "initial_price", "進場價"),
     ("strike", "strike_price", "執行價"),
@@ -149,11 +150,14 @@ def underlyings(ctx: Context) -> CheckResult:
             ov=ovs,
             reason="order_invalid",
             message=f"{ctx.order.source}的標的代號中間有空白欄",
+            column=UNDERLYINGS,
         )
     tickers = [str(values[i]) for i in filled]
     used = [ovs[i] for i in filled]
     if not pf.ok:
-        return doc_review(rid, "underlyings", pf, tickers, used)
+        problem = doc_review(rid, "underlyings", pf, tickers, used)
+        problem.column = UNDERLYINGS
+        return problem
     ok = tickers == pf.value
     msg = "" if ok else "彭博代號須依順序逐字相等（含交易所尾碼），數量也須相同"
     return result(
@@ -166,6 +170,7 @@ def underlyings(ctx: Context) -> CheckResult:
         ov=used,
         reason="" if ok else "value_mismatch",
         message=msg,
+        column=UNDERLYINGS,
     )
 
 
@@ -277,6 +282,7 @@ def ki_pct(ctx: Context) -> CheckResult:
             key,
             S.NOT_APPLICABLE if ok else S.MISMATCH,
             expected=v,
+            actual=None if ok else KI_LABEL["none"],
             evidence=kt.evidence,
             ov=[ov],
             reason="" if ok else "value_mismatch",
@@ -338,6 +344,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
                         field,
                         S.NOT_APPLICABLE if ok else S.MISMATCH,
                         expected=ov.value,
+                        actual=None if ok else "無下限價（無 KI）",
                         evidence=ev,
                         ov=[ov],
                         reason="" if ok else "value_mismatch",

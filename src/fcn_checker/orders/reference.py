@@ -109,6 +109,7 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
     unknown: list[OrderValue] = []
     duplicate: list[OrderValue] = []
     seen: set[str] = set()
+    headers: dict[int, str] = {}
     for col in range(1, ws.max_column + 1):
         header = normalize_cell(ws.cell(row=fmt.header_row, column=col).value)
         if header is None:
@@ -119,6 +120,7 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
             duplicate.append(where)
             continue
         seen.add(header)
+        headers[col] = header
         if header in (fmt.key_column, fmt.issuer_column):
             special[header] = col
         if header in fmt.columns:
@@ -144,13 +146,13 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
             cell = f"{get_column_letter(col)}{r}"
             raw = ws.cell(row=r, column=col).value
             value = _code(raw) if col == key_col else normalize_cell(raw)
-            fields[std] = OrderValue(value, ref(cell))
+            fields[std] = OrderValue(value, ref(cell), headers[col])
             cells[std] = cell
         rows.append(
             ReferenceRow(
                 r,
-                OrderValue(code, ref(f"{get_column_letter(key_col)}{r}")),
-                OrderValue(issuer_v, issuer_ref),
+                OrderValue(code, ref(f"{get_column_letter(key_col)}{r}"), fmt.key_column),
+                OrderValue(issuer_v, issuer_ref, fmt.issuer_column),
                 fields,
                 cells,
             )

@@ -41,6 +41,7 @@ from .config import (
 from .extraction import extract_lines
 from .ingestion import IngestionError, error_result, file_meta, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
+from .messages import problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
 from .reporting import STATUS_ZH, write_reports
 from .rules.common import doc_review, read_standard
@@ -378,10 +379,11 @@ def check_batch(
 
 def _summary(report: CheckReport) -> tuple[int, str]:
     problems = [r for r in report.results if r.status.is_problem]
-    parts = [f"{r.rule_id} {r.field}：{r.message or r.reason_code}" for r in problems[:5]]
-    if len(problems) > 5:
+    messages = list(dict.fromkeys(problem_message(r) for r in problems))  # 同一句錯訊只列一次
+    parts = messages[:5]
+    if len(messages) > 5:
         parts.append(f"等 {len(problems)} 項")
-    return len(problems), "；".join(parts)
+    return len(problems), "\n".join(parts)
 
 
 def _result_sheet(wb: Workbook, items: list[BatchItem], filled: list[bool]) -> None:

@@ -50,6 +50,7 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；`reference.py` 為參考條件表共用規則（表上事先填好的欄位與標準欄位的比對、Non-Call；空值寫法取自格式設定）；`common.py` 共用工具、參考條件表欄名檢查與審查標準規則（`review_standard_rules`）；`barc.py`、`hsbc.py` 等為上手專屬的說明書內部規則與未涵蓋清單 | 不讀檔、不呼叫模型、不自動修改來源值 |
 | `src/fcn_checker/backfill.py` | 回填欄位（ISIN Code、發行日、比價日_1～12）整段流程：每格決策與 `backfill.*` 規則（缺欄名轉人工覆核）、只有整份 PASS 才寫入、開檔前比對核對時記錄的參考條件表 hash、寫新檔（沿用日期格式、不覆蓋）、決策的顯示標籤 `BackfillAction.label`（報告與 PANEL 共用） | 批量入口 `save_batch` 呼叫；原檔不動 |
 | `src/fcn_checker/single_check.py` | 單份核對：配對結果 → 表頭欄位檢查 → 參考條件表欄位規則 → 上手說明書內部規則 → 審查標準規則 → Non-Call／ISIN／發行日／比價日 → 回填決策 → 整體狀態 | 所有上手共用同一順序；只用批量入口交來的讀出結果，不重新辨識或讀出 |
+| `src/fcn_checker/messages.py` | 錯訊：每條問題的中文說明（`problem_message`）與項目名稱（`subject`）；參考條件表欄位寫成「<Excel 欄名>對不起來：參考條件表 <值>／說明書 <值>」，其他類別用規則的中文說明並附雙方值；規則沒寫說明時依原因與狀態給中文預設 | 「核對結果」工作表問題摘要與 PANEL 結果明細共用；不判定哪一邊錯、不顯示 rule_id／reason_code |
 | `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
 | `src/fcn_checker/batch.py` | 批量入口，分三段：`preview_batch`（唯讀辨識：檔名上手編號、範本辨識、商品代號、對到的列）、`check_batch`（逐份辨識、讀出一次、配對後交單份核對，不寫檔）、`save_batch`（寫報告、回填新檔與「核對結果」工作表；整份 PASS 才回填）；`run_batch` = 核對＋儲存 | 測試切點 1；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
 | `src/fcn_checker/cli.py` | `fcn-batch` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
