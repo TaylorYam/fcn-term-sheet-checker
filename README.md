@@ -2,7 +2,7 @@
 
 FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料轉成相同資料結構，以可追溯規則產生差異與人工覆核清單。
 
-**目前狀態：可用——BARC 中文產品說明書（文字型 PDF）× BARC 詢價表的本機核對 CLI**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、ISIN、最初價格外部正確性與部分情境試算會列在報告的「未涵蓋」區。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
+**目前狀態：可用——BARC 中文產品說明書（文字型 PDF）× 參考條件表的本機批量核對（PANEL 與 CLI），並回填 ISIN 與比價日**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、最初價格外部正確性與部分情境試算會列在報告的「未涵蓋」區。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
 
 ## 預定流程
 
@@ -20,7 +20,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 ## 目前進度（2026-10-01）
 
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
-- 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`），用 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表已停用，PANEL 與 `fcn-check` 暫時沿用：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。
+- 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`）。PANEL 與 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[核對規則](docs/rules/barc-check-rules.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表流程已刪除（Issue #46）。
 - 第二家上手（規格階段）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。尚未實作。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
@@ -57,54 +57,30 @@ fcn-batch data/FCN參考條件_1001.xlsx data/ts/029*.pdf --out runtime/reports
 - 上手編號不在對照表、或上手還沒有範本時，標示「未支援上手」。
 - 結束碼同下表：未支援上手算 1；任一份 ERROR 或整批錯誤算 2。
 
-### 單份核對（BARC 詢價表，已停用、PANEL 改版前保留）
-
-在專案根目錄執行（審查標準與詢價格式預設讀 `config/`）：
-
-```bash
-fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/reports
-```
-
-| 參數 | 說明 |
-|---|---|
-| 第 1 個 | 說明書 PDF（目前支援 BARC 中文產品說明書；上手由範本辨識決定） |
-| 第 2 個 | BARC 詢價表 Excel（一筆交易一個檔，B3 為商品代號） |
-| `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
-| `--order-format` | 詢價格式設定檔；未指定時依辨識到的上手使用 `config/order_formats/<上手>.toml`（BARC → `barc.toml`） |
-| `--out` | 報告輸出資料夾，預設 `runtime/reports`（被 Git 忽略） |
-
-輸出 `<PDF 檔名>.check.json`（完整逐項結果、證據與執行 metadata）與 `<PDF 檔名>.check.md`（人看的報告：先列不一致與需人工覆核項目，再列未涵蓋規則與通過項目）。每項結果附詢價表值、說明書值、說明書頁碼與原文、詢價表儲存格位置。
+每份說明書輸出 `<PDF 檔名>_<日期時間>.check.json`（完整逐項結果、證據、回填決策與執行 metadata）與 `.check.md`（人看的報告：先列不一致與需人工覆核項目，再列回填欄位、未涵蓋規則與通過項目）；檔名已存在時不覆蓋。每項結果附參考條件表值、說明書值、說明書頁碼與原文、參考條件表儲存格位置。
 
 | 結束碼 | 整體狀態 |
 |---|---|
 | 0 | `PASS`：已涵蓋的規則全部通過（未涵蓋規則仍須人工核對） |
-| 1 | 有 `MISMATCH`（不一致）或 `REVIEW_REQUIRED`（需人工覆核） |
-| 2 | `ERROR`：PDF 損毀／加密、檔案不存在、設定檔錯誤等 |
+| 1 | 有 `MISMATCH`（不一致）或 `REVIEW_REQUIRED`（需人工覆核，含未支援上手） |
+| 2 | `ERROR`：PDF 損毀／加密、檔案不存在、設定檔錯誤、寫檔失敗等 |
 
-整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非 BARC 範本、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
+整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非已支援範本、參考條件表未知欄名或欄位值一律轉人工覆核，不猜值。
 
 ## 本機 PANEL：預覽、核對與保存
 
 Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），將專案放到自己有寫入權限的資料夾，雙擊 `setup_panel.cmd`。安裝會建立專案自己的 `.venv`，依 `constraints.txt` 安裝套件；需要可存取公司允許的 Python 套件來源。看到「安裝完成」後，雙擊 `launch_panel.cmd` 開啟程式。日常操作不需輸入命令；每位同事各自安裝、核對、保存，不需要伺服器。搬移資料夾或更新程式後請重新執行安裝；公司若禁止 PowerShell 腳本，請由 IT 依公司政策協助安裝。
 
-PANEL 使用 Python 內建 Tkinter，目前提供 BARC 選檔、唯讀預覽、核對與手動保存。原有 `launch_panel.pyw`、`fcn-panel` 及 CLI 入口仍可使用。
+PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對與回填流程。`launch_panel.pyw` 與 `fcn-panel` 入口仍可使用。
 
-1. 選取 BARC issuer 與中文產品說明書模板。
-2. 選取 TS PDF 與現有 BARC Excel 詢價表（沿用 B3 商品代號）。Outlook 條件由使用者整理到詢價表，不直接讀取信件。
-3. 按「載入／重新載入預覽」，查看 PDF 第一頁「商品代號」欄位（直接讀取文字層，保留前導零），以及 Excel 條件、值與來源儲存格。選取條件列可在表格下方查看完整內容。
-4. 確認預覽後按「開始核對」，畫面切到「核對結果」，先列不一致與需人工覆核項目。選取結果列可查看原因、雙方值、Excel 儲存格、PDF 頁碼及完整原文；沒有 PDF 證據時明示無法定位。
-5. 「待處理」分頁列出未涵蓋的 Monthly KI、標的名稱、ISIN 等項目，不算成通過。全部已支援項目一致時，仍明示待處理項目需人工核對。
-6. 預覽與結果只能查看。更換來源會清除舊預覽及結果；外部修改或刪除 PDF、Excel、格式設定或核對所用的審查標準時，畫面偵測後要求重新載入。核對時讀檔在背景執行，避免重複提交；核對期間來源變更則拒絕保留結果。
+1. 選取一份參考條件表（`FCN參考條件` Excel），再選取一或多份說明書 PDF（可多選）。上手由 PDF 檔名前三碼決定，不需要另外選擇。
+2. 按「載入／重新載入預覽」：每份 PDF 一列，顯示對應的上手（或「未支援上手」）、PDF 第一頁的商品代號（直接讀取文字層，保留前導零）、對到參考條件表的第幾列，或找不到／多列／發行機構不符等原因。參考條件表的欄名問題另外列出。
+3. 確認預覽後按「開始核對」，畫面切到「核對結果」：左側列出每份說明書（有問題的排前面），右側是選取那份的逐欄結果。選取結果列可查看原因、雙方值、參考條件表儲存格、PDF 頁碼及完整原文；下方列出這份的回填欄位（ISIN、比價日）及處理方式。
+4. 「待處理」分頁列出未涵蓋的項目（Monthly KI、標的名稱等），不算成通過。
+5. 預覽與結果只能查看。更換來源會清除舊預覽及結果；外部修改或刪除參考條件表、任一 PDF、審查標準或設定檔時，畫面偵測後要求重新載入。讀檔與核對在背景執行，避免重複提交。
+6. 按「儲存報告與回填新檔…」，選擇報告資料夾：每份說明書的 JSON／Markdown 報告寫到該資料夾，整份通過的說明書回填到參考條件表旁的新檔 `<原檔名>_回填_<日期時間>.xlsx`（原檔不動，新增「核對結果」工作表）。未按儲存不產生任何檔案；檔名已存在時不覆蓋，部分失敗時逐份列出原因，核對結果仍可查看與重試。
 
-7. 按「儲存報告…」，選擇本機資料夾，保存完整 JSON 與供人工閱讀的 Markdown。未按儲存不產生報告。畫面分別顯示兩份報告的實際路徑；取消、失敗或只成功一份時明列狀態，核對結果仍可查看與重試。每次使用 `FCN_日期時間_隨機識別碼.check.json/.md`，禁止覆蓋已有檔案。來源變更後不能保存舊結果，必須重新載入與核對。
-
-部署驗收步驟：在乾淨資料夾安裝 → 雙擊啟動 → 選取合成 PDF／Excel → 預覽 → 核對 → 取消保存 → 保存到本機資料夾 → 開啟兩份報告確認值、PDF 頁碼／原文、Excel 來源、待處理與 metadata → 修改來源確認舊结果無法保存。安裝失敗會顯示原因；確認 Python／Tcl/Tk、資料夾權限及套件來源後重試。本次已在 Windows 的獨立部署資料夾與乾淨虛擬環境驗證；不同同事電腦、公司套件來源及公司腳本限制仍需 IT 試裝確認。安裝包不含真實交易資料、憑證或開發機路徑；日常核對不傳送資料到網路。
-
-檔案讀取失敗、非 BARC 模板或 issuer 設定不符時，畫面顯示原因，不保留有效預覽。PDF／Excel 商品代號不同、缺漏或歧義時，核對停止，不執行一般條件比對（CLI 維持既有核對行為、結束碼與報告格式）。一般欄位缺漏仍繼續核對其餘項目，整體不能顯示通過。不以檔名、商品名稱或另一份文件的代號補值。Excel 空值顯示「未提供」，未知／缺漏／重複欄名另附提示。資料只在本機處理，不需要伺服器或網路。
-
-Windows 啟動時預設最大化，可使用視窗的「還原」按鈕恢復一般視窗並調整大小。建立視窗前會啟用 system DPI awareness，避免高縮放下整個畫面被點陣放大；視窗與表格尺寸會依系統 DPI 調整。跨不同 DPI 螢幕移動或更改系統縮放後，請關閉再重新開啟 PANEL。
-
-自訂格式設定路徑可用 `--order-format <路徑>`（未指定時依選取的上手），審查標準可用 `--review-standard <路徑>`；雙擊入口自動使用專案 `config/` 的設定，不依賴啟動工作目錄。格式設定的上手與選取的上手不同時會被拒絕。目前只支援文字型 PDF，掃描檔不會自動 OCR。
+設定檔：PANEL 讀根目錄 `config/` 的 `review_standard.toml`；`reference_sheet.toml` 與 `issuer_prefixes.toml` 若根目錄沒有（例如更新前安裝的環境），改用程式內建的同名設定。畫面上方會顯示實際使用的設定檔路徑。
 
 ## PANEL 更新 GitHub 最新版
 
@@ -131,7 +107,7 @@ pytest -q
 ruff check src tests
 ```
 
-測試只透過公開切點驗證：批量入口 `fcn_checker.batch.run_batch` 與 `fcn-batch` CLI（合成說明書 PDF 與合成參考條件表）、核對入口 `fcn_checker.checker.run_check` 與 `fcn-check` CLI（合成詢價表）。合成資料於測試時由 `tests/synth.py` 產生，數值皆虛構。`tests/test_real_samples*.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過。
+測試只透過公開切點驗證：批量入口 `fcn_checker.batch`（`check_batch`／`save_batch`／`run_batch`）、`fcn-batch` CLI 與 PANEL 工作階段 `fcn_checker.panel_workflow.PanelSession`。合成說明書 PDF 與合成參考條件表於測試時由 `tests/synth.py` 產生，數值皆虛構。`tests/test_real_samples*.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過。
 
 ## 文件與開發規則
 
@@ -140,7 +116,7 @@ ruff check src tests
 - [分階段 TODO 與待確認項目](docs/TODO.md)
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
 - [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
-- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已停用）](docs/order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
+- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
 - ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。

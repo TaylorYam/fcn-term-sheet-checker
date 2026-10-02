@@ -1,6 +1,6 @@
 """Issue #41：依 #38 範圍新增的規則（文件內重複出現處、情境試算、審查標準固定值）。
 
-測試切點同 test_check_barc.py：run_check 與合成資料；不直接測擷取函式。
+測試切點同 test_check_barc.py：批量核對入口與合成資料；不直接測擷取函式。
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ def test_repeated_coupon_mismatch_points_to_the_wrong_place(tmp_path):
     assert {x.status for x in results(report, "doc.coupon_consistency")} == {PASS}
 
 
-def test_strike_header_mismatch_while_definition_matches_inquiry_k(tmp_path):
+def test_strike_header_mismatch_while_definition_matches_reference_k(tmp_path):
     spec = Spec()
     report = check(tmp_path, spec, pdf_spec=spec.with_(strike_headers={"§15": "71.00"}))
     assert results(report, "field.strike_pct")[0].status == PASS

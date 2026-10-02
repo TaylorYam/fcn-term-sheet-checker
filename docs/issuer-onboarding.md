@@ -84,7 +84,7 @@
 | 文件 | 路徑 | 內容 |
 |---|---|---|
 | 範本規格 | `docs/templates/<上手>-<範本>.md` | 範本代號（例 `xxx-zh-pd`）、文件特性、骨架、欄位錨點表、型態維度、表格解析、多出處、誤抓清單、**範本辨識條件**、樣本總表 |
-| 詢價格式 | `docs/order-formats/<上手>-<格式>.md`＋`config/order_formats/<上手>.toml` | 版面、欄名 → 標準欄位、允許值與意義、不核對的欄位 |
+| 參考條件表對照 | `docs/order-formats/<上手>-fcn-reference.md` | 參考條件表各欄在該上手說明書的來源、比價日的日期定義；共用格式見 [reference-sheet.md](order-formats/reference-sheet.md) |
 | 核對規則 | `docs/rules/<上手>-check-rules.md` | 標準欄位對照、值對應、數值與容差、推算規則、說明書內部交叉驗證、日期規則、不核對項目、待確認事項、決策紀錄 |
 | 審查標準 | `config/review_standard.toml`＋`docs/rules/review-standard.md` | 只新增該上手不同的基準（例如名稱樣板）；共用基準不重複 |
 
@@ -100,7 +100,7 @@
 - 依 AGENTS.md 建立實作就緒的 Issue（繁體中文），驗收條件可觀察。
 - 一個 PR 做不完就分階段，例如 BARC：第一階段主要條款與審查標準（#7），第二階段配息表與提前出場表（#9）。未做的規則列入報告「未涵蓋」清單，不得假裝通過。
 - 樣本不足、無法確認寫法的型態（例如 BARC 的 Monthly KI）另開 Issue，先維持人工覆核。
-- 測試切點事先約定：核對入口 `run_check` 與 `fcn-check` CLI；不直接測擷取或解析的內部函式。
+- 測試切點事先約定：批量入口 `fcn_checker.batch` 與 `fcn-batch` CLI；不直接測擷取或解析的內部函式。
 
 ## 6. 實作與測試
 
@@ -108,13 +108,13 @@
 
 | 內容 | 路徑 | 說明 |
 |---|---|---|
-| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、規則入口、未涵蓋清單、預設詢價格式設定；參考條件表流程另需 `isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`reference_rules`、`reference_not_covered` |
+| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、`product_code`、`context`、`rules`（表上欄位＋說明書內部規則）、`isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`not_covered` |
 | 上手編號 | `config/issuer_prefixes.toml`、`config/reference_sheet.toml` | 登記商品代號前三碼 → 上手代號，以及該上手在參考條件表「發行機構」欄的寫法（[參考條件表格式](order-formats/reference-sheet.md)） |
 | 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`、欄位擷取；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
 | 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬規則；通用規則用 `rules/common.py`（§7） |
-| 合成測試資料 | `tests/synth_<上手>.py` | 依該上手版面產生虛構 PDF 與詢價表 |
+| 合成測試資料 | `tests/synth_<上手>.py` | 依該上手版面產生虛構 PDF；參考條件表用 `tests/synth.py` 的產生器 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |
 
 ### 6.2 實作原則
@@ -127,14 +127,14 @@
 
 ### 6.3 測試
 
-- **合成測試**（CI）：每種型態至少一個全部通過的案例；每條規則至少一個 PASS 與一個 MISMATCH／REVIEW 案例；另含範本辨識失敗、欄位缺漏、歧義、未知詢價表欄名或欄位值、跨頁表格、損毀或加密 PDF。
+- **合成測試**（CI）：每種型態至少一個全部通過的案例；每條規則至少一個 PASS 與一個 MISMATCH／REVIEW 案例；另含範本辨識失敗、欄位缺漏、歧義、未知參考條件表欄名或欄位值、跨頁表格、損毀或加密 PDF。
 - **本機真實樣本測試**：只在 `data/` 存在時執行，CI 自動略過；斷言與探勘結論一致（例如「只有舊文件的審查日期不符」）。測試碼不得含真實代號或數值。
 - **負面測試**：其他上手的樣本不得被判定為本範本，既有上手的樣本也不得被新範本誤判。
 
 ### 6.4 驗收門檻（合併前）
 
 - [ ] 全部樣本都能辨識為正確範本，負面樣本全部拒絕。
-- [ ] 詢價表樣本對應的說明書：已涵蓋規則全部通過，或差異經作業人員確認為真實差異。
+- [ ] 參考條件表有列的樣本：已涵蓋規則全部通過，或差異經作業人員確認為真實差異。
 - [ ] 全部樣本的說明書內部規則結果與探勘一致。
 - [ ] `pytest`、`ruff check`、`ruff format --check` 通過；CI 綠燈。
 - [ ] 已跑 code review 並處理發現。

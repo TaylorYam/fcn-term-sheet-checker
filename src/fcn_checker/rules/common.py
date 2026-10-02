@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Protocol
 
-from ..config import OrderFormat, ReferenceFormat, ReviewStandard
-from ..orders.inquiry import OrderRecord
+from ..config import ReferenceFormat, ReviewStandard
+from ..orders.reference import OrderRecord
 from ..parsers.layout import TextIndex, squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
@@ -34,7 +34,7 @@ class Context:
     ts: TermSheet
     order: OrderRecord
     std: ReviewStandard
-    fmt: OrderFormat | ReferenceFormat  # 詢價表或參考條件表的格式設定
+    fmt: ReferenceFormat
 
 
 # ---------------------------------------------------------------- 共用
@@ -159,7 +159,7 @@ def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
 # ---------------------------------------------------------------- 範本與格式
 
 
-def order_format_checks(order: OrderRecord) -> list[CheckResult]:
+def column_checks(order: OrderRecord) -> list[CheckResult]:
     src = order.source
     out = []
     for col in order.unknown_columns:
