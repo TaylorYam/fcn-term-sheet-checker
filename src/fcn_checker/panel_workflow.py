@@ -44,7 +44,7 @@ class PanelOutcome:
             f"{unsupported} 份未支援上手",
             f"{counts[CheckStatus.ERROR]} 份執行錯誤",
         ]
-        tail = "按「儲存」後才會寫出報告，並把通過的說明書回填到新檔。"
+        tail = "按「儲存核對結果」後才會寫出核對結果檔（通過的說明書回填在「回填後」）與報告。"
         return f"共 {len(items)} 份：" + "、".join(parts) + "。" + tail
 
 
