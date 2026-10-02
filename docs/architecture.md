@@ -57,8 +57,8 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/cli.py` | `fcn-batch` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
 | `src/fcn_checker/panel_workflow.py` | PANEL 工作階段：參考條件表＋多份說明書的預覽、核對、人工放行（`release`／`cancel_release`／`release_problem`，只作用於當次結果）、儲存，以及來源與設定檔 hash 失效檢查 | 測試切點 3；呼叫批量入口三段，按儲存才寫檔 |
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗：選檔（參考條件表＋多份 PDF）、預覽表、逐份結果與回填決策呈現、人工放行按鈕與確認視窗 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務；仍接受舊啟動器的 `--order-formats-dir` |
-| `src/fcn_checker/updating.py` | 公開 GitHub main 更新、隔離安裝與原子切換；版本資訊：`git_revision`（Git 工作目錄的 HEAD）、`program_commit`（正在執行的程式的 commit：開發用 Git、更新後的版本資料夾名稱或根目錄安裝紀錄，核對紀錄使用） | `PanelUpdater` 公開測試入口；不讀取或上傳交易資料，不覆寫本機 config |
-| `panel_bootstrap.py` | 穩定的本機更新版本啟動器 | 限定版本資料夾；不連網，維持根目錄 config |
+| `src/fcn_checker/version.py` | 程式版本：`git_revision`（Git 工作目錄的 HEAD）、`program_commit`（正在執行的程式的 commit：開發用 Git，或 `setup_panel.cmd` 安裝時記錄的 `.local/installed.json`，核對紀錄使用）、`record_installation`（安裝時記錄版本） | 不連網；PANEL 不提供自動更新，維護者以 `git pull`＋`setup_panel.cmd` 更新 |
+| `panel_bootstrap.py` | 雙擊入口（`launch_panel.pyw`）的啟動器：一律從專案根目錄啟動 PANEL，傳入根目錄 config 與安裝根目錄 | 不連網；不讀舊版自動更新留下的 `.local/current.json` |
 | `tests/synth.py`、`tests/hsbc_synth.py` | 各上手的說明書合成器：產生合成說明書 PDF 與一致的參考條件表列 | 數值皆虛構；不提交真實客戶交易資料；上手之間互不引用 |
 | `tests/pdf_writer.py`、`tests/reference_synth.py`、`tests/harness.py` | 不分上手的測試工具：PDF 寫入、參考條件表合成（發行機構寫法取自格式設定）、單份核對 harness（經 `check_batch`，依 rule_id 取結果） | 新測試用共用 harness 寫 |
 
@@ -82,7 +82,7 @@ PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版�
 
 Issue #13 新增本機 Tkinter PANEL，#14、#15、#17 接上預覽、核對與保存；#46 改為參考條件表＋多份說明書，並刪除 BARC 詢價表流程。唯讀預覽有效後才可核對；每份說明書先確認上手與參考條件表的列，配對失敗的說明書只回報原因、不執行一般條件比對。核對結果先呈現問題，再列通過／不適用項目，保留完整頁碼、原文及參考條件表儲存格；未涵蓋規則獨立列為待處理。
 
-參考條件表、每份 PDF、審查標準與兩個設定檔的 hash 在載入前後、核對前後及結果使用時檢查；任一變更即使預覽與結果失效，儲存前另確認參考條件表與核對時相同。讀檔與失效檢查在背景執行，UI 更新只在主執行緒，核對期間不能重複提交。所有資料仍在本機處理，僅在使用者按儲存後寫入核對結果檔與核對紀錄，沒有 Web UI、資料庫或雲端服務。核對結果檔與核對紀錄一律 exclusive create 禁止覆蓋；寫入失敗會回報原因，不清除當次結果。核對紀錄寫在安裝根目錄的 `runtime/`，不寫進版本資料夾，更新程式時保留。舊安裝的根目錄 `config` 沒有 `reference_sheet.toml`／`issuer_prefixes.toml` 時，改用版本資料夾內建的同名設定（ADR 0003 不自動修改根目錄設定）。Windows 透過專案獨立 .venv 安裝與雙擊啟動。
+參考條件表、每份 PDF、審查標準與兩個設定檔的 hash 在載入前後、核對前後及結果使用時檢查；任一變更即使預覽與結果失效，儲存前另確認參考條件表與核對時相同。讀檔與失效檢查在背景執行，UI 更新只在主執行緒，核對期間不能重複提交。所有資料仍在本機處理，僅在使用者按儲存後寫入核對結果檔與核對紀錄，沒有 Web UI、資料庫或雲端服務。核對結果檔與核對紀錄一律 exclusive create 禁止覆蓋；寫入失敗會回報原因，不清除當次結果。核對紀錄寫在專案根目錄的 `runtime/`，更新程式時保留。根目錄 `config` 沒有 `reference_sheet.toml`／`issuer_prefixes.toml` 時，改用程式內建的同名設定。Windows 透過專案獨立 .venv 安裝與雙擊啟動，雙擊入口一律從專案根目錄啟動。
 
 新增 issuer 時加入獨立且版本化的 parser 與對應 fixtures，不把所有文件塞入一組通用 regex。未知格式保留人工覆核入口。步驟、交付物與驗收門檻見[新增上手實作規範](issuer-onboarding.md)；多上手分派已完成（Issue #28）：新上手在 `issuers.py` 登記、在 `config/issuer_prefixes.toml` 登記上手編號後，批量入口、CLI、PANEL 與名稱樣板即依上手運作。上手 adapter 只提供標準欄位與說明書內部規則，參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填規則各上手共用（[ADR 0005](adr/0005-issuer-adapter-and-shared-rules.md)）。
 
@@ -90,4 +90,4 @@ Issue #13 新增本機 Tkinter PANEL，#14、#15、#17 接上預覽、核對與�
 
 決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)、[0004：核對條件統一改用參考條件表](adr/0004-reference-sheet-as-check-source.md)、[0005：上手 adapter 只提供標準欄位與說明書內部規則，參考條件表與審查標準規則各上手共用](adr/0005-issuer-adapter-and-shared-rules.md)。
 
-手動更新決策：[0003：PANEL 以公開 GitHub main 提供手動更新](adr/0003-public-github-panel-update.md)。程式更新與審查設定導入分開；更新成功後重新啟動，未儲存結果不保留，更新前有提示。
+更新方式：PANEL 只有維護者使用，以 `git pull`＋`setup_panel.cmd` 更新；原 PANEL 自動更新（[0003](adr/0003-public-github-panel-update.md)）已停用（Issue #85）。程式更新與審查設定導入仍分開。

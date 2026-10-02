@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from .ingestion import write_new
 from .schema import CheckReport, CheckResult, CheckStatus
-from .updating import program_commit
+from .version import program_commit
 
 if TYPE_CHECKING:
     from .backfill import CellDecision

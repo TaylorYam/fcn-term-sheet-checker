@@ -113,7 +113,7 @@ class ReferenceFormat:
     sha256: str
 
 
-# 開發環境（editable 安裝）的 repo config；PANEL 安裝是非 editable，內建設定由啟動的版本資料夾另外指定
+# 開發環境（editable 安裝）的 repo config；PANEL 安裝是非 editable，內建設定由雙擊入口另外指定（專案的 config）
 BUILTIN_CONFIG = Path(__file__).resolve().parents[2] / "config"
 
 

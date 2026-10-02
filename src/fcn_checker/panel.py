@@ -9,7 +9,6 @@ import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from queue import Empty, SimpleQueue
 from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
@@ -17,7 +16,6 @@ from .ingestion import IngestionError
 from .messages import STATUS_ZH, problem_message, subject
 from .panel_workflow import PanelOutcome, PanelSession, SaveReceipt
 from .schema import CheckResult, CheckStatus
-from .updating import PanelUpdater, UpdateError
 
 
 def display_value(value: object) -> str:
@@ -254,23 +252,13 @@ class ResultPane(ttk.Frame):
 
 
 class PanelWindow:
-    def __init__(self, root: tk.Tk, session: PanelSession, install_root: Path | None = None):
+    def __init__(self, root: tk.Tk, session: PanelSession):
         self.root, self.session = root, session
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.pending: Future[BatchPreview] | None = None
         self.check_pending: Future[PanelOutcome] | None = None
         self.save_pending: Future[SaveReceipt] | None = None
         self.has_result = False
-        self.update_pending = None
-        self.update_phase = ""
-        self.update_progress = SimpleQueue()
-        self.updater = None
-        self.update_error = ""
-        if install_root is not None:
-            try:
-                self.updater = PanelUpdater(install_root, self.update_progress.put)
-            except UpdateError as error:
-                self.update_error = str(error)
         self.validation: Future[BatchPreview | None] | None = None
         self.checking_for: BatchPreview | None = None
         self.closed = False
@@ -333,9 +321,7 @@ class PanelWindow:
         self.check_button.pack(side="left")
         self.save_button = ttk.Button(actions, text="儲存核對結果…", command=self.save, state="disabled")
         self.save_button.pack(side="left", padx=(12, 0))
-        self.update_button = ttk.Button(actions, text="更新 GitHub 最新版", command=self.update_app)
-        self.update_button.pack(side="left", padx=(12, 0))
-        self.controls += [self.update_button, self.reload]
+        self.controls += [self.reload]
         configs = "；".join(f"{label}：{path}" for label, path in session.config_paths)
         ttk.Label(frame, text="使用的設定檔：" + configs, style="Small.TLabel", wraplength=pixels(1100)).grid(
             row=5, column=0, columnspan=3, sticky="w", pady=(0, 8)
@@ -387,7 +373,7 @@ class PanelWindow:
             self.status_label.configure(wraplength=max(300, event.width - 60))
 
     def _busy_any(self) -> bool:
-        return any(f is not None for f in (self.pending, self.check_pending, self.save_pending, self.update_pending))
+        return any(f is not None for f in (self.pending, self.check_pending, self.save_pending))
 
     def _clear(self):
         self.shown = None
@@ -544,63 +530,6 @@ class PanelWindow:
             self.results.show(self.results.outcome, select=self.results.selected_item())  # 更新「已回填」狀態
         self.status.set(receipt.summary)
 
-    def update_app(self):
-        if self._busy_any():
-            return
-        if self.updater is None:
-            self.status.set(self.update_error or "請從 launch_panel.cmd 開啟 PANEL，才能更新安裝版本。")
-            return
-        self._busy(True)
-        self.status.set("正在檢查 GitHub main 最新版…")
-        self.update_phase = "check"
-        self.update_pending = self.executor.submit(self.updater.check)
-        self.root.after(80, self._finish_update)
-
-    def _install_and_restart(self, info):
-        update = self.updater.install(info)
-        self.update_progress.put("安裝驗證完成，正在重新啟動 PANEL…")
-        self.updater.restart(update)
-
-    def _finish_update(self):
-        if self.closed or self.update_pending is None:
-            return
-        try:
-            while True:
-                self.status.set(self.update_progress.get_nowait())
-        except Empty:
-            pass
-        if not self.update_pending.done():
-            self.root.after(80, self._finish_update)
-            return
-        future, self.update_pending = self.update_pending, None
-        try:
-            result = future.result()
-            if self.update_phase == "install":
-                self.close()
-                return
-            versions = (
-                f"目前：{result.current[:12] if result.current else '尚無版本紀錄'}\nGitHub main：{result.latest[:12]}"
-            )
-            if not result.available:
-                self.status.set("已是 GitHub 最新版。\n" + versions)
-            elif messagebox.askyesno(
-                "更新 GitHub 最新版",
-                versions + "\n\n更新完成會重新啟動，未儲存核對結果將消失。\n請先儲存。要現在更新嗎？",
-                parent=self.root,
-            ):
-                self.update_phase = "install"
-                self.status.set("正在下載與安裝新版，可能需要數分鐘…")
-                self.update_pending = self.executor.submit(self._install_and_restart, result)
-                self.root.after(80, self._finish_update)
-                return
-            else:
-                self.status.set("已取消更新，核對結果仍保留。\n" + versions)
-        except UpdateError as error:
-            self.status.set(str(error))
-        except Exception:
-            self.status.set("更新未完成，原視窗與核對結果仍可使用。請重試或聯絡維護人員。")
-        self._busy(False)
-
     def _watch_sources(self):
         if self.closed:
             return
@@ -622,9 +551,6 @@ class PanelWindow:
         self.root.after(100 if self.validation is not None else 1500, self._watch_sources)
 
     def close(self):
-        if self.update_pending is not None:
-            self.status.set("更新正在執行，請等待完成後再關閉 PANEL。")
-            return
         self.closed = True
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
@@ -641,7 +567,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="設定檔資料夾（預設 config）；缺少參考條件表格式或上手編號對照時改用程式內建設定",
     )
     parser.add_argument(
-        "--builtin-config-dir", type=Path, default=None, help="程式內建設定資料夾（啟動器傳入版本資料夾的 config）"
+        "--builtin-config-dir", type=Path, default=None, help="程式內建設定資料夾（雙擊入口傳入專案的 config）"
     )
     parser.add_argument("--order-formats-dir", type=Path, help=argparse.SUPPRESS)  # 舊版啟動器仍會傳入
     parser.add_argument(
@@ -655,7 +581,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def session_from_args(args: argparse.Namespace) -> PanelSession:
-    """根目錄與設定檔一致：雙擊入口給的安裝根目錄（不是版本資料夾），直接啟動時為執行目錄。"""
+    """根目錄與設定檔一致：雙擊入口給的專案根目錄，直接啟動時為執行目錄。"""
     return PanelSession(
         args.review_standard,
         args.config_dir,
@@ -664,14 +590,12 @@ def session_from_args(args: argparse.Namespace) -> PanelSession:
     )
 
 
-def main(argv: list[str] | None = None, on_ready: Callable[[], None] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     enable_windows_dpi_awareness()
     root = tk.Tk()
     session = session_from_args(args)
-    PanelWindow(root, session, args.install_root)
-    if on_ready is not None:
-        root.after_idle(on_ready)
+    PanelWindow(root, session)
     root.mainloop()
     return 0
 

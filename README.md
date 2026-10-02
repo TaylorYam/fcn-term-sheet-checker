@@ -70,7 +70,7 @@ fcn-batch data/FCN參考條件_1001.xlsx data/ts/029*.pdf --out runtime/reports
 
 ## 本機 PANEL：預覽、核對與保存
 
-Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），將專案放到自己有寫入權限的資料夾，雙擊 `setup_panel.cmd`。安裝會建立專案自己的 `.venv`，依 `constraints.txt` 安裝套件；需要可存取公司允許的 Python 套件來源。看到「安裝完成」後，雙擊 `launch_panel.cmd` 開啟程式。日常操作不需輸入命令；每位同事各自安裝、核對、保存，不需要伺服器。搬移資料夾或更新程式後請重新執行安裝；公司若禁止 PowerShell 腳本，請由 IT 依公司政策協助安裝。
+Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），將專案放到自己有寫入權限的資料夾，雙擊 `setup_panel.cmd`。安裝會建立專案自己的 `.venv`，依 `constraints.txt` 安裝套件；需要可存取公司允許的 Python 套件來源。看到「安裝完成」後，雙擊 `launch_panel.cmd` 開啟程式。日常操作不需輸入命令，不需要伺服器。搬移資料夾或更新程式後請重新執行安裝；公司若禁止 PowerShell 腳本，請由 IT 依公司政策協助安裝。
 
 PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對與回填流程。`launch_panel.pyw` 與 `fcn-panel` 入口仍可使用。
 
@@ -80,24 +80,15 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
    - **人工放行**：作業人員看過錯訊，認定一份「不一致」或「需人工覆核」的說明書可以通過時，選取它後按下方「人工放行…」，確認視窗列出這份全部錯訊，確認後視同通過：儲存時回填、進「回填後」，不列入「錯誤清單」；狀態顯示「人工放行（原：不一致）」，摘要另計「X 份人工放行」。同一個按鈕可「取消放行」。回填值無法確定、參考條件表回填欄位已有不同的值、同一批多份對到同一列、找不到列、未支援上手或執行錯誤時不能放行，按鈕旁顯示原因。重新載入或重新核對會清除放行；CLI 沒有人工放行。
 4. 「待處理」分頁列出未涵蓋的項目（Monthly KI、標的名稱等），不算成通過。
 5. 預覽與結果只能查看（人工放行除外，它不改任何檔案，儲存時才生效）。更換來源會清除舊預覽及結果；外部修改或刪除參考條件表、任一 PDF、審查標準或設定檔時，畫面偵測後要求重新載入。讀檔與核對在背景執行，避免重複提交。
-6. 按「儲存核對結果…」，選擇資料夾：核對結果檔 `<原檔名>_核對結果_<日期時間>.xlsx`（「回填後」＋「錯誤清單」）寫到該資料夾，完成訊息列出核對結果檔路徑。原參考條件表不動。內部核對紀錄自動寫到安裝根目錄的 `runtime/核對紀錄/`（不在版本資料夾，更新程式時保留）；紀錄寫不進去時，完成訊息會列出原因。未按儲存不產生任何檔案；檔名已存在時不覆蓋，寫入失敗時列出原因，核對結果仍可查看與重試。
+6. 按「儲存核對結果…」，選擇資料夾：核對結果檔 `<原檔名>_核對結果_<日期時間>.xlsx`（「回填後」＋「錯誤清單」）寫到該資料夾，完成訊息列出核對結果檔路徑。原參考條件表不動。內部核對紀錄自動寫到安裝根目錄的 `runtime/核對紀錄/`（更新程式時保留）；紀錄寫不進去時，完成訊息會列出原因。未按儲存不產生任何檔案；檔名已存在時不覆蓋，寫入失敗時列出原因，核對結果仍可查看與重試。
 
 設定檔：PANEL 讀根目錄 `config/` 的 `review_standard.toml`；`reference_sheet.toml` 與 `issuer_prefixes.toml` 若根目錄沒有（例如更新前安裝的環境），改用程式內建的同名設定。畫面上方會顯示實際使用的設定檔路徑。
 
-## PANEL 更新 GitHub 最新版
+## 更新程式
 
-安裝本次版本後，PANEL 提供「更新 GitHub 最新版」按鈕。第一次導入更新按鈕需取得本次程式並重新雙擊 `setup_panel.cmd` 安裝；之後從 `launch_panel.cmd` 開啟即可更新，不需 Git 或 GitHub 登入。
+PANEL 只有維護者本人使用。更新方式：在專案資料夾執行 `git pull`，再重新雙擊 `setup_panel.cmd`。安裝會把程式複製進 `.venv`，只 `git pull` 不會生效。根目錄的 PDF、Excel、核對紀錄（`runtime/`）及 `config` 不受影響；新版的內建設定若有變更，需自行比較後導入根目錄 `config`。
 
-1. 按鈕會背景檢查固定 Repo `TaylorYam/fcn-term-sheet-checker` 的 `main`，顯示目前與最新 commit；同版本不重裝。首次 ZIP 安裝沒有版本紀錄時會顯示未知。
-2. 有新版時先儲存核對結果，再確認更新；取消保留畫面。更新期間不能重複提交、核對、保存或關閉視窗。
-3. 新版下載到 `.local/releases/`，使用獨立 venv 安裝固定套件，驗證成功後才切換版本並重新啟動。失敗會顯示原因並保留舊版與當次結果；重啟成功後重新選檔與核對。
-4. 根目錄的 PDF、Excel、核對紀錄（`runtime/`）及 `config` 保留。更新程式與套件，**不自動更新本機審查設定**；新版內建設定留在新版本資料夾供維護人員比較後導入。更新不會上傳交易資料。
-
-Repo 須先公開，且電腦能存取 GitHub／公司允許的 Python 套件來源；私有、404、離線、逾時或限流都會顯示原因。程式不保存 Token，也不會替你公開 Repo。從 `fcn-panel` 或 module 直接啟動若沒有安裝根目錄，會提示改用雙擊入口。
-
-舊版與未完成安裝資料夾不自動刪除。更新非正常中斷可能留下 `.local/update.lock`；請由維護人員確認相關程序已停止後處理。要回到根目錄版本，可關閉所有 PANEL 再執行 `setup_panel.cmd`，成功後會重設啟動版本。搬移整個安裝資料夾後仍建議重新安裝。
-
-驗收：合成 HTTP／ZIP 與程序邊界測試涵蓋版本、不可存取、安全解壓、安裝／切換／重啟失敗；Windows 隔離部署驗證真實 venv、安裝與 GUI 重啟。Repo 目前仍私有，匿名 GitHub 成功下載的端到端驗收須公開後再執行；其他同事電腦與公司網路政策仍需試裝。
+舊版曾提供「更新 GitHub 最新版」按鈕（[ADR 0003](docs/adr/0003-public-github-panel-update.md)，已停用，Issue #85）。它留下的 `.local/releases/`、`.local/current.json`、`.local/update.lock` 已不再使用，可以手動刪除；`.local/installed.json` 是安裝時記錄的版本，請保留。
 
 ## 開發與測試
 
@@ -119,7 +110,7 @@ ruff check src tests
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
 - [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
 - [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)
+- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已停用）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
 
