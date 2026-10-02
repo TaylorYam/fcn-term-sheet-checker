@@ -6,9 +6,12 @@ import datetime as dt
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .schema import CheckReport, CheckResult, CheckStatus
+
+if TYPE_CHECKING:
+    from .backfill import CellDecision
 
 STATUS_ZH = {
     CheckStatus.PASS: "通過",
@@ -77,13 +80,13 @@ def _result_dict(r: CheckResult) -> dict[str, Any]:
     }
 
 
-def _backfill_dict(d: Any) -> dict[str, Any]:
+def _backfill_dict(d: CellDecision) -> dict[str, Any]:
     return {
         "column": d.column,
         "cell": d.cell,
         "sheet_value": _plain(d.sheet_value),
         "expected": _plain(d.expected),
-        "action": d.action,
+        "action": d.action.value,
     }
 
 
@@ -158,7 +161,6 @@ def to_markdown(report: CheckReport) -> str:
     ]
     lines += _table(issues) if issues else ["沒有不一致或需人工覆核的項目。"]
     if report.backfill:
-        action = {"fill": "空白，核對通過後回填", "match": "相同", "mismatch": "不一致，保留原值"}
         lines += [
             "",
             f"## 回填欄位（{len(report.backfill)}）",
@@ -167,7 +169,7 @@ def to_markdown(report: CheckReport) -> str:
             "|---|---|---|---|---|",
         ]
         lines += [
-            f"| {_cell(d.column)} | {d.cell} | {_cell(d.sheet_value)} | {_cell(d.expected)} | {action[d.action]} |"
+            f"| {_cell(d.column)} | {d.cell} | {_cell(d.sheet_value)} | {_cell(d.expected)} | {d.action.label} |"
             for d in report.backfill
         ]
     lines += [

@@ -11,7 +11,7 @@
 2. 說明書內容辨識出的上手、說明書商品代號前三碼都必須與檔名一致，否則轉人工覆核。
 3. 以商品代號找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
 
-只有整份核對 PASS 的說明書才回填；結果另存新檔（原檔不動、不覆蓋既有檔案）。
+只有整份核對 PASS 的說明書才回填；結果另存新檔（原檔不動、不覆蓋既有檔案）。回填流程見 backfill.py。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import fitz
 import openpyxl
 from openpyxl.workbook.workbook import Workbook
 
-from . import __version__
+from . import __version__, backfill
 from .config import (
     ReferenceFormat,
     ReviewStandard,
@@ -36,7 +36,7 @@ from .config import (
     load_review_standard,
 )
 from .extraction import extract_lines
-from .ingestion import IngestionError, error_result, file_meta, open_pdf, sha256_of
+from .ingestion import IngestionError, error_result, file_meta, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
 from .reporting import STATUS_ZH, write_reports
@@ -47,7 +47,6 @@ from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Line, Parse
 RESULT_SHEET = "核對結果"
 UNSUPPORTED = "issuer_unsupported"
 RESULT_HEADERS = ("PDF 檔名", "商品代號", "上手", "整體狀態", "問題數", "問題摘要", "已回填", "報告檔名")
-FALLBACK_DATE_FORMAT = "yyyy/m/d"
 DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
 DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
 
@@ -82,6 +81,7 @@ class BatchOutcome:
     output: Path | None = None  # 回填後的新檔；尚未儲存或儲存失敗時為 None
     errors: list[CheckResult] = field(default_factory=list)  # 整批錯誤（設定檔、參考條件表、寫檔）
     saved: bool = False
+    reference_sha256: str | None = None  # 核對時參考條件表的 hash；儲存前據此確認檔案未變更
 
     def refresh_status(self) -> None:
         statuses = [i.report.status for i in self.items] + [e.status for e in self.errors]
@@ -313,8 +313,8 @@ def _check_one(
         results.extend(issuer.rules(ctx))
         sched = issuer.autocall_schedule(ts)
         results.append(reference.first_callable_period(ctx, sched))
-        isin_result, isin_cells = reference.isin(ctx, rfmt, row, issuer.isin(ts))
-        dates_result, date_cells = reference.compare_dates(ctx, rfmt, row, sched)
+        isin_result, isin_cells = backfill.isin(ctx, rfmt, row, issuer.isin(ts))
+        dates_result, date_cells = backfill.compare_dates(ctx, rfmt, row, sched)
         results.extend([isin_result, dates_result])
         item.report.backfill = isin_cells + date_cells
         item.report.not_covered = [dict(n) for n in issuer.not_covered]
@@ -363,35 +363,14 @@ def check_batch(
             )
             item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [err], [], _item_metadata(pdf, meta)))
         items.append(item)
-    outcome = BatchOutcome(CheckStatus.ERROR, items, reference_sheet, rfmt)
+    outcome = BatchOutcome(
+        CheckStatus.ERROR, items, reference_sheet, rfmt, reference_sha256=meta["inputs"]["reference_sheet"]["sha256"]
+    )
     outcome.refresh_status()
     return outcome
 
 
 # ---------------------------------------------------------------- 儲存
-
-
-def _open_for_writing(path: Path, expected_sha256: str | None) -> Workbook:
-    try:
-        changed = expected_sha256 is None or sha256_of(path) != expected_sha256
-    except OSError:
-        changed = True
-    if changed:
-        raise IngestionError("reference_changed", "參考條件表在核對後已變更或無法讀取，請重新核對後再儲存")
-    try:
-        wb = openpyxl.load_workbook(path)  # 不用 data_only：保留公式與格式
-    except Exception as e:
-        raise IngestionError("reference_unreadable", f"參考條件表無法開啟（可能已損毀或不是 Excel）：{e}") from e
-    return wb
-
-
-def _date_format(ws: Any, rfmt: ReferenceFormat) -> str:
-    """沿用表上既有日期格的顯示格式。"""
-    for row in ws.iter_rows(min_row=rfmt.first_data_row):
-        for c in row:
-            if isinstance(c.value, dt.datetime):
-                return c.number_format
-    return FALLBACK_DATE_FORMAT
 
 
 def _summary(report: CheckReport) -> tuple[int, str]:
@@ -402,28 +381,10 @@ def _summary(report: CheckReport) -> tuple[int, str]:
     return len(problems), "；".join(parts)
 
 
-def _fill(wb: Workbook, rfmt: ReferenceFormat, items: list[BatchItem]) -> list[BatchItem]:
-    ws = wb[rfmt.sheet]
-    fmt = _date_format(ws, rfmt)
-    filled = []
-    for item in items:
-        if item.report.status != CheckStatus.PASS:
-            continue
-        for d in item.report.backfill:
-            if d.action != "fill":
-                continue
-            cell = ws[d.cell]
-            cell.value = d.expected
-            if isinstance(d.expected, dt.date):
-                cell.number_format = fmt
-        filled.append(item)
-    return filled
-
-
-def _result_sheet(wb: Workbook, items: list[BatchItem], filled: list[BatchItem]) -> None:
+def _result_sheet(wb: Workbook, items: list[BatchItem], filled: list[bool]) -> None:
     ws = wb.create_sheet(RESULT_SHEET)
     ws.append(RESULT_HEADERS)
-    for item in items:
+    for item, was_filled in zip(items, filled, strict=True):
         n, summary = _summary(item.report)
         md = next((p for p in item.report_paths if p.suffix == ".md"), None)
         ws.append(
@@ -434,7 +395,7 @@ def _result_sheet(wb: Workbook, items: list[BatchItem], filled: list[BatchItem])
                 item.status_label,
                 n,
                 summary,
-                "是" if any(x is item for x in filled) else "否",
+                "是" if was_filled else "否",
                 md.name if md else None,
             )
         )
@@ -458,27 +419,24 @@ def save_batch(outcome: BatchOutcome, reports_dir: Path, *, now: dt.datetime | N
             item.report_paths = write_reports(item.report, Path(reports_dir), stem)
         except OSError as e:
             item.save_error = str(e)
-    expected = outcome.items[0].report.metadata["inputs"]["reference_sheet"]["sha256"]
     try:
-        wb = _open_for_writing(outcome.reference_sheet, expected)
+        wb = backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256)
     except IngestionError as e:
         outcome.errors.append(error_result("output.reference_sheet", "回填新檔", e))
     else:
-        filled = _fill(wb, outcome.reference_format, outcome.items)
+        filled = backfill.apply(wb, outcome.reference_format, [i.report for i in outcome.items])
         _result_sheet(wb, outcome.items, filled)
         out = output_path(outcome.reference_sheet, now)
         buf = io.BytesIO()
         wb.save(buf)
         try:
-            with out.open("xb") as f:
-                f.write(buf.getvalue())
-        except OSError as e:
-            err = IngestionError("output_exists", f"無法寫入新檔 {out.name}：{e}")
-            outcome.errors.append(error_result("output.reference_sheet", "回填新檔", err))
+            backfill.write_new(buf.getvalue(), out)
+        except IngestionError as e:
+            outcome.errors.append(error_result("output.reference_sheet", "回填新檔", e))
         else:
             outcome.output = out
-            for item in filled:
-                item.filled = True
+            for item, ok in zip(outcome.items, filled, strict=True):
+                item.filled = ok
     outcome.saved = True
     outcome.refresh_status()
     return outcome

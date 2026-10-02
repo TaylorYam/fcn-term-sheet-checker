@@ -19,8 +19,6 @@ from .reporting import FIELD_ZH, STATUS_ZH
 from .schema import CheckResult, CheckStatus
 from .updating import PanelUpdater, UpdateError
 
-ACTION_ZH = {"fill": "空白，核對通過後回填", "match": "相同", "mismatch": "不一致，保留原值"}
-
 
 def display_value(value: object) -> str:
     return "未提供" if value is None else str(value)
@@ -178,7 +176,7 @@ class ResultPane(ttk.Frame):
             return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
         head = "回填欄位（整份通過才會回填；按「儲存」後寫入新檔）："
         lines = [
-            f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {ACTION_ZH[d.action]}"
+            f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {d.action.label}"
             for d in item.report.backfill
         ]
         return "\n".join([head, *lines])
