@@ -519,6 +519,29 @@ def test_partial_period_coupon_arithmetic(tmp_path, amount, status):
     )
 
 
+@pytest.mark.parametrize(
+    "items,total,status",
+    [
+        ("+美元25.00", "225.01", S.PASS),
+        ("+美元25.00", "224.99", S.PASS),
+        ("+美元25.00", "225.02", S.MISMATCH),
+        ("+美元25.01", "225.01", S.MISMATCH),
+    ],
+)
+def test_profit_total_allows_rounding_difference_only(tmp_path, items, total, status):
+    s = Spec(partial_coupon=True)
+    s.replacements = {
+        "損益=美元10,000.00+美元200.00+美元25.00-美元10,000.00=美元225.00": (
+            f"損益=美元10,000.00+美元200.00{items}-美元10,000.00=美元{total}"
+        )
+    }
+    r = check(tmp_path, s)
+    [profit] = [x for x in r.results if x.field.startswith("s1.profit.")]
+    assert profit.rule_id == "doc.scenario_calculations" and profit.tolerance
+    assert profit.status == status and profit.actual == Decimal(total)
+    assert r.status == status
+
+
 @pytest.mark.parametrize("obs", ["D", "P"])
 def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     from fcn_checker.batch import run_batch

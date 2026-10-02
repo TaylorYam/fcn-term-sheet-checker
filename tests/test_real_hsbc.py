@@ -21,16 +21,14 @@ pytestmark = [
 
 
 def test_real_hsbc_samples_match_exploration():
-    reports = [
-        i.report
-        for i in check_batch(
-            PDFS,
-            ORDER,
-            REVIEW_STANDARD,
-            reference_format=ORDER_FORMAT,
-            issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
-        ).items
-    ]
+    items = check_batch(
+        PDFS,
+        ORDER,
+        REVIEW_STANDARD,
+        reference_format=ORDER_FORMAT,
+        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
+    ).items
+    reports = [i.report for i in items]
     assert len(reports) == 8 and all(r.template == "hsbc-zh-pd" for r in reports)
     bad = Counter(
         (x.rule_id, x.reason_code) for r in reports for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)
@@ -39,9 +37,10 @@ def test_real_hsbc_samples_match_exploration():
         {
             ("standard.approval_date", "value_mismatch"): 2,
             ("batch.pairing", "reference_row_missing"): 1,
-            ("doc.scenario_calculations", "value_mismatch"): 1,
         }
     )
+    # Issue #82: the issuer's unrounded-coupon total differs from the printed items by 0.01 and now passes.
+    assert next(i.report for i in items if i.term_sheet.name.startswith("325000132929")).status == S.PASS
     paired = [r for r in reports if not any(x.reason_code == "reference_row_missing" for x in r.results)]
     assert len(paired) == 7 and all(
         not any(x.status in (S.REVIEW_REQUIRED, S.ERROR) for x in r.results) for r in paired
