@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections import Counter
 from pathlib import Path
@@ -16,8 +17,12 @@ from fcn_checker.schema import CheckStatus
 from synth import ISSUER_PREFIXES, REFERENCE_FORMAT, REVIEW_STANDARD
 
 ROOT = Path(__file__).resolve().parents[1]
-PDFS = sorted((ROOT / "data" / "ts").glob("*.pdf")) if (ROOT / "data" / "ts").is_dir() else []
-REFERENCE = ROOT / "data" / "FCN參考條件_1001.xlsx"
+PDFS = (
+    sorted((Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts").glob("*.pdf"))
+    if (Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts").is_dir()
+    else []
+)
+REFERENCE = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "FCN參考條件_1001.xlsx"
 PROBLEMS = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED, CheckStatus.ERROR)
 
 pytestmark = [
@@ -45,7 +50,7 @@ def problems(item) -> Counter[tuple[str, str]]:
 
 
 def test_other_issuers_are_unsupported(outcome):
-    others = [i for i in outcome.items if not i.term_sheet.name.startswith("029")]
+    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325"))]
     assert others and all(i.unsupported and not i.filled for i in others)
 
 
@@ -53,7 +58,8 @@ def test_barc_rows_match_every_prefilled_field(outcome):
     paired = [
         i
         for i in outcome.items
-        if any(r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS for r in i.report.results)
+        if i.issuer == "BARC"
+        and any(r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS for r in i.report.results)
     ]
     assert len(paired) == 8, "參考條件表有 8 列 BARC"
     allowed = {
@@ -75,7 +81,7 @@ def test_daily_rows_differ_only_in_the_old_last_period_compare_date(outcome):
 
 
 def test_period_end_rows_pass_and_are_marked_filled(outcome):
-    passed = [i for i in outcome.items if i.report.status == CheckStatus.PASS]
+    passed = [i for i in outcome.items if i.issuer == "BARC" and i.report.status == CheckStatus.PASS]
     assert len(passed) == 3
     assert all(i.filled for i in passed)
     assert all(d.action == "match" for i in passed for d in i.report.backfill)

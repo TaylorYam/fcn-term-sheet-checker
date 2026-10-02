@@ -216,8 +216,8 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
 
 
 def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
-    spec = Spec(product_code="325199990001")  # 325 = HSBC：對照表有，範本尚未建立
-    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")])
+    spec = Spec(product_code="325199990001")  # 325 = HSBC：對照表有，本測試 registry 刻意不註冊 HSBC
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")], registry=(BARC,))
     item = outcome.items[0]
     assert item.unsupported and item.issuer == "HSBC"
     assert "HSBC" in only(item, "batch.issuer_prefix").message

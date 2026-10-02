@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,9 @@ class ProductNameTemplate:
     memory_zh: str
     memory_en: str
     normalize_brackets: bool
+    maxi_en: str = ""
+    daily_en: str = ""
+    ignore_whitespace_en: bool = False
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ class ReviewStandard:
     denomination: dict[str, int]
     print_date_max_days_after_trade: int
     sha256: str
+    fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,9 @@ def load_review_standard(path: Path) -> ReviewStandard:
                 memory_zh=n["memory_zh"],
                 memory_en=n["memory_en"],
                 normalize_brackets=bool(n.get("normalize_brackets", True)),
+                maxi_en=n.get("maxi_en", ""),
+                daily_en=n.get("daily_en", ""),
+                ignore_whitespace_en=bool(n.get("ignore_whitespace_en", False)),
             )
             for issuer, n in d["product_name"].items()
         }
@@ -112,6 +119,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             issue_price_pct=Decimal(str(d["issue_price"]["pct"])),
             risk_level=d["risk"]["level"],
             fixed_warning=d["risk"]["fixed_warning"],
+            fixed_warning_by_issuer=dict(d["risk"].get("fixed_warning_by_issuer", {})),
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),
             forbidden=tuple(d["wording"]["forbidden"]),
             allowed_phrases=tuple(d["wording"]["allowed_phrases"]),

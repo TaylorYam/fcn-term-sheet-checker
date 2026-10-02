@@ -13,7 +13,9 @@ from typing import Any
 from .config import ReferenceFormat, ReviewStandard
 from .orders.reference import OrderRecord
 from .parsers import barc as barc_parser
+from .parsers import hsbc as hsbc_parser
 from .rules import barc as barc_rules
+from .rules import hsbc as hsbc_rules
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Line, ParsedField
 
 
@@ -48,7 +50,22 @@ BARC = Issuer(
     not_covered=tuple(barc_rules.NOT_COVERED),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC,)
+HSBC = Issuer(
+    code=hsbc_rules.ISSUER,
+    template_id=hsbc_parser.TEMPLATE_ID,
+    label="HSBC 中文產品說明書",
+    parser_version=hsbc_parser.PARSER_VERSION,
+    detect=hsbc_parser.detect,
+    parse=hsbc_parser.parse,
+    product_code=hsbc_parser.product_code,
+    context=hsbc_rules.Context,
+    rules=hsbc_rules.reference_rules,
+    isin=lambda ts: ts.f("isin"),
+    autocall_schedule=hsbc_rules.autocall_schedule,
+    not_covered=tuple(hsbc_rules.NOT_COVERED),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

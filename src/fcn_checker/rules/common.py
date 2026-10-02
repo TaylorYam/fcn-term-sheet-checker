@@ -294,10 +294,14 @@ def chairman(ctx: Context) -> CheckResult:
     )
 
 
-def fixed_warning(ctx: Context) -> CheckResult:
+def fixed_warning(ctx: Context, *, issuer: str | None = None) -> CheckResult:
     rid = "standard.fixed_warning"
     ti = ctx.ts.full_text
-    target = squash(ctx.std.fixed_warning)
+    target = squash(
+        ctx.std.fixed_warning_by_issuer.get(
+            (issuer or getattr(ctx.fmt, "issuer", "BARC")).lower(), ctx.std.fixed_warning
+        )
+    )
     hits = [m for m in re.finditer(re.escape(target), ti.text)]
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
     expected = ctx.std.fixed_warning_occurrences
@@ -414,7 +418,7 @@ def issuer_name(ctx: Context, issuer: str) -> list[CheckResult]:
     return [_fixed_text(rid, name, ctx.ts.f(name), expected, what) for name, what in fields]
 
 
-def distributor_info(ctx: Context) -> list[CheckResult]:
+def distributor_info(ctx: Context, *, allow_international_phone: bool = False) -> list[CheckResult]:
     """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準。"""
     rid, std = "standard.distributor", ctx.std
     checks = (
@@ -424,7 +428,16 @@ def distributor_info(ctx: Context) -> list[CheckResult]:
         ("distributor_name_ch2", std.distributor_name, "第二章受託或銷售機構事業名稱"),
         ("distributor_address_ch2", std.distributor_address, "第二章受託或銷售機構營業所在地"),
     )
-    return [_fixed_text(rid, name, ctx.ts.f(name), exp, what) for name, exp, what in checks]
+    out = []
+    for name, exp, what in checks:
+        pf = ctx.ts.f(name)
+        if allow_international_phone and name == "distributor_phone_cover" and pf.ok:
+            value = squash(pf.value)
+            if re.fullmatch(r"\+886-2-\d{4}-\d{4}", value):
+                value = "02-" + value[len("+886-2-") :]
+            pf = ParsedField(pf.name, pf.status, value, pf.evidence, pf.candidates, pf.note)
+        out.append(_fixed_text(rid, name, pf, exp, what))
+    return out
 
 
 def fees(ctx: Context) -> list[CheckResult]:
@@ -504,9 +517,23 @@ def product_name(ctx: Context, issuer: str) -> list[CheckResult]:
             norm = (lambda s: squash(s).translate(_BRACKETS)) if tpl.normalize_brackets else squash
             tol = "忽略空白；全形／半形括號不計" if tpl.normalize_brackets else "忽略空白"
         else:
-            expected = tpl.en.format(tenor=tenor.value, ccy=iso, memory_en=tpl.memory_en if mem.value else "")
+            extra = {}
+            if tpl.maxi_en or tpl.daily_en:
+                uls, obs = ctx.ts.f("underlyings"), ctx.ts.f("ko_observation")
+                bad = next((p for p in (uls, obs) if not p.ok), None)
+                if bad is not None:
+                    out.append(doc_review(rid, field, bad))
+                    continue
+                extra = {
+                    "maxi_en": tpl.maxi_en if len(uls.value) >= 2 else "",
+                    "daily_en": tpl.daily_en if obs.value == "D" else "",
+                }
+            expected = tpl.en.format(tenor=tenor.value, ccy=iso, memory_en=tpl.memory_en if mem.value else "", **extra)
             norm = lambda s: re.sub(r"\s+", " ", s).strip()  # noqa: E731
             tol = "連續空白視為一個"
+            if tpl.ignore_whitespace_en:
+                norm = squash
+                tol = "忽略所有空白與換行"
         ok = norm(expected) == norm(pf.value)
         out.append(
             result(
