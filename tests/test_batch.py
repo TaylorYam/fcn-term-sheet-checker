@@ -277,6 +277,42 @@ def test_missing_or_duplicate_reference_row_requires_review(tmp_path):
     assert len(r.order_source) == 2
 
 
+def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back_fill(tmp_path):
+    spec, other = Spec(), Spec(product_code="029199990002")
+    old = pdf_for(tmp_path, spec, name=f"{spec.product_code}_舊版.pdf")
+    new = pdf_for(tmp_path, spec, name=f"{spec.product_code}_新版.pdf")
+    ok = pdf_for(tmp_path, other)
+    outcome, _ = batch(tmp_path, [old, ok, new], [reference_row(spec), reference_row(other)])
+
+    first, second, third = outcome.items
+    for item, another in ((first, new), (third, old)):
+        r = only(item, "batch.pairing")
+        assert (r.status, r.reason_code) == (REVIEW, "reference_row_shared")
+        assert "同一批有多份說明書對到同一個 TDCC Code" in r.message and another.name in r.message
+        assert item.term_sheet.name not in r.message
+        assert item.report.status == REVIEW and not item.filled
+        assert not any(x.rule_id.startswith(("field.", "backfill.")) for x in item.report.results)
+    assert second.report.status == PASS and second.filled
+    assert row_of(outcome.output, spec.product_code)["ISIN Code"] is None
+    assert row_of(outcome.output, other.product_code)["ISIN Code"] == SYNTH_ISIN
+    rows = result_rows(outcome.output)
+    assert new.name in rows[0]["問題摘要"] and old.name in rows[2]["問題摘要"]
+
+
+def test_same_pdf_selected_twice_says_so_and_same_names_show_full_paths(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    outcome, _ = batch(tmp_path, [pdf, pdf], [reference_row(spec)])
+    for item in outcome.items:
+        assert f"{pdf.name}（同一個檔案重複選取）" in only(item, "batch.pairing").message
+
+    (tmp_path / "v2").mkdir()
+    copy = pdf_for(tmp_path / "v2", spec)
+    outcome, _ = batch(tmp_path / "v2", [pdf, copy], [reference_row(spec)])
+    assert str(copy) in only(outcome.items[0], "batch.pairing").message
+    assert str(pdf) in only(outcome.items[1], "batch.pairing").message
+
+
 def test_reference_row_of_another_issuer_requires_review(tmp_path):
     spec = Spec()
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")])

@@ -51,7 +51,7 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/backfill.py` | 回填欄位（ISIN Code、發行日、比價日_1～12）整段流程：每格決策與 `backfill.*` 規則（缺欄名轉人工覆核）、只有整份 PASS 才寫入、開檔前比對核對時記錄的參考條件表 hash、寫新檔（沿用日期格式、不覆蓋）、決策的顯示標籤 `BackfillAction.label`（報告與 PANEL 共用） | 批量入口 `save_batch` 呼叫；原檔不動 |
 | `src/fcn_checker/single_check.py` | 單份核對：配對結果 → 表頭欄位檢查 → 參考條件表欄位規則 → 上手說明書內部規則 → 審查標準規則 → Non-Call／ISIN／發行日／比價日 → 回填決策 → 整體狀態 | 所有上手共用同一順序；只用批量入口交來的讀出結果，不重新辨識或讀出 |
 | `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
-| `src/fcn_checker/batch.py` | 批量入口，分三段：`preview_batch`（唯讀辨識：檔名上手編號、範本辨識、商品代號、對到的列）、`check_batch`（逐份辨識、讀出一次、配對後交單份核對，不寫檔）、`save_batch`（寫報告、回填新檔與「核對結果」工作表；整份 PASS 才回填）；`run_batch` = 核對＋儲存 | 測試切點 1；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
+| `src/fcn_checker/batch.py` | 批量入口，分三段：`preview_batch`（唯讀辨識：檔名上手編號、範本辨識、商品代號、對到的列）、`check_batch`（先辨識全部說明書、讀出一次，同一批多份對到同一列的全部轉人工覆核，其餘配對後交單份核對，不寫檔）、`save_batch`（寫報告、回填新檔與「核對結果」工作表；整份 PASS 才回填）；`run_batch` = 核對＋儲存 | 測試切點 1；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
 | `src/fcn_checker/cli.py` | `fcn-batch` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
 | `src/fcn_checker/panel_workflow.py` | PANEL 工作階段：參考條件表＋多份說明書的預覽、核對、儲存，以及來源與設定檔 hash 失效檢查 | 測試切點 3；呼叫批量入口三段，按儲存才寫檔 |
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗：選檔（參考條件表＋多份 PDF）、預覽表、逐份結果與回填決策呈現 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務；仍接受舊啟動器的 `--order-formats-dir` |
