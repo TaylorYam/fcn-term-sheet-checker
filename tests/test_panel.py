@@ -55,14 +55,20 @@ def test_preview_lists_each_pdf_without_writing_anything(tmp_path):
         first.problem = "modified"
 
 
-def test_preview_shows_pdfs_sharing_one_reference_row(tmp_path):
+def test_preview_and_result_show_pdfs_sharing_one_reference_row(tmp_path):
     spec = Spec()
     pdfs = [build_pdf(tmp_path / f"{spec.product_code}_{v}.pdf", spec) for v in ("舊版", "新版")]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    old, new = session_for(tmp_path, sheet, pdfs).load_preview().rows
+    session = session_for(tmp_path, sheet, pdfs)
+    old, new = session.load_preview().rows
     assert old.reference_row == new.reference_row == 4
     assert "同一批有多份說明書對到同一個 TDCC Code" in old.problem and pdfs[1].name in old.problem
     assert pdfs[0].name in new.problem
+
+    outcome = session.start_check()
+    assert "2 份需人工覆核" in outcome.headline
+    for item, other in zip(outcome.ordered_items, reversed(pdfs), strict=True):
+        assert other.name in outcome.ordered_results(item)[0].message
 
 
 def test_preview_reports_reference_sheet_column_problems(tmp_path):

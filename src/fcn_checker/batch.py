@@ -115,6 +115,7 @@ class BatchPreview:
 
 @dataclass
 class _Identified:
+    pdf: Path
     results: list[CheckResult]
     issuer_code: str | None = None
     issuer: Issuer | None = None
@@ -129,6 +130,15 @@ class _Identified:
         if self.issuer is None or self.ts is None or self.row is None or self.shared:
             return None
         return Paired(self.issuer, self.ts, self.row)
+
+    def mark_shared(self, row_no: int, others: str) -> None:
+        """同一批有其他說明書對到同一列：配對改為人工覆核，不核對也不回填。"""
+        pairing = next(r for r in self.results if r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS)
+        pairing.status, pairing.reason_code = CheckStatus.REVIEW_REQUIRED, "reference_row_shared"
+        pairing.message = (
+            f"同一批有多份說明書對到同一個 TDCC Code {pairing.actual}（參考條件表第 {row_no} 列），其他說明書：{others}"
+        )
+        self.shared = True
 
 
 def _unexpected(e: Exception) -> CheckResult:
@@ -155,7 +165,7 @@ def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = 
 def _identify(
     pdf: Path, sheet: ReferenceSheet, rfmt: ReferenceFormat, prefixes: dict[str, str], registry: Sequence[Issuer]
 ) -> _Identified:
-    out = _Identified([])
+    out = _Identified(pdf, [])
     results = out.results
     try:
         doc = open_pdf(pdf)
@@ -252,33 +262,44 @@ def _identify(
     return out
 
 
-def _flag_shared_rows(identified: Sequence[tuple[Path, _Identified]]) -> None:
-    """同一批有多份說明書對到參考條件表同一列：全部轉人工覆核（取代配對通過的結果），不核對也不回填。"""
-    by_row: dict[int, list[int]] = {}
-    for i, (_, found) in enumerate(identified):
-        if found.row is not None:
-            by_row.setdefault(found.row.row, []).append(i)
-    for row_no, group in by_row.items():
-        if len(group) < 2:
+def _other_names(found: _Identified, group: Sequence[_Identified]) -> str:
+    """同一列其他說明書的檔名；檔名相同時改列完整路徑，同一個檔案選了兩次時註明。"""
+    names = [f.pdf.name for f in group]
+    labels = []
+    for f in group:
+        if f is found:
             continue
-        for i in group:
-            found = identified[i][1]
-            others = "、".join(identified[j][0].name for j in group if j != i)
-            k = next(n for n, r in enumerate(found.results) if r.rule_id == "batch.pairing")
-            passed = found.results[k]
-            found.results[k] = CheckResult(
-                rule_id="batch.pairing",
-                field="product_code",
-                status=CheckStatus.REVIEW_REQUIRED,
-                expected=passed.expected,
-                actual=passed.actual,
-                document_evidence=passed.document_evidence,
-                order_source=passed.order_source,
-                reason_code="reference_row_shared",
-                message=f"同一批有多份說明書對到同一個 TDCC Code {passed.actual}（參考條件表第 {row_no} 列），"
-                f"其他說明書：{others}",
-            )
-            found.shared = True
+        if f.pdf.resolve() == found.pdf.resolve():
+            labels.append(f"{f.pdf.name}（同一個檔案重複選取）")
+        else:
+            labels.append(str(f.pdf) if names.count(f.pdf.name) > 1 else f.pdf.name)
+    return "、".join(labels)
+
+
+def _identify_all(
+    term_sheets: Sequence[Path],
+    sheet: ReferenceSheet,
+    rfmt: ReferenceFormat,
+    prefixes: dict[str, str],
+    registry: Sequence[Issuer],
+) -> list[_Identified]:
+    """先辨識全部說明書，同一批有多份對到參考條件表同一列時全部轉人工覆核；單份非預期錯誤不中斷整批。"""
+    identified = []
+    for pdf in map(Path, term_sheets):
+        try:
+            found = _identify(pdf, sheet, rfmt, prefixes, registry)
+        except Exception as e:
+            found = _Identified(pdf, [_unexpected(e)])
+        identified.append(found)
+    by_row: dict[int, list[_Identified]] = {}
+    for found in identified:
+        if found.row is not None:
+            by_row.setdefault(found.row.row, []).append(found)
+    for row_no, group in by_row.items():
+        if len(group) > 1:
+            for found in group:
+                found.mark_shared(row_no, _other_names(found, group))
+    return identified
 
 
 def _sheet_warnings(sheet: ReferenceSheet) -> tuple[str, ...]:
@@ -308,15 +329,13 @@ def preview_batch(
     rfmt = load_reference_format(Path(reference_format))
     prefixes = load_issuer_prefixes(Path(issuer_prefixes))
     sheet = _load_sheet(Path(reference_sheet), rfmt)
-    identified = [(pdf, _identify(pdf, sheet, rfmt, prefixes, registry)) for pdf in map(Path, term_sheets)]
-    _flag_shared_rows(identified)
     rows = []
-    for pdf, found in identified:
+    for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
         problems = [r for r in found.results if r.status != CheckStatus.PASS]
         pc = found.product_code
         rows.append(
             PreviewRow(
-                pdf,
+                found.pdf,
                 found.issuer_code,
                 any(r.reason_code == UNSUPPORTED for r in problems),
                 pc.value if pc is not None and pc.ok else None,
@@ -341,13 +360,13 @@ def _item_metadata(pdf: Path, meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_one(
-    pdf: Path,
     found: _Identified,
     sheet: ReferenceSheet,
     rfmt: ReferenceFormat,
     std: ReviewStandard,
     meta: dict[str, Any],
 ) -> BatchItem:
+    pdf = found.pdf
     metadata = _item_metadata(pdf, meta)
     issuer = found.issuer
     if found.pages is not None:
@@ -389,20 +408,12 @@ def check_batch(
         "review_standard": {**file_meta(Path(review_standard)), "version": std.version},
         "reference_format": {**file_meta(Path(reference_format)), "version": rfmt.version},
     }
-    # 先辨識全部說明書，才知道同一批是否有多份對到同一列；單份非預期錯誤不中斷整批
-    identified = []
-    for pdf in map(Path, term_sheets):
-        try:
-            found = _identify(pdf, sheet, rfmt, prefixes, registry)
-        except Exception as e:
-            found = _Identified([_unexpected(e)])
-        identified.append((pdf, found))
-    _flag_shared_rows(identified)
     items: list[BatchItem] = []
-    for pdf, found in identified:
+    for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
         try:
-            item = _check_one(pdf, found, sheet, rfmt, std, meta)
-        except Exception as e:
+            item = _check_one(found, sheet, rfmt, std, meta)
+        except Exception as e:  # 單份非預期錯誤不中斷整批
+            pdf = found.pdf
             item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta)))
         items.append(item)
     outcome = BatchOutcome(

@@ -299,6 +299,20 @@ def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back
     assert new.name in rows[0]["問題摘要"] and old.name in rows[2]["問題摘要"]
 
 
+def test_same_pdf_selected_twice_says_so_and_same_names_show_full_paths(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    outcome, _ = batch(tmp_path, [pdf, pdf], [reference_row(spec)])
+    for item in outcome.items:
+        assert f"{pdf.name}（同一個檔案重複選取）" in only(item, "batch.pairing").message
+
+    (tmp_path / "v2").mkdir()
+    copy = pdf_for(tmp_path / "v2", spec)
+    outcome, _ = batch(tmp_path / "v2", [pdf, copy], [reference_row(spec)])
+    assert str(copy) in only(outcome.items[0], "batch.pairing").message
+    assert str(pdf) in only(outcome.items[1], "batch.pairing").message
+
+
 def test_reference_row_of_another_issuer_requires_review(tmp_path):
     spec = Spec()
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")])
