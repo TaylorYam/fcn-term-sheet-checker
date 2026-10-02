@@ -22,7 +22,7 @@ flowchart TD
     H --> R[Rule engine]
     P --> R
     R --> S[根目錄 runtime/核對紀錄：整批 JSON]
-    R --> W[核對結果檔：回填後（整份通過才回填）＋錯誤清單]
+    R --> W[核對結果檔：回填後（整份通過或人工放行才回填）＋錯誤清單]
     B -->|不支援／失敗| X[待人工覆核]
     F -->|未知／多重命中| X
     G -->|缺漏／歧義| X
@@ -48,15 +48,15 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/config.py` | 載入審查標準、參考條件表格式、上手編號對照（TOML）；根目錄設定缺檔時改用程式內建設定 | 會隨時間改變的基準只在設定檔 |
 | `src/fcn_checker/orders/reference.py` | 參考條件表 adapter（多列表格，所有上手共用，記下每欄儲存格位置供回填）與 `OrderRecord` | 未知欄名回報覆核；禁止用文件值填補預期值 |
 | `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；`reference.py` 為參考條件表共用規則（表上事先填好的欄位與標準欄位的比對、Non-Call；空值寫法取自格式設定）；`common.py` 共用工具、參考條件表欄名檢查與審查標準規則（`review_standard_rules`）；`barc.py`、`hsbc.py` 等為上手專屬的說明書內部規則與未涵蓋清單 | 不讀檔、不呼叫模型、不自動修改來源值 |
-| `src/fcn_checker/backfill.py` | 回填欄位（ISIN Code、發行日、比價日_1～12）整段流程：每格決策與 `backfill.*` 規則（缺欄名轉人工覆核）、只有整份 PASS 才寫入、開檔前比對核對時記錄的參考條件表 hash、回填值寫進記憶體中的工作表（沿用日期格式）、決策的顯示標籤 `BackfillAction.label`（PANEL 使用） | 批量入口 `save_batch` 呼叫；原檔不動 |
-| `src/fcn_checker/result_file.py` | 核對結果檔 `<參考條件表檔名>_核對結果_<時間>.xlsx`：「回填後」（原 `樣本清單` 版面，只留整份通過且已回填的列，順序照原表；其他工作表不帶入）與「錯誤清單」（每份沒通過的 PDF 一列：TDCC Code、PDF 檔名、錯訊） | 批量入口 `save_batch` 呼叫；寫到指定資料夾、exclusive create 不覆蓋 |
+| `src/fcn_checker/backfill.py` | 回填欄位（ISIN Code、發行日、比價日_1～12）整段流程：每格決策與 `backfill.*` 規則（缺欄名轉人工覆核）、寫入呼叫端決定要回填的說明書（整份 PASS 或人工放行）、開檔前比對核對時記錄的參考條件表 hash、回填值寫進記憶體中的工作表（沿用日期格式）、決策的顯示標籤 `BackfillAction.label`（PANEL 使用） | 批量入口 `save_batch` 呼叫；原檔不動 |
+| `src/fcn_checker/result_file.py` | 核對結果檔 `<參考條件表檔名>_核對結果_<時間>.xlsx`：「回填後」（原 `樣本清單` 版面，只留整份通過或人工放行且已回填的列，順序照原表；其他工作表不帶入）與「錯誤清單」（每份沒通過也沒人工放行的 PDF 一列：TDCC Code、PDF 檔名、錯訊） | 批量入口 `save_batch` 呼叫；寫到指定資料夾、exclusive create 不覆蓋 |
 | `src/fcn_checker/single_check.py` | 單份核對：配對結果 → 表頭欄位檢查 → 參考條件表欄位規則 → 上手說明書內部規則 → 審查標準規則 → Non-Call／ISIN／發行日／比價日 → 回填決策 → 整體狀態 | 所有上手共用同一順序；只用批量入口交來的讀出結果，不重新辨識或讀出 |
 | `src/fcn_checker/messages.py` | 錯訊：每條問題的中文說明（`problem_message`）與項目名稱（`subject`）；參考條件表欄位寫成「<Excel 欄名>對不起來：參考條件表 <值>／說明書 <值>」，其他類別用規則的中文說明並附雙方值；規則沒寫說明時依原因與狀態給中文預設 | 核對結果檔「錯誤清單」與 PANEL 結果明細共用；不判定哪一邊錯、不顯示 rule_id／reason_code |
-| `src/fcn_checker/reporting.py` | 核對紀錄：每次儲存在根目錄（CLI 為執行目錄、PANEL 為安裝根目錄）`runtime/核對紀錄/<時間>.json` 寫一份整批 JSON：程式版本與 commit、設定檔與審查標準的路徑與 hash、參考條件表與每份 PDF 的 hash、每份 PDF 的逐項結果、證據與回填決策 | 供維護人員追查，作業人員不需要看；時間戳與核對結果檔相同、不覆蓋；寫入失敗只記整批錯誤，不影響核對結果檔 |
-| `src/fcn_checker/batch.py` | 批量入口，分三段：`preview_batch`（唯讀辨識：檔名上手編號、範本辨識、商品代號、對到的列）、`check_batch`（先辨識全部說明書、讀出一次，同一批多份對到同一列的全部轉人工覆核，其餘配對後交單份核對，不寫檔）、`save_batch`（確認參考條件表未變更後，寫核對結果檔與核對紀錄；整份 PASS 才回填）；`run_batch` = 核對＋儲存 | 測試切點 1；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
+| `src/fcn_checker/reporting.py` | 核對紀錄：每次儲存在根目錄（CLI 為執行目錄、PANEL 為安裝根目錄）`runtime/核對紀錄/<時間>.json` 寫一份整批 JSON：程式版本與 commit、設定檔與審查標準的路徑與 hash、參考條件表與每份 PDF 的 hash、每份 PDF 的逐項結果（人工放行仍保留原判定，另記 `manual_release`）、證據與回填決策 | 供維護人員追查，作業人員不需要看；時間戳與核對結果檔相同、不覆蓋；寫入失敗只記整批錯誤，不影響核對結果檔 |
+| `src/fcn_checker/batch.py` | 批量入口，分三段：`preview_batch`（唯讀辨識：檔名上手編號、範本辨識、商品代號、對到的列）、`check_batch`（先辨識全部說明書、讀出一次，同一批多份對到同一列的全部轉人工覆核，其餘配對後交單份核對，不寫檔）、`save_batch`（確認參考條件表未變更後，寫核對結果檔與核對紀錄；整份 PASS 或人工放行才回填）；`BatchItem.release_problem` 判斷能否人工放行（回填值確定且不和參考條件表打架），`BatchItem.status` 為人工放行後的有效狀態；`run_batch` = 核對＋儲存 | 測試切點 1；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
 | `src/fcn_checker/cli.py` | `fcn-batch` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
-| `src/fcn_checker/panel_workflow.py` | PANEL 工作階段：參考條件表＋多份說明書的預覽、核對、儲存，以及來源與設定檔 hash 失效檢查 | 測試切點 3；呼叫批量入口三段，按儲存才寫檔 |
-| `src/fcn_checker/panel.py` | Tkinter 本機視窗：選檔（參考條件表＋多份 PDF）、預覽表、逐份結果與回填決策呈現 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務；仍接受舊啟動器的 `--order-formats-dir` |
+| `src/fcn_checker/panel_workflow.py` | PANEL 工作階段：參考條件表＋多份說明書的預覽、核對、人工放行（`release`／`cancel_release`／`release_problem`，只作用於當次結果）、儲存，以及來源與設定檔 hash 失效檢查 | 測試切點 3；呼叫批量入口三段，按儲存才寫檔 |
+| `src/fcn_checker/panel.py` | Tkinter 本機視窗：選檔（參考條件表＋多份 PDF）、預覽表、逐份結果與回填決策呈現、人工放行按鈕與確認視窗 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務；仍接受舊啟動器的 `--order-formats-dir` |
 | `src/fcn_checker/updating.py` | 公開 GitHub main 更新、隔離安裝與原子切換；版本資訊：`git_revision`（Git 工作目錄的 HEAD）、`program_commit`（正在執行的程式的 commit：開發用 Git、更新後的版本資料夾名稱或根目錄安裝紀錄，核對紀錄使用） | `PanelUpdater` 公開測試入口；不讀取或上傳交易資料，不覆寫本機 config |
 | `panel_bootstrap.py` | 穩定的本機更新版本啟動器 | 限定版本資料夾；不連網，維持根目錄 config |
 | `tests/synth.py`、`tests/hsbc_synth.py` | 各上手的說明書合成器：產生合成說明書 PDF 與一致的參考條件表列 | 數值皆虛構；不提交真實客戶交易資料；上手之間互不引用 |

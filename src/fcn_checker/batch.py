@@ -15,7 +15,7 @@
 範本辨識與讀出每份說明書各只做一次；配對成功後由單份核對（single_check.py）依序執行所有規則。
 批量入口只負責載入設定與參考條件表、逐份呼叫、單份錯誤隔離與儲存。
 
-只有整份核對 PASS 的說明書才回填；回填結果只寫進核對結果檔（原檔不動、不覆蓋既有檔案）。回填流程見 backfill.py。
+只有整份核對 PASS 或人工放行（PANEL）的說明書才回填；回填結果只寫進核對結果檔（原檔不動、不覆蓋既有檔案）。回填流程見 backfill.py。
 """
 
 from __future__ import annotations
@@ -49,6 +49,8 @@ from .single_check import Paired, check_document
 from .standard_fields import TermSheet
 
 UNSUPPORTED = "issuer_unsupported"
+SHARED_ROW = "reference_row_shared"
+RELEASABLE = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED)  # 可以人工放行的原判定
 T = TypeVar("T")
 DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
 DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
@@ -62,16 +64,45 @@ class BatchItem:
     product_code: str | None = None
     reference_row: int | None = None  # 對到的參考條件表列號
     filled: bool = False
+    released: bool = False  # 人工放行（只有 PANEL 會設定）；原判定仍在 report
 
     @property
     def unsupported(self) -> bool:
         return any(r.reason_code == UNSUPPORTED for r in self.report.results)
 
     @property
+    def status(self) -> CheckStatus:
+        """有效狀態：人工放行視同 PASS。"""
+        return CheckStatus.PASS if self.released else self.report.status
+
+    @property
+    def fillable(self) -> bool:
+        """整份通過或人工放行才回填。"""
+        return self.released or backfill.fillable(self.report)
+
+    @property
     def status_label(self) -> str:
         if self.unsupported:
             return "未支援上手"
+        if self.released:
+            return f"人工放行（原：{STATUS_ZH[self.report.status]}）"
         return f"{self.report.status.value}（{STATUS_ZH[self.report.status]}）"
+
+    @property
+    def release_problem(self) -> str:
+        """不能人工放行的原因；空字串表示可以放行。只有回填值確定且不和參考條件表打架時才能放行。"""
+        report = self.report
+        if report.status == CheckStatus.PASS:
+            return "已經通過，不需要人工放行"
+        if self.unsupported:
+            return "未支援上手，沒有可以回填的值"
+        if report.status not in RELEASABLE:
+            return "執行錯誤，沒有可以回填的值"
+        if any(r.reason_code == SHARED_ROW for r in report.results):
+            return "同一批有多份說明書對到同一列，不能人工放行"
+        if self.reference_row is None:
+            return "沒有對到參考條件表的列，沒有地方可以回填"
+        return backfill.release_problem(report)
 
 
 @dataclass
@@ -88,7 +119,7 @@ class BatchOutcome:
     record: Path | None = None  # 核對紀錄；尚未儲存或寫入失敗時為 None
 
     def refresh_status(self) -> None:
-        statuses = [i.report.status for i in self.items] + [e.status for e in self.errors]
+        statuses = [i.status for i in self.items] + [e.status for e in self.errors]
         self.status = overall_status(statuses) if self.items else CheckStatus.ERROR
 
 
@@ -137,7 +168,7 @@ class _Identified:
     def mark_shared(self, row_no: int, others: str) -> None:
         """同一批有其他說明書對到同一列：配對改為人工覆核，不核對也不回填。"""
         pairing = next(r for r in self.results if r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS)
-        pairing.status, pairing.reason_code = CheckStatus.REVIEW_REQUIRED, "reference_row_shared"
+        pairing.status, pairing.reason_code = CheckStatus.REVIEW_REQUIRED, SHARED_ROW
         pairing.message = (
             f"同一批有多份說明書對到同一個 TDCC Code {pairing.actual}（參考條件表第 {row_no} 列），其他說明書：{others}"
         )
@@ -459,9 +490,11 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
         lambda: backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256),
     )
     if wb is not None:  # 參考條件表核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
-        filled = backfill.apply(wb, rfmt, [i.report for i in items])
-        keep = [i.reference_row for i, ok in zip(items, filled, strict=True) if ok and i.reference_row]
-        errors = [_error_row(i) for i in items if not backfill.fillable(i.report)]
+        filled = [i.fillable for i in items]
+        to_fill = [i for i, ok in zip(items, filled, strict=True) if ok]
+        backfill.apply(wb, rfmt, [i.report for i in to_fill])
+        keep = [i.reference_row for i in to_fill if i.reference_row]
+        errors = [_error_row(i) for i, ok in zip(items, filled, strict=True) if not ok]
         out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
         outcome.output = _attempt(
             outcome, "output.result_file", "核對結果檔", lambda: result_file.save(wb, rfmt, keep, errors, out)
