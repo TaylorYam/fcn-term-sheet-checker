@@ -1,7 +1,8 @@
 """核對紀錄：每次儲存核對結果時，在根目錄 `runtime/核對紀錄/` 寫一份整批 JSON，供維護人員事後追查（Issue #73）。
 
 根目錄和設定檔一致：CLI 是執行目錄，PANEL 是安裝根目錄。檔名 `<YYYYMMDD-HHMMSS>.json`，與同次核對結果檔的
-時間戳相同；不覆蓋既有紀錄。內容：執行 metadata（程式版本與 commit、設定檔與審查標準的路徑與 hash、
+時間戳相同；不覆蓋既有紀錄。核對結果檔沒寫成（例如同名檔已存在）時仍寫紀錄並記下錯誤；參考條件表核對後被改過時
+兩者都不寫。內容：執行 metadata（程式版本與 commit、設定檔與審查標準的路徑與 hash、
 參考條件表與每份 PDF 的 hash、執行時間）、核對結果檔路徑、整批錯誤，以及每份 PDF 的整體狀態、逐項結果、
 證據（頁碼、原文、儲存格位置）與回填決策。作業人員不需要看這份紀錄。
 """
@@ -24,14 +25,6 @@ if TYPE_CHECKING:
 
 RECORD_DIR = Path("runtime") / "核對紀錄"
 RECORD_VERSION = 1
-
-STATUS_ZH = {
-    CheckStatus.PASS: "通過",
-    CheckStatus.MISMATCH: "不一致",
-    CheckStatus.REVIEW_REQUIRED: "需人工覆核",
-    CheckStatus.NOT_APPLICABLE: "不適用",
-    CheckStatus.ERROR: "執行錯誤",
-}
 
 
 def _plain(v: Any) -> Any:
@@ -89,15 +82,21 @@ def to_json(report: CheckReport) -> dict[str, Any]:
     return out
 
 
-def record_path(root: Path, now: dt.datetime) -> Path:
-    return root / RECORD_DIR / f"{now:%Y%m%d-%H%M%S}.json"
+def save_record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> Path:
+    """寫出這次儲存的核對紀錄並回傳路徑；核對結果檔處理完後呼叫，才記得到核對結果檔路徑與是否回填。
+
+    檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。
+    """
+    path = root / RECORD_DIR / f"{now:%Y%m%d-%H%M%S}.json"
+    text = json.dumps(_record(outcome, root, now), ensure_ascii=False, indent=2, default=str) + "\n"
+    write_new(path, text.encode("utf-8"), "核對紀錄")
+    return path
 
 
-def build_record(outcome: BatchOutcome, now: dt.datetime, root: Path) -> dict[str, Any]:
-    """整批核對紀錄；核對結果檔寫完後呼叫，才記得到核對結果檔路徑與是否回填。"""
+def _record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> dict[str, Any]:
     return {
         "record_version": RECORD_VERSION,
-        "saved_at": now.isoformat(timespec="seconds"),
+        "saved_at": now.astimezone().isoformat(timespec="seconds"),
         "status": outcome.status.value,
         "result_file": str(outcome.output) if outcome.output else None,
         "metadata": _plain({**outcome.metadata, "program_commit": program_commit(root)}),
@@ -114,9 +113,3 @@ def build_record(outcome: BatchOutcome, now: dt.datetime, root: Path) -> dict[st
             for i in outcome.items
         ],
     }
-
-
-def write_record(record: dict[str, Any], path: Path) -> None:
-    """寫出核對紀錄；檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。"""
-    text = json.dumps(record, ensure_ascii=False, indent=2, default=str) + "\n"
-    write_new(path, text.encode("utf-8"), "核對紀錄")

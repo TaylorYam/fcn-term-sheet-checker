@@ -29,7 +29,7 @@ def inputs(tmp_path: Path, *specs: Spec, rows: list[dict] | None = None):
 
 
 def session_for(tmp_path: Path, sheet, pdfs, standard=REVIEW_STANDARD, config_dir=None) -> PanelSession:
-    session = PanelSession(standard, config_dir or ROOT / "config", root=tmp_path)
+    session = PanelSession(standard, config_dir or ROOT / "config", install_root=tmp_path)
     session.select(sheet, pdfs)
     return session
 
@@ -175,7 +175,7 @@ def test_changing_sources_clears_result_and_requires_new_preview(tmp_path, chang
 # ---------------------------------------------------------------- 儲存
 
 
-def test_save_writes_reports_and_result_file_only_when_asked(tmp_path):
+def test_save_writes_result_file_and_record_only_when_asked(tmp_path):
     spec = Spec()
     sheet, pdfs = inputs(tmp_path, spec)
     original = sheet.read_bytes()
@@ -294,6 +294,6 @@ def test_builtin_config_comes_from_the_launched_release_not_the_package_location
     assert args.config_dir == root / "config"
     assert args.builtin_config_dir == release / "config"
     session = session_from_args(args)
-    assert session.root == root.resolve(), "核對紀錄寫到安裝根目錄的 runtime/，不寫進版本資料夾"
+    assert session.install_root == root.resolve(), "核對紀錄寫到安裝根目錄的 runtime/，不寫進版本資料夾"
     assert session.reference_format == (release / "config" / REFERENCE_FORMAT.name).resolve()
     assert session.issuer_prefixes == (release / "config" / ISSUER_PREFIXES.name).resolve()

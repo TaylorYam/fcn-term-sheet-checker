@@ -18,6 +18,14 @@ from typing import Any
 
 from .schema import CheckResult, CheckStatus
 
+STATUS_ZH = {
+    CheckStatus.PASS: "通過",
+    CheckStatus.MISMATCH: "不一致",
+    CheckStatus.REVIEW_REQUIRED: "需人工覆核",
+    CheckStatus.NOT_APPLICABLE: "不適用",
+    CheckStatus.ERROR: "執行錯誤",
+}
+
 FIELD_ZH = {
     "template": "範本",
     "issuer": "上手",
@@ -168,7 +176,7 @@ STATUS_DEFAULT = {
     CheckStatus.REVIEW_REQUIRED: "需要人工確認",
     CheckStatus.ERROR: "執行錯誤",
 }
-MAX_VALUE = 80  # 值太長（例：整段固定警語）只顯示前段，完整值見報告
+MAX_VALUE = 80  # 值太長（例：整段固定警語）只顯示前段，完整值見核對紀錄
 
 
 def _category(r: CheckResult) -> str:

@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import fitz
 import openpyxl
@@ -41,15 +41,15 @@ from .config import (
 from .extraction import extract_lines
 from .ingestion import IngestionError, error_result, file_meta, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
-from .messages import problem_message
+from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
-from .reporting import STATUS_ZH
 from .rules.common import doc_review, read_standard
 from .schema import CheckReport, CheckResult, CheckStatus, Evidence, ParsedField, overall_status
 from .single_check import Paired, check_document
 from .standard_fields import TermSheet
 
 UNSUPPORTED = "issuer_unsupported"
+T = TypeVar("T")
 DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
 DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
 
@@ -451,32 +451,39 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
     for item in outcome.items:
         item.filled = False
     outcome.saved = True
-    out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
-    wb = None
-    try:
-        # 參考條件表核對後被改過（或讀不到）時在這裡中止：核對結果檔與核對紀錄都不寫
-        wb = backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256)
-        filled = backfill.apply(wb, outcome.reference_format, [i.report for i in outcome.items])
-        keep = [i.reference_row for i, ok in zip(outcome.items, filled, strict=True) if ok and i.reference_row]
-        errors = [_error_row(i) for i in outcome.items if not backfill.fillable(i.report)]
-        result_file.write(result_file.build(wb, outcome.reference_format, keep, errors), out)
-    except IngestionError as e:
-        outcome.errors.append(error_result("output.result_file", "核對結果檔", e))
-    else:
-        outcome.output = out
-        for item, ok in zip(outcome.items, filled, strict=True):
-            item.filled = ok
+    rfmt, items = outcome.reference_format, outcome.items
+    wb = _attempt(
+        outcome,
+        "output.result_file",
+        "核對結果檔",
+        lambda: backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256),
+    )
+    if wb is not None:  # 參考條件表核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
+        filled = backfill.apply(wb, rfmt, [i.report for i in items])
+        keep = [i.reference_row for i, ok in zip(items, filled, strict=True) if ok and i.reference_row]
+        errors = [_error_row(i) for i in items if not backfill.fillable(i.report)]
+        out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
+        outcome.output = _attempt(
+            outcome, "output.result_file", "核對結果檔", lambda: result_file.save(wb, rfmt, keep, errors, out)
+        )
+        if outcome.output is not None:
+            for item, ok in zip(items, filled, strict=True):
+                item.filled = ok
+        outcome.refresh_status()
+        outcome.record = _attempt(
+            outcome, "output.record", "核對紀錄", lambda: reporting.save_record(outcome, Path(root), now)
+        )
     outcome.refresh_status()
-    if wb is not None:
-        record = reporting.record_path(Path(root), now)
-        try:
-            reporting.write_record(reporting.build_record(outcome, now, Path(root)), record)
-        except IngestionError as e:
-            outcome.errors.append(error_result("output.record", "核對紀錄", e))
-            outcome.refresh_status()
-        else:
-            outcome.record = record
     return outcome
+
+
+def _attempt(outcome: BatchOutcome, rule_id: str, what: str, step: Callable[[], T]) -> T | None:
+    """儲存的一步；失敗（IngestionError）時記成整批錯誤並回傳 None，不中斷其他輸出。"""
+    try:
+        return step()
+    except IngestionError as e:
+        outcome.errors.append(error_result(rule_id, what, e))
+        return None
 
 
 def run_batch(

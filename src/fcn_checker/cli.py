@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from .batch import run_batch
-from .reporting import STATUS_ZH
+from .messages import STATUS_ZH
 from .schema import CheckStatus
 
 EXIT = {CheckStatus.PASS: 0, CheckStatus.MISMATCH: 1, CheckStatus.REVIEW_REQUIRED: 1, CheckStatus.ERROR: 2}
@@ -85,8 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"核對結果檔：{outcome.output}")
     if outcome.record is not None:
         print(f"核對紀錄：{outcome.record}")
-    if outcome.items:
-        print(f"報告資料夾：{args.out}")
     return EXIT[outcome.status]
 
 

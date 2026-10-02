@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fcn_checker.cli import main
-from harness import ROOT, cli_root, load_record
+from harness import cli_root, load_record
 from reference_synth import build_reference_sheet
 from synth import Spec, build_pdf, reference_row
 
@@ -68,15 +68,14 @@ def test_corrupt_or_missing_pdf_gives_error_exit_code_and_record(tmp_path, monke
     assert not list(out.glob("*.check.*")), "輸出資料夾沒有每份說明書的報告"
 
 
-def test_console_script_entry_point(tmp_path):
-    import shutil
+def test_console_script_entry_point(tmp_path, monkeypatch):
     import subprocess
     import sys
 
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    shutil.copytree(ROOT / "config", tmp_path / "config")  # 執行目錄是根目錄：核對紀錄寫在 tmp_path/runtime/
+    cli_root(tmp_path, monkeypatch)  # 執行目錄是根目錄：核對紀錄寫在 tmp_path/runtime/
     proc = subprocess.run(
         [sys.executable, "-m", "fcn_checker.cli", str(sheet), str(pdf), "--out", str(tmp_path / "r")],
         capture_output=True,
@@ -86,3 +85,4 @@ def test_console_script_entry_point(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert "整體狀態：PASS" in proc.stdout
+    assert "報告資料夾" not in proc.stdout

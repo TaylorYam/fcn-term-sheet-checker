@@ -619,6 +619,8 @@ def test_save_writes_one_audit_record_named_like_the_result_file(tmp_path):
     assert [p.name for p in (tmp_path / "reports").iterdir()] == [outcome.output.name], "輸出資料夾只有核對結果檔"
     data = json.loads(outcome.record.read_text(encoding="utf-8"))
     assert (data["status"], data["result_file"]) == ("MISMATCH", str(outcome.output))
+    assert dt.datetime.fromisoformat(data["saved_at"]).replace(tzinfo=None) == NOW, "執行時間（含時區）"
+    assert dt.datetime.fromisoformat(data["saved_at"]).tzinfo is not None
     meta = data["metadata"]
     assert meta["program_version"] == __version__ and "program_commit" in meta
     for key, path in (

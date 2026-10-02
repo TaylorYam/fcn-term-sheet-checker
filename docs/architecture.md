@@ -57,7 +57,7 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/cli.py` | `fcn-batch` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
 | `src/fcn_checker/panel_workflow.py` | PANEL 工作階段：參考條件表＋多份說明書的預覽、核對、儲存，以及來源與設定檔 hash 失效檢查 | 測試切點 3；呼叫批量入口三段，按儲存才寫檔 |
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗：選檔（參考條件表＋多份 PDF）、預覽表、逐份結果與回填決策呈現 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務；仍接受舊啟動器的 `--order-formats-dir` |
-| `src/fcn_checker/updating.py` | 公開 GitHub main 更新、隔離安裝與原子切換 | `PanelUpdater` 公開測試入口；不讀取或上傳交易資料，不覆寫本機 config |
+| `src/fcn_checker/updating.py` | 公開 GitHub main 更新、隔離安裝與原子切換；版本資訊：`git_revision`（Git 工作目錄的 HEAD）、`program_commit`（正在執行的程式的 commit：開發用 Git、更新後的版本資料夾名稱或根目錄安裝紀錄，核對紀錄使用） | `PanelUpdater` 公開測試入口；不讀取或上傳交易資料，不覆寫本機 config |
 | `panel_bootstrap.py` | 穩定的本機更新版本啟動器 | 限定版本資料夾；不連網，維持根目錄 config |
 | `tests/synth.py`、`tests/hsbc_synth.py` | 各上手的說明書合成器：產生合成說明書 PDF 與一致的參考條件表列 | 數值皆虛構；不提交真實客戶交易資料；上手之間互不引用 |
 | `tests/pdf_writer.py`、`tests/reference_synth.py`、`tests/harness.py` | 不分上手的測試工具：PDF 寫入、參考條件表合成（發行機構寫法取自格式設定）、單份核對 harness（經 `check_batch`，依 rule_id 取結果） | 新測試用共用 harness 寫 |
@@ -68,7 +68,7 @@ PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版�
 
 詳見 [資料契約](data-contract.md)。文件及下單資料各自驗證後，依明確交易識別配對；第一個流程可用人工指定的一對檔案，不用相似度猜配對。
 
-每項規則產生 `PASS`、`MISMATCH`、`REVIEW_REQUIRED`、`NOT_APPLICABLE` 或 `ERROR`。只有所有適用必核欄位有可靠值且通過驗證／核對，整體才可為 `PASS`；未實作的必核規則不算通過。整體狀態優先順序為 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`，報告仍保留全部差異。`NOT_APPLICABLE` 必須由產品範本與明確規則支持，不能以空值推定。
+每項規則產生 `PASS`、`MISMATCH`、`REVIEW_REQUIRED`、`NOT_APPLICABLE` 或 `ERROR`。只有所有適用必核欄位有可靠值且通過驗證／核對，整體才可為 `PASS`；未實作的必核規則不算通過。整體狀態優先順序為 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`，核對紀錄仍保留全部差異。`NOT_APPLICABLE` 必須由產品範本與明確規則支持，不能以空值推定。
 
 利率、金額與比例使用 Decimal 概念；序列化為十進位字串，避免二進位浮點誤差。日期不猜日月順序；百分比不混淆年率與每期利率。容差、四捨五入、計息及日期調整規則必須按欄位明定、版本化，預設不使用寬鬆容差。
 
@@ -76,7 +76,7 @@ PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版�
 
 首版規劃為本機 Python CLI。執行紀錄包含文件 hash、下單輸入 hash、parser/schema/rule/config 版本、程式 commit、擷取工具版本與執行時間。同輸入與同版本應產生相同的標準化值及判定，時間與 run ID 等 metadata 不列入此保證。
 
-機密輸入與產出只放 `data/`、`runtime/`；console log 以識別碼與錯誤分類為主，詳細證據放根目錄 `runtime/核對紀錄/` 的核對紀錄。保存期限、存取控制及報告遮蔽在試行前確認。第一版不需 API 金鑰，不會自動載入 `.env`，設定格式在實作時確定。
+機密輸入與產出只放 `data/`、`runtime/`；console log 以識別碼與錯誤分類為主，詳細證據放根目錄 `runtime/核對紀錄/` 的核對紀錄。保存期限、存取控制及核對紀錄遮蔽在試行前確認。第一版不需 API 金鑰，不會自動載入 `.env`，設定格式在實作時確定。
 
 ## 擴充與限制
 

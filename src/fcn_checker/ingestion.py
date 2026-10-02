@@ -12,7 +12,7 @@ from .schema import CheckResult, CheckStatus
 
 
 class IngestionError(Exception):
-    """輸入檔無法讀取（不存在、損毀、加密）。reason_code 供報告使用。"""
+    """輸入檔無法讀取（不存在、損毀、加密）或輸出檔無法寫入。reason_code 記在結果與核對紀錄。"""
 
     def __init__(self, reason_code: str, message: str):
         super().__init__(message)

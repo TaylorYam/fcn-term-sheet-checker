@@ -21,6 +21,8 @@ from urllib.request import Request, urlopen
 REPOSITORY = "TaylorYam/fcn-term-sheet-checker"
 API = f"https://api.github.com/repos/{REPOSITORY}"
 SHA = re.compile(r"[0-9a-f]{40}")
+PACKAGE_DIR = Path(__file__).resolve().parent
+RELEASE_NAME = re.compile(r"([0-9a-f]{40})-")  # 更新安裝的版本資料夾：.local/releases/<commit>-<隨機碼>
 MAX_ARCHIVE = 50 * 1024 * 1024
 MAX_EXTRACTED = 100 * 1024 * 1024
 
@@ -159,15 +161,25 @@ def git_revision(root: Path) -> str | None:
     return None
 
 
-def program_commit(root: Path) -> str | None:
-    """執行中程式的 commit：套件所在的 Git 工作目錄優先；PANEL 安裝版沒有 Git，改讀根目錄的版本紀錄；都沒有時為 None。"""
-    source = git_revision(Path(__file__).resolve().parents[2])
-    if source is not None:
-        return source
+def program_commit(root: Path, *, package: Path = PACKAGE_DIR) -> str | None:
+    """正在執行的程式的 commit（核對紀錄用）；`package` 是 fcn_checker 套件所在資料夾。
+
+    依序：開發用 Git 工作目錄（src/fcn_checker 的上兩層）的 HEAD；PANEL 更新後的版本資料夾名稱
+    （.local/releases/<commit>-…）；根目錄安裝時記錄的 .local/installed.json。不讀目前的啟動指標
+    （另一個視窗可能已經更新到別的版本）。都取不到時為 None。
+    """
+    revision = git_revision(package.parent.parent)
+    if revision is not None:
+        return revision
+    for folder in package.parents:
+        if folder.parent.name == "releases" and folder.parent.parent.name == ".local":
+            m = RELEASE_NAME.match(folder.name)
+            return m[1] if m else None
     try:
-        return PanelUpdater(root).current
-    except UpdateError:
+        sha = json.loads((root / ".local" / "installed.json").read_text(encoding="utf-8"))["sha"]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
+    return sha if isinstance(sha, str) and SHA.fullmatch(sha) else None
 
 
 def record_installation(root: Path) -> None:

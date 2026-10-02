@@ -77,13 +77,13 @@ class PanelSession:
         *,
         builtin_config_dir: Path | None = None,
         registry: Sequence[Issuer] = REGISTRY,
-        root: Path = Path("."),
+        install_root: Path | None = None,
     ):
         """config_dir 有參考條件表格式與上手編號對照就用它的；沒有（舊安裝）就用 builtin_config_dir（版本內建設定）。
 
-        root 是根目錄（安裝根目錄；直接啟動時為執行目錄），核對紀錄寫到 root/runtime/核對紀錄。
+        install_root 是根目錄（雙擊入口給的安裝根目錄；沒有時為執行目錄），核對紀錄寫到它的 runtime/核對紀錄。
         """
-        self.root = Path(root).resolve()
+        self.install_root = Path(install_root or ".").resolve()
         self.review_standard = Path(review_standard).resolve()
         self.reference_format = resolve_config("reference_sheet.toml", config_dir, builtin_config_dir)
         self.issuer_prefixes = resolve_config("issuer_prefixes.toml", config_dir, builtin_config_dir)
@@ -194,7 +194,7 @@ class PanelSession:
         outcome = self.outcome
         if outcome is None:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
-        batch = save_batch(outcome.batch, Path(out_dir), root=self.root, now=now)
+        batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)
         errors = [e.message for e in batch.errors]
         if self.outcome is not outcome:
             errors.append("儲存期間來源已變更；已寫入的檔案屬於先前核對，請重新載入。")

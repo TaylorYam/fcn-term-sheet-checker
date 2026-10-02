@@ -14,9 +14,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
 from .ingestion import IngestionError
-from .messages import problem_message, subject
+from .messages import STATUS_ZH, problem_message, subject
 from .panel_workflow import PanelOutcome, PanelSession, SaveReceipt
-from .reporting import STATUS_ZH
 from .schema import CheckResult, CheckStatus
 from .updating import PanelUpdater, UpdateError
 
@@ -594,7 +593,7 @@ def session_from_args(args: argparse.Namespace) -> PanelSession:
         args.review_standard,
         args.config_dir,
         builtin_config_dir=args.builtin_config_dir,
-        root=args.install_root or Path("."),
+        install_root=args.install_root,
     )
 
 
