@@ -7,8 +7,10 @@
 
 比價日填法：
 
-- D（期間每日觀察）：只填 `比價日_{Non-Call}`，其他格填空值寫法。
+- D（期間每日觀察）：填 `比價日_{Non-Call}`（開始）與 `比價日_{期數}`（最後一期），其他格填空值寫法；
+  Non-Call 等於期數時只有一格。
 - P（每期定日觀察）：`比價日_{Non-Call}`～`比價日_{期數}` 每格填該期比價日，其他格填空值寫法。
+- 填出來最晚的比價日必須等於說明書的最終比價日，否則轉人工覆核、不回填。
 
 格式設定沒有回填欄位的欄名、或參考條件表缺少該欄時，回填規則轉人工覆核並寫出缺的欄名，不產生決策。
 """
@@ -116,8 +118,10 @@ def expected_slots(sched: AutocallSchedule, tenor: int | None, empty: str) -> li
         return f"說明書有 {sched.periods} 期，超過參考條件表的 {SLOTS} 格比價日"
     if not 1 <= sched.first_callable <= sched.periods:
         return f"第一個可提前出場的期別（{sched.first_callable}）不在第 1～{sched.periods} 期之間"
-    last = sched.first_callable if sched.observation == "D" else sched.periods
-    callable_ = range(sched.first_callable, last + 1)
+    if sched.observation == "D":
+        callable_ = sorted({sched.first_callable, sched.periods})
+    else:
+        callable_ = list(range(sched.first_callable, sched.periods + 1))
     missing = [n for n in callable_ if n not in sched.dates]
     if missing:
         return "說明書抓不到以下期別的比價日：" + "、".join(f"第 {n} 期" for n in missing)
@@ -191,8 +195,30 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
             [],
         )
     decisions = [_decide(fmt, row, s, e) for s, e in zip(stds, slots, strict=True)]
+    final = standard_field(ctx, "final_valuation_date")
+    if not final.ok:
+        problem = doc_review(rid, key, final, None, ovs)
+        problem.column = COMPARE_DATES
+        return problem, decisions
+    latest = max(d for d in slots if isinstance(d, dt.date))
+    if latest != final.value:
+        return (
+            result(
+                rid,
+                key,
+                S.REVIEW_REQUIRED,
+                expected=final.value,
+                actual=latest,
+                pf=sched,
+                ov=ovs,
+                reason="compare_dates_max_mismatch",
+                message=f"說明書最晚的比價日 {latest.isoformat()} 不等於最終比價日 {final.value.isoformat()}，不回填",
+                column=COMPARE_DATES,
+            ),
+            decisions,
+        )
     bad = [d for d in decisions if d.action == BackfillAction.MISMATCH]
-    rule = "D：只填第一個可提前出場期" if sched.value.observation == "D" else "P：第一個可提前出場期起每期都填"
+    rule = "D：填第一個可提前出場期與最後一期" if sched.value.observation == "D" else "P：第一個可提前出場期起每期都填"
     return (
         result(
             rid,

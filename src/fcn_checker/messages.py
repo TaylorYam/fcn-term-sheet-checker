@@ -242,10 +242,13 @@ def _simple(v: Any) -> bool:
 
 
 def _shows_values(r: CheckResult) -> bool:
-    """配對、範本、讀檔、欄名等問題的說明本身已寫明雙方，不另附值。"""
-    return _category(r) not in ("batch", "template", "input", "output", "order") and all(
-        _simple(v) for v in (r.expected, r.actual)
-    )
+    """配對、範本、讀檔、欄名等問題，以及說明裡已寫出雙方值的，不另附值。"""
+    if _category(r) in ("batch", "template", "input", "output", "order"):
+        return False
+    if not all(_simple(v) for v in (r.expected, r.actual)):
+        return False
+    detail = _detail(r)
+    return not all(show(v) in detail for v in (r.expected, r.actual))
 
 
 def _detail(r: CheckResult) -> str:

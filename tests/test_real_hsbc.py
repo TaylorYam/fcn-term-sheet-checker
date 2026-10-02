@@ -39,7 +39,6 @@ def test_real_hsbc_samples_match_exploration():
         {
             ("standard.approval_date", "value_mismatch"): 2,
             ("batch.pairing", "reference_row_missing"): 1,
-            ("backfill.compare_dates", "value_mismatch"): 4,
             ("doc.scenario_calculations", "value_mismatch"): 1,
         }
     )

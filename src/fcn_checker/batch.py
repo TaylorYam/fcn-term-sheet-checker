@@ -10,6 +10,7 @@
 1. 檔名前三碼（上手編號）查上手編號對照 → 上手；不在對照表或上手沒有範本 → 未支援上手。
 2. 說明書內容辨識出的上手、說明書商品代號前三碼都必須與檔名一致，否則轉人工覆核。
 3. 以商品代號找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
+4. 同一批有多份說明書對到同一列時，這幾份全部轉人工覆核，不核對也不回填。
 
 範本辨識與讀出每份說明書各只做一次；配對成功後由單份核對（single_check.py）依序執行所有規則。
 批量入口只負責載入設定與參考條件表、逐份呼叫、單份錯誤隔離與儲存。
@@ -115,6 +116,7 @@ class BatchPreview:
 
 @dataclass
 class _Identified:
+    pdf: Path
     results: list[CheckResult]
     issuer_code: str | None = None
     issuer: Issuer | None = None
@@ -122,12 +124,22 @@ class _Identified:
     row: ReferenceRow | None = None
     ts: TermSheet | None = None  # 讀出結果：同一份說明書只讀一次，核對直接沿用
     pages: int | None = None
+    shared: bool = False  # 同一批有其他說明書對到同一列
 
     @property
     def paired(self) -> Paired | None:
-        if self.issuer is None or self.ts is None or self.row is None:
+        if self.issuer is None or self.ts is None or self.row is None or self.shared:
             return None
         return Paired(self.issuer, self.ts, self.row)
+
+    def mark_shared(self, row_no: int, others: str) -> None:
+        """同一批有其他說明書對到同一列：配對改為人工覆核，不核對也不回填。"""
+        pairing = next(r for r in self.results if r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS)
+        pairing.status, pairing.reason_code = CheckStatus.REVIEW_REQUIRED, "reference_row_shared"
+        pairing.message = (
+            f"同一批有多份說明書對到同一個 TDCC Code {pairing.actual}（參考條件表第 {row_no} 列），其他說明書：{others}"
+        )
+        self.shared = True
 
 
 def _unexpected(e: Exception) -> CheckResult:
@@ -154,7 +166,7 @@ def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = 
 def _identify(
     pdf: Path, sheet: ReferenceSheet, rfmt: ReferenceFormat, prefixes: dict[str, str], registry: Sequence[Issuer]
 ) -> _Identified:
-    out = _Identified([])
+    out = _Identified(pdf, [])
     results = out.results
     try:
         doc = open_pdf(pdf)
@@ -251,6 +263,46 @@ def _identify(
     return out
 
 
+def _other_names(found: _Identified, group: Sequence[_Identified]) -> str:
+    """同一列其他說明書的檔名；檔名相同時改列完整路徑，同一個檔案選了兩次時註明。"""
+    names = [f.pdf.name for f in group]
+    labels = []
+    for f in group:
+        if f is found:
+            continue
+        if f.pdf.resolve() == found.pdf.resolve():
+            labels.append(f"{f.pdf.name}（同一個檔案重複選取）")
+        else:
+            labels.append(str(f.pdf) if names.count(f.pdf.name) > 1 else f.pdf.name)
+    return "、".join(labels)
+
+
+def _identify_all(
+    term_sheets: Sequence[Path],
+    sheet: ReferenceSheet,
+    rfmt: ReferenceFormat,
+    prefixes: dict[str, str],
+    registry: Sequence[Issuer],
+) -> list[_Identified]:
+    """先辨識全部說明書，同一批有多份對到參考條件表同一列時全部轉人工覆核；單份非預期錯誤不中斷整批。"""
+    identified = []
+    for pdf in map(Path, term_sheets):
+        try:
+            found = _identify(pdf, sheet, rfmt, prefixes, registry)
+        except Exception as e:
+            found = _Identified(pdf, [_unexpected(e)])
+        identified.append(found)
+    by_row: dict[int, list[_Identified]] = {}
+    for found in identified:
+        if found.row is not None:
+            by_row.setdefault(found.row.row, []).append(found)
+    for row_no, group in by_row.items():
+        if len(group) > 1:
+            for found in group:
+                found.mark_shared(row_no, _other_names(found, group))
+    return identified
+
+
 def _sheet_warnings(sheet: ReferenceSheet) -> tuple[str, ...]:
     return (
         *(f"未找到欄名：{h}" for h in sheet.missing_columns),
@@ -279,13 +331,12 @@ def preview_batch(
     prefixes = load_issuer_prefixes(Path(issuer_prefixes))
     sheet = _load_sheet(Path(reference_sheet), rfmt)
     rows = []
-    for pdf in map(Path, term_sheets):
-        found = _identify(pdf, sheet, rfmt, prefixes, registry)
+    for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
         problems = [r for r in found.results if r.status != CheckStatus.PASS]
         pc = found.product_code
         rows.append(
             PreviewRow(
-                pdf,
+                found.pdf,
                 found.issuer_code,
                 any(r.reason_code == UNSUPPORTED for r in problems),
                 pc.value if pc is not None and pc.ok else None,
@@ -310,16 +361,14 @@ def _item_metadata(pdf: Path, meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_one(
-    pdf: Path,
+    found: _Identified,
     sheet: ReferenceSheet,
     rfmt: ReferenceFormat,
     std: ReviewStandard,
-    prefixes: dict[str, str],
-    registry: Sequence[Issuer],
     meta: dict[str, Any],
 ) -> BatchItem:
+    pdf = found.pdf
     metadata = _item_metadata(pdf, meta)
-    found = _identify(pdf, sheet, rfmt, prefixes, registry)
     issuer = found.issuer
     if found.pages is not None:
         metadata["inputs"]["term_sheet"]["pages"] = found.pages
@@ -361,10 +410,11 @@ def check_batch(
         "reference_format": {**file_meta(Path(reference_format)), "version": rfmt.version},
     }
     items: list[BatchItem] = []
-    for pdf in map(Path, term_sheets):
+    for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
         try:
-            item = _check_one(pdf, sheet, rfmt, std, prefixes, registry, meta)
+            item = _check_one(found, sheet, rfmt, std, meta)
         except Exception as e:  # 單份非預期錯誤不中斷整批
+            pdf = found.pdf
             item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta)))
         items.append(item)
     outcome = BatchOutcome(

@@ -70,7 +70,7 @@ def slots(d: dict) -> list:
 # ---------------------------------------------------------------- 全部一致 → 回填
 
 
-def test_consistent_daily_term_sheet_passes_and_back_fills_isin_issue_date_and_first_compare_date(tmp_path):
+def test_consistent_daily_term_sheet_passes_and_back_fills_first_and_last_compare_dates(tmp_path):
     spec = Spec()  # D 型、天期 6、第 1 期期末日起可提前出場
     outcome, sheet = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
 
@@ -83,7 +83,27 @@ def test_consistent_daily_term_sheet_passes_and_back_fills_isin_issue_date_and_f
     assert d["發行日"] == dt.datetime.combine(spec.issue_date, dt.time())
     assert row_of(sheet, spec.product_code)["發行日"] is None, "原檔不動"
     first = schedule_rows(spec)[0]["valuation"]
-    assert slots(d) == [first] + ["-"] * 11
+    assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6, "D 型：Non-Call 那期與最後一期"
+
+
+def test_daily_with_non_call_equal_to_tenor_fills_only_the_last_period(tmp_path):
+    spec = Spec(guaranteed=6)  # 第 6 期期末日起才可提前出場 → Non-Call = 天期
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+
+    assert outcome.items[0].report.status == PASS, problems(outcome.items[0])
+    assert slots(row_of(outcome.output, spec.product_code)) == ["-"] * 5 + [spec.final_date] + ["-"] * 6
+
+
+def test_latest_compare_date_must_equal_final_valuation_date(tmp_path):
+    spec = Spec(ko_overrides={(6, "end"): "2030 年7 月9 日"})  # 最後一期期末日晚於最終評價日 2030-07-08
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+
+    item = outcome.items[0]
+    r = only(item, "backfill.compare_dates")
+    assert (r.status, r.reason_code) == (REVIEW, "compare_dates_max_mismatch")
+    assert "2030-07-09" in r.message and "2030-07-08" in r.message
+    assert not item.filled
+    assert slots(row_of(outcome.output, spec.product_code)) == [None] * 12
 
 
 def test_period_end_back_fills_every_compare_date_from_first_callable_period(tmp_path):
@@ -118,15 +138,17 @@ def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     spec = Spec()
     first = schedule_rows(spec)[0]["valuation"]
     issue = dt.datetime.combine(spec.issue_date, dt.time())
+    last = dt.datetime.combine(spec.final_date, dt.time())
     filled = {"ISIN Code": SYNTH_ISIN, "發行日": issue, "比價日_1": dt.datetime.combine(first, dt.time())}
-    filled |= {f"比價日_{i}": "-" for i in range(2, 13)}
+    filled |= {f"比價日_{i}": "-" for i in range(2, 13)} | {"比價日_6": last}
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **filled)])
 
     item = outcome.items[0]
     assert item.report.status == PASS, problems(item)
     assert {d.action for d in item.report.backfill} == {"match"}
     d = row_of(outcome.output, spec.product_code)
-    assert d["ISIN Code"] == SYNTH_ISIN and d["發行日"] == issue and slots(d) == [first] + ["-"] * 11
+    assert d["ISIN Code"] == SYNTH_ISIN and d["發行日"] == issue
+    assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6
 
 
 def test_wrong_existing_compare_date_is_mismatch_and_nothing_is_back_filled(tmp_path):
@@ -275,6 +297,42 @@ def test_missing_or_duplicate_reference_row_requires_review(tmp_path):
     r = only(outcome.items[0], "batch.pairing")
     assert (r.status, r.reason_code) == (REVIEW, "reference_row_duplicate")
     assert len(r.order_source) == 2
+
+
+def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back_fill(tmp_path):
+    spec, other = Spec(), Spec(product_code="029199990002")
+    old = pdf_for(tmp_path, spec, name=f"{spec.product_code}_舊版.pdf")
+    new = pdf_for(tmp_path, spec, name=f"{spec.product_code}_新版.pdf")
+    ok = pdf_for(tmp_path, other)
+    outcome, _ = batch(tmp_path, [old, ok, new], [reference_row(spec), reference_row(other)])
+
+    first, second, third = outcome.items
+    for item, another in ((first, new), (third, old)):
+        r = only(item, "batch.pairing")
+        assert (r.status, r.reason_code) == (REVIEW, "reference_row_shared")
+        assert "同一批有多份說明書對到同一個 TDCC Code" in r.message and another.name in r.message
+        assert item.term_sheet.name not in r.message
+        assert item.report.status == REVIEW and not item.filled
+        assert not any(x.rule_id.startswith(("field.", "backfill.")) for x in item.report.results)
+    assert second.report.status == PASS and second.filled
+    assert row_of(outcome.output, spec.product_code)["ISIN Code"] is None
+    assert row_of(outcome.output, other.product_code)["ISIN Code"] == SYNTH_ISIN
+    rows = result_rows(outcome.output)
+    assert new.name in rows[0]["問題摘要"] and old.name in rows[2]["問題摘要"]
+
+
+def test_same_pdf_selected_twice_says_so_and_same_names_show_full_paths(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    outcome, _ = batch(tmp_path, [pdf, pdf], [reference_row(spec)])
+    for item in outcome.items:
+        assert f"{pdf.name}（同一個檔案重複選取）" in only(item, "batch.pairing").message
+
+    (tmp_path / "v2").mkdir()
+    copy = pdf_for(tmp_path / "v2", spec)
+    outcome, _ = batch(tmp_path / "v2", [pdf, copy], [reference_row(spec)])
+    assert str(copy) in only(outcome.items[0], "batch.pairing").message
+    assert str(pdf) in only(outcome.items[1], "batch.pairing").message
 
 
 def test_reference_row_of_another_issuer_requires_review(tmp_path):

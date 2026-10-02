@@ -114,6 +114,31 @@ def test_hsbc_compare_date_difference_names_each_cell(tmp_path):
     assert problem_message(r) == "比價日_2對不起來：參考條件表 2030-03-09／說明書 2030-03-07"
 
 
+def test_latest_compare_date_check_does_not_label_document_dates_as_sheet_values(tmp_path):
+    spec = Spec(ko_overrides={(6, "end"): "2030 年7 月9 日"})  # 最後一期期末日晚於最終評價日 2030-07-08
+    report = check(tmp_path, spec)
+
+    [r] = [r for r in issues(report) if r.rule_id == "backfill.compare_dates"]
+    assert problem_message(r) == "比價日：說明書最晚的比價日 2030-07-09 不等於最終比價日 2030-07-08，不回填"
+
+
+def test_pdfs_sharing_one_reference_row_get_a_plain_chinese_message(tmp_path):
+    spec = Spec()
+    pdfs = [build_pdf(tmp_path / f"{spec.product_code}_{v}.pdf", spec) for v in ("舊版", "新版")]
+    sheet = check_rows(tmp_path, pdfs[0], [reference_row(spec)])  # 建好參考條件表
+    assert sheet.status == CheckStatus.PASS
+    outcome = check_batch(
+        pdfs,
+        tmp_path / "FCN參考條件.xlsx",
+        REVIEW_STANDARD,
+        reference_format=REFERENCE_FORMAT,
+        issuer_prefixes=ISSUER_PREFIXES,
+    )
+
+    for item in outcome.items:
+        assert_plain_chinese(item.report)
+
+
 def test_missing_sheet_value_says_which_column(tmp_path):
     report = check(tmp_path, overrides={"K(%)": None})
 

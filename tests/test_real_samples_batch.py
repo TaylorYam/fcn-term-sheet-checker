@@ -10,6 +10,7 @@ import shutil
 from collections import Counter
 from pathlib import Path
 
+import openpyxl
 import pytest
 
 from fcn_checker.batch import run_batch
@@ -23,7 +24,10 @@ PDFS = (
     if (Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts").is_dir()
     else []
 )
-REFERENCE = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "FCN參考條件_1001.xlsx"
+DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
+REFERENCE = DATA / "FCN參考條件_1001.xlsx"
+TO_FILL = DATA / "FCN參考條件_待回補.xlsx"  # 同一張表，回填欄位空白（Issue #69）
+BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
 PROBLEMS = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED, CheckStatus.ERROR)
 
 pytestmark = [
@@ -64,7 +68,6 @@ def test_barc_rows_match_every_prefilled_field(outcome):
     ]
     assert len(paired) == 8, "參考條件表有 8 列 BARC"
     allowed = {
-        ("backfill.compare_dates", "value_mismatch"),  # 舊填法：D 型多填了最後一期
         ("standard.approval_date", "value_mismatch"),  # 舊系列沿用前一次審查日期
         ("standard.product_name", "value_mismatch"),  # 較早的中文名稱沒有「（不保本）」
     }
@@ -72,17 +75,40 @@ def test_barc_rows_match_every_prefilled_field(outcome):
         assert set(problems(item)) <= allowed, item.term_sheet.name
 
 
-def test_daily_rows_differ_only_in_the_old_last_period_compare_date(outcome):
-    for item in outcome.items:
-        mismatched = [d for d in item.report.backfill if d.action == "mismatch"]
-        if not mismatched:
-            continue
-        assert len(mismatched) == 1, item.term_sheet.name
-        assert mismatched[0].expected == "-" and mismatched[0].sheet_value is not None
+def test_every_compare_date_on_the_sheet_matches_the_fill_rule(outcome):
+    # D 型填 Non-Call 那期與最後一期、P 型從 Non-Call 那期起每期都填（Issue #69）
+    assert not [
+        (i.term_sheet.name, d.column) for i in outcome.items for d in i.report.backfill if d.action == "mismatch"
+    ]
 
 
-def test_period_end_rows_pass_and_are_marked_filled(outcome):
+def test_passing_barc_rows_are_marked_filled(outcome):
     passed = [i for i in outcome.items if i.issuer == "BARC" and i.report.status == CheckStatus.PASS]
-    assert len(passed) == 3
+    assert len(passed) == 5, "3 列 P 型＋2 列審查日期與名稱樣板都是新版的 D 型"
     assert all(i.filled for i in passed)
     assert all(d.action == "match" for i in passed for d in i.report.backfill)
+
+
+def rows_by_code(path: Path) -> dict[str, dict]:
+    ws = openpyxl.load_workbook(path, data_only=True)["樣本清單"]
+    headers = [c.value for c in ws[3]]
+    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=4, values_only=True))
+    return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
+
+
+@pytest.mark.skipif(not TO_FILL.is_file(), reason="本機沒有待回補的參考條件表")
+def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
+    sheet = shutil.copy(TO_FILL, tmp_path / TO_FILL.name)
+    filled = run_batch(
+        PDFS,
+        Path(sheet),
+        REVIEW_STANDARD,
+        tmp_path / "reports",
+        reference_format=REFERENCE_FORMAT,
+        issuer_prefixes=ISSUER_PREFIXES,
+    )
+    codes = [i.product_code for i in filled.items if i.filled]
+    assert len(codes) >= 9, "BARC 5 份＋HSBC 至少 4 份通過並回填"
+    got, want = rows_by_code(filled.output), rows_by_code(REFERENCE)
+    for code in codes:
+        assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code
