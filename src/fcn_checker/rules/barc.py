@@ -63,6 +63,7 @@ ISSUER = "BARC"
 @dataclass
 class Context(common.Context):
     ts: BarcTermSheet
+    issuer: str = ISSUER
 
 
 # ---------------------------------------------------------------- 推算規則
@@ -907,8 +908,8 @@ def document_rules(ctx: Context) -> list[CheckResult]:
         fixed_warning(ctx),
         risk_level(ctx),
         forbidden_wording(ctx),
-        *product_name(ctx, ISSUER),
-        *issuer_name(ctx, ISSUER),
+        *product_name(ctx),
+        *issuer_name(ctx),
         *distributor_info(ctx),
         *fees(ctx),
         issue_price(ctx),
