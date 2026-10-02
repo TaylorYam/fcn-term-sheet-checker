@@ -195,7 +195,11 @@ class PanelSession:
         return outcome
 
     def release_problem(self, item: BatchItem) -> str:
-        """不能人工放行的原因（PANEL 顯示用）；空字串表示可以放行。"""
+        """不能人工放行的原因（PANEL 顯示用）；空字串表示可以放行。結果已失效時也不能放行。"""
+        try:
+            self._current(item)
+        except IngestionError as e:
+            return str(e)
         return item.release_problem
 
     def release(self, item: BatchItem) -> None:
@@ -204,14 +208,14 @@ class PanelSession:
         if item.release_problem:
             raise IngestionError("release_refused", item.release_problem)
         item.released = True
-        self._released(outcome)
+        self._refresh_after_release(outcome)
 
     def cancel_release(self, item: BatchItem) -> None:
         outcome = self._current(item)
         item.released = False
-        self._released(outcome)
+        self._refresh_after_release(outcome)
 
-    def _released(self, outcome: PanelOutcome) -> None:
+    def _refresh_after_release(self, outcome: PanelOutcome) -> None:
         outcome.batch.refresh_status()
         self.message = outcome.headline
 

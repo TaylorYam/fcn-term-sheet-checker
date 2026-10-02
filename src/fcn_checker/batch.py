@@ -100,13 +100,9 @@ class BatchItem:
             return "執行錯誤，沒有可以回填的值"
         if any(r.reason_code == SHARED_ROW for r in report.results):
             return "同一批有多份說明書對到同一列，不能人工放行"
-        if self.reference_row is None or not report.backfill:
+        if self.reference_row is None:
             return "沒有對到參考條件表的列，沒有地方可以回填"
-        if any(d.action == backfill.BackfillAction.MISMATCH for d in report.backfill):
-            return "參考條件表回填欄位已有不同的值，請先修正參考條件表再核對"
-        if any(r.rule_id.startswith("backfill.") and r.status != CheckStatus.PASS for r in report.results):
-            return "回填值無法確定，請人工處理"
-        return ""
+        return backfill.release_problem(report)
 
 
 @dataclass
@@ -495,9 +491,10 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
     )
     if wb is not None:  # 參考條件表核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
         filled = [i.fillable for i in items]
-        backfill.apply(wb, rfmt, [i.report for i in items if i.fillable])
-        keep = [i.reference_row for i in items if i.fillable and i.reference_row]
-        errors = [_error_row(i) for i in items if not i.fillable]
+        to_fill = [i for i, ok in zip(items, filled, strict=True) if ok]
+        backfill.apply(wb, rfmt, [i.report for i in to_fill])
+        keep = [i.reference_row for i in to_fill if i.reference_row]
+        errors = [_error_row(i) for i, ok in zip(items, filled, strict=True) if not ok]
         out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
         outcome.output = _attempt(
             outcome, "output.result_file", "核對結果檔", lambda: result_file.save(wb, rfmt, keep, errors, out)

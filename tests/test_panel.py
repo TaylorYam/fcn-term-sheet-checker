@@ -301,6 +301,19 @@ def test_cancelled_release_saves_like_never_released(tmp_path):
     assert record["items"][0]["manual_release"] is False and not item.filled
 
 
+def test_saving_again_writes_the_current_release_state(tmp_path):
+    spec = Spec()
+    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
+    (item,) = outcome.batch.items
+    session.release(item)
+    first = session.save(tmp_path / "reports", now=NOW)
+    session.cancel_release(item)
+    second = session.save(tmp_path / "reports", now=NOW + dt.timedelta(seconds=1))
+    assert openpyxl.load_workbook(first.output)["回填後"].max_row == 4
+    assert openpyxl.load_workbook(second.output)["回填後"].max_row == 3
+    assert openpyxl.load_workbook(second.output)["錯誤清單"].max_row == 2 and not item.filled
+
+
 def test_released_items_sort_with_passed_ones(tmp_path):
     ok, bad, other = Spec(), Spec(product_code="029199990002"), Spec(product_code="029199990003")
     rows = [reference_row(ok), reference_row(bad, **{"K(%)": 71}), reference_row(other, **{"K(%)": 71})]
@@ -385,6 +398,7 @@ def test_release_only_applies_to_the_current_result(tmp_path):
     session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
     stale = outcome.batch.items[0]
     session.start_check()
+    assert "重新核對" in session.release_problem(stale)
     with pytest.raises(IngestionError, match="重新核對"):
         session.release(stale)
 

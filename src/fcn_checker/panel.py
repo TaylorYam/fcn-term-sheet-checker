@@ -111,8 +111,8 @@ class ResultPane(ttk.Frame):
         self,
         parent,
         pixels,
-        release_problem: Callable[[BatchItem], str] = lambda _: "",
-        on_release: Callable[[BatchItem], None] = lambda _: None,
+        release_problem: Callable[[BatchItem], str],
+        on_release: Callable[[BatchItem], None],
     ):
         super().__init__(parent, padding=8)
         self.release_problem, self.on_release = release_problem, on_release
