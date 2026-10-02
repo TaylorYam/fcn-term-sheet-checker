@@ -68,6 +68,28 @@ def test_two_issuers_detected_requires_review(tmp_path):
     assert not any(x.rule_id.startswith("field.") for x in report.results)
 
 
+def test_adapter_missing_a_standard_field_requires_review_naming_the_field(tmp_path):
+    from fcn_checker.batch import check_batch
+    from harness import ISSUER_PREFIXES
+    from reference_synth import REFERENCE_FORMAT
+
+    def parse_without_prices(lines):
+        det, ts = BARC.parse(lines)
+        del ts.fields["underlying_prices"]
+        return det, ts
+
+    adapter = dataclasses.replace(BARC, parse=parse_without_prices)
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    report = check_batch([pdf], sheet, REVIEW_STANDARD, registry=(adapter,), **kw).items[0].report
+    r = only(report, "field.underlying_prices")
+    assert (r.status, r.reason_code) == (REVIEW, "document_missing")
+    assert "underlying_prices" in r.message
+    assert report.status == REVIEW, "缺標準欄位轉人工覆核，不是執行錯誤"
+
+
 def test_review_standard_reads_product_name_per_issuer(tmp_path):
     from fcn_checker.batch import check_batch
     from harness import ISSUER_PREFIXES
