@@ -47,7 +47,6 @@ FIELD_ZH = {
     "name_zh": "中文商品名稱",
     "name_en": "英文商品名稱",
 }
-_ORDER = {CheckStatus.ERROR: 0, CheckStatus.MISMATCH: 1, CheckStatus.REVIEW_REQUIRED: 2}
 
 
 def _plain(v: Any) -> Any:
@@ -136,11 +135,8 @@ def _table(rows: list[CheckResult], with_message: bool = True) -> list[str]:
 
 def to_markdown(report: CheckReport) -> str:
     meta = report.metadata
-    issues = sorted(
-        (r for r in report.results if r.status in _ORDER),
-        key=lambda r: _ORDER[r.status],
-    )
-    ok = [r for r in report.results if r.status not in _ORDER]
+    issues = sorted((r for r in report.results if r.status.is_problem), key=lambda r: r.status.display_rank)
+    ok = [r for r in report.results if not r.status.is_problem]
     ts, sheet = meta["inputs"]["term_sheet"], meta["inputs"]["reference_sheet"]
     fmt = meta.get("reference_format", {"file": None})
     lines = [
