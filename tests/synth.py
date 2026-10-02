@@ -1,7 +1,8 @@
-"""合成測試資料：仿 BARC 中文產品說明書版面的 PDF 與參考條件表 Excel。
+"""BARC 說明書合成器：仿 BARC 中文產品說明書版面的 PDF，以及與之一致的參考條件表列。
 
 所有數值、代號、名稱皆為虛構；不含任何真實交易資料。版面座標依範本規格
-docs/templates/barc-zh-product-description.md 觀察值設定。
+docs/templates/barc-zh-product-description.md 觀察值設定。PDF 排版用 tests/pdf_writer.py，
+參考條件表與單份核對用 tests/reference_synth.py、tests/harness.py。
 """
 
 from __future__ import annotations
@@ -13,11 +14,9 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
-import fitz
-import openpyxl
-
-ROOT = Path(__file__).resolve().parents[1]
-REVIEW_STANDARD = ROOT / "config" / "review_standard.toml"
+from harness import REVIEW_STANDARD, check_rows
+from pdf_writer import FONT, PdfWriter, zh_date
+from reference_synth import make_row
 
 _STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
 FIXED_WARNING = _STD["risk"]["fixed_warning"]
@@ -25,8 +24,8 @@ DISTRIBUTOR = _STD["distributor"]
 ISSUER_NAME = _STD["issuer_name"]["barc"]
 FEES = dict(_STD["fees"])
 CURRENCY_ISO = dict(_STD["currency"])
-FONT = "china-t"
 Q4 = Decimal("0.0001")
+SYNTH_ISIN = "XS0000000000"  # 合成說明書封面的 ISIN
 
 
 @dataclass
@@ -149,10 +148,6 @@ class Spec:
         )
 
 
-def zh_date(d: dt.date) -> str:
-    return f"{d.year} 年{d.month} 月{d.day} 日"
-
-
 def fmt_price(v: Decimal) -> str:
     return f"{v:,.4f}"
 
@@ -161,91 +156,18 @@ def price(initial: Decimal, pct: Decimal) -> Decimal:
     return (initial * pct / 100).quantize(Q4, ROUND_HALF_UP)
 
 
-# ---------------------------------------------------------------- PDF 寫入器
-
-
-class _Writer:
-    TOP, BOTTOM = 80.0, 770.0
-
-    def __init__(self) -> None:
-        self.doc = fitz.open()
-        self.page: fitz.Page
-        self.y = 0.0
-        self.new_page()
-
-    def new_page(self) -> None:
-        self.page = self.doc.new_page(width=595, height=842)
-        self.y = self.TOP
-
-    def need(self, h: float) -> None:
-        if self.y + h > self.BOTTOM:
-            self.new_page()
-
-    def put(self, x: float, y: float, text: str, size: float = 10) -> None:
-        """西文字元（Latin-1）用 Helvetica、其餘用 CJK 字型，逐段相接排版，避免全形寬度造成溢出或重疊。"""
-        for western, run in _runs(text):
-            if western:
-                self.page.insert_text((x, y + size), run, fontname="helv", fontsize=size)
-                x += fitz.get_text_length(run, fontname="helv", fontsize=size)
-            else:
-                self.page.insert_text((x, y + size), run, fontname=FONT, fontsize=size)
-                x += size * len(run)
-
-    def line(self, x: float, text: str, size: float = 10, gap: float = 13) -> None:
-        self.need(gap)
-        self.put(x, self.y, text, size)
-        self.y += gap
-
-    def row(self, cells: list[tuple[float, str]], gap: float = 20, size: float = 10) -> None:
-        self.need(gap)
-        for x, t in cells:
-            self.put(x, self.y, t, size)
-        self.y += gap
-
-    def para(self, x: float, text: str, width: int = 40, size: float = 10, gap: float = 13) -> None:
-        for k in range(0, len(text), width):
-            self.line(x, text[k : k + width], size, gap)
-
-    def numbered(self, n: str, x_num: float, x_body: float, title: str, gap: float = 20) -> None:
-        self.need(gap)
-        self.put(x_num, self.y, n)
-        self.put(x_body, self.y, title)
-        self.y += gap
-
-    def space(self, h: float = 8) -> None:
-        self.y += h
-
-    def finish(self, path: Path) -> Path:
-        n = self.doc.page_count
-        for i, page in enumerate(self.doc):
-            if i == 0:
-                page.insert_text((508.7, 792), f"Page 1 of {n}", fontname=FONT, fontsize=8)
-            else:
-                page.insert_text((295.5, 806), str(i + 1), fontname=FONT, fontsize=8)
-        self.doc.save(path)
-        return path
+def _finish(w: PdfWriter, path: Path) -> Path:
+    """BARC 頁尾：封面右下「Page 1 of N」，其餘頁置中頁碼。"""
+    n = w.doc.page_count
+    for i, page in enumerate(w.doc):
+        if i == 0:
+            page.insert_text((508.7, 792), f"Page 1 of {n}", fontname=FONT, fontsize=8)
+        else:
+            page.insert_text((295.5, 806), str(i + 1), fontname=FONT, fontsize=8)
+    return w.save(path)
 
 
 # ---------------------------------------------------------------- 說明書
-
-
-def _is_western(ch: str) -> bool:
-    try:
-        ch.encode("latin-1")
-    except UnicodeEncodeError:
-        return False
-    return True
-
-
-def _runs(text: str) -> list[tuple[bool, str]]:
-    out: list[tuple[bool, str]] = []
-    for ch in text:
-        w = _is_western(ch)
-        if out and out[-1][0] == w:
-            out[-1] = (w, out[-1][1] + ch)
-        else:
-            out.append((w, ch))
-    return out
 
 
 def next_weekday(d: dt.date) -> dt.date:
@@ -291,7 +213,7 @@ def schedule_rows(s: Spec) -> list[dict[str, Any]]:
 
 
 def build_pdf(path: Path, s: Spec) -> Path:
-    w = _Writer()
+    w = PdfWriter()
     warnings = s.warnings or (FIXED_WARNING,) * 3
     warnings = tuple(x.replace("RR4", s.rr) for x in warnings)
     name_zh = s.name_zh or s.expected_name_zh()
@@ -315,7 +237,7 @@ def build_pdf(path: Path, s: Spec) -> Path:
 
     cover("商品代號:", [s.product_code])
     cover("受託或銷售機構商品代號:", [s.distributor_code or s.product_code])
-    cover("ISIN:", ["XS0000000000"])
+    cover("ISIN:", [SYNTH_ISIN])
     cover("商品中文名稱:", [name_zh[k : k + 25] for k in range(0, len(name_zh), 25)])
     cut = name_en.index("issued")
     cover("商品英文名稱:", [name_en[:cut].strip(), name_en[cut:]])
@@ -642,10 +564,10 @@ def build_pdf(path: Path, s: Spec) -> Path:
     w.line(41.0, "本商品之其他事項依銷售說明書辦理。")
     if s.extra_text:
         w.para(41.0, s.extra_text)
-    return w.finish(path)
+    return _finish(w, path)
 
 
-def _scenarios(w: _Writer, s: Spec, notional: str) -> None:
+def _scenarios(w: PdfWriter, s: Spec, notional: str) -> None:
     """§16(3) 情境分析：(i) 有利（第 1 期提前出場）、(ii) 一般（持有至到期）、(iii) 最差。"""
     m = s.monthly_value
     rep = {k: s.repeat_overrides.get(k, f"{m}") for k in ("§16(i)", "§16(ii)", "§16(iii)")}
@@ -690,50 +612,17 @@ def _wrap_name(name: str) -> list[str]:
 
 
 def build_not_barc_pdf(path: Path) -> Path:
-    w = _Writer()
+    w = PdfWriter()
     w.line(255.6, "中文產品說明書", size=12, gap=16)
     w.line(41.0, "法商範例銀行12 個月美元計價連結股權結構型商品（不保本）")
     w.line(41.0, "商品代號:")
     w.put(301.4, w.y - 13, "037199990001")
     w.line(41.0, "發行機構:")
     w.put(301.4, w.y - 13, "法商範例銀行（Example Bank SA）")
-    return w.finish(path)
+    return _finish(w, path)
 
 
-# ---------------------------------------------------------------- 參考條件表
-
-REFERENCE_FORMAT = ROOT / "config" / "reference_sheet.toml"
-ISSUER_PREFIXES = ROOT / "config" / "issuer_prefixes.toml"
-SYNTH_ISIN = "XS0000000000"  # 合成說明書封面的 ISIN
-
-REFERENCE_HEADERS = [
-    "庫存狀態",
-    "當日比價",
-    "Product",
-    "發行機構",
-    "TDCC Code",
-    "ISIN Code",
-    "私銀註記",
-    "單位面額",
-    "承作幣別",
-    "交易日",
-    "發行日",
-    *[f"比價日_{i}" for i in range(1, 13)],
-    "最終比價日",
-    "到期日",
-    "KO(%)",
-    "KO(Freq)",
-    "KO(memo)",
-    "K(%)",
-    "KI(%)",
-    "KI(Freq)",
-    "UF",
-    "Coupon p.a. (%)",
-    "天期(月)",
-    "Non-Call(月)",
-    *[f"UL_{i}{suffix}" for i in range(1, 6) for suffix in ("", "_進場價", "_執行價", "_下限價", "_KO價", "_Memo")],
-]
-DATE_FORMAT = "mm-dd-yy"
+# ---------------------------------------------------------------- 參考條件表與單份核對
 
 
 def _xl_date(d: dt.date) -> dt.datetime:
@@ -746,63 +635,42 @@ def first_callable(s: Spec) -> int:
 
 
 def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
-    """與合成說明書一致的參考條件表列；回填欄位（ISIN、比價日）預設空白。"""
-    row: dict[str, Any] = {
-        "庫存狀態": None,
-        "當日比價": None,
-        "Product": "FCN",
-        "發行機構": "Barclays",
-        "TDCC Code": s.product_code,
-        "ISIN Code": None,
-        "私銀註記": "-",
-        "單位面額": s.denom,
-        "承作幣別": s.ccy,
-        "交易日": _xl_date(s.trade_date),
-        "發行日": _xl_date(s.issue_date),
-        "最終比價日": _xl_date(s.final_date),
-        "到期日": _xl_date(s.maturity_date),
-        "KO(%)": float(s.ko),
-        "KO(Freq)": s.ko_obs,
-        "KO(memo)": "Y" if s.memory else "N",
-        "K(%)": float(s.strike),
-        "KI(%)": float(s.ki_pct) if s.ki != "none" else "-",
-        "KI(Freq)": {"none": "-", "AM": "AM", "D": "D", "M": "M"}[s.ki],
-        "UF": 1.5900000000000034,
-        "Coupon p.a. (%)": float(s.annual),
-        "天期(月)": s.tenor,
-        "Non-Call(月)": first_callable(s),
+    """與合成說明書一致的 BARC 參考條件表列；回填欄位（ISIN、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
+    fields: dict[str, Any] = {
+        "product_code": s.product_code,
+        "denomination": s.denom,
+        "currency": s.ccy,
+        "trade_date": _xl_date(s.trade_date),
+        "issue_date": _xl_date(s.issue_date),
+        "final_valuation_date": _xl_date(s.final_date),
+        "maturity_date": _xl_date(s.maturity_date),
+        "ko_pct": float(s.ko),
+        "ko_observation": s.ko_obs,
+        "ko_memory": "Y" if s.memory else "N",
+        "strike_pct": float(s.strike),
+        "ki_pct": float(s.ki_pct) if s.ki != "none" else "-",
+        "ki_type": {"none": "-", "AM": "AM", "D": "D", "M": "M"}[s.ki],
+        "coupon_pa_pct": float(s.annual),
+        "tenor_months": s.tenor,
+        "first_callable_period": first_callable(s),
     }
     for i in range(1, 6):
         u = s.underlyings[i - 1] if i <= len(s.underlyings) else None
-        row[f"UL_{i}"] = u.ticker if u else "-"
-        row[f"UL_{i}_進場價"] = float(u.initial) if u else "-"
-        row[f"UL_{i}_執行價"] = float(price(u.initial, s.strike)) if u else "-"
-        row[f"UL_{i}_下限價"] = float(price(u.initial, s.ki_pct)) if u and s.ki != "none" else "-"
-        row[f"UL_{i}_KO價"] = float(price(u.initial, s.ko)) if u else "-"
-        row[f"UL_{i}_Memo"] = "-"
-    row.update(overrides)
-    return row
+        fields[f"underlying_{i}"] = u.ticker if u else "-"
+        fields[f"underlying_{i}_initial_price"] = float(u.initial) if u else "-"
+        fields[f"underlying_{i}_strike_price"] = float(price(u.initial, s.strike)) if u else "-"
+        fields[f"underlying_{i}_ki_price"] = float(price(u.initial, s.ki_pct)) if u and s.ki != "none" else "-"
+        fields[f"underlying_{i}_ko_price"] = float(price(u.initial, s.ko)) if u else "-"
+    return make_row("BARC", fields, **overrides)
 
 
-def build_reference_sheet(
-    path: Path, rows: list[dict[str, Any]], headers: list[str] | None = None, extra_sheets: tuple[str, ...] = ()
-) -> Path:
-    """仿 FCN參考條件 的 `樣本清單`：第 3 列表頭、第 4 列起資料，最右側一個無表頭欄；另有一張其他工作表。"""
-    headers = headers or REFERENCE_HEADERS
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "樣本清單"
-    for k, h in enumerate(headers, start=1):
-        ws.cell(row=3, column=k, value=h)
-    for r, row in enumerate(rows, start=4):
-        for k, h in enumerate(headers, start=1):
-            c = ws.cell(row=r, column=k, value=row.get(h))
-            if isinstance(c.value, dt.datetime):  # 空白格維持「通用格式」，回填時要沿用表上日期格式
-                c.number_format = DATE_FORMAT
-        ws.cell(row=r, column=len(headers) + 9, value=1 if row.get("庫存狀態") else None)
-    other = wb.create_sheet("詢價表格")
-    other["B3"] = "其他工作表（回填時不得改動）"
-    for name in extra_sheets:
-        wb.create_sheet(name)
-    wb.save(path)
-    return path
+def check_pdf(tmp_path: Path, pdf: Path, spec: Spec | None = None, *, overrides=None, headers=None):
+    """以合成參考條件表（一列，依 spec）核對一份說明書，回傳該份的 CheckReport。"""
+    spec = spec or Spec()
+    return check_rows(tmp_path, pdf, [reference_row(spec, **(overrides or {}))], headers=headers)
+
+
+def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, overrides=None, headers=None):
+    spec = spec or Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
+    return check_pdf(tmp_path, pdf, spec, overrides=overrides, headers=headers)

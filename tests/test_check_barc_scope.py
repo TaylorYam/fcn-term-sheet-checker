@@ -9,8 +9,8 @@ from decimal import Decimal
 
 import pytest
 
-from synth import UL, Spec
-from test_check_barc import MISMATCH, NA, PASS, REVIEW, check, problems, results
+from harness import MISMATCH, NA, PASS, REVIEW, problems, results
+from synth import UL, Spec, check
 
 NEW_RULES = (
     "doc.name_consistency",

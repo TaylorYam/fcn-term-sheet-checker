@@ -14,7 +14,8 @@ import pytest
 
 from fcn_checker.batch import check_batch
 from fcn_checker.schema import CheckStatus
-from synth import ISSUER_PREFIXES, REFERENCE_FORMAT, REVIEW_STANDARD, build_reference_sheet
+from harness import ISSUER_PREFIXES, REVIEW_STANDARD
+from reference_synth import REFERENCE_FORMAT, build_reference_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 TS_DIR = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts"

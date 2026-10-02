@@ -7,59 +7,12 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
-from fcn_checker.batch import check_batch
-from fcn_checker.schema import CheckStatus
-from synth import (
-    ISSUER_PREFIXES,
-    REFERENCE_FORMAT,
-    REFERENCE_HEADERS,
-    REVIEW_STANDARD,
-    UL,
-    Spec,
-    build_not_barc_pdf,
-    build_pdf,
-    build_reference_sheet,
-    reference_row,
-)
-
-PASS, MISMATCH, REVIEW, NA, ERROR = (
-    CheckStatus.PASS,
-    CheckStatus.MISMATCH,
-    CheckStatus.REVIEW_REQUIRED,
-    CheckStatus.NOT_APPLICABLE,
-    CheckStatus.ERROR,
-)
-
-
-def check_pdf(tmp_path: Path, pdf: Path, spec: Spec | None = None, *, overrides=None, headers=None):
-    """以合成參考條件表（一列，依 spec）核對一份說明書，回傳該份的 CheckReport。"""
-    spec = spec or Spec()
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **(overrides or {}))], headers)
-    outcome = check_batch(
-        [pdf], sheet, REVIEW_STANDARD, reference_format=REFERENCE_FORMAT, issuer_prefixes=ISSUER_PREFIXES
-    )
-    return outcome.items[0].report
-
-
-def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, overrides=None, headers=None):
-    spec = spec or Spec()
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
-    return check_pdf(tmp_path, pdf, spec, overrides=overrides, headers=headers)
-
-
-def problems(report) -> set[tuple[str, CheckStatus]]:
-    return {(r.rule_id, r.status) for r in report.results if r.status not in (PASS, NA)}
-
-
-def results(report, rule_id: str, field: str | None = None):
-    out = [r for r in report.results if r.rule_id == rule_id and (field is None or r.field == field)]
-    assert out, f"沒有 {rule_id} {field or ''} 的結果"
-    return out
-
+from harness import ERROR, MISMATCH, NA, PASS, REVIEW, problems, results
+from reference_synth import REFERENCE_HEADERS
+from synth import UL, Spec, build_not_barc_pdf, build_pdf, check, check_pdf
 
 # ---------------------------------------------------------------- 全部一致
 

@@ -10,9 +10,11 @@ from pathlib import Path
 
 import openpyxl
 
-from synth import REVIEW_STANDARD, ROOT, _Writer, zh_date
+from harness import REVIEW_STANDARD
+from pdf_writer import FONT, PdfWriter, zh_date
+from reference_synth import REFERENCE_FORMAT, issuer_value
 
-ORDER_FORMAT = ROOT / "config/reference_sheet.toml"
+ORDER_FORMAT = REFERENCE_FORMAT
 STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
 
 
@@ -52,7 +54,7 @@ class Spec:
 
 
 def build_pdf(path: Path, s: Spec):
-    w = _Writer()
+    w = PdfWriter()
 
     def line(t, x=110):
         t = s.replacements.get(t, t)
@@ -227,12 +229,9 @@ def build_pdf(path: Path, s: Spec):
         w.row([(60, t), (180, s.replacements.get("0%~5%", "0%~5%"))])
     chapter("五", "特別記載事項")
     line("其他說明")
-    # HSBC footer differs from the BARC writer's convenience finish().
     for i, page in enumerate(w.doc):
-        page.insert_text((270, 806), f"第{i + 1}頁，共{len(w.doc)}頁", fontname="china-t", fontsize=8)
-    w.doc.save(path)
-    w.doc.close()
-    return path
+        page.insert_text((270, 806), f"第{i + 1}頁，共{len(w.doc)}頁", fontname=FONT, fontsize=8)
+    return w.save(path)
 
 
 def build_inquiry(path: Path, s: Spec, overrides=None):
@@ -271,7 +270,7 @@ def build_inquiry(path: Path, s: Spec, overrides=None):
     headers = [h for h, v in cfg["columns"].items() if isinstance(v, str)] + ["發行機構"]
     for i, h in enumerate(headers, 1):
         ws.cell(3, i, h)
-        ws.cell(4, i, "HSBC" if h == "發行機構" else vals[cfg["columns"][h]])
+        ws.cell(4, i, issuer_value("HSBC") if h == "發行機構" else vals[cfg["columns"][h]])
     wb.save(path)
     wb.close()
     return path
