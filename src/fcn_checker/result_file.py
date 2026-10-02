@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -25,8 +26,7 @@ from .ingestion import IngestionError
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
-ERROR_HEADERS = ("TDCC Code", "PDF 檔名", "錯訊")
-ERROR_WIDTHS = {"A": 16, "B": 40, "C": 100}
+ERROR_COLUMNS = (("TDCC Code", 16), ("PDF 檔名", 40), ("錯訊", 100))  # 表頭與欄寬
 
 
 @dataclass(frozen=True)
@@ -82,21 +82,23 @@ def _keep_rows(ws: Worksheet, first: int, keep: list[int]) -> None:
 
 
 def _error_sheet(ws: Worksheet, errors: Sequence[ErrorRow]) -> None:
-    ws.append(ERROR_HEADERS)
+    ws.append([header for header, _ in ERROR_COLUMNS])
     for e in errors:
         ws.append((e.tdcc_code, e.pdf_name, e.message))
-    for col, width in ERROR_WIDTHS.items():
-        ws.column_dimensions[col].width = width
+    for k, (_, width) in enumerate(ERROR_COLUMNS, start=1):
+        ws.column_dimensions[get_column_letter(k)].width = width
     for row in ws.iter_rows(min_row=2):
         for c in row:
             c.alignment = Alignment(wrap_text=True, vertical="top")
 
 
 def write(data: bytes, out: Path) -> None:
-    """寫出核對結果檔；檔案已存在時不覆蓋，丟出 IngestionError。"""
+    """寫出核對結果檔；檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。"""
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("xb") as f:
             f.write(data)
+    except FileExistsError as e:
+        raise IngestionError("output_exists", f"核對結果檔 {out.name} 已經存在，不覆蓋") from e
     except OSError as e:
-        raise IngestionError("output_exists", f"無法寫入核對結果檔 {out.name}：{e}") from e
+        raise IngestionError("output_unwritable", f"無法寫入核對結果檔 {out.name}：{e}") from e

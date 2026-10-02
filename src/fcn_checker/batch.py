@@ -70,14 +70,6 @@ class BatchItem:
         return any(r.reason_code == UNSUPPORTED for r in self.report.results)
 
     @property
-    def tdcc_code(self) -> str | None:
-        """錯誤清單的 TDCC Code：說明書封面的商品代號；取不到時用檔名前 12 碼（12 位數字才算）。"""
-        if self.product_code:
-            return self.product_code
-        head = self.term_sheet.name[:12]
-        return head if re.fullmatch(r"[0-9]{12}", head) else None
-
-    @property
     def status_label(self) -> str:
         if self.unsupported:
             return "未支援上手"
@@ -131,6 +123,10 @@ class _Identified:
     ts: TermSheet | None = None  # 讀出結果：同一份說明書只讀一次，核對直接沿用
     pages: int | None = None
     shared: bool = False  # 同一批有其他說明書對到同一列
+
+    @property
+    def row_no(self) -> int | None:
+        return self.row.row if self.row is not None else None
 
     @property
     def paired(self) -> Paired | None:
@@ -340,7 +336,7 @@ def preview_batch(
                 any(r.reason_code == UNSUPPORTED for r in problems),
                 pc.value if pc is not None and pc.ok else None,
                 tuple(pc.evidence) if pc is not None else (),
-                found.row.row if found.row is not None else None,
+                found.row_no,
                 "；".join(r.message for r in problems),
             )
         )
@@ -375,7 +371,7 @@ def _check_one(
         metadata["parser"] = {"template": issuer.template_id, "version": issuer.parser_version}
     template = issuer.template_id if issuer is not None else None
     report = check_document(found.results, found.paired, sheet, rfmt, std, template, metadata)
-    item = BatchItem(pdf, report, issuer=found.issuer_code, reference_row=found.row.row if found.row else None)
+    item = BatchItem(pdf, report, issuer=found.issuer_code, reference_row=found.row_no)
     if found.product_code is not None and found.product_code.ok:
         item.product_code = found.product_code.value
     return item
@@ -427,9 +423,12 @@ def check_batch(
 
 
 def _error_row(item: BatchItem) -> result_file.ErrorRow:
+    """錯誤清單的一列。TDCC Code 取說明書封面商品代號；取不到時用檔名前 12 碼（12 位數字才算），否則留白。"""
+    head = item.term_sheet.name[:12]
+    code = item.product_code or (head if re.fullmatch(r"[0-9]{12}", head) else None)
     problems = [r for r in item.report.results if r.status.is_problem]
     messages = dict.fromkeys(problem_message(r) for r in problems)  # 同一句錯訊只列一次
-    return result_file.ErrorRow(item.tdcc_code, item.term_sheet.name, "\n".join(messages))
+    return result_file.ErrorRow(code, item.term_sheet.name, "\n".join(messages))
 
 
 def save_batch(outcome: BatchOutcome, out_dir: Path, *, now: dt.datetime | None = None) -> BatchOutcome:
@@ -442,23 +441,19 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, now: dt.datetime | None 
     for item in outcome.items:
         item.filled, item.report_paths, item.save_error = False, (), ""
     outcome.saved = True
-    try:
-        wb = backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256)
-    except IngestionError as e:  # 參考條件表核對後被改過：什麼都不寫
-        outcome.errors.append(error_result("output.result_file", "核對結果檔", e))
-        outcome.refresh_status()
-        return outcome
-    for item in outcome.items:
-        stem = f"{item.term_sheet.stem.replace(' ', '')}_{now:%Y%m%d-%H%M%S}"
-        try:
-            item.report_paths = write_reports(item.report, Path(out_dir), stem)
-        except OSError as e:
-            item.save_error = str(e)
-    filled = backfill.apply(wb, outcome.reference_format, [i.report for i in outcome.items])
-    keep = [i.reference_row for i, ok in zip(outcome.items, filled, strict=True) if ok and i.reference_row]
-    errors = [_error_row(i) for i in outcome.items if i.report.status != CheckStatus.PASS]
     out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
     try:
+        # 參考條件表核對後被改過（或讀不到）時在這裡中止：報告與核對結果檔都不寫
+        wb = backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256)
+        for item in outcome.items:
+            stem = f"{item.term_sheet.stem.replace(' ', '')}_{now:%Y%m%d-%H%M%S}"
+            try:
+                item.report_paths = write_reports(item.report, Path(out_dir), stem)
+            except OSError as e:
+                item.save_error = str(e)
+        filled = backfill.apply(wb, outcome.reference_format, [i.report for i in outcome.items])
+        keep = [i.reference_row for i, ok in zip(outcome.items, filled, strict=True) if ok and i.reference_row]
+        errors = [_error_row(i) for i in outcome.items if not backfill.fillable(i.report)]
         result_file.write(result_file.build(wb, outcome.reference_format, keep, errors), out)
     except IngestionError as e:
         outcome.errors.append(error_result("output.result_file", "核對結果檔", e))
