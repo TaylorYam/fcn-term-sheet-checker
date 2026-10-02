@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,9 @@ class ProductNameTemplate:
     memory_zh: str
     memory_en: str
     normalize_brackets: bool
+    maxi_en: str = ""
+    daily_en: str = ""
+    ignore_whitespace_en: bool = False
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ class ReviewStandard:
     denomination: dict[str, int]
     print_date_max_days_after_trade: int
     sha256: str
+    fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,13 @@ class OrderFormat:
     ko_type_values: dict[str, dict[str, Any]]
     ki_type_values: dict[str, str]
     sha256: str
+    kind: str = "single"
+    key_column: str = ""
+    issuer_column: str = ""
+    issuer_value: str = ""
+    empty_value: str = "-"
+    ko_observation_values: dict[str, str] = field(default_factory=dict)
+    ko_memory_values: dict[str, bool] = field(default_factory=dict)
 
 
 def _load(path: Path, what: str) -> dict[str, Any]:
@@ -80,6 +91,9 @@ def load_review_standard(path: Path) -> ReviewStandard:
                 memory_zh=n["memory_zh"],
                 memory_en=n["memory_en"],
                 normalize_brackets=bool(n.get("normalize_brackets", True)),
+                maxi_en=n.get("maxi_en", ""),
+                daily_en=n.get("daily_en", ""),
+                ignore_whitespace_en=bool(n.get("ignore_whitespace_en", False)),
             )
             for issuer, n in d["product_name"].items()
         }
@@ -96,6 +110,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             issue_price_pct=Decimal(str(d["issue_price"]["pct"])),
             risk_level=d["risk"]["level"],
             fixed_warning=d["risk"]["fixed_warning"],
+            fixed_warning_by_issuer=dict(d["risk"].get("fixed_warning_by_issuer", {})),
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),
             forbidden=tuple(d["wording"]["forbidden"]),
             allowed_phrases=tuple(d["wording"]["allowed_phrases"]),
@@ -112,18 +127,32 @@ def load_review_standard(path: Path) -> ReviewStandard:
 def load_order_format(path: Path) -> OrderFormat:
     d = _load(path, "詢價格式")
     try:
+        kind = d["layout"].get("kind", "single")
+        if kind not in ("single", "table"):
+            raise ValueError("未知 layout.kind")
+        if kind == "table" and not all(
+            d["layout"].get(k) for k in ("key_column", "issuer_column", "issuer_value", "first_data_row")
+        ):
+            raise ValueError("多列表格缺少配對設定")
         cols = dict(d["columns"])
         ignored = tuple(cols.pop("ignored", ()))
         return OrderFormat(
             issuer=d["issuer"],
             version=int(d["version"]),
             sheet=d["layout"]["sheet"],
-            product_code_cell=d["layout"]["product_code_cell"],
+            product_code_cell=d["layout"].get("product_code_cell", ""),
             header_row=int(d["layout"]["header_row"]),
-            data_row=int(d["layout"]["data_row"]),
+            data_row=int(d["layout"].get("data_row", d["layout"].get("first_data_row", 4))),
             columns=cols,
             ignored=ignored,
-            ko_type_values=dict(d["values"]["ko_type"]),
+            ko_type_values=dict(d["values"].get("ko_type", {})),
+            kind=kind,
+            key_column=d["layout"].get("key_column", ""),
+            issuer_column=d["layout"].get("issuer_column", ""),
+            issuer_value=d["layout"].get("issuer_value", ""),
+            empty_value=d["layout"].get("empty_value", "-"),
+            ko_observation_values=dict(d["values"].get("ko_observation", {})),
+            ko_memory_values=dict(d["values"].get("ko_memory", {})),
             ki_type_values=dict(d["values"]["ki_type"]),
             sha256=sha256_of(path),
         )

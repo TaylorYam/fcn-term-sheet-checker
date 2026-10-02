@@ -197,7 +197,7 @@ class PanelSession:
                     "template_mismatch", f"PDF 不符合選取的 {chosen.code} 模板：" + "；".join(detection.failed)
                 )
             code = chosen.product_code(lines)
-            record = load_inquiry(self.order, fmt)
+            record = load_inquiry(self.order, fmt, code.value if code.ok else None)
             rows = [Condition("商品代號", record.product_code.value, record.product_code.source)]
             for label, name in fmt.columns.items():
                 if name in record.fields:
@@ -208,6 +208,7 @@ class PanelSession:
             warnings = [f"未找到欄名：{label}" for label in record.missing_columns]
             warnings.extend(f"未知欄名：{v.value}（{v.source}）" for v in record.unknown_columns)
             warnings.extend(f"重複欄名：{v.value}（{v.source}）" for v in record.duplicate_columns)
+            warnings.extend(r.message for r in record.selection_errors)
             if before != self._fingerprints():
                 raise IngestionError("source_changed", "讀取期間來源已變更，請重新載入預覽。")
             self._preview = Preview(

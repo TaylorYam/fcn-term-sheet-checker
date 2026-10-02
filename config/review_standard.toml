@@ -7,7 +7,7 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 3
+version = 4
 effective_date = 2026-10-02
 
 [distributor]
@@ -58,6 +58,8 @@ RR1~RR5，RR1、RR2為保守型，RR3、RR4為穩健型，RR5為積極型，本�
 # 發行機構中英文法人全名（鍵為上手代號小寫）：封面「發行機構」與第二章「發行機構」條的「事業名稱」。
 # 比對時忽略空白與換行，其餘（含全形括號）逐字相等。
 barc = "英商巴克萊銀行股份有限公司（Barclays Bank PLC）"
+
+hsbc = "香港商香港上海滙豐銀行股份有限公司（THE HONGKONG AND SHANGHAI BANKING CORPORATION LIMITED）"
 
 [fees]
 # 第四章「投資人應負擔的各項費用」表的費率區間（鍵為表中費用項目名稱）；忽略空白後逐字相等。

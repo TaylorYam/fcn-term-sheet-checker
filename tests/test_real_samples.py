@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -15,8 +16,9 @@ from fcn_checker.schema import CheckStatus
 from synth import ORDER_FORMAT, REVIEW_STANDARD
 
 ROOT = Path(__file__).resolve().parents[1]
-TS_DIR = ROOT / "data" / "ts"
-INQUIRY = ROOT / "data" / "BARC詢價格式.xlsx"
+DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
+TS_DIR = DATA / "ts"
+INQUIRY = DATA / "BARC詢價格式.xlsx"
 PDFS = sorted(TS_DIR.glob("*.pdf")) if TS_DIR.is_dir() else []
 
 pytestmark = [
@@ -60,7 +62,7 @@ def test_non_barc_samples_are_not_detected(reports):
 
 
 def test_document_rules_only_flag_old_format_documents(reports):
-    barc = {k: r for k, r in reports.items() if r.template}
+    barc = {k: r for k, r in reports.items() if r.template == "barc-zh-pd"}
     assert len(barc) == 14
     flagged: Counter[tuple[str, str]] = Counter()
     for r in barc.values():

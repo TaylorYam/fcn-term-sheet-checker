@@ -13,7 +13,9 @@ from typing import Any
 from .config import OrderFormat, ReviewStandard
 from .orders.inquiry import OrderRecord
 from .parsers import barc as barc_parser
+from .parsers import hsbc as hsbc_parser
 from .rules import barc as barc_rules
+from .rules import hsbc as hsbc_rules
 from .schema import CheckResult, DetectionResult, Line, ParsedField
 
 
@@ -31,10 +33,12 @@ class Issuer:
     run_rules: Callable[[Any], list[CheckResult]]
     not_covered: tuple[dict[str, str], ...]
     order_format: Path  # 預設詢價格式設定檔（相對於工作目錄）
+    product_prefix: str = ""
 
 
 BARC = Issuer(
     code=barc_rules.ISSUER,
+    product_prefix="029",
     template_id=barc_parser.TEMPLATE_ID,
     label="BARC 中文產品說明書",
     parser_version=barc_parser.PARSER_VERSION,
@@ -48,7 +52,23 @@ BARC = Issuer(
     order_format=Path("config/order_formats/barc.toml"),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC,)
+HSBC = Issuer(
+    code=hsbc_rules.ISSUER,
+    template_id=hsbc_parser.TEMPLATE_ID,
+    label="HSBC 中文產品說明書",
+    parser_version=hsbc_parser.PARSER_VERSION,
+    detect=hsbc_parser.detect,
+    parse=hsbc_parser.parse,
+    product_code=hsbc_parser.product_code,
+    context=hsbc_rules.Context,
+    pairing=hsbc_rules.common.product_code,
+    run_rules=hsbc_rules.run_all,
+    not_covered=tuple(hsbc_rules.NOT_COVERED),
+    order_format=Path("config/order_formats/hsbc.toml"),
+    product_prefix="325",
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

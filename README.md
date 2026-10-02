@@ -2,7 +2,7 @@
 
 FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料轉成相同資料結構，以可追溯規則產生差異與人工覆核清單。
 
-**目前狀態：可用——BARC 中文產品說明書（文字型 PDF）× BARC 詢價表的本機核對 CLI**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、ISIN、最初價格外部正確性與部分情境試算會列在報告的「未涵蓋」區。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
+**目前狀態：可用——BARC／HSBC 中文產品說明書（文字型 PDF）的本機核對 CLI 與 PANEL**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、ISIN、最初價格外部正確性與部分情境試算會列在報告的「未涵蓋」區。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
 
 ## 預定流程
 
@@ -17,11 +17,11 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - 未知範本、欄位缺漏、值衝突、OCR 不可靠：進人工覆核，不猜值、不自動通過。
 - 未來 LLM fallback 僅記錄擴充邊界；第一版不安裝 SDK、不設定金鑰、不呼叫模型。
 
-## 目前進度（2026-10-01）
+## 目前進度（2026-10-02）
 
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
 - 下單資料來源：各家上手原始格式（每家一份格式設定）。BARC 為詢價表，一筆交易一個檔，以儲存格 B3 的商品代號配對：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。舊整理表 `FCN參考條件.xlsx` 已停用（HSBC 暫用新版整理表，見下）。
-- 第二家上手（規格階段）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。尚未實作。
+- 第二家上手（已實作 Issue #34）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。以 H02 為唯一作業螢光樣本確認範圍；支援新版整理表按商品代號選列、價格、日期與情境簡單算式。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
 ## 安裝
@@ -42,10 +42,10 @@ fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/repo
 
 | 參數 | 說明 |
 |---|---|
-| 第 1 個 | 說明書 PDF（目前支援 BARC 中文產品說明書；上手由範本辨識決定） |
-| 第 2 個 | BARC 詢價表 Excel（一筆交易一個檔，B3 為商品代號） |
+| 第 1 個 | 說明書 PDF（目前支援 BARC／HSBC 中文產品說明書；上手由範本辨識決定） |
+| 第 2 個 | BARC 詢價表（一筆交易一檔）或 HSBC 整理表（樣本清單，以 TDCC Code 選列） |
 | `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
-| `--order-format` | 詢價格式設定檔；未指定時依辨識到的上手使用 `config/order_formats/<上手>.toml`（BARC → `barc.toml`） |
+| `--order-format` | 詢價格式設定檔；未指定時依辨識到的上手使用 `config/order_formats/<上手>.toml`（BARC → `barc.toml`、HSBC → `hsbc.toml`） |
 | `--out` | 報告輸出資料夾，預設 `runtime/reports`（被 Git 忽略） |
 
 輸出 `<PDF 檔名>.check.json`（完整逐項結果、證據與執行 metadata）與 `<PDF 檔名>.check.md`（人看的報告：先列不一致與需人工覆核項目，再列未涵蓋規則與通過項目）。每項結果附詢價表值、說明書值、說明書頁碼與原文、詢價表儲存格位置。
@@ -56,13 +56,13 @@ fcn-check data/ts/<商品代號>_TS.pdf data/<詢價表>.xlsx --out runtime/repo
 | 1 | 有 `MISMATCH`（不一致）或 `REVIEW_REQUIRED`（需人工覆核） |
 | 2 | `ERROR`：PDF 損毀／加密、檔案不存在、設定檔錯誤等 |
 
-整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非 BARC 範本、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
+整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、未知範本、詢價表未知欄名或欄位值一律轉人工覆核，不猜值。
 
 ## 本機 PANEL：預覽、核對與保存
 
 Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），將專案放到自己有寫入權限的資料夾，雙擊 `setup_panel.cmd`。安裝會建立專案自己的 `.venv`，依 `constraints.txt` 安裝套件；需要可存取公司允許的 Python 套件來源。看到「安裝完成」後，雙擊 `launch_panel.cmd` 開啟程式。日常操作不需輸入命令；每位同事各自安裝、核對、保存，不需要伺服器。搬移資料夾或更新程式後請重新執行安裝；公司若禁止 PowerShell 腳本，請由 IT 依公司政策協助安裝。
 
-PANEL 使用 Python 內建 Tkinter，目前提供 BARC 選檔、唯讀預覽、核對與手動保存。原有 `launch_panel.pyw`、`fcn-panel` 及 CLI 入口仍可使用。
+PANEL 使用 Python 內建 Tkinter，目前提供 BARC／HSBC 選檔、唯讀預覽、核對與手動保存。原有 `launch_panel.pyw`、`fcn-panel` 及 CLI 入口仍可使用。
 
 1. 選取 BARC issuer 與中文產品說明書模板。
 2. 選取 TS PDF 與現有 BARC Excel 詢價表（沿用 B3 商品代號）。Outlook 條件由使用者整理到詢價表，不直接讀取信件。

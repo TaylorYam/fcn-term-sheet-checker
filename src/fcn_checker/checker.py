@@ -155,7 +155,8 @@ def run_check(
             results.append(_error("input.order_format", "詢價格式設定", e))
     if fmt is not None:
         try:
-            rec = load_inquiry(order, fmt)
+            code = issuer.product_code(lines) if issuer is not None and lines is not None else None
+            rec = load_inquiry(order, fmt, code.value if code is not None and code.ok else None)
         except IngestionError as e:
             results.append(_error("input.order", "詢價表", e))
     if pdf_error is not None:
@@ -167,11 +168,26 @@ def run_check(
         results.append(template_result)
         if rec is not None:
             results.extend(order_format_checks(rec))
+            results.extend(rec.selection_errors)
         if issuer is not None and fmt is not None and rec is not None:
             template = issuer.template_id
             if fmt.issuer != issuer.code:
                 results.append(_issuer_mismatch(issuer, fmt))
-            else:
+            elif not rec.selection_errors:
+                code = issuer.product_code(lines)
+                if issuer.product_prefix and (not code.ok or not str(code.value).startswith(issuer.product_prefix)):
+                    results.append(
+                        CheckResult(
+                            "template.product_prefix",
+                            "product_code",
+                            CheckStatus.REVIEW_REQUIRED,
+                            expected=issuer.product_prefix,
+                            actual=code.value,
+                            reason_code="issuer_prefix_mismatch",
+                            document_evidence=code.evidence,
+                            message="商品代號前綴與辨識上手不同",
+                        )
+                    )
                 _, ts = issuer.parse(lines)
                 context = issuer.context(ts, rec, std, fmt)
                 pairing = issuer.pairing(context)

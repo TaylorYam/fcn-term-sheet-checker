@@ -1,0 +1,38 @@
+"""本機 HSBC 真實樣本；交易資料不進 Git，CI 自動略過。"""
+
+import os
+from collections import Counter
+from pathlib import Path
+
+import pytest
+
+from fcn_checker.checker import run_check
+from fcn_checker.schema import CheckStatus as S
+from hsbc_synth import ORDER_FORMAT, REVIEW_STANDARD, ROOT
+
+DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
+PDFS = sorted((DATA / "ts").glob("325*.pdf"))
+ORDER = DATA / "FCN參考條件_1001.xlsx"
+pytestmark = [
+    pytest.mark.real_samples,
+    pytest.mark.skipif(not PDFS or not ORDER.is_file(), reason="本機無 HSBC 真實樣本或整理表"),
+]
+
+
+def test_real_hsbc_samples_match_exploration():
+    reports = [run_check(pdf, ORDER, REVIEW_STANDARD, ORDER_FORMAT) for pdf in PDFS]
+    assert len(reports) == 8 and all(r.template == "hsbc-zh-pd" for r in reports)
+    bad = Counter(
+        (x.rule_id, x.reason_code) for r in reports for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)
+    )
+    assert bad == Counter(
+        {
+            ("standard.approval_date", "value_mismatch"): 2,
+            ("order.table_pairing", "order_row_missing"): 1,
+            ("doc.scenario_calculations", "value_mismatch"): 1,
+        }
+    )
+    paired = [r for r in reports if not any(x.reason_code == "order_row_missing" for x in r.results)]
+    assert len(paired) == 7 and all(
+        not any(x.status in (S.REVIEW_REQUIRED, S.ERROR) for x in r.results) for r in paired
+    )
