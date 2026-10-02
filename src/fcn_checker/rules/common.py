@@ -364,6 +364,91 @@ def forbidden_wording(ctx: Context) -> CheckResult:
     )
 
 
+def _field(ctx: Context, name: str, note: str) -> ParsedField:
+    try:
+        return ctx.ts.f(name)
+    except KeyError:
+        return ParsedField.missing(name, note)
+
+
+def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str) -> CheckResult:
+    """說明書文字（已去空白）與審查標準固定值比對；忽略空白與換行，其餘逐字相等。"""
+    if not pf.ok:
+        return doc_review(rid, field, pf, expected)
+    ok = squash(pf.value) == squash(expected)
+    return result(
+        rid,
+        field,
+        S.PASS if ok else S.MISMATCH,
+        expected=expected,
+        actual=pf.value,
+        pf=pf,
+        reason="" if ok else "value_mismatch",
+        tolerance="忽略空白與換行後逐字相等",
+        message="" if ok else f"{what}與審查標準不同",
+    )
+
+
+def issuer_name(ctx: Context, issuer: str) -> list[CheckResult]:
+    """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。"""
+    rid = "standard.issuer_name"
+    expected = ctx.std.issuer_names.get(issuer.lower())
+    fields = (("issuer_name_cover", "封面「發行機構」"), ("issuer_name_ch2", "第二章「發行機構」事業名稱"))
+    if expected is None:
+        return [
+            result(
+                rid,
+                name,
+                S.REVIEW_REQUIRED,
+                pf=ctx.ts.f(name),
+                reason="standard_missing",
+                message=f"審查標準沒有 {issuer} 的發行機構全名（issuer_name.{issuer.lower()}）",
+            )
+            for name, _ in fields
+        ]
+    return [_fixed_text(rid, name, ctx.ts.f(name), expected, what) for name, what in fields]
+
+
+def distributor_info(ctx: Context) -> list[CheckResult]:
+    """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準。"""
+    rid, std = "standard.distributor", ctx.std
+    checks = (
+        ("distributor_name_cover", std.distributor_name, "封面受託或銷售機構名稱"),
+        ("distributor_phone_cover", std.distributor_phone, "封面受託或銷售機構電話"),
+        ("distributor_address_cover", std.distributor_address, "封面受託或銷售機構地址"),
+        ("distributor_name_ch2", std.distributor_name, "第二章受託或銷售機構事業名稱"),
+        ("distributor_address_ch2", std.distributor_address, "第二章受託或銷售機構營業所在地"),
+    )
+    return [_fixed_text(rid, name, ctx.ts.f(name), exp, what) for name, exp, what in checks]
+
+
+def fees(ctx: Context) -> list[CheckResult]:
+    """第四章費用表：審查標準列出的各費用項目費率區間逐字相等。"""
+    rid = "standard.fees"
+    return [
+        _fixed_text(rid, label, _field(ctx, f"fee_{label}", f"費用表找不到「{label}」"), exp, f"「{label}」費率")
+        for label, exp in ctx.std.fees.items()
+    ]
+
+
+def issue_price(ctx: Context) -> CheckResult:
+    """發行價格 = 商品面額之 N%（審查標準）；不同時轉人工覆核（可能為特殊條件），不判為錯誤。"""
+    rid, pf, exp = "standard.issue_price", ctx.ts.f("issue_price_pct"), ctx.std.issue_price_pct
+    if not pf.ok:
+        return doc_review(rid, "issue_price_pct", pf, exp)
+    ok = pf.value == exp
+    return result(
+        rid,
+        "issue_price_pct",
+        S.PASS if ok else S.REVIEW_REQUIRED,
+        expected=exp,
+        actual=pf.value,
+        pf=pf,
+        reason="" if ok else "issue_price_non_standard",
+        message="" if ok else f"發行價格不是商品面額之 {exp}%，請人工確認",
+    )
+
+
 _BRACKETS = str.maketrans({"(": "（", ")": "）"})
 
 

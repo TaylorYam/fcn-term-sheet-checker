@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import tomllib
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,12 @@ class ReviewStandard:
     effective_date: dt.date
     approval_date: dt.date
     chairman: str
+    distributor_name: str
+    distributor_phone: str
+    distributor_address: str
+    issuer_names: dict[str, str]  # 上手代號（小寫）→ 發行機構中英文法人全名
+    fees: dict[str, str]  # 第四章費用項目 → 費率區間
+    issue_price_pct: Decimal
     risk_level: str
     fixed_warning: str
     fixed_warning_occurrences: int
@@ -81,6 +88,12 @@ def load_review_standard(path: Path) -> ReviewStandard:
             effective_date=d["effective_date"],
             approval_date=d["distributor"]["approval_date"],
             chairman=d["distributor"]["chairman"],
+            distributor_name=d["distributor"]["name"],
+            distributor_phone=d["distributor"]["phone"],
+            distributor_address=d["distributor"]["address"],
+            issuer_names=dict(d["issuer_name"]),
+            fees=dict(d["fees"]),
+            issue_price_pct=Decimal(str(d["issue_price"]["pct"])),
             risk_level=d["risk"]["level"],
             fixed_warning=d["risk"]["fixed_warning"],
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),

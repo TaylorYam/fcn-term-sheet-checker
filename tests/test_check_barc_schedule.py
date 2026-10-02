@@ -50,7 +50,13 @@ def test_schedule_variants_pass(tmp_path, spec, guaranteed):
 
 def test_not_covered_only_lists_deferred_rules(tmp_path):
     report = check(tmp_path)
-    assert {n["rule_id"] for n in report.not_covered} == {"field.monthly_ki", "doc.underlying_names", "field.isin"}
+    assert {n["rule_id"] for n in report.not_covered} == {
+        "field.monthly_ki",
+        "doc.underlying_names",
+        "field.isin",
+        "doc.initial_prices",
+        "doc.scenario_other_returns",
+    }
 
 
 def test_guaranteed_periods_mismatch(tmp_path):

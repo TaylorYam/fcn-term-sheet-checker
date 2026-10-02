@@ -12,6 +12,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from ..parsers.barc import BarcTermSheet
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
+from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from . import common
@@ -19,9 +20,13 @@ from .common import (
     approval_date,
     chairman,
     cmp_pct,
+    distributor_info,
     doc_review,
+    fees,
     fixed_warning,
     forbidden_wording,
+    issue_price,
+    issuer_name,
     order_review,
     order_value,
     product_code,
@@ -44,8 +49,16 @@ PRICE_PCT_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}
 # 第二階段或暫不核對的規則：列入報告「未涵蓋」區，不影響也不假裝通過
 NOT_COVERED: list[dict[str, str]] = [
     {"rule_id": "field.monthly_ki", "description": "Monthly KI（MKI）說明書判斷方式（尚無樣本，見 Issue #10）"},
-    {"rule_id": "doc.underlying_names", "description": "標的中文名稱與交易所（擱置，見核對規則 §6.2）"},
+    {
+        "rule_id": "doc.underlying_names",
+        "description": "標的名稱：不核對，上手依彭博代號帶入名稱，以代號為準（核對規則 §6.2）",
+    },
     {"rule_id": "field.isin", "description": "ISIN（詢價表沒有，暫不核對）"},
+    {"rule_id": "doc.initial_prices", "description": "最初價格本身的外部正確性（無權威來源，Issue #38 排除）"},
+    {
+        "rule_id": "doc.scenario_other_returns",
+        "description": "情境分析有利情況的年化報酬率與最差情況的報酬率（取決於假設的持有期間與價格，無固定基準）",
+    },
 ]
 
 
@@ -838,6 +851,278 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
     return out
 
 
+# ---------------------------------------------------------------- 文件內重複出現處（Issue #38）
+
+_NAME_SUFFIX = "（下稱「本商品」）"
+_BRACKETS = str.maketrans({"(": "（", ")": "）"})
+
+
+def _same_text(a: str, b: str) -> bool:
+    """去空白、括號全半形不計（同審查標準商品名稱的寬鬆度）。"""
+    return squash(a).translate(_BRACKETS) == squash(b).translate(_BRACKETS)
+
+
+def _equal(rid: str, field: str, pf: ParsedField, ref: ParsedField, expected: object, message: str) -> CheckResult:
+    """說明書某處（pf）的值須等於另一處（ref）推得的值（expected）。"""
+    for x in (pf, ref):
+        if not x.ok:
+            return doc_review(rid, field, x)
+    ok = _same_text(str(pf.value), str(expected)) if isinstance(expected, str) else pf.value == expected
+    return result(
+        rid,
+        field,
+        S.PASS if ok else S.MISMATCH,
+        expected=expected,
+        actual=pf.value,
+        evidence=pf.evidence + ref.evidence,
+        reason="" if ok else "document_inconsistent",
+        message=message,
+    )
+
+
+def name_consistency(ctx: Context) -> list[CheckResult]:
+    """封面標題與第一章第 1 條商品名稱 = 封面「商品中文名稱」（標題不含「（下稱「本商品」）」）。"""
+    rid, cover = "doc.name_consistency", ctx.ts.f("name_zh")
+    title = _equal(
+        rid,
+        "title_name",
+        ctx.ts.f("title_name"),
+        cover,
+        # 括號先統一為全形，半形的「(下稱「本商品」)」也要去掉
+        squash(cover.value).translate(_BRACKETS).replace(_NAME_SUFFIX, "") if cover.ok else None,
+        "封面標題須等於封面「商品中文名稱」（去掉「（下稱「本商品」）」）",
+    )
+    art1 = _equal(
+        rid, "art1_name", ctx.ts.f("art1_name"), cover, cover.value, "第一章第 1 條商品名稱須等於封面「商品中文名稱」"
+    )
+    return [title, art1]
+
+
+def distributor_product_code(ctx: Context) -> CheckResult:
+    code = ctx.ts.f("product_code")
+    return _equal(
+        "doc.distributor_product_code",
+        "distributor_product_code",
+        ctx.ts.f("distributor_product_code"),
+        code,
+        code.value,
+        "封面「受託或銷售機構商品代號」須等於「商品代號」",
+    )
+
+
+def currency_consistency(ctx: Context) -> CheckResult:
+    cz = ctx.ts.f("currency_zh")
+    return _equal(
+        "doc.currency_consistency",
+        "art5_currency",
+        ctx.ts.f("art5_currency"),
+        cz,
+        cz.value,
+        "第一章第 5 條計價幣別須等於封面「計價幣別」",
+    )
+
+
+def scenario_notional(ctx: Context) -> CheckResult:
+    denom = ctx.ts.f("denomination")
+    return _equal(
+        "doc.scenario_notional",
+        "scenario_notional",
+        ctx.ts.f("scenario_notional"),
+        denom,
+        denom.value,
+        "第 16 條情境假設的每單位商品面額須等於第 6 條面額",
+    )
+
+
+def price_header_pct(ctx: Context) -> list[CheckResult]:
+    """§15 價格表與 §16 情境表欄頭「X（為最初價格的N%）」= §15 定義句的百分比（執行價格另與詢價表 K 比對）。"""
+    rid = "doc.price_header_pct"
+    out = []
+    for field in ("strike_pct", "ko_pct", "ki_pct"):
+        mentions = [h.mention for h in ctx.ts.header_pcts if h.field == field]
+        if field == "strike_pct" and not any(m.article == "第15條" for m in mentions):
+            out.append(
+                result(
+                    rid,
+                    field,
+                    S.REVIEW_REQUIRED,
+                    reason="document_missing",
+                    message="第 15 條價格表找不到「執行價格（為最初價格的N%）」欄頭",
+                )
+            )
+        if not mentions:
+            continue
+        pf = ctx.ts.f(field)
+        if not pf.ok:
+            out.append(doc_review(rid, field, pf))
+            continue
+        bad = [m for m in mentions if m.value != pf.value]
+        out.append(
+            result(
+                rid,
+                field,
+                S.MISMATCH if bad else S.PASS,
+                expected=pf.value,
+                actual=sorted({f"{m.article} {m.value}%" for m in bad}) if bad else pf.value,
+                evidence=pf.evidence + [Evidence.of(ln) for m in (bad or mentions) for ln in m.lines],
+                reason="document_inconsistent" if bad else "",
+                message=f"價格表欄頭共 {len(mentions)} 處，須等於第 15 條定義句",
+            )
+        )
+    return out
+
+
+def coupon_repeats(ctx: Context) -> list[CheckResult]:
+    """§9(3) 相關配息率與 §16 情境試算中每次出現的月配息率 = §14 正式月配息率。"""
+    rid, pf = "doc.coupon_repeats", ctx.ts.f("monthly_coupon_pct")
+    mentions = ctx.ts.coupon_mentions["repeat"]
+    out = []
+    obs = ctx.ts.f("ko_observation")
+    if obs.ok and obs.value == "D" and not any(m.article == "第9條(3)" for m in mentions):
+        # 期間每日觀察型態的 §9(3) 一定列出相關配息率；抓不到代表寫法不同，不能略過
+        out.append(
+            result(
+                rid,
+                "第9條(3)",
+                S.REVIEW_REQUIRED,
+                evidence=obs.evidence,
+                reason="document_missing",
+                message="期間每日觀察型態的第9條(3)找不到「相關配息率為…%」",
+            )
+        )
+    for article in dict.fromkeys(m.article for m in mentions):
+        group = [m for m in mentions if m.article == article]
+        if any(m.value.is_nan() for m in group):
+            out.append(
+                result(
+                    rid,
+                    article,
+                    S.REVIEW_REQUIRED,
+                    reason="document_missing",
+                    evidence=[Evidence.of(ln) for m in group if m.value.is_nan() for ln in m.lines],
+                    message=f"{article}有月配息率讀不到數值（寫法與範本不同），請人工確認",
+                )
+            )
+            continue
+        if not pf.ok:
+            out.append(doc_review(rid, article, pf))
+            continue
+        bad = [m for m in group if m.value != pf.value]
+        out.append(
+            result(
+                rid,
+                article,
+                S.MISMATCH if bad else S.PASS,
+                expected=pf.value,
+                actual=sorted({str(m.value) for m in bad}) if bad else pf.value,
+                evidence=pf.evidence + [Evidence.of(ln) for m in (bad or group) for ln in m.lines],
+                reason="document_inconsistent" if bad else "",
+                message=f"{article}共 {len(group)} 處月配息率，須等於第 14 條「配息率」",
+            )
+        )
+    return out
+
+
+def _shown(value: Decimal, like: Decimal) -> Decimal:
+    """依說明書顯示位數四捨五入（half-up）。"""
+    exp = like.as_tuple().exponent
+    return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
+
+
+def scenario_returns(ctx: Context) -> list[CheckResult]:
+    """§16(3) 有利情況：總報酬率 = 月配息率 × 配息期數；一般情況：總報酬率 = 月配息率 × 總期數、
+    平均年化報酬率 = 正式年利率。有利情況的年化率取決於持有期間，不核對（列未涵蓋）。"""
+    rid = "doc.scenario_returns"
+    monthly, annual, table = ctx.ts.f("monthly_coupon_pct"), ctx.ts.f("coupon_pa_pct"), ctx.ts.f("coupon_table")
+    out = []
+    for name, label in (("scenario_favourable", "有利情況"), ("scenario_general", "一般情況")):
+        pf = ctx.ts.f(name)
+        if not pf.ok:
+            out.append(doc_review(rid, f"{name}_total", pf))
+            continue
+        if name == "scenario_general" and not table.ok:
+            out.append(doc_review(rid, f"{name}_total", table))
+            continue
+        if not monthly.ok:
+            out.append(doc_review(rid, f"{name}_total", monthly))
+            continue
+        periods = pf.value["periods"] if name == "scenario_favourable" else len(table.value.rows)
+        total = pf.value["total"]
+        expected = _shown(monthly.value * periods, total)
+        ok = expected == total
+        out.append(
+            result(
+                rid,
+                f"{name}_total",
+                S.PASS if ok else S.MISMATCH,
+                expected=expected,
+                actual=total,
+                evidence=pf.evidence + monthly.evidence,
+                reason="" if ok else "value_mismatch",
+                tolerance="依說明書顯示位數四捨五入",
+                message=f"{label}總報酬率 = 月配息率 {monthly.value}% × {periods} 期",
+            )
+        )
+        if name == "scenario_general":
+            if not annual.ok:
+                out.append(doc_review(rid, f"{name}_annualized", annual))
+                continue
+            ann = pf.value["annualized"]
+            ok = _shown(annual.value, ann) == ann
+            out.append(
+                result(
+                    rid,
+                    f"{name}_annualized",
+                    S.PASS if ok else S.MISMATCH,
+                    expected=annual.value,
+                    actual=ann,
+                    evidence=pf.evidence + annual.evidence,
+                    reason="" if ok else "value_mismatch",
+                    message="一般情況（持有至到期、全部配息）平均年化報酬率須等於第 14 條年利率",
+                )
+            )
+    return out
+
+
+def observation_t_range(ctx: Context) -> CheckResult:
+    """§13(7) 自動提前出場觀察期定義句（Daily Memory）各段 t 的起訖：
+    保證配息期 G ≥ 1 → (G, G) 與 (G+1, 總期數)；G = 0 → (1, 總期數)。總期數 = 配息表列數。"""
+    rid, field = "doc.observation_t_range", "observation_t_ranges"
+    obs, mem = ctx.ts.f("ko_observation"), ctx.ts.f("ko_memory")
+    for x in (obs, mem):
+        if not x.ok:
+            return doc_review(rid, field, x)
+    if not (obs.value == "D" and mem.value):
+        return result(
+            rid,
+            field,
+            S.NOT_APPLICABLE,
+            evidence=obs.evidence,
+            message="只有期間每日觀察的記憶式商品有「自動提前出場觀察期」t 範圍定義句",
+        )
+    pf, g, table = ctx.ts.f(field), ctx.ts.f("guaranteed_periods"), ctx.ts.f("coupon_table")
+    for x in (pf, g, table):
+        if not x.ok:
+            return doc_review(rid, field, x)
+    n = len(table.value.rows)
+    expected = [(g.value, g.value), (g.value + 1, n)] if g.value >= 1 else [(1, n)]
+    ok = pf.value == expected
+
+    def show(rs: list[tuple[int, int]]) -> str:
+        return "；".join(f"t={a}" if a == b else f"t={a}～{b}" for a, b in rs)
+
+    return result(
+        rid,
+        field,
+        S.PASS if ok else S.MISMATCH,
+        expected=show(expected),
+        actual=show(pf.value),
+        evidence=pf.evidence + g.evidence,
+        reason="" if ok else "value_mismatch",
+        message=f"依提前出場表推得保證配息期 {g.value}、配息表 {n} 期",
+    )
+
+
 # ---------------------------------------------------------------- 入口
 
 
@@ -871,6 +1156,14 @@ def run_all(ctx: Context) -> list[CheckResult]:
         trigger_per_period(ctx),
         scenario_price_table(ctx),
         *min_amounts(ctx),
+        *name_consistency(ctx),
+        distributor_product_code(ctx),
+        currency_consistency(ctx),
+        scenario_notional(ctx),
+        *price_header_pct(ctx),
+        *coupon_repeats(ctx),
+        *scenario_returns(ctx),
+        observation_t_range(ctx),
         denomination(ctx),
         subscription_start(ctx),
         print_date(ctx),
@@ -880,5 +1173,9 @@ def run_all(ctx: Context) -> list[CheckResult]:
         risk_level(ctx),
         forbidden_wording(ctx),
         *product_name(ctx, ISSUER),
+        *issuer_name(ctx, ISSUER),
+        *distributor_info(ctx),
+        *fees(ctx),
+        issue_price(ctx),
     ]
     return out

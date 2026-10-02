@@ -22,6 +22,9 @@ ORDER_FORMAT = ROOT / "config" / "order_formats" / "barc.toml"
 
 _STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
 FIXED_WARNING = _STD["risk"]["fixed_warning"]
+DISTRIBUTOR = _STD["distributor"]
+ISSUER_NAME = _STD["issuer_name"]["barc"]
+FEES = dict(_STD["fees"])
 CURRENCY_ISO = dict(_STD["currency"])
 FONT = "china-t"
 Q4 = Decimal("0.0001")
@@ -89,6 +92,25 @@ class Spec:
     min_subscription: int | None = None
     min_redemption: int | None = None
     ko_header_override: str | None = None  # 定日記憶式提前出場表的「自動提前出場評價日」表頭改寫
+    # ---- 文件內重複出現處與審查標準固定值（Issue #41）----
+    title_name: str | None = None  # 封面標題；None → 中文名稱去掉「（下稱「本商品」）」
+    art1_name: str | None = None  # 第一章第 1 條商品名稱；None → 中文名稱
+    distributor_code: str | None = None  # 封面受託或銷售機構商品代號；None → 商品代號
+    art5_currency: str | None = None  # 第一章第 5 條計價幣別；None → 封面幣別
+    issue_price: str = "100"
+    strike_headers: dict[str, str] = field(default_factory=dict)  # "§15"／"§16"／"§16(ii)" → 執行價格欄頭百分比
+    repeat_overrides: dict[str, str] = field(
+        default_factory=dict
+    )  # "§9(3)"／"§16(i)"／"§16(ii)"／"§16(iii)" → 月配息率
+    scenario_notional: int | None = None  # §16 情境假設面額；None → 面額
+    general_total: str | None = None  # §16(ii) 總報酬率；None → 月配息率 × 期數
+    general_annualized: str | None = None  # §16(ii) 平均年化報酬率；None → 年利率
+    favourable_total: str | None = None  # §16(i) 總報酬率；None → 月配息率
+    t_range_end: int | None = None  # §13(7)「t 等於 G+1 至 N」的 N；None → 天期
+    issuer_ch2: str | None = None  # 第二章發行機構事業名稱
+    distributor_cover: tuple[str, str, str] | None = None  # 封面受託或銷售機構（名稱、電話、地址）
+    distributor_address_ch2: str | None = None
+    fees: dict[str, str] = field(default_factory=dict)  # 費用項目 → 費率區間（覆寫審查標準值）
 
     def with_(self, **kw: Any) -> Spec:
         return replace(self, **kw)
@@ -281,7 +303,8 @@ def build_pdf(path: Path, s: Spec) -> Path:
 
     # ---- p1 封面 ----
     w.line(255.6, "中文產品說明書", size=12, gap=16)
-    w.para(45.4, name_zh.replace("（下稱「本商品」）", ""), width=42, size=12, gap=16)
+    title = s.title_name or name_zh.replace("（下稱「本商品」）", "")
+    w.para(45.4, title, width=42, size=12, gap=16)
     w.space(6)
 
     def cover(label: str, value_lines: list[str]) -> None:
@@ -292,7 +315,7 @@ def build_pdf(path: Path, s: Spec) -> Path:
         w.y += 13 * len(value_lines) + 6
 
     cover("商品代號:", [s.product_code])
-    cover("受託或銷售機構商品代號:", [s.product_code])
+    cover("受託或銷售機構商品代號:", [s.distributor_code or s.product_code])
     cover("ISIN:", ["XS0000000000"])
     cover("商品中文名稱:", [name_zh[k : k + 25] for k in range(0, len(name_zh), 25)])
     cut = name_en.index("issued")
@@ -300,6 +323,8 @@ def build_pdf(path: Path, s: Spec) -> Path:
     cover("商品種類:", ["股權連結債券"])
     cover("發行機構:", [s.issuer_cover])
     cover("計價幣別:", [s.currency_zh])
+    d_name, d_phone, d_addr = s.distributor_cover or (DISTRIBUTOR["name"], DISTRIBUTOR["phone"], DISTRIBUTOR["address"])
+    cover("受託或銷售機構之名稱、電話及地址:", [f"{d_name}，電話：{d_phone}，地址", f"：{d_addr}"])
     cover("受託或銷售機構審查通過之日期:", [zh_date(s.approval_date)])
     w.line(41.0, "警語：", size=12, gap=18)
     w.numbered("1.", 41.0, 69.4, warnings[0][:40], gap=13)
@@ -321,14 +346,17 @@ def build_pdf(path: Path, s: Spec) -> Path:
     def sub(n: int, title: str, x_num: float = 69.4, x_body: float = 97.7) -> None:
         w.numbered(f"({n})", x_num, x_body, title)
 
-    article(1, f"商品名稱：{name_zh[:40]}")
-    w.para(69.4, name_zh[40:])
+    art1 = s.art1_name or name_zh
+    article(1, f"商品名稱：{art1[:40]}")
+    w.para(69.4, art1[40:])
     article(2, "商品風險程度:" + warnings[1][:34])
     w.para(69.4, warnings[1][34:], width=44)
     article(3, "發行機構名稱及其長期債務信用評等：英商巴克萊銀行股份有限公司（Barclays Bank PLC）")
     article(4, "商品之發行評等：不適用。")
-    article(5, f"計價幣別：{s.currency_zh}")
-    article(6, f"商品面額與發行價格：每單位商品面額為{s.denom:,} {s.currency_zh}。發行價格為商品面額之100%。")
+    article(5, f"計價幣別：{s.art5_currency or s.currency_zh}")
+    article(
+        6, f"商品面額與發行價格：每單位商品面額為{s.denom:,} {s.currency_zh}。發行價格為商品面額之{s.issue_price}%。"
+    )
     article(7, "計價貨幣本金保本率：無，本商品為不保障本金之境外結構型商品。")
     article(8, "投資本金達成100％保本之各項條件：不適用。")
     article(9, "主要給付項目及其計算方式：")
@@ -337,6 +365,15 @@ def build_pdf(path: Path, s: Spec) -> Path:
     w.line(81.0, f"月之配息率（為{m['§9']}%(顯示至小數點後第4 位)，即年利率為{s.annual}%）所計算之配息金額。")
     sub(2, "到期贖回：")
     w.line(81.0, "有關到期贖回之詳細說明，請參閱本章第15 條之說明。")
+    sub(3, "指定提前現金交割金額：")
+    w.line(81.0, "若「指定提前贖回事件」發生，發行機構將支付商品面額100%加計「相關配息金額」。")
+    if s.ko_obs == "D":
+        rel = s.repeat_overrides.get("§9(3)", f"{monthly}")
+        w.line(81.0, "「相關配息金額」係指依以下相關配息率而計算之金額：")
+        w.line(106.1, f"(i) 就於第1 個自動提前出場觀察期期末日當日發生者而言，相關配息率為{rel}%；或")
+        w.line(106.1, f"(ii) 就除(i)外之其他情況而言，相關配息率為：{monthly}% × Ant/Dt")
+    else:
+        w.line(81.0, "「相關配息金額」係指若「指定提前贖回事件」未曾發生時，原應支付之配息金額。")
     article(10, "連結標的資產及其相對權重、與投資績效之關連情形：")
     w.line(56.0, "(1) 連結標的資產：係指下表所示之標的資產（合稱「一籃子標的資產」）。", gap=19)
     w.row([(108.6, "標的資產"), (284.7, "交易所"), (418.6, "彭博代號（僅供參考）")], gap=22)
@@ -396,9 +433,11 @@ def build_pdf(path: Path, s: Spec) -> Path:
             text = f"自動提前出場觀察期：就t 等於1 至{n} 的情況而言，則指自相關期始日起（含）至相關期末日止（含）之各期間；"
         else:
             ordinal = "首個" if g == 1 else f"第{'一二三四五六七八九十'[g - 1]}個"
+            end = s.t_range_end or n
             text = (
                 f"自動提前出場觀察期：就{ordinal}（即t 等於{g} 的情況）自動提前出場觀察期而言，指期末日{g}，"
-                f"且就各後續自動提前出場觀察期而言，則指自相關期始日起（含）至相關期末日止（含）之各期間；"
+                f"且就各後續自動提前出場觀察期（其中當t 等於{g + 1} 至{end} 的情況）而言，"
+                "則指自相關期始日起（含）至相關期末日止（含）之各期間；"
             )
         w.para(97.7, text + "上述各期間仍不為調整（如以下「自動提前出場觀察期」一表所示）。", width=42)
         w.line(97.7, "自動提前出場評價日：指自動提前出場觀察期內之各一籃子預定交易日。")
@@ -470,11 +509,11 @@ def build_pdf(path: Path, s: Spec) -> Path:
         w.line(67.7, f"「觸及生效價格」詳見下表所示（為最初價格的{s.ki_pct}%)；", gap=23)
     w.line(67.7, f"「{ko_term}」詳見下表所示（為最初價格的{s.ko}%）；", gap=23)
 
-    def price_table(overrides: dict, cross_page: bool) -> None:
+    def price_table(overrides: dict, cross_page: bool, strike_hdr: str) -> None:
         cols = [("initial", 173.3), ("strike", 251.4), ("ko", 354.5)] + ([("ki", 457.5)] if s.ki != "none" else [])
         head = {
             "initial": ["最初價格"],
-            "strike": ["執行價格（為最初價", f"格的{s.strike}%）(四捨", "五入至小數點後第4", "位)"],
+            "strike": ["執行價格（為最初價", f"格的{strike_hdr}%）(四捨", "五入至小數點後第4", "位)"],
             "ko": (
                 ["自動提前出場觸發價", "格（為最初價格乘以", "自動提前出場觸發百", "分比）(四捨五入至"]
                 if s.memory
@@ -485,16 +524,18 @@ def build_pdf(path: Path, s: Spec) -> Path:
         if cross_page:
             w.y = w.BOTTOM - 26  # 表頭前兩行在本頁底部，其餘在下一頁
         w.need(26)
-        for k in range(4):
-            if k == 2 and cross_page:
+        # 表頭逐欄寫入（同一欄的各行相連），與真實樣本「每格一個文字區塊」的擷取順序一致
+        for rows in ((0, 1), (2, 3)) if cross_page else ((0, 1, 2, 3),):
+            if rows[0] == 2:
                 w.new_page()
-            w.need(13)
-            for key, x in cols:
-                if k < len(head[key]):
-                    w.put(x, w.y, head[key][k])
-            if k == 0:
+            w.need(13 * len(rows))
+            if rows[0] == 0:
                 w.put(71.5, w.y, "標的資產")
-            w.y += 13
+            for key, x in cols:
+                for j, k in enumerate(rows):
+                    if k < len(head[key]):
+                        w.put(x, w.y + 13 * j, head[key][k])
+            w.y += 13 * len(rows)
         w.space(10)
         pcts = {"strike": s.strike, "ko": s.ko, "ki": s.ki_pct}
         for i, u in enumerate(s.underlyings, 1):
@@ -514,7 +555,7 @@ def build_pdf(path: Path, s: Spec) -> Path:
                 w.put(51.6, y + 1 + 13 * k, part)
             w.y += max(24, 13 * len(name_lines) + 12)
 
-    price_table(s.price_overrides, s.cross_page_price_table)
+    price_table(s.price_overrides, s.cross_page_price_table, s.strike_headers.get("§15", f"{s.strike}"))
     if multi:
         w.line(67.7, "「表現最差之標的資產」指於最終評價日當日價值最低之標的資產。")
     w.line(96.0, "發行機構應以實物交割時，將根據發行機構及相關結算機構規則進行交割活動。")
@@ -522,9 +563,14 @@ def build_pdf(path: Path, s: Spec) -> Path:
     w.line(182.5, f"每單位商品面額 × {m['§15']}%(顯示至小數點後第4 位)")
     sub(3, "參與率：不適用。", x_num=67.7, x_body=96.0)
     article(16, "投資收益計算方法，包含本金虧損之機率及以情境分析解說最大可能獲利、損失：")
+    sub(3, "以情境分析解說最大可能獲利、損失及其他狀況之年化平均報酬率：", x_num=67.7, x_body=96.0)
+    notional = f"{s.scenario_notional or s.denom:,} {s.currency_zh}"
+    w.line(77.7, f"a) 每單位商品面額 = {notional}")
+    w.line(77.7, "b) 投資標的單位數 = 1 單位")
     w.line(77.7, "d) 本商品標的資產之相關資訊：")
-    price_table({**s.price_overrides, **s.scenario_overrides}, False)
+    price_table({**s.price_overrides, **s.scenario_overrides}, False, s.strike_headers.get("§16", f"{s.strike}"))
     w.line(77.7, "情境分析結果不保證未來績效。")
+    _scenarios(w, s, notional)
     article(17, "平均年化報酬率：")
     sub(1, "平均年化報酬率：本商品於各配息支付日支付之配息金額，")
     w.line(97.7, f"均以每月之配息率（為{m['§17']}%，即年利率為{s.annual}%）乘以每單位商品面額計算。")
@@ -534,18 +580,20 @@ def build_pdf(path: Path, s: Spec) -> Path:
     # ---- 第二章 ----
     w.new_page()
     w.line(41.0, "第二章 相關機構事業概況", size=12, gap=22)
-    for n, title, boss in [
-        (1, "發行機構：", "Alex Example（CFO）"),
-        (2, "總代理人：", "王小明（董事長）"),
-        (3, "保證機構：", "無"),
-        (4, "計算代理機構：", "Casey Sample（CFO）"),
-        (5, "受託或銷售機構：", s.chairman),
-        (6, "報價機構：", "Robin Test"),
+    example = ("範例股份有限公司", "範例市範例路1 號")
+    distributor = (DISTRIBUTOR["name"], s.distributor_address_ch2 or DISTRIBUTOR["address"])
+    for n, title, boss, (corp, addr) in [
+        (1, "發行機構：", "Alex Example（CFO）", (s.issuer_ch2 or ISSUER_NAME, "1 Example Place, London")),
+        (2, "總代理人：", "王小明（董事長）", example),
+        (3, "保證機構：", "無", example),
+        (4, "計算代理機構：", "Casey Sample（CFO）", example),
+        (5, "受託或銷售機構：", s.chairman, distributor),
+        (6, "報價機構：", "Robin Test", example),
     ]:
         article(n, title)
-        sub(1, "事業名稱：範例股份有限公司", x_num=67.7, x_body=96.0)
+        sub(1, f"事業名稱：{corp}", x_num=67.7, x_body=96.0)
         sub(2, "設立日期：2000 年1 月1 日", x_num=67.7, x_body=96.0)
-        sub(3, "營業所在地：範例市範例路1 號", x_num=67.7, x_body=96.0)
+        sub(3, f"營業所在地：{addr}", x_num=67.7, x_body=96.0)
         sub(4, f"負責人姓名：{boss}", x_num=67.7, x_body=96.0)
 
     # ---- 第三章 ----
@@ -562,6 +610,25 @@ def build_pdf(path: Path, s: Spec) -> Path:
     subscription = s.subscription_date or s.trade_date
     w.numbered("(1)", 59.5, 83.7, f"商品開始受理申購日期：{zh_date(subscription)}。")
     w.numbered("(2)", 59.5, 83.7, "開始受理投資人提前贖回日期：於發行日後的次一個營業日。")
+    w.numbered("2.", 35.4, 59.5, "投資人應負擔的各項費用及金額或計算基準之表列：")
+    w.row([(108.4, "費用項目"), (248.4, "費率"), (314.2, "收取時點"), (378.0, "收取方式"), (517.4, "收取人")])
+    fees = {**FEES, **s.fees}
+    for label, rate in [
+        (["申購費用"], ["申購價金的", fees["申購費用"]]),
+        (["提前贖回費用"], ["投資人提前贖", "回價金的", fees["提前贖回費用"]]),
+        (["管理費用（信託管理費）"], ["無"]),
+        (["分銷費用（如屬發行機構", "給予受託機構之報酬）"], ["申購價金的", fees["分銷費用"]]),
+        (["其他費用"], ["無"]),
+    ]:
+        h = 11 * max(len(label), len(rate)) + 10
+        w.need(h)
+        for k, t in enumerate(label):
+            w.put(41.4, w.y + 11 * k, t)
+        for k, t in enumerate(rate):
+            w.put(226.2, w.y + 11 * k, t)
+        w.put(301.4, w.y, "不適用" if rate == ["無"] else "申購時")
+        w.y += h
+    w.line(35.4, "附註：分銷費用係由投資人負擔。")
     min_sub = s.min_subscription or s.denom
     min_red = s.min_redemption or s.denom
     w.numbered("4.", 35.4, 59.5, "最低申購金額及累加申購金額：")
@@ -577,6 +644,37 @@ def build_pdf(path: Path, s: Spec) -> Path:
     if s.extra_text:
         w.para(41.0, s.extra_text)
     return w.finish(path)
+
+
+def _scenarios(w: _Writer, s: Spec, notional: str) -> None:
+    """§16(3) 情境分析：(i) 有利（第 1 期提前出場）、(ii) 一般（持有至到期）、(iii) 最差。"""
+    m = s.monthly_value
+    rep = {k: s.repeat_overrides.get(k, f"{m}") for k in ("§16(i)", "§16(ii)", "§16(iii)")}
+    ccy = s.currency_zh
+    gross = Decimal(s.denom) * (100 + m) / 100
+    w.numbered("(i)", 77.7, 106.1, "有利情況：假設本商品於第1 個觀察期期末日發生「指定提前贖回事件」。")
+    w.line(77.7, "每單位指定提前現金交割金額 = 每單位商品面額 × (100% + 相關配息率)")
+    w.line(77.7, f"= {notional} × (100% + {rep['§16(i)']}%) = {gross:,.2f} {ccy}")
+    w.line(77.7, f"每單位累積配息金額 = 0.00 {ccy}")
+    w.line(81.0, "總報酬率(截至指定提前贖回事件日之報酬) = [(每單位指定提前現金交割金額 + 每單位累積配息金額) /")
+    fav = s.favourable_total or f"{m}"
+    w.line(52.7, f"= [({gross:,.2f} {ccy} + 0.00 {ccy}) / {notional}] - 1 = {fav}%(平均年化報酬率：{s.annual}%)")
+    w.numbered("(ii)", 77.7, 106.1, "一般情況：假設本商品未發生「指定提前贖回事件」，發行機構將於每一個「配息支付日")
+    w.line(106.1, f"t」支付商品面額乘以{rep['§16(ii)']}%之配息率所計算之配息金額。舉例說明如下：")
+    w.line(77.7, f"執行價格（為最初價格的{s.strike_headers.get('§16(ii)', f'{s.strike}')}%）")
+    coupon = (Decimal(s.denom) * m / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    w.line(77.7, f"每單位配息金額 = {notional} × {rep['§16(ii)']}% (四捨五入至小數點後第2 位)")
+    w.line(77.7, f"每單位累積配息金額 = {coupon:,.2f} {ccy} × {s.tenor} = {coupon * s.tenor:,.2f} {ccy}")
+    total = s.general_total or f"{m * s.tenor}"
+    ann = s.general_annualized or f"{s.annual}"
+    w.line(77.7, "總報酬率(截至到期日之報酬) = [(每單位累積配息金額 + 每單位最終現金交割金額) / 每單位商品面額] - 1")
+    w.line(
+        77.7, f"= [({coupon * s.tenor:,.2f} {ccy} + {notional})/ {notional}] - 1 = {total}% (平均年化報酬率：{ann}%)"
+    )
+    w.numbered("(iii)", 77.7, 106.1, "最差情況：假設表現最差之標的資產之最終價格小於其執行價格，發行機構將支付每單位")
+    w.line(106.1, f"商品面額乘以{rep['§16(iii)']}%之配息率所計算之每單位配息金額。")
+    w.line(77.7, f"每單位配息金額 = {notional} × {rep['§16(iii)']}% (四捨五入至小數點後第2 位)")
+    w.line(77.7, f"= [(5,000.00 {ccy})/ {notional}] - 1 = -50.00% (平均年化報酬率：-100.00%)")
 
 
 def _wrap_name(name: str) -> list[str]:
