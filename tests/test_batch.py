@@ -14,19 +14,9 @@ import openpyxl
 from fcn_checker.batch import check_batch, run_batch, save_batch
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
-from synth import (
-    DATE_FORMAT,
-    ISSUER_PREFIXES,
-    REFERENCE_FORMAT,
-    REFERENCE_HEADERS,
-    REVIEW_STANDARD,
-    SYNTH_ISIN,
-    Spec,
-    build_pdf,
-    build_reference_sheet,
-    reference_row,
-    schedule_rows,
-)
+from harness import ISSUER_PREFIXES, REVIEW_STANDARD
+from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
+from synth import SYNTH_ISIN, Spec, build_pdf, reference_row, schedule_rows
 
 PASS, MISMATCH, REVIEW, ERROR = (
     CheckStatus.PASS,

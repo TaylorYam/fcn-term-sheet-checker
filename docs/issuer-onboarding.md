@@ -114,7 +114,7 @@
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
 | 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬規則；通用規則用 `rules/common.py`（§7） |
-| 合成測試資料 | `tests/synth_<上手>.py` | 依該上手版面產生虛構 PDF；參考條件表用 `tests/synth.py` 的產生器 |
+| 合成測試資料 | `tests/<上手>_synth.py` | 依該上手版面產生虛構 PDF，只用 `tests/pdf_writer.py` 排版；參考條件表用 `tests/reference_synth.py`，單份核對用 `tests/harness.py`；不引用其他上手合成器 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |
 
 ### 6.2 實作原則

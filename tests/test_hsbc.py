@@ -17,7 +17,8 @@ from fcn_checker.issuers import HSBC, REGISTRY
 from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
-from hsbc_synth import ORDER_FORMAT, REVIEW_STANDARD, ROOT, Spec, build_inquiry, build_pdf
+from harness import REVIEW_STANDARD, ROOT
+from hsbc_synth import ORDER_FORMAT, Spec, build_inquiry, build_pdf
 
 
 def run_check(pdf, excel, standard, fmt, registry=REGISTRY):

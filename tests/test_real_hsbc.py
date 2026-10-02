@@ -8,7 +8,8 @@ import pytest
 
 from fcn_checker.batch import check_batch
 from fcn_checker.schema import CheckStatus as S
-from hsbc_synth import ORDER_FORMAT, REVIEW_STANDARD, ROOT
+from harness import REVIEW_STANDARD, ROOT
+from hsbc_synth import ORDER_FORMAT
 
 DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
 PDFS = sorted((DATA / "ts").glob("325*.pdf"))

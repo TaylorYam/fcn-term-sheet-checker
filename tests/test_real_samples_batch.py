@@ -14,7 +14,8 @@ import pytest
 
 from fcn_checker.batch import run_batch
 from fcn_checker.schema import CheckStatus
-from synth import ISSUER_PREFIXES, REFERENCE_FORMAT, REVIEW_STANDARD
+from harness import ISSUER_PREFIXES, REVIEW_STANDARD
+from reference_synth import REFERENCE_FORMAT
 
 ROOT = Path(__file__).resolve().parents[1]
 PDFS = (

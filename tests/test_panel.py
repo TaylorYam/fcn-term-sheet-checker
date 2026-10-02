@@ -14,17 +14,9 @@ import pytest
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel import parse_args
 from fcn_checker.panel_workflow import PanelSession
-from synth import (
-    ISSUER_PREFIXES,
-    REFERENCE_FORMAT,
-    REVIEW_STANDARD,
-    ROOT,
-    SYNTH_ISIN,
-    Spec,
-    build_pdf,
-    build_reference_sheet,
-    reference_row,
-)
+from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT
+from reference_synth import REFERENCE_FORMAT, build_reference_sheet
+from synth import SYNTH_ISIN, Spec, build_pdf, reference_row
 
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 
@@ -64,7 +56,7 @@ def test_preview_lists_each_pdf_without_writing_anything(tmp_path):
 
 
 def test_preview_reports_reference_sheet_column_problems(tmp_path):
-    from synth import REFERENCE_HEADERS
+    from reference_synth import REFERENCE_HEADERS
 
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)

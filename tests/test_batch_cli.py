@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from fcn_checker.cli import main
-from synth import ROOT, Spec, build_pdf, build_reference_sheet, reference_row
+from harness import ROOT
+from reference_synth import build_reference_sheet
+from synth import Spec, build_pdf, reference_row
 
 
 def run(tmp_path, monkeypatch, capsys, specs, rows, extra=()):

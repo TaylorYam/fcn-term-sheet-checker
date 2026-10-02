@@ -11,8 +11,9 @@ import json
 from fcn_checker.cli import main
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus
-from synth import REVIEW_STANDARD, ROOT, Spec, build_not_barc_pdf, build_pdf, build_reference_sheet, reference_row
-from test_check_barc import check, check_pdf
+from harness import REVIEW_STANDARD, ROOT
+from reference_synth import build_reference_sheet
+from synth import Spec, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
 
 PASS, REVIEW = CheckStatus.PASS, CheckStatus.REVIEW_REQUIRED
 
@@ -44,7 +45,8 @@ def test_no_issuer_detected_requires_review_and_runs_no_rules(tmp_path):
 
 def test_two_issuers_detected_requires_review(tmp_path):
     from fcn_checker.batch import check_batch
-    from synth import ISSUER_PREFIXES, REFERENCE_FORMAT
+    from harness import ISSUER_PREFIXES
+    from reference_synth import REFERENCE_FORMAT
 
     fake = dataclasses.replace(BARC, code="FAKE", template_id="fake-zh-pd", label="FAKE 測試範本")
     spec = Spec()
@@ -68,7 +70,8 @@ def test_two_issuers_detected_requires_review(tmp_path):
 
 def test_review_standard_reads_product_name_per_issuer(tmp_path):
     from fcn_checker.batch import check_batch
-    from synth import ISSUER_PREFIXES, REFERENCE_FORMAT
+    from harness import ISSUER_PREFIXES
+    from reference_synth import REFERENCE_FORMAT
 
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)

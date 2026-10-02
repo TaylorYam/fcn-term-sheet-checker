@@ -10,8 +10,8 @@ import datetime as dt
 import pytest
 
 from fcn_checker.schema import CheckStatus
-from synth import Spec
-from test_check_barc import MISMATCH, PASS, REVIEW, check, problems, results
+from harness import MISMATCH, PASS, REVIEW, problems, results
+from synth import Spec, check
 
 SCHEDULE_RULES = (
     "field.first_callable_period",
