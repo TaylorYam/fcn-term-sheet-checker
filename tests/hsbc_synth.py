@@ -257,7 +257,7 @@ def build_inquiry(path: Path, s: Spec, overrides=None):
     }
     for i in range(1, 13):
         vals[f"autocall_date_{i}"] = (
-            s.ends[i - 1] if (s.obs == "P" and 2 <= i <= 6) or (s.obs == "D" and i == 2) else "-"
+            s.ends[i - 1] if (s.obs == "P" and 2 <= i <= 6) or (s.obs == "D" and i in (2, 6)) else "-"
         )
     for i in range(1, 6):
         vals[f"underlying_{i}"] = f"ZZ{i} UW" if i <= s.count else "-"

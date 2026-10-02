@@ -556,7 +556,8 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     assert vals["ISIN Code"] == "XS1999900001"
     assert vals["發行日"] == dt.datetime(2030, 1, 14)
     assert vals["比價日_2"].date() == s.ends[1]
-    assert vals["比價日_6"] == ("-" if obs == "D" else dt.datetime.combine(s.ends[-1], dt.time()))
+    assert vals["比價日_6"] == dt.datetime.combine(s.ends[-1], dt.time()), "D 型也填最後一期"
+    assert vals["比價日_3"] == ("-" if obs == "D" else dt.datetime.combine(s.ends[2], dt.time()))
     assert vals["比價日_1"] == "-"
     wb.close()
     wb = openpyxl.load_workbook(excel)
