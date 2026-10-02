@@ -64,7 +64,11 @@ def result(
     message: str = "",
     tolerance: str | None = None,
     evidence: list[Evidence] | None = None,
+    column: str | None = None,
 ) -> CheckResult:
+    """`column` 為錯訊用的參考條件表欄名；未指定時取自 `ov` 的來源欄名。"""
+    if column is None:
+        column = "、".join(dict.fromkeys(o.column for o in ov or [] if o is not None and o.column))
     return CheckResult(
         rule_id=rule_id,
         field=field,
@@ -76,6 +80,7 @@ def result(
         message=message,
         document_evidence=list(evidence if evidence is not None else (pf.evidence if pf else [])),
         order_source=[o.source for o in (ov or []) if o is not None],
+        column=column,
     )
 
 

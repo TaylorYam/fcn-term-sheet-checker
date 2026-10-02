@@ -8,6 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .messages import FIELD_ZH
 from .schema import CheckReport, CheckResult, CheckStatus
 
 if TYPE_CHECKING:
@@ -19,36 +20,6 @@ STATUS_ZH = {
     CheckStatus.REVIEW_REQUIRED: "需人工覆核",
     CheckStatus.NOT_APPLICABLE: "不適用",
     CheckStatus.ERROR: "執行錯誤",
-}
-FIELD_ZH = {
-    "template": "範本",
-    "product_code": "商品代號",
-    "currency": "幣別",
-    "underlyings": "標的彭博代號",
-    "strike_pct": "執行 %",
-    "ko_pct": "KO %",
-    "ko_type": "KO 觀察方式／記憶式",
-    "ki_type": "KI 型態",
-    "ki_pct": "KI %",
-    "coupon_pa_pct": "年利率 %",
-    "monthly_coupon_pct": "月配息率 %",
-    "tenor_months": "天期（月）",
-    "trade_date": "交易日",
-    "issue_date": "發行日",
-    "final_valuation_date": "最終評價日",
-    "maturity_date": "到期日",
-    "issue_date_offset_days": "發行日 − 交易日（天）",
-    "price_table": "價格表",
-    "denomination": "面額",
-    "subscription_start_date": "開始受理申購日",
-    "print_date": "刊印日期",
-    "approval_date": "受託機構審查通過日期",
-    "chairman": "受託機構負責人",
-    "fixed_warning": "固定風險警語",
-    "risk_level": "風險等級",
-    "forbidden_wording": "禁用語「受託投資」",
-    "name_zh": "中文商品名稱",
-    "name_en": "英文商品名稱",
 }
 
 
@@ -77,6 +48,7 @@ def _result_dict(r: CheckResult) -> dict[str, Any]:
         "message": r.message,
         "document_evidence": [e.to_dict() for e in r.document_evidence],
         "order_source": list(r.order_source),
+        "column": r.column,
     }
 
 

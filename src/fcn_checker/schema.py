@@ -130,6 +130,7 @@ class OrderValue:
 
     value: Any
     source: str  # 例：詢價表格!J5
+    column: str = ""  # 來源 Excel 欄名（例：UL_2_進場價）；錯訊用
 
 
 @dataclass
@@ -145,6 +146,7 @@ class CheckResult:
     document_evidence: list[Evidence] = field(default_factory=list)
     order_source: list[str] = field(default_factory=list)
     rule_version: str = "1"
+    column: str = ""  # 參考條件表欄名（參考條件表欄位與回填規則才有）；錯訊用
 
 
 @dataclass

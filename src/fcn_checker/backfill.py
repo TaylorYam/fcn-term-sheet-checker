@@ -39,6 +39,7 @@ from .standard_fields import AutocallSchedule
 SLOTS = 12
 FALLBACK_DATE_FORMAT = "yyyy/m/d"
 COLUMN_MISSING = "backfill_column_missing"
+COMPARE_DATES = "比價日"  # 比價日_1～12 合起來核對，錯訊用這個名稱
 
 
 class BackfillAction(StrEnum):
@@ -173,21 +174,32 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
     stds = [f"autocall_date_{n}" for n in range(1, SLOTS + 1)]
     ovs = [row.fields.get(s) for s in stds]
     missing = _missing_columns(fmt, row, stds)
-    if missing:
-        return _column_missing(rid, key, missing, ovs), []
-    if not sched.ok:
-        return doc_review(rid, key, sched, None, ovs), []
+    if missing or not sched.ok:
+        problem = _column_missing(rid, key, missing, ovs) if missing else doc_review(rid, key, sched, None, ovs)
+        problem.column = COMPARE_DATES
+        return problem, []
     tenor = standard_field(ctx, "tenor_months")
     slots = expected_slots(sched.value, tenor.value if tenor.ok else None, fmt.empty_value)
     if isinstance(slots, str):
         return (
-            result(rid, key, S.REVIEW_REQUIRED, pf=sched, ov=ovs, reason="compare_dates_unmapped", message=slots),
+            result(
+                rid,
+                key,
+                S.REVIEW_REQUIRED,
+                pf=sched,
+                ov=ovs,
+                reason="compare_dates_unmapped",
+                message=slots,
+                column=COMPARE_DATES,
+            ),
             [],
         )
     decisions = [_decide(fmt, row, s, e) for s, e in zip(stds, slots, strict=True)]
     final = standard_field(ctx, "final_valuation_date")
     if not final.ok:
-        return doc_review(rid, key, final, None, ovs), decisions
+        problem = doc_review(rid, key, final, None, ovs)
+        problem.column = COMPARE_DATES
+        return problem, decisions
     latest = max(d for d in slots if isinstance(d, dt.date))
     if latest != final.value:
         return (
@@ -201,6 +213,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
                 ov=ovs,
                 reason="compare_dates_max_mismatch",
                 message=f"說明書最晚的比價日 {latest.isoformat()} 不等於最終比價日 {final.value.isoformat()}，不回填",
+                column=COMPARE_DATES,
             ),
             decisions,
         )
@@ -218,6 +231,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
             reason="value_mismatch" if bad else "",
             message="；".join(x for x in (rule, _fill_message(decisions)) if x)
             + ("；表上值與說明書不同的格子保留原值" if bad else ""),
+            column=COMPARE_DATES,
         ),
         decisions,
     )
