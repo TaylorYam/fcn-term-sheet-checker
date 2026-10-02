@@ -34,6 +34,12 @@ def run_check(pdf, excel, standard, fmt, registry=REGISTRY):
     return out.items[0].report if out.items else CheckReport(out.status, None, list(out.errors), [])
 
 
+def only(report, rule_id, field=None):
+    out = [x for x in report.results if x.rule_id == rule_id and (field is None or x.field == field)]
+    assert len(out) == 1, [(x.rule_id, x.field) for x in report.results if x.rule_id == rule_id]
+    return out[0]
+
+
 def check(tmp_path, spec=None, overrides=None):
     s = spec or Spec()
     return run_check(
@@ -87,10 +93,10 @@ def test_supported_types_pass(tmp_path, obs, memory, ki, count):
         ("ki_type", "D", "field.ki_type"),
         ("underlying_1", "ZZ9 UW", "field.underlyings"),
         ("underlying_1", "ZZ1 UN", "field.underlyings"),
-        ("underlying_1_initial_price", 101, "field.prices"),
-        ("underlying_1_strike_price", 71, "field.prices"),
-        ("underlying_1_ki_price", 61, "field.prices"),
-        ("underlying_1_ko_price", 101, "field.prices"),
+        ("underlying_1_initial_price", 101, "field.underlying_prices"),
+        ("underlying_1_strike_price", 71, "field.underlying_prices"),
+        ("underlying_1_ki_price", 61, "field.underlying_prices"),
+        ("underlying_1_ko_price", 101, "field.underlying_prices"),
         ("underlying_5", "ZZ5 UW", "field.underlyings"),
         ("autocall_date_3", "2030-04-07", "backfill.compare_dates"),
         ("autocall_date_2", "-", "backfill.compare_dates"),
@@ -376,11 +382,45 @@ def test_panel_preview_selects_the_matching_table_row(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "field,value,rule", [("ko_pct", 100.004, "field.ko_pct"), ("strike_pct", 70.004, "field.strike_pct")]
+    "field,value,status",
+    [
+        # 說明書顯示到整數（12%、100%、70%）：表上值依顯示位數 half-up 後比對（BARC 比法）
+        ("coupon_pa_pct", "12.4999", S.PASS),
+        ("coupon_pa_pct", "12.5", S.MISMATCH),
+        ("ko_pct", "100.004", S.PASS),
+        ("ko_pct", "100.5", S.MISMATCH),
+        ("strike_pct", "69.5", S.PASS),
+        ("strike_pct", "70.5", S.MISMATCH),
+    ],
 )
-def test_threshold_percentages_are_not_rounded_to_two_places(tmp_path, field, value, rule):
+def test_percentages_are_rounded_to_the_displayed_digits(tmp_path, field, value, status):
     r = check(tmp_path, overrides={field: value})
-    assert any(x.rule_id == rule and x.status == S.MISMATCH for x in r.results)
+    x = only(r, "field." + field)
+    assert x.status == status
+    assert x.tolerance == "依說明書顯示位數四捨五入後比對"
+
+
+def test_ki_pct_must_be_empty_when_the_document_has_no_ki(tmp_path):
+    r = check(tmp_path, Spec(ki="none"), overrides={"ki_pct": 60})
+    x = only(r, "field.ki_pct")
+    assert (x.status, x.reason_code) == (S.MISMATCH, "value_mismatch")
+
+
+def test_non_integer_denomination_requires_review(tmp_path):
+    r = check(tmp_path, overrides={"denomination": "10000.5"})
+    x = only(r, "field.denomination")
+    assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "order_invalid")
+
+
+def test_reference_fields_use_the_shared_rule_ids(tmp_path):
+    r = check(tmp_path, Spec(ki="none"))
+    ids = {x.rule_id for x in r.results}
+    assert {"field.underlyings", "field.underlying_prices", "field.currency", "field.ki_pct"} <= ids
+    assert not ids & {"field.prices", "field.isin", "field.autocall_dates"}
+    for rid in ("field.first_callable_period", "backfill.isin", "backfill.compare_dates"):
+        assert sum(x.rule_id == rid for x in r.results) == 1, rid
+    ki_price = only(r, "field.underlying_prices", "ZZ1 UW 下限價")
+    assert ki_price.status == S.NOT_APPLICABLE and ki_price.document_evidence
 
 
 @pytest.mark.parametrize(

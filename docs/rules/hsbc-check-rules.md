@@ -27,25 +27,27 @@
 
 ### 3.2 標準欄位對照
 
-| 標準欄位 | 整理表欄位 | 說明書來源（範本規格） | 規則 |
+參考條件表欄位與標準欄位的比對由各上手共用的 `rules/reference.py` 執行，語意與 rule_id 同 [BARC 核對規則](barc-check-rules.md) §9（使用者 2026-10-02 確認：兩家不同時以 BARC 為準，Issue #54）。HSBC parser 只負責交出標準欄位（`src/fcn_checker/standard_fields.py`）。
+
+| 標準欄位 | 參考條件表欄位 | 說明書來源（範本規格） | 規則（rule_id） |
 |---|---|---|---|
-| 商品代號 | TDCC Code | 封面 | 字串相等；也用來配對 |
-| ISIN | ISIN Code | §27 | 字串相等（整理表有值，HSBC 核對） |
-| 幣別 | 承作幣別 | 封面 | 審查標準幣別對照 |
-| 單位面額 | 單位面額 | §6 | 整數相等；另依審查標準面額預設值，不等於預設值轉人工審查 |
-| 交易日、發行日、最後評價日、到期日 | 交易日／發行日／最終比價日／到期日 | §15 | 日期相等 |
-| KO % | KO(%) | §11(2) | 數值相等 |
-| KO 觀察方式 | KO(Freq) | §4.2 | `D`／`P` |
-| 記憶式 | KO(memo) | §4.1 | `Y`／`N` |
-| 執行 % | K(%) | §11(3) | 數值相等 |
-| KI % | KI(%) | §11(3) | 有 KI 時數值相等；無 KI 時整理表為 `-` |
-| KI 型態 | KI(Freq) | §4.4 | `-`／`AM`／`D` |
-| 年利率 | Coupon p.a. (%) | §11(1) | 數值相等（比到 2 位；說明書寫 4 位） |
-| 天期 | 天期(月) | §15(1) | 整數相等 |
-| 第一個可提前出場期 | Non-Call(月) | §4.3 | 整數相等 |
-| 各期比價日 | 比價日_1～12 | §11(1)(2) | 見 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md) §4 |
-| 標的 | UL_1～5 | §12(1) 彭博代號 | 依順序逐字相等（含交易所尾碼），數量相同 |
-| 各標的價格 | UL_n_進場價／執行價／下限價／KO價 | §12(1) | 整理表四捨五入（half-up）到 4 位後相等 |
+| 商品代號 | TDCC Code | 封面 | 字串相等；也用來配對（`field.product_code`） |
+| ISIN | ISIN Code | §27 | 回填欄位：空白 → 整份通過後回填；有值 → 比對（`backfill.isin`） |
+| 幣別 | 承作幣別 | 封面 | 審查標準幣別對照（`field.currency`） |
+| 單位面額 | 單位面額 | §6 | 表上須為整數，非整數轉人工覆核；整數相等（`field.denomination`）。另依審查標準面額預設值，不等於預設值轉人工審查（`doc.denomination`） |
+| 交易日、發行日、最後評價日、到期日 | 交易日／發行日／最終比價日／到期日 | §15 | 日期相等（`field.trade_date` 等） |
+| KO % | KO(%) | §11(2) | 表上值依說明書顯示位數四捨五入（half-up）後比對（`field.ko_pct`） |
+| KO 觀察方式 | KO(Freq) | §4.2 | `D`／`P`（`field.ko_observation`） |
+| 記憶式 | KO(memo) | §4.1 | `Y`／`N`（`field.ko_memory`） |
+| 執行 % | K(%) | §11(3) | 同 KO %（`field.strike_pct`） |
+| KI % | KI(%) | §11(3) | 由說明書 KI 型態判定：無 KI 時表上必須是空值寫法，否則不一致；有 KI 時同 KO %（`field.ki_pct`） |
+| KI 型態 | KI(Freq) | §4.4 | `-`／`AM`／`D`（`field.ki_type`） |
+| 年利率 | Coupon p.a. (%) | §11(1) | 同 KO %：依說明書顯示位數四捨五入後比對（不再「比到 2 位」）（`field.coupon_pa_pct`） |
+| 天期 | 天期(月) | §15(1) | 整數相等（`field.tenor_months`） |
+| 第一個可提前出場期 | Non-Call(月) | §4.3 | 整數相等（`field.first_callable_period`） |
+| 各期比價日 | 比價日_1～12 | §11(1)(2) | 回填欄位，見 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md) §4（`backfill.compare_dates`） |
+| 標的 | UL_1～5 | §12(1) 彭博代號 | 依順序逐字相等（含交易所尾碼），數量相同；空值寫法表示沒有這檔標的（`field.underlyings`） |
+| 各標的價格 | UL_n_進場價／執行價／下限價／KO價 | §12(1) | 表上值四捨五入（half-up）到 4 位後相等；無 KI 時下限價必須是空值寫法（`field.underlying_prices`，欄位名稱「代號 執行價」等） |
 
 ### 3.3 數值
 
@@ -163,9 +165,10 @@
 |---|---|
 | `template.detect`、`batch.issuer_prefix` | 已知章條錨點及上手代號前綴 |
 | `batch.pairing`、`order.unknown_column`、`order.missing_column`、`order.duplicate_column` | 整理表唯一列與欄名；無表頭欄忽略 |
-| `field.product_code`、`backfill.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | PDF 與整理表核心條件 |
-| `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`backfill.compare_dates` | 型態、首可 KO 期與比價日 |
-| `field.underlyings`、`field.prices`、`derive.prices`、`doc.price_header_pct` | 五個標的槽、順序／尾碼、四位價格與百分比推導 |
+| `field.product_code`、`backfill.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | 參考條件表核心條件（共用 `rules/reference.py`，§3.2） |
+| `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`backfill.compare_dates` | 型態、首可 KO 期與比價日（共用） |
+| `field.underlyings`、`field.underlying_prices` | 標的順序／尾碼與各標的四位價格（共用） |
+| `derive.prices`、`doc.price_header_pct` | 價格 = 期初股價 × 百分比；表頭百分比 = 定義句（HSBC 說明書內部） |
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
 | `doc.currency_consistency`、`doc.denomination`、`doc.minimum_amounts`、`doc.subscription_dates`、`doc.print_date`、`doc.name_consistency` | 文件重複欄位與審查日期規範 |
 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_parameters` | 情境每處參數與正式條款一致 |
