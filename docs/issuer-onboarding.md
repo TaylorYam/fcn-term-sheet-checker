@@ -91,7 +91,7 @@
 撰寫規則：
 
 - 範例數值一律虛構；樣本以代號（例 S01–S10）表示，代號與真實商品代號的對照只存在本機 `data/tmp/`。
-- **標準欄位名稱沿用既有命名**（`trade_date`、`strike_pct`、`ko_type`、`ki_type`…），讓通用規則可以共用；上手特有欄位才新增名稱。
+- **標準欄位名稱沿用既有命名**（清單見 `src/fcn_checker/standard_fields.py`，例：`trade_date`、`strike_pct`、`ki_type`），讓通用規則可以共用；上手特有欄位才新增名稱。
 - 每條規則寫清楚：主來源、比對方式、容差、抓不到或有歧義時的處理（一律轉人工覆核）。
 - 「不適用」（例如無 KI）必須能由說明書明確判定，不能因抓不到而推定。
 
@@ -108,12 +108,12 @@
 
 | 內容 | 路徑 | 說明 |
 |---|---|---|
-| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、`product_code`、`context`、`rules`（表上欄位＋說明書內部規則）、`isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`not_covered` |
+| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、`product_code`、`context`、`rules`（參考條件表欄位規則＋說明書內部規則）、`isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`not_covered` |
 | 上手編號 | `config/issuer_prefixes.toml`、`config/reference_sheet.toml` | 登記商品代號前三碼 → 上手代號，以及該上手在參考條件表「發行機構」欄的寫法（[參考條件表格式](order-formats/reference-sheet.md)） |
 | 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`、欄位擷取；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
-| 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬規則；通用規則用 `rules/common.py`（§7） |
+| 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬的說明書內部規則；參考條件表欄位規則沿用 `rules/reference.py`（parser 須交出 `standard_fields.py` 的標準欄位），共用工具與審查標準用 `rules/common.py`（§7） |
 | 合成測試資料 | `tests/<上手>_synth.py` | 依該上手版面產生虛構 PDF，只用 `tests/pdf_writer.py` 排版；參考條件表用 `tests/reference_synth.py`，單份核對用 `tests/harness.py`；不引用其他上手合成器 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |
 

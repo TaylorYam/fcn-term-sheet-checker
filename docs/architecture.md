@@ -44,9 +44,10 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/issuers.py` | 上手註冊表（每家上手一組欄位：範本辨識、擷取、商品代號、`rules`、`isin`、`autocall_schedule`、未涵蓋清單）與範本辨識 `detect`（零個或多個命中轉人工覆核） | 批量入口、CLI、PANEL 都由此分派；新增上手在此登記，並在 `config/issuer_prefixes.toml` 登記上手編號 |
 | `src/fcn_checker/parsers/` | `layout.py` 章／條／子項定位（格式由各上手的 `LayoutSpec` 提供）；`barc.py` 範本辨識與欄位、價格表擷取；`barc_schedule.py` §13 配息表與提前出場表；`hsbc.py`／`hsbc_tables.py` HSBC 專屬欄位與表格 | 使用錨點、座標與有限 regex；多重命中轉歧義，不任選 |
 | `src/fcn_checker/schema.py` | 標準化型別：`ParsedField`、`Evidence`、`CheckResult`、`CheckReport` | 缺值／歧義／不合法／不適用分開；保留來源證據；不依賴其他模組 |
+| `src/fcn_checker/standard_fields.py` | 說明書標準欄位清單（`STANDARD_FIELDS`）與值的形狀（`PriceRow`、`AutocallSchedule`） | 上手 parser 與共用規則之間的 seam：各上手 parser 依此交出欄位，共用規則只讀這些欄位 |
 | `src/fcn_checker/config.py` | 載入審查標準、參考條件表格式、上手編號對照（TOML）；根目錄設定缺檔時改用程式內建設定 | 會隨時間改變的基準只在設定檔 |
 | `src/fcn_checker/orders/reference.py` | 參考條件表 adapter（多列表格，所有上手共用，記下每欄儲存格位置供回填）與 `OrderRecord` | 未知欄名回報覆核；禁止用文件值填補預期值 |
-| `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；`common.py` 各上手共用規則（欄位比對工具、參考條件表欄名檢查、審查標準），`barc.py` 等為上手專屬規則與未涵蓋清單；`reference.py` 為參考條件表共用規則（Non-Call、ISIN 與比價日的比對與回填決策） | 不讀檔、不呼叫模型、不自動修改來源值；回填只產生決策，由批量入口寫入新檔 |
+| `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；`reference.py` 為參考條件表共用規則（表上事先填好的欄位與標準欄位的比對、Non-Call、ISIN 與比價日的比對與回填決策；空值寫法取自格式設定）；`common.py` 共用工具、參考條件表欄名檢查與審查標準；`barc.py` 等為上手專屬的說明書內部規則與未涵蓋清單（HSBC 尚未改用 `reference.py` 的欄位規則，Issue #54） | 不讀檔、不呼叫模型、不自動修改來源值；回填只產生決策，由批量入口寫入新檔 |
 | `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
 | `src/fcn_checker/batch.py` | 批量入口，分三段：`preview_batch`（唯讀辨識：檔名上手編號、範本辨識、商品代號、對到的列）、`check_batch`（逐份核對，不寫檔）、`save_batch`（寫報告、回填新檔與「核對結果」工作表；整份 PASS 才回填）；`run_batch` = 核對＋儲存 | 測試切點 1；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
 | `src/fcn_checker/cli.py` | `fcn-batch` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |

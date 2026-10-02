@@ -12,7 +12,7 @@ from ..parsers.hsbc import HsbcTermSheet
 from ..parsers.layout import squash
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, ParsedField
-from . import common, hsbc_scenario
+from . import common, hsbc_scenario, reference
 
 ISSUER = "HSBC"
 Q4 = Decimal("0.0001")
@@ -365,7 +365,7 @@ def document_info(ctx):
 
 
 def run_all(ctx):
-    out = [common.product_code(ctx)]
+    out = [reference.product_code(ctx)]
     for key, convert, what in [
         ("isin", str, "文字"),
         ("denomination", common.to_decimal, "數值"),

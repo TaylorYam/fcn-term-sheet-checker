@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from . import barc_schedule as schedule
 from .layout import Document, LayoutSpec, Span, TextIndex, join_text, parse_date, squash
@@ -407,6 +408,17 @@ def _price_table(
     return field_, rows
 
 
+def _standard_prices(table: ParsedField, rows: list[PriceRow]) -> ParsedField:
+    """標準欄位 `underlying_prices`：§15 價格表各列（表上沒有代號，以 `underlyings` 同順序為準）。"""
+    name = "underlying_prices"
+    if not table.ok:
+        return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
+    value = tuple(
+        standard_fields.PriceRow(None, dict(r.values), tuple(Evidence.of(ln) for ln in r.lines)) for r in rows
+    )
+    return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
+
+
 _MONTHLY_PATTERNS = {
     "第9條": r"每月之配息率[（(]?為([\d.]+)%",
     "第14條": r"每月之配息率[（(]?為([\d.]+)%",
@@ -753,6 +765,7 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds["ki_pct"] = _definition_pct("ki_pct", s15, "觸及生效價格")
     flds["ki_type"] = _ki_type(s15, flds["ki_pct"], flds["strike_pct"])
     flds["price_table"], rows = _price_table(s15)
+    flds["underlying_prices"] = _standard_prices(flds["price_table"], rows)
     flds["scenario_price_table"], scenario_rows = _price_table(
         doc.span_lines(arts.get(16)), "scenario_price_table", _SCENARIO_START, _SCENARIO_END
     )

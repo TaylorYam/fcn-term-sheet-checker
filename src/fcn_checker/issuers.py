@@ -16,6 +16,7 @@ from .parsers import barc as barc_parser
 from .parsers import hsbc as hsbc_parser
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
+from .rules import reference
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Line, ParsedField
 
 
@@ -29,9 +30,9 @@ class Issuer:
     parse: Callable[[Sequence[Line]], tuple[DetectionResult, Any]]
     product_code: Callable[[Sequence[Line]], ParsedField]
     context: Callable[[Any, OrderRecord, ReviewStandard, ReferenceFormat], Any]
-    rules: Callable[[Any], list[CheckResult]]  # 表上事先填好的欄位＋說明書內部規則
+    rules: Callable[[Any], list[CheckResult]]  # 參考條件表欄位規則＋說明書內部規則
     isin: Callable[[Any], ParsedField]  # 說明書 ISIN（含證據）
-    autocall_schedule: Callable[[Any], ParsedField]  # 值為 rules.reference.AutocallSchedule
+    autocall_schedule: Callable[[Any], ParsedField]  # 值為 standard_fields.AutocallSchedule
     not_covered: tuple[dict[str, str], ...]
 
 
@@ -44,7 +45,7 @@ BARC = Issuer(
     parse=barc_parser.parse,
     product_code=barc_parser.product_code,
     context=barc_rules.Context,
-    rules=barc_rules.run_all,
+    rules=lambda ctx: [*reference.field_rules(ctx), *barc_rules.run_all(ctx)],
     isin=lambda ts: ts.f("isin"),
     autocall_schedule=barc_rules.autocall_schedule,
     not_covered=tuple(barc_rules.NOT_COVERED),

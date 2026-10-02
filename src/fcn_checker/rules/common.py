@@ -149,6 +149,16 @@ def order_value(
     return v, ov, None
 
 
+KI_LABEL = {"none": "無 KI", "AM": "到期觀察", "D": "每日觀察", "M": "每月觀察（Monthly KI）"}
+
+
+def doc_ki(pf: ParsedField) -> str | None:
+    """說明書 KI 型態（標準欄位 `ki_type`）；無 KI 可用 NOT_APPLICABLE 狀態交出。抓不到或未知值回傳 None。"""
+    if pf.status in (FieldStatus.PRESENT, FieldStatus.NOT_APPLICABLE) and pf.value in KI_LABEL:
+        return pf.value
+    return None
+
+
 def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
     """百分比：下單值依說明書顯示位數四捨五入（half-up）後比對。"""
     exp = doc_v.as_tuple().exponent
@@ -199,7 +209,7 @@ def column_checks(order: OrderRecord) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 標準欄位比對
+# ---------------------------------------------------------------- 標準欄位比對（HSBC 尚未改用 rules/reference.py）
 
 
 def simple(
@@ -229,26 +239,6 @@ def simple(
         ov=[ov],
         reason="" if ok else "value_mismatch",
         tolerance=tolerance,
-    )
-
-
-def product_code(ctx: Context) -> CheckResult:
-    rid, pf, ov = "field.product_code", ctx.ts.f("product_code"), ctx.order.product_code
-    if ov.value is None:
-        return order_review(rid, "product_code", ov, pf, "order_missing", f"{ctx.order.source}沒有商品代號")
-    if not pf.ok:
-        return doc_review(rid, "product_code", pf, ov.value, [ov])
-    ok = ov.value == pf.value
-    return result(
-        rid,
-        "product_code",
-        S.PASS if ok else S.MISMATCH,
-        expected=ov.value,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message="" if ok else f"說明書與{ctx.order.source}的商品代號不同，可能拿錯檔案",
     )
 
 
