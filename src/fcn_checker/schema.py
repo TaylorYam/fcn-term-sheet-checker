@@ -32,7 +32,7 @@ class CheckStatus(StrEnum):
 
     @property
     def display_rank(self) -> int:
-        """報告與 PANEL 的顯示順序：ERROR、MISMATCH、REVIEW_REQUIRED、PASS、NOT_APPLICABLE。"""
+        """PANEL 的顯示順序：ERROR、MISMATCH、REVIEW_REQUIRED、PASS、NOT_APPLICABLE。"""
         return _DISPLAY_ORDER.index(self)
 
 

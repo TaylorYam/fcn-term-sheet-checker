@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from .batch import run_batch
-from .reporting import STATUS_ZH
+from .messages import STATUS_ZH
 from .schema import CheckStatus
 
 EXIT = {CheckStatus.PASS: 0, CheckStatus.MISMATCH: 1, CheckStatus.REVIEW_REQUIRED: 1, CheckStatus.ERROR: 2}
@@ -22,7 +22,7 @@ def _parser() -> argparse.ArgumentParser:
         description=(
             "以參考條件表（FCN參考條件 的「樣本清單」）批量核對多份說明書 PDF；結果存成一份核對結果檔"
             "（「回填後」：整份通過且回填 ISIN、發行日、比價日的列；「錯誤清單」：沒通過的說明書與錯訊），"
-            "原檔不動；每份說明書另有 JSON 與 Markdown 報告。"
+            "原檔不動；另在執行目錄的 runtime/核對紀錄/ 寫一份內部核對紀錄（JSON）。"
         ),
     )
     p.add_argument("reference_sheet", type=Path, help="參考條件表 Excel（.xlsx）")
@@ -49,7 +49,7 @@ def _parser() -> argparse.ArgumentParser:
         "--out",
         type=Path,
         default=Path("runtime/reports"),
-        help="核對結果檔與每份報告的輸出資料夾（預設 runtime/reports）",
+        help="核對結果檔的輸出資料夾（預設 runtime/reports）",
     )
     return p
 
@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             args.reference_sheet,
             args.review_standard,
             args.out,
+            root=Path.cwd(),
             reference_format=args.reference_format,
             issuer_prefixes=args.issuer_prefixes,
         )
@@ -77,15 +78,13 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT[CheckStatus.ERROR]
     for item in outcome.items:
         print(f"{item.status_label}  {item.term_sheet.name}{'  已回填' if item.filled else ''}")
-        if item.save_error:
-            print(f"  [ERROR] 報告未儲存：{item.save_error}", file=sys.stderr)
     for e in outcome.errors:
         print(f"  [ERROR] {e.field}：{e.message}", file=sys.stderr)
     print(f"整體狀態：{outcome.status.value}（{STATUS_ZH[outcome.status]}）")
     if outcome.output is not None:
         print(f"核對結果檔：{outcome.output}")
-    if outcome.items:
-        print(f"報告資料夾：{args.out}")
+    if outcome.record is not None:
+        print(f"核對紀錄：{outcome.record}")
     return EXIT[outcome.status]
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from decimal import Decimal
 
 import fitz
@@ -17,7 +16,7 @@ from fcn_checker.issuers import HSBC, REGISTRY
 from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
-from harness import REVIEW_STANDARD, ROOT
+from harness import REVIEW_STANDARD, ROOT, cli_root, load_record
 from hsbc_synth import ORDER_FORMAT, Spec, build_inquiry, build_pdf
 
 
@@ -224,11 +223,9 @@ def test_cli_and_panel_select_hsbc(tmp_path, monkeypatch):
     s = Spec()
     pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
-    monkeypatch.chdir(ROOT)
-    out = tmp_path / "reports"
-    assert main([str(excel), str(pdf), "--out", str(out)]) == 0
-    data = json.loads(next(out.glob("*.check.json")).read_text(encoding="utf-8"))
-    assert data["template"] == HSBC.template_id
+    cli_root(tmp_path, monkeypatch)
+    assert main([str(excel), str(pdf), "--out", str(tmp_path / "reports")]) == 0
+    assert load_record(tmp_path)["items"][0]["template"] == HSBC.template_id
     assert "HSBC" in [x.code for x in REGISTRY]
     session = PanelSession(REVIEW_STANDARD, ROOT / "config")
     session.select(excel, [pdf])
@@ -541,6 +538,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
         excel,
         REVIEW_STANDARD,
         tmp_path / "reports",
+        root=tmp_path,
         reference_format=ROOT / "config/reference_sheet.toml",
         issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
     )
@@ -587,6 +585,7 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
         build_inquiry(tmp_path / "order.xlsx", s, {"issue_date": sheet_value}),
         REVIEW_STANDARD,
         tmp_path / "reports",
+        root=tmp_path,
         reference_format=ROOT / "config/reference_sheet.toml",
         issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
     )

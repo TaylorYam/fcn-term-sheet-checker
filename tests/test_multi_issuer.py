@@ -5,13 +5,12 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 
 from fcn_checker.cli import main
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus
-from harness import REVIEW_STANDARD, ROOT
+from harness import REVIEW_STANDARD, cli_root, load_record
 from reference_synth import build_reference_sheet
 from synth import Spec, barc_adapter, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
 
@@ -152,10 +151,9 @@ def test_cli_uses_default_config_files(tmp_path, monkeypatch):
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
-    out = tmp_path / "reports"
-    monkeypatch.chdir(ROOT)  # 預設設定檔路徑相對於工作目錄
-    assert main([str(sheet), str(pdf), "--out", str(out)]) == 0
-    data = json.loads(next(out.glob("*.check.json")).read_text(encoding="utf-8"))
+    cli_root(tmp_path, monkeypatch)  # 預設設定檔路徑相對於工作目錄
+    assert main([str(sheet), str(pdf), "--out", str(tmp_path / "reports")]) == 0
+    data = load_record(tmp_path)["items"][0]
     assert data["status"] == "PASS"
     assert data["metadata"]["reference_format"]["file"] == "reference_sheet.toml"
     assert data["metadata"]["review_standard"]["file"] == "review_standard.toml"

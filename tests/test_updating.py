@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from fcn_checker.updating import PanelUpdater, UpdateError, record_installation
+from fcn_checker.updating import PanelUpdater, UpdateError, program_commit, record_installation
 
 OLD = "1" * 40
 NEW = "2" * 40
@@ -66,7 +66,7 @@ def environment(tmp_path, monkeypatch, payload=None):
 
 def test_update_pins_commit_installs_isolated_and_preserves_local_files(tmp_path, monkeypatch):
     updater, requests, commands = environment(tmp_path, monkeypatch)
-    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/report.check.json"):
+    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/核對紀錄/20300203-040506.json"):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("local original")
@@ -82,7 +82,7 @@ def test_update_pins_commit_installs_isolated_and_preserves_local_files(tmp_path
     assert installed.release.is_relative_to(tmp_path / ".local/releases")
     assert not (tmp_path / ".venv").exists()
     assert any(command[-6:] == ["-m", "pip", "install", "-c", "constraints.txt", "."] for command in commands)
-    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/report.check.json"):
+    for name in ("config/review_standard.toml", "data/order.xlsx", "runtime/核對紀錄/20300203-040506.json"):
         assert (tmp_path / name).read_text() == "local original"
     assert not (tmp_path / ".local/update.lock").exists()
     assert not PanelUpdater(tmp_path).check().available
@@ -261,3 +261,23 @@ def test_bootstrap_refuses_pointer_outside_release_directory(tmp_path, monkeypat
     (local / "current.json").write_text(json.dumps({"sha": NEW, "release": "../outside"}))
     with pytest.raises(ValueError, match="路徑不正確"):
         bootstrap.run(str(tmp_path / "launch_panel.pyw"), [])
+
+
+def test_program_commit_is_the_commit_of_the_running_code(tmp_path):
+    """核對紀錄的 commit 取自正在執行的程式，不是目前的啟動指標（另一個視窗可能已經更新）。"""
+    local = tmp_path / ".local"
+    local.mkdir()
+    (local / "installed.json").write_text(json.dumps({"sha": OLD}))
+    (local / "current.json").write_text(json.dumps({"sha": NEW, "release": ".local/releases/other"}))
+    running = "3" * 40
+    release = local / "releases" / f"{running}-{'0' * 32}" / ".venv" / "Lib" / "site-packages" / "fcn_checker"
+    installed = tmp_path / ".venv" / "Lib" / "site-packages" / "fcn_checker"
+
+    assert program_commit(tmp_path, package=release) == running, "更新後的版本資料夾：取資料夾名稱的 commit"
+    assert program_commit(tmp_path, package=installed) == OLD, "根目錄安裝：取安裝時記錄的 commit"
+    assert program_commit(tmp_path / "elsewhere", package=installed) is None, "沒有版本紀錄時為 None"
+
+    repo = Path(__file__).resolve().parents[1]
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True)
+    if head.returncode == 0 and (repo / ".git").exists():
+        assert program_commit(tmp_path, package=repo / "src" / "fcn_checker") == head.stdout.strip(), "開發用 Git"

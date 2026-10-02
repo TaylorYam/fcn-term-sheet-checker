@@ -21,6 +21,8 @@ from urllib.request import Request, urlopen
 REPOSITORY = "TaylorYam/fcn-term-sheet-checker"
 API = f"https://api.github.com/repos/{REPOSITORY}"
 SHA = re.compile(r"[0-9a-f]{40}")
+PACKAGE_DIR = Path(__file__).resolve().parent
+RELEASE_NAME = re.compile(r"([0-9a-f]{40})-")  # 更新安裝的版本資料夾：.local/releases/<commit>-<隨機碼>
 MAX_ARCHIVE = 50 * 1024 * 1024
 MAX_EXTRACTED = 100 * 1024 * 1024
 
@@ -130,10 +132,9 @@ def _run(args: list[str], cwd: Path) -> None:
         raise UpdateError("新版安裝無法執行或已逾時；舊版仍可使用。") from error
 
 
-def record_installation(root: Path) -> None:
-    """首次／重新安裝成功後記錄版本；ZIP 安裝若無 Git，版本顯示未知。"""
+def git_revision(root: Path) -> str | None:
+    """root 本身是 Git 工作目錄時回傳 HEAD commit；不是 Git、沒有 git 或查詢失敗時為 None。"""
     root = root.resolve()
-    sha = None
     try:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         repository = subprocess.run(
@@ -154,9 +155,37 @@ def record_installation(root: Path) -> None:
                 creationflags=flags,
             )
             if revision.returncode == 0 and SHA.fullmatch(revision.stdout.strip()):
-                sha = revision.stdout.strip()
+                return revision.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         pass
+    return None
+
+
+def program_commit(root: Path, *, package: Path = PACKAGE_DIR) -> str | None:
+    """正在執行的程式的 commit（核對紀錄用）；`package` 是 fcn_checker 套件所在資料夾。
+
+    依序：開發用 Git 工作目錄（src/fcn_checker 的上兩層）的 HEAD；PANEL 更新後的版本資料夾名稱
+    （.local/releases/<commit>-…）；根目錄安裝時記錄的 .local/installed.json。不讀目前的啟動指標
+    （另一個視窗可能已經更新到別的版本）。都取不到時為 None。
+    """
+    revision = git_revision(package.parent.parent)
+    if revision is not None:
+        return revision
+    for folder in package.parents:
+        if folder.parent.name == "releases" and folder.parent.parent.name == ".local":
+            m = RELEASE_NAME.match(folder.name)
+            return m[1] if m else None
+    try:
+        sha = json.loads((root / ".local" / "installed.json").read_text(encoding="utf-8"))["sha"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return sha if isinstance(sha, str) and SHA.fullmatch(sha) else None
+
+
+def record_installation(root: Path) -> None:
+    """首次／重新安裝成功後記錄版本；ZIP 安裝若無 Git，版本顯示未知。"""
+    root = root.resolve()
+    sha = git_revision(root)
     local = root / ".local"
     local.mkdir(parents=True, exist_ok=True)
     temporary = local / f"installed-{uuid.uuid4().hex}.tmp"

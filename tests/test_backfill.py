@@ -12,7 +12,6 @@ from fcn_checker.backfill import BackfillAction
 from fcn_checker.batch import check_batch, save_batch
 from fcn_checker.ingestion import sha256_of
 from fcn_checker.panel import ResultPane
-from fcn_checker.reporting import to_markdown
 from harness import ISSUER_PREFIXES, PASS, REVIEW, REVIEW_STANDARD, results
 from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
 from synth import Spec, build_pdf, reference_row
@@ -36,7 +35,7 @@ def assert_column_missing(outcome, rule_id: str, name: str, tmp_path: Path) -> N
     assert (r.status, r.reason_code) == (REVIEW, "backfill_column_missing")
     assert name in r.message
     assert all(d.cell != "?" for d in report.backfill)
-    save_batch(outcome, tmp_path / "reports", now=NOW)
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
     assert not outcome.items[0].filled
 
 
@@ -81,15 +80,15 @@ def test_format_without_a_compare_date_column_name_requires_review_naming_the_fi
 # ---------------------------------------------------------------- 顯示標籤
 
 
-def test_report_and_panel_show_the_same_backfill_labels(tmp_path):
+def test_panel_shows_the_backfill_labels(tmp_path):
     outcome = run(tmp_path, overrides={"比價日_12": "-"})
     item = outcome.items[0]
     assert item.report.status == PASS
     actions = {d.action for d in item.report.backfill}
     assert actions == {BackfillAction.FILL, BackfillAction.MATCH}  # 空白格與已填「-」的格子
-    md, panel = to_markdown(item.report), ResultPane._backfill_text(item)
+    panel = ResultPane._backfill_text(item)
     for action in actions:
-        assert action.label in md and action.label in panel
+        assert action.label in panel
 
 
 # ---------------------------------------------------------------- 儲存前檢查
@@ -98,7 +97,7 @@ def test_report_and_panel_show_the_same_backfill_labels(tmp_path):
 def test_save_checks_the_reference_sheet_hash_recorded_on_the_batch(tmp_path):
     outcome = run(tmp_path)
     assert outcome.reference_sha256 == sha256_of(outcome.reference_sheet)
-    # 單份報告的檔案資訊只是記錄，不作為儲存前的檢查依據
+    # 每份說明書 metadata 裡的檔案資訊只是記錄，不作為儲存前的檢查依據
     outcome.items[0].report.metadata["inputs"]["reference_sheet"]["sha256"] = "0" * 64
-    save_batch(outcome, tmp_path / "reports", now=NOW)
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
     assert outcome.output is not None and outcome.items[0].filled

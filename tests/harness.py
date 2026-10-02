@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,19 @@ PASS, MISMATCH, REVIEW, NA, ERROR = (
     CheckStatus.NOT_APPLICABLE,
     CheckStatus.ERROR,
 )
+
+
+def cli_root(tmp_path: Path, monkeypatch) -> Path:
+    """CLI 的根目錄是執行目錄：把設定檔複製到 tmp_path/config 再切換過去，核對紀錄就寫在 tmp_path/runtime/。"""
+    shutil.copytree(ROOT / "config", tmp_path / "config")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def load_record(root: Path) -> dict[str, Any]:
+    """根目錄 runtime/核對紀錄/ 下唯一的一份核對紀錄。"""
+    [path] = (root / "runtime" / "核對紀錄").glob("*.json")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def check_sheet(pdf: Path, sheet: Path, review_standard: Path = REVIEW_STANDARD) -> CheckReport:

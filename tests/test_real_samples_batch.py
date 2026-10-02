@@ -45,6 +45,7 @@ def outcome(tmp_path_factory):
         Path(sheet),
         REVIEW_STANDARD,
         tmp / "reports",
+        root=tmp,
         reference_format=REFERENCE_FORMAT,
         issuer_prefixes=ISSUER_PREFIXES,
     )
@@ -104,6 +105,7 @@ def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
         Path(sheet),
         REVIEW_STANDARD,
         tmp_path / "reports",
+        root=tmp_path,
         reference_format=REFERENCE_FORMAT,
         issuer_prefixes=ISSUER_PREFIXES,
     )

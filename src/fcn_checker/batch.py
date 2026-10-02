@@ -1,10 +1,10 @@
-"""批量核對入口：多份說明書 PDF × 參考條件表 → 逐份核對結果、報告與核對結果檔（ADR 0004）。
+"""批量核對入口：多份說明書 PDF × 參考條件表 → 逐份核對結果、核對結果檔與核對紀錄（ADR 0004）。
 
 分三段，CLI 與 PANEL 共用：
 
 - `preview_batch`：唯讀辨識每份說明書（上手、商品代號、對到的參考條件表列），不核對、不寫檔。
 - `check_batch`：逐份核對，回傳結果與回填決策，不寫任何檔案。
-- `save_batch`：寫每份報告與核對結果檔（result_file.py）。`run_batch` = 核對 ＋ 儲存（CLI 使用）。
+- `save_batch`：寫核對結果檔（result_file.py）與根目錄的核對紀錄（reporting.py）。`run_batch` = 核對 ＋ 儲存（CLI 使用）。
 
 辨識流程（每份說明書）：
 1. 檔名前三碼（上手編號）查上手編號對照 → 上手；不在對照表或上手沒有範本 → 未支援上手。
@@ -22,15 +22,15 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import fitz
 import openpyxl
 
-from . import __version__, backfill, result_file
+from . import __version__, backfill, reporting, result_file
 from .config import (
     ReferenceFormat,
     ReviewStandard,
@@ -41,15 +41,15 @@ from .config import (
 from .extraction import extract_lines
 from .ingestion import IngestionError, error_result, file_meta, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
-from .messages import problem_message
+from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
-from .reporting import STATUS_ZH, write_reports
 from .rules.common import doc_review, read_standard
 from .schema import CheckReport, CheckResult, CheckStatus, Evidence, ParsedField, overall_status
 from .single_check import Paired, check_document
 from .standard_fields import TermSheet
 
 UNSUPPORTED = "issuer_unsupported"
+T = TypeVar("T")
 DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
 DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
 
@@ -62,8 +62,6 @@ class BatchItem:
     product_code: str | None = None
     reference_row: int | None = None  # 對到的參考條件表列號
     filled: bool = False
-    report_paths: tuple[Path, ...] = ()
-    save_error: str = ""  # 這份報告儲存失敗的原因
 
     @property
     def unsupported(self) -> bool:
@@ -86,6 +84,8 @@ class BatchOutcome:
     errors: list[CheckResult] = field(default_factory=list)  # 整批錯誤（設定檔、參考條件表、寫檔）
     saved: bool = False
     reference_sha256: str | None = None  # 核對時參考條件表的 hash；儲存前據此確認檔案未變更
+    metadata: dict[str, Any] = field(default_factory=dict)  # 整批執行 metadata（程式版本、設定檔與參考條件表 hash）
+    record: Path | None = None  # 核對紀錄；尚未儲存或寫入失敗時為 None
 
     def refresh_status(self) -> None:
         statuses = [i.report.status for i in self.items] + [e.status for e in self.errors]
@@ -403,6 +403,7 @@ def check_batch(
         "inputs": {"reference_sheet": file_meta(reference_sheet)},
         "review_standard": {**file_meta(Path(review_standard)), "version": std.version},
         "reference_format": {**file_meta(Path(reference_format)), "version": rfmt.version},
+        "issuer_prefixes": file_meta(Path(issuer_prefixes)),
     }
     items: list[BatchItem] = []
     for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
@@ -413,7 +414,12 @@ def check_batch(
             item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta)))
         items.append(item)
     outcome = BatchOutcome(
-        CheckStatus.ERROR, items, reference_sheet, rfmt, reference_sha256=meta["inputs"]["reference_sheet"]["sha256"]
+        CheckStatus.ERROR,
+        items,
+        reference_sheet,
+        rfmt,
+        reference_sha256=meta["inputs"]["reference_sheet"]["sha256"],
+        metadata=meta,
     )
     outcome.refresh_status()
     return outcome
@@ -431,38 +437,53 @@ def _error_row(item: BatchItem) -> result_file.ErrorRow:
     return result_file.ErrorRow(code, item.term_sheet.name, "\n".join(messages))
 
 
-def save_batch(outcome: BatchOutcome, out_dir: Path, *, now: dt.datetime | None = None) -> BatchOutcome:
-    """確認參考條件表與核對時相同後，寫每份報告與核對結果檔到 out_dir（都不覆蓋）；逐份記錄失敗，不清除核對結果。"""
+def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.datetime | None = None) -> BatchOutcome:
+    """確認參考條件表與核對時相同後，寫核對結果檔到 out_dir、核對紀錄到 root/runtime/核對紀錄（都不覆蓋）。
+
+    root 是根目錄（CLI 為執行目錄、PANEL 為安裝根目錄）。核對紀錄寫入失敗只記成整批錯誤，不影響核對結果檔；
+    寫檔失敗不清除核對結果，可以再儲存一次。
+    """
     if outcome.reference_format is None or not outcome.items:
         return outcome
     now = now or dt.datetime.now()
-    outcome.output = None  # 同一份結果可以再儲存一次：清掉上一次的儲存狀態
+    outcome.output = outcome.record = None  # 同一份結果可以再儲存一次：清掉上一次的儲存狀態
     outcome.errors = [e for e in outcome.errors if not e.rule_id.startswith("output.")]
     for item in outcome.items:
-        item.filled, item.report_paths, item.save_error = False, (), ""
+        item.filled = False
     outcome.saved = True
-    out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
-    try:
-        # 參考條件表核對後被改過（或讀不到）時在這裡中止：報告與核對結果檔都不寫
-        wb = backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256)
-        for item in outcome.items:
-            stem = f"{item.term_sheet.stem.replace(' ', '')}_{now:%Y%m%d-%H%M%S}"
-            try:
-                item.report_paths = write_reports(item.report, Path(out_dir), stem)
-            except OSError as e:
-                item.save_error = str(e)
-        filled = backfill.apply(wb, outcome.reference_format, [i.report for i in outcome.items])
-        keep = [i.reference_row for i, ok in zip(outcome.items, filled, strict=True) if ok and i.reference_row]
-        errors = [_error_row(i) for i in outcome.items if not backfill.fillable(i.report)]
-        result_file.write(result_file.build(wb, outcome.reference_format, keep, errors), out)
-    except IngestionError as e:
-        outcome.errors.append(error_result("output.result_file", "核對結果檔", e))
-    else:
-        outcome.output = out
-        for item, ok in zip(outcome.items, filled, strict=True):
-            item.filled = ok
+    rfmt, items = outcome.reference_format, outcome.items
+    wb = _attempt(
+        outcome,
+        "output.result_file",
+        "核對結果檔",
+        lambda: backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256),
+    )
+    if wb is not None:  # 參考條件表核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
+        filled = backfill.apply(wb, rfmt, [i.report for i in items])
+        keep = [i.reference_row for i, ok in zip(items, filled, strict=True) if ok and i.reference_row]
+        errors = [_error_row(i) for i in items if not backfill.fillable(i.report)]
+        out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
+        outcome.output = _attempt(
+            outcome, "output.result_file", "核對結果檔", lambda: result_file.save(wb, rfmt, keep, errors, out)
+        )
+        if outcome.output is not None:
+            for item, ok in zip(items, filled, strict=True):
+                item.filled = ok
+        outcome.refresh_status()
+        outcome.record = _attempt(
+            outcome, "output.record", "核對紀錄", lambda: reporting.save_record(outcome, Path(root), now)
+        )
     outcome.refresh_status()
     return outcome
+
+
+def _attempt(outcome: BatchOutcome, rule_id: str, what: str, step: Callable[[], T]) -> T | None:
+    """儲存的一步；失敗（IngestionError）時記成整批錯誤並回傳 None，不中斷其他輸出。"""
+    try:
+        return step()
+    except IngestionError as e:
+        outcome.errors.append(error_result(rule_id, what, e))
+        return None
 
 
 def run_batch(
@@ -471,6 +492,7 @@ def run_batch(
     review_standard: Path,
     out_dir: Path,
     *,
+    root: Path,
     reference_format: Path = DEFAULT_REFERENCE_FORMAT,
     issuer_prefixes: Path = DEFAULT_ISSUER_PREFIXES,
     registry: Sequence[Issuer] = REGISTRY,
@@ -485,4 +507,4 @@ def run_batch(
         issuer_prefixes=issuer_prefixes,
         registry=registry,
     )
-    return save_batch(outcome, out_dir, now=now)
+    return save_batch(outcome, out_dir, root=root, now=now)

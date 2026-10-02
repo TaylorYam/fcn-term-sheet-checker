@@ -1,4 +1,11 @@
-"""報告輸出：JSON（完整、可重現）與 Markdown（問題項目優先）。"""
+"""核對紀錄：每次儲存核對結果時，在根目錄 `runtime/核對紀錄/` 寫一份整批 JSON，供維護人員事後追查（Issue #73）。
+
+根目錄和設定檔一致：CLI 是執行目錄，PANEL 是安裝根目錄。檔名 `<YYYYMMDD-HHMMSS>.json`，與同次核對結果檔的
+時間戳相同；不覆蓋既有紀錄。核對結果檔沒寫成（例如同名檔已存在）時仍寫紀錄並記下錯誤；參考條件表核對後被改過時
+兩者都不寫。內容：執行 metadata（程式版本與 commit、設定檔與審查標準的路徑與 hash、
+參考條件表與每份 PDF 的 hash、執行時間）、核對結果檔路徑、整批錯誤，以及每份 PDF 的整體狀態、逐項結果、
+證據（頁碼、原文、儲存格位置）與回填決策。作業人員不需要看這份紀錄。
+"""
 
 from __future__ import annotations
 
@@ -8,19 +15,16 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .messages import FIELD_ZH
+from .ingestion import write_new
 from .schema import CheckReport, CheckResult, CheckStatus
+from .updating import program_commit
 
 if TYPE_CHECKING:
     from .backfill import CellDecision
+    from .batch import BatchOutcome
 
-STATUS_ZH = {
-    CheckStatus.PASS: "通過",
-    CheckStatus.MISMATCH: "不一致",
-    CheckStatus.REVIEW_REQUIRED: "需人工覆核",
-    CheckStatus.NOT_APPLICABLE: "不適用",
-    CheckStatus.ERROR: "執行錯誤",
-}
+RECORD_DIR = Path("runtime") / "核對紀錄"
+RECORD_VERSION = 1
 
 
 def _plain(v: Any) -> Any:
@@ -63,6 +67,7 @@ def _backfill_dict(d: CellDecision) -> dict[str, Any]:
 
 
 def to_json(report: CheckReport) -> dict[str, Any]:
+    """一份說明書的核對結果。"""
     counts = {s.value: sum(1 for r in report.results if r.status == s) for s in CheckStatus}
     out = {
         "status": report.status.value,
@@ -77,102 +82,34 @@ def to_json(report: CheckReport) -> dict[str, Any]:
     return out
 
 
-def _cell(v: Any) -> str:
-    if v is None or v == "":
-        return "—"
-    v = _plain(v)
-    if isinstance(v, list):
-        v = "、".join(str(x) for x in v)
-    elif isinstance(v, dict):
-        v = "；".join(f"{k}：{_cell(x)}" for k, x in v.items())
-    return str(v).replace("|", "\\|").replace("\n", " ")
+def save_record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> Path:
+    """寫出這次儲存的核對紀錄並回傳路徑；核對結果檔處理完後呼叫，才記得到核對結果檔路徑與是否回填。
+
+    檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。
+    """
+    path = root / RECORD_DIR / f"{now:%Y%m%d-%H%M%S}.json"
+    text = json.dumps(_record(outcome, root, now), ensure_ascii=False, indent=2, default=str) + "\n"
+    write_new(path, text.encode("utf-8"), "核對紀錄")
+    return path
 
 
-def _where(r: CheckResult) -> str:
-    if not r.document_evidence:
-        return "—"
-    parts = [_cell(f"p.{e.page}「{e.text[:40]}{'…' if len(e.text) > 40 else ''}」") for e in r.document_evidence[:3]]
-    more = f" 等 {len(r.document_evidence)} 處" if len(r.document_evidence) > 3 else ""
-    return "<br>".join(parts) + more
-
-
-def _table(rows: list[CheckResult], with_message: bool = True) -> list[str]:
-    head = "| 狀態 | 規則 | 欄位 | 參考條件表／標準值 | 說明書值 | 容差 | 說明 | 說明書位置 | 參考條件表位置 |"
-    out = [head, "|" + "---|" * 9]
-    for r in rows:
-        out.append(
-            f"| {STATUS_ZH[r.status]} | `{r.rule_id}` | {_cell(FIELD_ZH.get(r.field, r.field))} | {_cell(r.expected)} | {_cell(r.actual)} "
-            f"| {_cell(r.tolerance)} | {_cell(r.message if with_message else '')} | {_where(r)} "
-            f"| {_cell(r.order_source)} |"
-        )
-    return out
-
-
-def to_markdown(report: CheckReport) -> str:
-    meta = report.metadata
-    issues = sorted((r for r in report.results if r.status.is_problem), key=lambda r: r.status.display_rank)
-    ok = [r for r in report.results if not r.status.is_problem]
-    ts, sheet = meta["inputs"]["term_sheet"], meta["inputs"]["reference_sheet"]
-    fmt = meta.get("reference_format", {"file": None})
-    lines = [
-        "# FCN Term Sheet 核對報告",
-        "",
-        f"- **整體狀態：{report.status.value}（{STATUS_ZH[report.status]}）**",
-        f"- 範本：{report.template or '未辨識'}",
-        f"- 說明書：`{ts['file']}`（sha256 `{ts['sha256']}`）",
-        f"- 參考條件表：`{sheet['file']}`（sha256 `{sheet['sha256']}`）",
-        f"- 審查標準：`{meta['review_standard']['file']}` 版本 {meta['review_standard'].get('version', '—')}"
-        f"（生效 {meta['review_standard'].get('effective_date', '—')}）",
-        f"- 參考條件表格式：`{fmt['file'] or '—'}` 版本 {fmt.get('version', '—')}",
-        f"- 程式版本 {meta['program_version']}；{meta['extractor']}；{meta['excel_reader']}；產生時間 {meta['generated_at']}",
-        "",
-        "> 整體狀態只涵蓋本報告列出的規則；「未涵蓋」區的項目仍須人工核對。",
-        "",
-        f"## 問題項目（{len(issues)}）",
-        "",
-    ]
-    lines += _table(issues) if issues else ["沒有不一致或需人工覆核的項目。"]
-    if report.backfill:
-        lines += [
-            "",
-            f"## 回填欄位（{len(report.backfill)}）",
-            "",
-            "| 欄位 | 儲存格 | 表上值 | 說明書值 | 處理 |",
-            "|---|---|---|---|---|",
-        ]
-        lines += [
-            f"| {_cell(d.column)} | {d.cell} | {_cell(d.sheet_value)} | {_cell(d.expected)} | {d.action.label} |"
-            for d in report.backfill
-        ]
-    lines += [
-        "",
-        f"## 未涵蓋規則（{len(report.not_covered)}）",
-        "",
-        "以下規則本階段尚未實作，不影響整體狀態，也不代表通過：",
-        "",
-    ]
-    lines += [f"- `{n['rule_id']}`：{n['description']}" for n in report.not_covered]
-    lines += ["", f"## 通過與不適用項目（{len(ok)}）", ""]
-    lines += _table(ok) if ok else ["（無）"]
-    return "\n".join(lines) + "\n"
-
-
-def write_reports(report: CheckReport, out_dir: Path, stem: str) -> tuple[Path, Path]:
-    """寫 `<stem>.check.json` 與 `<stem>.check.md`；檔名已存在時不覆蓋（OSError），已寫一半的檔案會移除。"""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    saved: list[Path] = []
-    for ext, content in (
-        ("json", json.dumps(to_json(report), ensure_ascii=False, indent=2) + "\n"),
-        ("md", to_markdown(report)),
-    ):
-        path = out_dir / f"{stem}.check.{ext}"
-        try:
-            with path.open("x", encoding="utf-8") as f:
-                saved.append(path)
-                f.write(content)
-        except OSError:
-            if saved and saved[-1] == path:
-                path.unlink(missing_ok=True)
-                saved.pop()
-            raise
-    return saved[0], saved[1]
+def _record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> dict[str, Any]:
+    return {
+        "record_version": RECORD_VERSION,
+        "saved_at": now.astimezone().isoformat(timespec="seconds"),
+        "status": outcome.status.value,
+        "result_file": str(outcome.output) if outcome.output else None,
+        "metadata": _plain({**outcome.metadata, "program_commit": program_commit(root)}),
+        "errors": [_result_dict(e) for e in outcome.errors],
+        "items": [
+            {
+                "pdf": i.term_sheet.name,
+                "issuer": i.issuer,
+                "product_code": i.product_code,
+                "reference_row": i.reference_row,
+                "filled": i.filled,
+                **to_json(i.report),
+            }
+            for i in outcome.items
+        ],
+    }

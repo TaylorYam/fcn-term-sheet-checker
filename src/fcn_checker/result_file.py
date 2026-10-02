@@ -25,7 +25,7 @@ from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .config import ReferenceFormat
-from .ingestion import IngestionError
+from .ingestion import IngestionError, write_new
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
@@ -45,8 +45,16 @@ def output_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:
     return out_dir / f"{reference_sheet.stem}_核對結果_{now:%Y%m%d-%H%M%S}.xlsx"
 
 
-def build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequence[ErrorRow]) -> bytes:
-    """`wb` 是已回填的參考條件表（會被改寫）；`keep` 是要留在「回填後」的資料列號。回傳 xlsx 內容。"""
+def save(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequence[ErrorRow], out: Path) -> Path:
+    """寫出核對結果檔並回傳路徑；檔案已存在（不覆蓋）、版面無法安全刪列或無法寫入時丟出 IngestionError。
+
+    `wb` 是已回填的參考條件表（會被改寫）；`keep` 是要留在「回填後」的資料列號。
+    """
+    write_new(out, _build(wb, rfmt, keep, errors), "核對結果檔")
+    return out
+
+
+def _build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequence[ErrorRow]) -> bytes:
     for name in wb.sheetnames:
         if name != rfmt.sheet:
             del wb[name]
@@ -120,15 +128,3 @@ def _error_sheet(ws: Worksheet, errors: Sequence[ErrorRow]) -> None:
     for row in ws.iter_rows(min_row=2):
         for c in row:
             c.alignment = Alignment(wrap_text=True, vertical="top")
-
-
-def write(data: bytes, out: Path) -> None:
-    """寫出核對結果檔；檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。"""
-    try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with out.open("xb") as f:
-            f.write(data)
-    except FileExistsError as e:
-        raise IngestionError("output_exists", f"核對結果檔 {out.name} 已經存在，不覆蓋") from e
-    except OSError as e:
-        raise IngestionError("output_unwritable", f"無法寫入核對結果檔 {out.name}：{e}") from e

@@ -4,7 +4,7 @@
 - 只有整份核對 PASS 的說明書才寫入（`fillable`）。
 - 寫入：開檔前確認參考條件表與核對時相同，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
   原檔不動，回填結果由核對結果檔（result_file.py）帶出。
-- 決策的顯示標籤（`BackfillAction.label`）只在這裡定義，報告與 PANEL 共用。
+- 決策的顯示標籤（`BackfillAction.label`）只在這裡定義，PANEL 使用。
 
 比價日填法：
 
