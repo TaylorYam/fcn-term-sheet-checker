@@ -28,6 +28,7 @@ NOT_COVERED = [
 @dataclass
 class Context(common.Context):
     ts: HsbcTermSheet
+    issuer: str = ISSUER
 
 
 def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
@@ -421,16 +422,16 @@ def run_all(ctx):
         [
             common.approval_date(ctx),
             common.chairman(ctx),
-            common.fixed_warning(ctx, issuer=ISSUER),
+            common.fixed_warning(ctx),
             common.risk_level(ctx),
             common.forbidden_wording(ctx),
             common.issue_price(ctx),
         ]
     )
-    out.extend(common.issuer_name(ctx, ISSUER))
-    out.extend(common.distributor_info(ctx, allow_international_phone=True))
+    out.extend(common.issuer_name(ctx))
+    out.extend(common.distributor_info(ctx))
     out.extend(common.fees(ctx))
-    out.extend(common.product_name(ctx, ISSUER))
+    out.extend(common.product_name(ctx))
     out.extend(hsbc_scenario.run(ctx, first_callable(ctx.ts)))
     return out
 

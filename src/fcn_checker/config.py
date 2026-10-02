@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import string
 import tomllib
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -10,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from .ingestion import IngestionError, sha256_of
+
+# 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）
+NAME_FLAGS = ("memory", "maxi", "daily")
+NAME_PLACEHOLDERS = frozenset({"tenor", "ccy_zh", "ccy"} | {f"{f}_{lang}" for f in NAME_FLAGS for lang in ("zh", "en")})
 
 
 @dataclass(frozen=True)
@@ -19,9 +24,33 @@ class ProductNameTemplate:
     memory_zh: str
     memory_en: str
     normalize_brackets: bool
+    maxi_zh: str = ""
     maxi_en: str = ""
+    daily_zh: str = ""
     daily_en: str = ""
     ignore_whitespace_en: bool = False
+
+    def placeholders(self, lang: str) -> frozenset[str]:
+        """樣板（zh／en）用到的佔位符名稱。"""
+        return frozenset(name for _, name, _, _ in string.Formatter().parse(getattr(self, lang)) if name is not None)
+
+    def flag_text(self, flag: str, lang: str) -> str:
+        return getattr(self, f"{flag}_{lang}")
+
+
+@dataclass(frozen=True)
+class IssuerStandard:
+    """某上手適用的審查標準：上手專屬值已解析（固定警語有上手版本就用，否則用預設）。"""
+
+    issuer: str
+    fixed_warning: str
+    fixed_warning_occurrences: int
+    issuer_name: str | None  # None → 審查標準沒有該上手的值，規則轉人工覆核
+    product_name: ProductNameTemplate | None
+    distributor_name: str
+    distributor_phone: str
+    distributor_phone_equivalents: tuple[str, ...]  # 電話可接受的其他寫法（所有上手適用）
+    distributor_address: str
 
 
 @dataclass(frozen=True)
@@ -47,6 +76,21 @@ class ReviewStandard:
     print_date_max_days_after_trade: int
     sha256: str
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
+    distributor_phone_equivalents: tuple[str, ...] = ()
+
+    def for_issuer(self, issuer: str) -> IssuerStandard:
+        key = issuer.lower()
+        return IssuerStandard(
+            issuer=issuer,
+            fixed_warning=self.fixed_warning_by_issuer.get(key, self.fixed_warning),
+            fixed_warning_occurrences=self.fixed_warning_occurrences,
+            issuer_name=self.issuer_names.get(key),
+            product_name=self.product_names.get(key),
+            distributor_name=self.distributor_name,
+            distributor_phone=self.distributor_phone,
+            distributor_phone_equivalents=self.distributor_phone_equivalents,
+            distributor_address=self.distributor_address,
+        )
 
 
 @dataclass(frozen=True)
@@ -90,22 +134,37 @@ def _load(path: Path, what: str) -> dict[str, Any]:
         raise IngestionError("config_invalid", f"{what}設定檔格式錯誤：{e}") from e
 
 
+def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
+    tpl = ProductNameTemplate(
+        zh=n["zh"],
+        en=n["en"],
+        memory_zh=n["memory_zh"],
+        memory_en=n["memory_en"],
+        normalize_brackets=bool(n.get("normalize_brackets", True)),
+        maxi_zh=n.get("maxi_zh", ""),
+        maxi_en=n.get("maxi_en", ""),
+        daily_zh=n.get("daily_zh", ""),
+        daily_en=n.get("daily_en", ""),
+        ignore_whitespace_en=bool(n.get("ignore_whitespace_en", False)),
+    )
+    for lang in ("zh", "en"):
+        unknown = sorted(tpl.placeholders(lang) - NAME_PLACEHOLDERS)
+        if unknown:
+            raise IngestionError(
+                "config_invalid",
+                f"審查標準商品名稱樣板 product_name.{issuer}.{lang} 有未知的佔位符："
+                + "、".join(f"{{{u}}}" for u in unknown)
+                + "（可用："
+                + "、".join(f"{{{p}}}" for p in sorted(NAME_PLACEHOLDERS))
+                + "）",
+            )
+    return tpl
+
+
 def load_review_standard(path: Path) -> ReviewStandard:
     d = _load(path, "審查標準")
     try:
-        names = {
-            issuer: ProductNameTemplate(
-                zh=n["zh"],
-                en=n["en"],
-                memory_zh=n["memory_zh"],
-                memory_en=n["memory_en"],
-                normalize_brackets=bool(n.get("normalize_brackets", True)),
-                maxi_en=n.get("maxi_en", ""),
-                daily_en=n.get("daily_en", ""),
-                ignore_whitespace_en=bool(n.get("ignore_whitespace_en", False)),
-            )
-            for issuer, n in d["product_name"].items()
-        }
+        names = {issuer: _product_name(issuer, n) for issuer, n in d["product_name"].items()}
         return ReviewStandard(
             version=int(d["version"]),
             effective_date=d["effective_date"],
@@ -113,6 +172,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             chairman=d["distributor"]["chairman"],
             distributor_name=d["distributor"]["name"],
             distributor_phone=d["distributor"]["phone"],
+            distributor_phone_equivalents=tuple(d["distributor"].get("phone_equivalents", ())),
             distributor_address=d["distributor"]["address"],
             issuer_names=dict(d["issuer_name"]),
             fees=dict(d["fees"]),

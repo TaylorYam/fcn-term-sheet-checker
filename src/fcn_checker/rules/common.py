@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Protocol
 
-from ..config import ReferenceFormat, ReviewStandard
+from ..config import NAME_FLAGS, IssuerStandard, ReferenceFormat, ReviewStandard
 from ..orders.reference import OrderRecord
 from ..parsers.layout import TextIndex, squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
@@ -35,6 +35,11 @@ class Context:
     order: OrderRecord
     std: ReviewStandard
     fmt: ReferenceFormat
+    issuer: str  # 上手代號；上手專屬的審查標準值由 issuer_std 依此解析
+
+    @property
+    def issuer_std(self) -> IssuerStandard:
+        return self.std.for_issuer(self.issuer)
 
 
 # ---------------------------------------------------------------- 共用
@@ -294,17 +299,14 @@ def chairman(ctx: Context) -> CheckResult:
     )
 
 
-def fixed_warning(ctx: Context, *, issuer: str | None = None) -> CheckResult:
-    rid = "standard.fixed_warning"
+def fixed_warning(ctx: Context) -> CheckResult:
+    """該上手適用的固定風險警語（有上手版本就用，否則用預設）逐字出現的次數 = 審查標準。"""
+    rid, std = "standard.fixed_warning", ctx.issuer_std
     ti = ctx.ts.full_text
-    target = squash(
-        ctx.std.fixed_warning_by_issuer.get(
-            (issuer or getattr(ctx.fmt, "issuer", "BARC")).lower(), ctx.std.fixed_warning
-        )
-    )
+    target = squash(std.fixed_warning)
     hits = [m for m in re.finditer(re.escape(target), ti.text)]
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
-    expected = ctx.std.fixed_warning_occurrences
+    expected = std.fixed_warning_occurrences
     ok = len(hits) == expected
     return result(
         rid,
@@ -398,10 +400,10 @@ def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str)
     )
 
 
-def issuer_name(ctx: Context, issuer: str) -> list[CheckResult]:
+def issuer_name(ctx: Context) -> list[CheckResult]:
     """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。"""
-    rid = "standard.issuer_name"
-    expected = ctx.std.issuer_names.get(issuer.lower())
+    rid, issuer = "standard.issuer_name", ctx.issuer
+    expected = ctx.issuer_std.issuer_name
     fields = (("issuer_name_cover", "封面「發行機構」"), ("issuer_name_ch2", "第二章「發行機構」事業名稱"))
     if expected is None:
         return [
@@ -418,9 +420,9 @@ def issuer_name(ctx: Context, issuer: str) -> list[CheckResult]:
     return [_fixed_text(rid, name, ctx.ts.f(name), expected, what) for name, what in fields]
 
 
-def distributor_info(ctx: Context, *, allow_international_phone: bool = False) -> list[CheckResult]:
-    """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準。"""
-    rid, std = "standard.distributor", ctx.std
+def distributor_info(ctx: Context) -> list[CheckResult]:
+    """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準；電話另接受審查標準列出的等價寫法。"""
+    rid, std = "standard.distributor", ctx.issuer_std
     checks = (
         ("distributor_name_cover", std.distributor_name, "封面受託或銷售機構名稱"),
         ("distributor_phone_cover", std.distributor_phone, "封面受託或銷售機構電話"),
@@ -431,11 +433,20 @@ def distributor_info(ctx: Context, *, allow_international_phone: bool = False) -
     out = []
     for name, exp, what in checks:
         pf = ctx.ts.f(name)
-        if allow_international_phone and name == "distributor_phone_cover" and pf.ok:
-            value = squash(pf.value)
-            if re.fullmatch(r"\+886-2-\d{4}-\d{4}", value):
-                value = "02-" + value[len("+886-2-") :]
-            pf = ParsedField(pf.name, pf.status, value, pf.evidence, pf.candidates, pf.note)
+        equivalents = {squash(p) for p in std.distributor_phone_equivalents}
+        if name == "distributor_phone_cover" and pf.ok and squash(pf.value) in equivalents:
+            out.append(
+                result(
+                    rid,
+                    name,
+                    S.PASS,
+                    expected=exp,
+                    actual=pf.value,
+                    pf=pf,
+                    tolerance="審查標準列出的電話等價寫法（distributor.phone_equivalents）",
+                )
+            )
+            continue
         out.append(_fixed_text(rid, name, pf, exp, what))
     return out
 
@@ -470,13 +481,28 @@ def issue_price(ctx: Context) -> CheckResult:
 _BRACKETS = str.maketrans({"(": "（", ")": "）"})
 
 
-def product_name(ctx: Context, issuer: str) -> list[CheckResult]:
-    """用說明書的天期、幣別、是否記憶式組出預期名稱後比對；中文名稱括號全半形不計。
+def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
+    """名稱樣板的 maxi（標的數 ≥ 2）、daily（KO 每日觀察）旗標；只讀樣板用到的說明書欄位。不依上手分支。"""
+    flags: dict[str, bool] = {}
+    for flag, field, test in (
+        ("maxi", "underlyings", lambda v: len(v) >= 2),
+        ("daily", "ko_observation", lambda v: v == "D"),
+    ):
+        if used & {f"{flag}_zh", f"{flag}_en"}:
+            pf = ctx.ts.f(field)
+            if not pf.ok:
+                return flags, pf
+            flags[flag] = test(pf.value)
+    return flags, None
 
-    名稱樣板依上手讀取審查標準 `product_name.<上手代號小寫>`；沒有樣板時轉人工覆核。
+
+def product_name(ctx: Context) -> list[CheckResult]:
+    """用說明書的天期、幣別、是否記憶式（樣板有用到時再加標的數、KO 觀察方式）組出預期名稱後比對。
+
+    名稱樣板依上手讀取審查標準 `product_name.<上手代號小寫>`；沒有樣板時轉人工覆核。中文名稱括號全半形不計。
     """
-    rid = "standard.product_name"
-    tpl = ctx.std.product_names.get(issuer.lower())
+    rid, issuer = "standard.product_name", ctx.issuer
+    tpl = ctx.issuer_std.product_name
     if tpl is None:
         return [
             result(
@@ -512,23 +538,21 @@ def product_name(ctx: Context, issuer: str) -> list[CheckResult]:
                 )
             )
             continue
-        if field == "name_zh":
-            expected = tpl.zh.format(tenor=tenor.value, ccy_zh=cz.value, memory_zh=tpl.memory_zh if mem.value else "")
+        lang = "zh" if field == "name_zh" else "en"
+        flags, bad = _name_flags(ctx, tpl.placeholders(lang))
+        if bad is not None:
+            out.append(doc_review(rid, field, bad))
+            continue
+        flags["memory"] = bool(mem.value)
+        values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": iso}
+        for flag in NAME_FLAGS:
+            for code in ("zh", "en"):
+                values[f"{flag}_{code}"] = tpl.flag_text(flag, code) if flags.get(flag) else ""
+        expected = getattr(tpl, lang).format(**values)
+        if lang == "zh":
             norm = (lambda s: squash(s).translate(_BRACKETS)) if tpl.normalize_brackets else squash
             tol = "忽略空白；全形／半形括號不計" if tpl.normalize_brackets else "忽略空白"
         else:
-            extra = {}
-            if tpl.maxi_en or tpl.daily_en:
-                uls, obs = ctx.ts.f("underlyings"), ctx.ts.f("ko_observation")
-                bad = next((p for p in (uls, obs) if not p.ok), None)
-                if bad is not None:
-                    out.append(doc_review(rid, field, bad))
-                    continue
-                extra = {
-                    "maxi_en": tpl.maxi_en if len(uls.value) >= 2 else "",
-                    "daily_en": tpl.daily_en if obs.value == "D" else "",
-                }
-            expected = tpl.en.format(tenor=tenor.value, ccy=iso, memory_en=tpl.memory_en if mem.value else "", **extra)
             norm = lambda s: re.sub(r"\s+", " ", s).strip()  # noqa: E731
             tol = "連續空白視為一個"
             if tpl.ignore_whitespace_en:
