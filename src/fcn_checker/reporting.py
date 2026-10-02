@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from .batch import BatchOutcome
 
 RECORD_DIR = Path("runtime") / "核對紀錄"
-RECORD_VERSION = 1
+RECORD_VERSION = 2
 
 
 def _plain(v: Any) -> Any:
@@ -108,6 +108,7 @@ def _record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> dict[str, An
                 "product_code": i.product_code,
                 "reference_row": i.reference_row,
                 "filled": i.filled,
+                "manual_release": i.released,
                 **to_json(i.report),
             }
             for i in outcome.items

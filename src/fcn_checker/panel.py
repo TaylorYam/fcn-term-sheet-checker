@@ -102,10 +102,20 @@ def _write(widget: tk.Text, text: str) -> None:
 
 
 class ResultPane(ttk.Frame):
-    """左側逐份說明書清單（問題優先）；右側選取那份的逐欄結果，選取列可查看完整值與原文證據。"""
+    """左側逐份說明書清單（問題優先）；右側選取那份的逐欄結果，選取列可查看完整值與原文證據。
 
-    def __init__(self, parent, pixels):
+    下方「人工放行」按鈕對選取的說明書操作；能否放行由 release_problem 判斷，按下時呼叫 on_release。
+    """
+
+    def __init__(
+        self,
+        parent,
+        pixels,
+        release_problem: Callable[[BatchItem], str] = lambda _: "",
+        on_release: Callable[[BatchItem], None] = lambda _: None,
+    ):
         super().__init__(parent, padding=8)
+        self.release_problem, self.on_release = release_problem, on_release
         self.items: dict[str, BatchItem] = {}
         self.rows: dict[str, CheckResult] = {}
         self.outcome: PanelOutcome | None = None
@@ -137,6 +147,14 @@ class ResultPane(ttk.Frame):
         )
         self.detail = _text(self, 6)
         self.detail.grid(row=3, column=0, columnspan=2, sticky="ew")
+        actions = ttk.Frame(self)
+        actions.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.release_button = ttk.Button(actions, text="人工放行…", command=self._release, state="disabled")
+        self.release_button.grid(row=0, column=0, sticky="w")
+        self.release_reason = tk.StringVar(value="")
+        ttk.Label(actions, textvariable=self.release_reason, wraplength=pixels(900)).grid(
+            row=0, column=1, sticky="w", padx=(12, 0)
+        )
         self.item_table.bind("<<TreeviewSelect>>", self._item_selected)
         self.table.bind("<<TreeviewSelect>>", self._row_selected)
 
@@ -148,18 +166,43 @@ class ResultPane(ttk.Frame):
         self.table.delete(*self.table.get_children())
         self.summary.set("尚未執行核對。")
         _write(self.detail, "")
+        self._release_state(None)
 
-    def show(self, outcome: PanelOutcome):
+    def show(self, outcome: PanelOutcome, select: BatchItem | None = None):
+        """顯示結果並選取 select（沒給或不在結果中時選第一份）。"""
         self.clear()
         self.outcome = outcome
         self.summary.set(outcome.headline)
+        chosen = None
         for item in outcome.ordered_items:
             problems = sum(r.status.is_problem for r in item.report.results)
             key = self.item_table.insert("", "end", values=(item.status_label, item.term_sheet.name, problems))
             self.items[key] = item
+            if item is select:
+                chosen = key
         if self.items:
-            self.item_table.selection_set(next(iter(self.items)))
+            chosen = chosen or next(iter(self.items))
+            self.item_table.selection_set(chosen)
+            self.item_table.see(chosen)
             self._item_selected(None)
+
+    def _release_state(self, item: BatchItem | None) -> None:
+        if item is None:
+            self.release_button.configure(text="人工放行…", state="disabled")
+            self.release_reason.set("")
+        elif item.released:
+            self.release_button.configure(text="取消放行", state="normal")
+            self.release_reason.set("已人工放行：儲存時視同通過並回填，不列入錯誤清單。")
+        else:
+            problem = self.release_problem(item)
+            self.release_button.configure(text="人工放行…", state="disabled" if problem else "normal")
+            show = problem and item.status != CheckStatus.PASS  # 已通過的不必說明
+            self.release_reason.set(f"不能人工放行：{problem}" if show else "")
+
+    def _release(self):
+        item = self.selected_item()
+        if item is not None:
+            self.on_release(item)
 
     def selected_item(self) -> BatchItem | None:
         selection = self.item_table.selection()
@@ -169,6 +212,7 @@ class ResultPane(ttk.Frame):
         item = self.selected_item()
         if item is None or self.outcome is None:
             return
+        self._release_state(item)
         self.rows.clear()
         self.table.delete(*self.table.get_children())
         for row in self.outcome.ordered_results(item):
@@ -195,7 +239,7 @@ class ResultPane(ttk.Frame):
     def _backfill_text(item: BatchItem) -> str:
         if not item.report.backfill:
             return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
-        head = "回填欄位（整份通過才會回填；按「儲存核對結果」後寫入核對結果檔）："
+        head = "回填欄位（整份通過或人工放行才會回填；按「儲存核對結果」後寫入核對結果檔）："
         lines = [
             f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {d.action.label}"
             for d in item.report.backfill
@@ -319,7 +363,7 @@ class PanelWindow:
         ttk.Label(preview_frame, textvariable=self.preview_warnings, wraplength=pixels(1000)).grid(
             row=1, column=0, sticky="w", pady=(8, 0)
         )
-        self.results = ResultPane(self.tabs, pixels)
+        self.results = ResultPane(self.tabs, pixels, self.session.release_problem, self.toggle_release)
         self.tabs.add(self.results, text="核對結果")
         self.not_covered = ttk.Frame(self.tabs, padding=12)
         self.tabs.add(self.not_covered, text="待處理")
@@ -457,6 +501,29 @@ class PanelWindow:
         self.tabs.tab(self.not_covered, text=f"待處理（{len(not_covered)}）")
         self.status.set(outcome.headline)
 
+    def toggle_release(self, item: BatchItem):
+        """人工放行（先確認全部錯訊）或取消放行；結果失效時顯示原因。"""
+        if self._busy_any():
+            return
+        try:
+            if item.released:
+                self.session.cancel_release(item)
+            else:
+                messages = dict.fromkeys(problem_message(r) for r in item.report.results if r.status.is_problem)
+                text = (
+                    f"{item.term_sheet.name}\n\n這份說明書的問題：\n"
+                    + "\n".join(f"・{m}" for m in messages)
+                    + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
+                )
+                if not messagebox.askyesno("人工放行", text, parent=self.root):
+                    return
+                self.session.release(item)
+        except IngestionError as e:
+            self.status.set(str(e))
+            return
+        self.results.show(self.session.outcome, select=item)
+        self.status.set(self.session.message)
+
     def save(self):
         if not self.has_result or self._busy_any():
             return
@@ -474,7 +541,7 @@ class PanelWindow:
         if self.session.outcome is None:
             self._clear()
         elif self.results.outcome is not None:
-            self.results.show(self.results.outcome)  # 更新「已回填」狀態
+            self.results.show(self.results.outcome, select=self.results.selected_item())  # 更新「已回填」狀態
         self.status.set(receipt.summary)
 
     def update_app(self):

@@ -1,7 +1,7 @@
 """回填欄位（ISIN Code、發行日、比價日_1～12）的整段流程，所有上手共用（ADR 0004）。
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
-- 只有整份核對 PASS 的說明書才寫入（`fillable`）。
+- 只有整份核對 PASS（`fillable`）或人工放行（PANEL）的說明書才寫入。
 - 寫入：開檔前確認參考條件表與核對時相同，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
   原檔不動，回填結果由核對結果檔（result_file.py）帶出。
 - 決策的顯示標籤（`BackfillAction.label`）只在這裡定義，PANEL 使用。
@@ -269,20 +269,15 @@ def _date_format(ws: Any, rfmt: ReferenceFormat) -> str:
     return FALLBACK_DATE_FORMAT
 
 
-def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -> list[bool]:
-    """把整份 PASS 的說明書的「回填」格寫進工作表；回傳每份是否回填（與 reports 同順序）。"""
+def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -> None:
+    """把要回填的說明書（呼叫端已決定：整份 PASS 或人工放行）的「回填」格寫進工作表。"""
     ws = wb[rfmt.sheet]
     fmt = _date_format(ws, rfmt)
-    filled = []
     for report in reports:
-        ok = fillable(report)
-        if ok:
-            for d in report.backfill:
-                if d.action != BackfillAction.FILL:
-                    continue
-                cell = ws[d.cell]
-                cell.value = d.expected
-                if isinstance(d.expected, dt.date):
-                    cell.number_format = fmt
-        filled.append(ok)
-    return filled
+        for d in report.backfill:
+            if d.action != BackfillAction.FILL:
+                continue
+            cell = ws[d.cell]
+            cell.value = d.expected
+            if isinstance(d.expected, dt.date):
+                cell.number_format = fmt
