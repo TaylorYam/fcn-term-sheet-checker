@@ -4,7 +4,7 @@
 
 協助作業人員將 FCN Term Sheet 與已確認的下單資料逐欄比對，輸出可回溯到原文件的例外清單。第一階段先支援一家 issuer 的一個文字型 PDF 範本；不做產品定價、交易執行、法律條款解釋或無人覆核的交易放行。
 
-已實作 BARC 文字型 PDF ＋ 詢價表的端到端流程（Issue #7、#9）；OCR 與更多範本仍為目標設計。
+已實作 BARC 文字型 PDF ＋ 詢價表的端到端流程（Issue #7、#9），以及以參考條件表批量核對多份說明書並回填 ISIN 與比價日（Issue #43，[ADR 0004](adr/0004-reference-sheet-as-check-source.md)）；OCR 與更多範本仍為目標設計。名詞見 [CONTEXT.md](../CONTEXT.md)。
 
 ## 系統資料流
 
@@ -40,15 +40,16 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 |---|---|---|
 | `src/fcn_checker/ingestion.py` | 文件 hash、加密／破損檢查 | 不解析金融欄位；不嘗試繞過密碼 |
 | `src/fcn_checker/extraction.py` | PyMuPDF 逐頁文字行、頁碼、bbox；排除頁碼雜訊 | 輸出頁碼、座標、文字；不判斷核對結果 |
-| `src/fcn_checker/issuers.py` | 上手註冊表：每家上手的範本辨識、擷取、規則入口、未涵蓋清單與預設詢價格式設定 | 核對入口、CLI、PANEL 都由此分派；新增上手只在此登記 |
+| `src/fcn_checker/issuers.py` | 上手註冊表：每家上手的範本辨識、擷取、規則入口、未涵蓋清單、預設詢價格式設定，以及參考條件表流程需要的 `isin`、`autocall_schedule`、`reference_rules` | 核對入口、批量入口、CLI、PANEL 都由此分派；新增上手在此登記，並在 `config/issuer_prefixes.toml` 登記上手編號 |
 | `src/fcn_checker/parsers/` | `layout.py` 章／條／子項定位（格式由各上手的 `LayoutSpec` 提供）；`barc.py` 範本辨識與欄位、價格表擷取；`barc_schedule.py` §13 配息表與提前出場表 | 使用錨點、座標與有限 regex；多重命中轉歧義，不任選 |
 | `src/fcn_checker/schema.py` | 標準化型別：`ParsedField`、`Evidence`、`CheckResult` | 缺值／歧義／不合法／不適用分開；保留來源證據 |
 | `src/fcn_checker/config.py` | 載入審查標準與上手詢價格式設定（TOML） | 會隨時間改變的基準只在設定檔 |
-| `src/fcn_checker/orders/` | 上手原始詢價表 adapter（目前 BARC） | 未知欄名回報覆核；禁止用文件值填補預期值 |
-| `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；`common.py` 各上手共用規則（欄位比對工具、詢價表欄位檢查、審查標準），`barc.py` 等為上手專屬規則與未涵蓋清單 | 不讀檔、不呼叫模型、不自動修改來源值 |
+| `src/fcn_checker/orders/` | `reference.py` 參考條件表 adapter（多列表格，所有上手共用，記下每欄儲存格位置供回填）；`inquiry.py` BARC 詢價表 adapter（已停用，PANEL 改版前保留） | 未知欄名回報覆核；禁止用文件值填補預期值 |
+| `src/fcn_checker/rules/` | 版本化規則（rule_id）與明確容差；`common.py` 各上手共用規則（欄位比對工具、詢價表欄位檢查、審查標準），`barc.py` 等為上手專屬規則與未涵蓋清單；`reference.py` 為參考條件表共用規則（Non-Call、ISIN 與比價日的比對與回填決策） | 不讀檔、不呼叫模型、不自動修改來源值；回填只產生決策，由批量入口寫入新檔 |
 | `src/fcn_checker/checker.py` | 核對入口 `run_check`：以註冊表辨識上手（`template.detect`；零個或多個命中轉人工覆核），串接上述模組並產生完整結果與 metadata | 測試切點 1 |
 | `src/fcn_checker/reporting.py` | JSON 與 Markdown 報告 | 問題項目優先；呈現差異、證據、未涵蓋規則 |
-| `src/fcn_checker/cli.py` | `fcn-check` 指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
+| `src/fcn_checker/batch.py` | 批量入口 `run_batch`：依檔名上手編號選上手、與範本辨識及商品代號互相確認、以商品代號配對參考條件表列、逐份核對與寫報告；整份 PASS 才回填，另存新檔並新增「核對結果」工作表 | 批量測試切點；單份失敗不中斷整批；原檔不動、不覆蓋既有檔案 |
+| `src/fcn_checker/cli.py` | `fcn-check`（詢價表）與 `fcn-batch`（參考條件表）指令與結束碼 | 測試切點 2；無 Web UI、資料庫或雲端服務 |
 | `src/fcn_checker/panel_workflow.py` | PANEL 來源預覽、核對工作階段及來源／審查標準 hash 失效檢查 | PANEL 工作流程測試切點；呼叫既有核對入口，按儲存才寫報告 |
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗、選檔及預覽呈現 | 背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness；不建立網路服務 |
 | `src/fcn_checker/updating.py` | 公開 GitHub main 更新、隔離安裝與原子切換 | `PanelUpdater` 公開測試入口；不讀取或上傳交易資料，不覆寫本機 config |
@@ -81,6 +82,6 @@ PDF、Excel 與格式設定的 hash 在載入前後、核對前後及結果使�
 
 未來 LLM fallback 若獲批准，只能作為 extraction adapter 提供候選欄位與來源證據；不得修改預期下單值或取代 rule engine。需另立 ADR、資料傳送政策與驗證門檻；第一版無相關 SDK、開關或外部呼叫。
 
-決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)。
+決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)、[0004：核對條件統一改用參考條件表](adr/0004-reference-sheet-as-check-source.md)。
 
 手動更新決策：[0003：PANEL 以公開 GitHub main 提供手動更新](adr/0003-public-github-panel-update.md)。程式更新與審查設定導入分開；更新成功後重新啟動，未儲存結果不保留，更新前有提示。

@@ -1,4 +1,4 @@
-"""上手註冊表：每家上手的範本辨識、擷取、規則入口與預設詢價格式設定。
+"""上手註冊表：每家上手的範本辨識、擷取、規則入口、參考條件表需要的擷取能力與預設詢價格式設定。
 
 新增上手時在 `REGISTRY` 登記一筆（docs/issuer-onboarding.md §6）；核對入口、CLI 與 PANEL 都由這裡分派。
 """
@@ -31,6 +31,11 @@ class Issuer:
     run_rules: Callable[[Any], list[CheckResult]]
     not_covered: tuple[dict[str, str], ...]
     order_format: Path  # 預設詢價格式設定檔（相對於工作目錄）
+    # ---- 參考條件表流程（ADR 0004）----
+    isin: Callable[[Any], ParsedField]  # 說明書 ISIN（含證據）
+    autocall_schedule: Callable[[Any], ParsedField]  # 值為 rules.reference.AutocallSchedule
+    reference_rules: Callable[[Any], list[CheckResult]]  # 表上事先填好的欄位＋說明書內部規則
+    reference_not_covered: tuple[dict[str, str], ...]
 
 
 BARC = Issuer(
@@ -46,6 +51,10 @@ BARC = Issuer(
     run_rules=barc_rules.run_all,
     not_covered=tuple(barc_rules.NOT_COVERED),
     order_format=Path("config/order_formats/barc.toml"),
+    isin=lambda ts: ts.f("isin"),
+    autocall_schedule=barc_rules.autocall_schedule,
+    reference_rules=barc_rules.reference_rules,
+    reference_not_covered=tuple(barc_rules.REFERENCE_NOT_COVERED),
 )
 
 REGISTRY: tuple[Issuer, ...] = (BARC,)

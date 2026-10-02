@@ -79,9 +79,19 @@ def _result_dict(r: CheckResult) -> dict[str, Any]:
     }
 
 
+def _backfill_dict(d: Any) -> dict[str, Any]:
+    return {
+        "column": d.column,
+        "cell": d.cell,
+        "sheet_value": _plain(d.sheet_value),
+        "expected": _plain(d.expected),
+        "action": d.action,
+    }
+
+
 def to_json(report: CheckReport) -> dict[str, Any]:
     counts = {s.value: sum(1 for r in report.results if r.status == s) for s in CheckStatus}
-    return {
+    out = {
         "status": report.status.value,
         "template": report.template,
         "summary": counts,
@@ -89,6 +99,9 @@ def to_json(report: CheckReport) -> dict[str, Any]:
         "not_covered": report.not_covered,
         "metadata": _plain(report.metadata),
     }
+    if report.backfill:
+        out["backfill"] = [_backfill_dict(d) for d in report.backfill]
+    return out
 
 
 def _cell(v: Any) -> str:
@@ -110,8 +123,8 @@ def _where(r: CheckResult) -> str:
     return "<br>".join(parts) + more
 
 
-def _table(rows: list[CheckResult], with_message: bool = True) -> list[str]:
-    head = "| 狀態 | 規則 | 欄位 | 詢價表／標準值 | 說明書值 | 容差 | 說明 | 說明書位置 | 詢價表位置 |"
+def _table(rows: list[CheckResult], with_message: bool = True, source: str = "詢價表") -> list[str]:
+    head = f"| 狀態 | 規則 | 欄位 | {source}／標準值 | 說明書值 | 容差 | 說明 | 說明書位置 | {source}位置 |"
     out = [head, "|" + "---|" * 9]
     for r in rows:
         out.append(
@@ -129,18 +142,22 @@ def to_markdown(report: CheckReport) -> str:
         key=lambda r: _ORDER[r.status],
     )
     ok = [r for r in report.results if r.status not in _ORDER]
-    ts, order = meta["inputs"]["term_sheet"], meta["inputs"]["order"]
+    ts = meta["inputs"]["term_sheet"]
+    reference = "reference_sheet" in meta["inputs"]
+    source = "參考條件表" if reference else "詢價表"
+    order = meta["inputs"]["reference_sheet" if reference else "order"]
+    fmt = meta.get("reference_format" if reference else "order_format", {"file": None})
     lines = [
         "# FCN Term Sheet 核對報告",
         "",
         f"- **整體狀態：{report.status.value}（{STATUS_ZH[report.status]}）**",
         f"- 範本：{report.template or '未辨識'}",
         f"- 說明書：`{ts['file']}`（sha256 `{ts['sha256']}`）",
-        f"- 詢價表：`{order['file']}`（sha256 `{order['sha256']}`）",
+        f"- {source}：`{order['file']}`（sha256 `{order['sha256']}`）",
         f"- 審查標準：`{meta['review_standard']['file']}` 版本 {meta['review_standard'].get('version', '—')}"
         f"（生效 {meta['review_standard'].get('effective_date', '—')}）",
-        f"- 詢價格式：`{meta['order_format']['file'] or '—'}` {meta['order_format'].get('issuer', '—')} "
-        f"版本 {meta['order_format'].get('version', '—')}",
+        f"- {'參考條件表格式' if reference else '詢價格式'}：`{fmt['file'] or '—'}` "
+        f"{'' if reference else fmt.get('issuer', '—') + ' '}版本 {fmt.get('version', '—')}",
         f"- 程式版本 {meta['program_version']}；{meta['extractor']}；{meta['excel_reader']}；產生時間 {meta['generated_at']}",
         "",
         "> 整體狀態只涵蓋本報告列出的規則；「未涵蓋」區的項目仍須人工核對。",
@@ -148,7 +165,20 @@ def to_markdown(report: CheckReport) -> str:
         f"## 問題項目（{len(issues)}）",
         "",
     ]
-    lines += _table(issues) if issues else ["沒有不一致或需人工覆核的項目。"]
+    lines += _table(issues, source=source) if issues else ["沒有不一致或需人工覆核的項目。"]
+    if report.backfill:
+        action = {"fill": "空白，核對通過後回填", "match": "相同", "mismatch": "不一致，保留原值"}
+        lines += [
+            "",
+            f"## 回填欄位（{len(report.backfill)}）",
+            "",
+            "| 欄位 | 儲存格 | 表上值 | 說明書值 | 處理 |",
+            "|---|---|---|---|---|",
+        ]
+        lines += [
+            f"| {_cell(d.column)} | {d.cell} | {_cell(d.sheet_value)} | {_cell(d.expected)} | {action[d.action]} |"
+            for d in report.backfill
+        ]
     lines += [
         "",
         f"## 未涵蓋規則（{len(report.not_covered)}）",
@@ -158,7 +188,7 @@ def to_markdown(report: CheckReport) -> str:
     ]
     lines += [f"- `{n['rule_id']}`：{n['description']}" for n in report.not_covered]
     lines += ["", f"## 通過與不適用項目（{len(ok)}）", ""]
-    lines += _table(ok) if ok else ["（無）"]
+    lines += _table(ok, source=source) if ok else ["（無）"]
     return "\n".join(lines) + "\n"
 
 

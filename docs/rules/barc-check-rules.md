@@ -1,11 +1,11 @@
 # 核對規則：BARC 中文產品說明書
 
 - 文件側：[BARC 範本規格](../templates/barc-zh-product-description.md)
-- 下單側：上手原始詢價格式，見 [BARC 詢價格式](../order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）
+- 下單側：2026-10-02 起為[參考條件表](../order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`，[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)），對照見 §9。§1～§8 描述的 BARC 詢價表流程已停用，PANEL 改版前暫時保留，見 [BARC 詢價格式](../order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）
 - 會隨時間改變的基準（審查通過日期、固定警語、負責人、名稱格式、面額預設值等）見 [審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
 - 狀態：規則已與使用者確認（2026-10-01）；第一階段已實作（Issue #7，`src/fcn_checker/rules/barc.py`，實作對照見 §8），第二階段（配息表、提前出場表、保證配息期等）待另開 Issue；§6.2 擱置、§6.4 需更多詢價表樣本驗證
 - 依 Issue #38 的範圍決定（使用者螢光標記與程式規則取交集，差異逐項決定），Issue #41 補齊文件內重複出現處、情境試算與審查標準固定值的核對（§3.7、§3.9、§7）
-- 舊的整理表 `FCN參考條件.xlsx` 已停用，見 [fcn-reference-legacy.md](../order-formats/fcn-reference-legacy.md)
+- 舊的整理表 `FCN參考條件.xlsx` 見 [fcn-reference-legacy.md](../order-formats/fcn-reference-legacy.md)；新版整理表即參考條件表
 
 ## 1. 下單資料來源（2026-10-01 起）
 
@@ -291,3 +291,28 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 - **商品名稱樣板的參數**：用說明書自身的天期（§13(1)）、幣別（封面）與是否記憶式（§15 觸發名詞）組出預期名稱，只檢查名稱格式；參數本身是否與詢價表一致由 `field.*` 規則負責，避免同一差異重複報告。§15 觸發名詞與名稱是否含「記憶式」不一致時轉人工覆核。
 - **Monthly KI**：詢價表或說明書任一方判定為 Monthly KI 時，`field.ki_type` 轉人工覆核（尚無樣本）。
 - **未涵蓋規則**：以固定清單列在報告「未涵蓋」區（`rules/barc.py` 的 `NOT_COVERED`），不影響整體狀態，也不代表通過。
+
+## 9. 參考條件表流程（2026-10-02，Issue #43）
+
+表上事先填好的欄位與說明書比對；說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：`rules/barc.py` 的 `reference_rules`、`autocall_schedule`，共用的 Non-Call 與回填規則在 `rules/reference.py`。
+
+| 參考條件表欄 | 說明書來源 | 規則 |
+|---|---|---|
+| TDCC Code | p1 商品代號 | 配對＋字串相等 |
+| ISIN Code | p1 `ISIN:` | 回填欄位：空白 → 通過後回填；有值 → 比對 |
+| 單位面額 | §6 面額 | 整數相等；另保留 §3.2 的審查標準預設值檢查 |
+| 承作幣別 | p1 計價幣別 | 依審查標準幣別對照 |
+| 交易日、發行日、最終比價日、到期日 | §13(2)～(5) | 日期相等 |
+| KO(%)、K(%)、KI(%)、Coupon p.a. (%) | §15、§14 | 依說明書顯示位數四捨五入後比對；無 KI 時 KI(%) 必須是 `-` |
+| KO(Freq) | §13 表頭型態 | `D` 期間每日／`P` 定日 |
+| KO(memo) | 商品名稱含「記憶式」 | `Y`／`N` |
+| KI(Freq) | §15 | `-` 無／`AM` 到期觀察／`D` 每日觀察；Monthly KI 轉人工覆核 |
+| 天期(月) | §13(1) | 整數相等 |
+| Non-Call(月) | §13 提前出場表 | D 型 = 保證配息期 G（第 G 期期始日 N/A、期末日有日期）；P 型 = G + 1。D 型第 1 期期始日就有日期（G = 0）轉人工覆核 |
+| UL_1～UL_5 | §10 彭博代號 | 同 §3.6；`-` 表示沒有這檔標的 |
+| UL_n_進場價／執行價／下限價／KO價 | §15 價格表 | 表上值四捨五入（half-up）到 4 位後相等；無 KI 時下限價必須是 `-` |
+| 比價日_1～12 | §13 提前出場表 | 回填欄位。D：`比價日_{Non-Call}` = 該期期末日；P：`比價日_{Non-Call}`～`比價日_{期數}` = 各期自動提前出場評價日（評價日表為評價日）；其他格 `-` |
+
+詢價表專屬的 Guaranteed Periods、Observation Frequency、Effective Date offset 不再核對：Non-Call、配息表期數（§3.8 B1）、發行日直接比對可以取代。
+
+本機真實樣本：8 列 BARC 的事先填好欄位全部一致；P 型 3 列通過；D 型 5 列只有舊填法多填的最後一期比價日顯示不一致（2026-10-02 驗證）。
