@@ -196,7 +196,7 @@ class ResultPane(ttk.Frame):
     def _backfill_text(item: BatchItem) -> str:
         if not item.report.backfill:
             return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
-        head = "回填欄位（整份通過才會回填；按「儲存」後寫入新檔）："
+        head = "回填欄位（整份通過才會回填；按「儲存核對結果」後寫入核對結果檔）："
         lines = [
             f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {d.action.label}"
             for d in item.report.backfill
@@ -288,7 +288,7 @@ class PanelWindow:
         self.reload.pack(side="left", padx=(0, 12))
         self.check_button = ttk.Button(actions, text="開始核對", command=self.start_check, state="disabled")
         self.check_button.pack(side="left")
-        self.save_button = ttk.Button(actions, text="儲存報告與回填新檔…", command=self.save, state="disabled")
+        self.save_button = ttk.Button(actions, text="儲存核對結果…", command=self.save, state="disabled")
         self.save_button.pack(side="left", padx=(12, 0))
         self.update_button = ttk.Button(actions, text="更新 GitHub 最新版", command=self.update_app)
         self.update_button.pack(side="left", padx=(12, 0))
@@ -333,7 +333,8 @@ class PanelWindow:
         self.status_label = ttk.Label(frame, textvariable=self.status, wraplength=960)
         self.status_label.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 10))
         ttk.Label(
-            frame, text="按「儲存」才會寫出報告與回填新檔（原參考條件表不動）；有差異或待處理項目請交由人工核對。"
+            frame,
+            text="按「儲存核對結果」才會寫出核對結果檔與報告（原參考條件表不動）；錯誤清單上的說明書請交由人工核對。",
         ).grid(row=9, column=0, columnspan=3, sticky="w")
         root.bind("<Configure>", self._resize)
         root.after(1000, self._watch_sources)
@@ -461,7 +462,7 @@ class PanelWindow:
         if not self.has_result or self._busy_any():
             return
         self._busy(True)
-        destination = filedialog.askdirectory(parent=self.root, title="選取報告保存資料夾（回填新檔放在參考條件表旁）")
+        destination = filedialog.askdirectory(parent=self.root, title="選取核對結果檔與報告的保存資料夾")
         if not destination:
             self.status.set(self.session.save(None).summary)
             self._busy(False)
@@ -565,7 +566,7 @@ class PanelWindow:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="FCN 本機 PANEL：以參考條件表預覽並核對多份說明書 PDF，按儲存才寫出報告與回填新檔。"
+        description="FCN 本機 PANEL：以參考條件表預覽並核對多份說明書 PDF，按儲存才寫出核對結果檔與報告。"
     )
     parser.add_argument(
         "--config-dir",

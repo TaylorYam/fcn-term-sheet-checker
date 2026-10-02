@@ -67,7 +67,6 @@ class ReferenceSheet:
     unknown_columns: list[OrderValue] = field(default_factory=list)
     missing_columns: list[str] = field(default_factory=list)
     duplicate_columns: list[OrderValue] = field(default_factory=list)
-    sheet_names: tuple[str, ...] = ()  # 檔案內所有工作表名稱
 
     def find(self, product_code: str) -> list[ReferenceRow]:
         return [r for r in self.rows if r.product_code.value == product_code]
@@ -157,4 +156,4 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
                 cells,
             )
         )
-    return ReferenceSheet(fmt.sheet, rows, unknown, missing, duplicate, tuple(wb.sheetnames))
+    return ReferenceSheet(fmt.sheet, rows, unknown, missing, duplicate)

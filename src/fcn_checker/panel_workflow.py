@@ -63,7 +63,7 @@ class SaveReceipt:
     def summary(self) -> str:
         if self.cancelled:
             return "已取消儲存，核對結果仍保留。"
-        lines = [f"回填新檔：{self.output}" if self.output else "回填新檔：未儲存"]
+        lines = [f"核對結果檔：{self.output}" if self.output else "核對結果檔：未儲存"]
         lines.append(f"報告：已儲存 {len(self.report_paths)} 個檔案")
         lines.extend(self.errors)
         return "\n".join(lines)
@@ -185,7 +185,7 @@ class PanelSession:
         return self._outcome
 
     def save(self, reports_dir: Path | None, *, now: dt.datetime | None = None) -> SaveReceipt:
-        """寫報告到 reports_dir、回填新檔到參考條件表旁；reports_dir 為 None 表示使用者取消。"""
+        """寫報告與核對結果檔到 reports_dir；reports_dir 為 None 表示使用者取消。"""
         if reports_dir is None:
             return SaveReceipt(cancelled=True)
         outcome = self.outcome
