@@ -10,9 +10,9 @@ from decimal import Decimal
 
 import pytest
 
-from harness import ERROR, MISMATCH, NA, PASS, REVIEW, problems, results
-from reference_synth import REFERENCE_HEADERS
-from synth import UL, Spec, build_not_barc_pdf, build_pdf, check, check_pdf
+from harness import ERROR, MISMATCH, NA, PASS, REVIEW, check_sheet, problems, results
+from reference_synth import REFERENCE_HEADERS, build_reference_sheet
+from synth import UL, Spec, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
 
 # ---------------------------------------------------------------- 全部一致
 
@@ -339,8 +339,10 @@ def test_same_input_gives_same_result_except_time(tmp_path):
 
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
-    a = to_json(check_pdf(tmp_path, pdf, spec))
-    b = to_json(check_pdf(tmp_path, pdf, spec))
+    # 參考條件表只建一次：openpyxl 存檔會寫入當下時間，重建可能跨秒而使 hash 不同
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    a = to_json(check_sheet(pdf, sheet))
+    b = to_json(check_sheet(pdf, sheet))
     a["metadata"].pop("generated_at")
     b["metadata"].pop("generated_at")
     assert a == b
