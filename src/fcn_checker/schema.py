@@ -22,6 +22,16 @@ class CheckStatus(StrEnum):
     NOT_APPLICABLE = "NOT_APPLICABLE"
     ERROR = "ERROR"
 
+    @property
+    def is_problem(self) -> bool:
+        """需作業人員處理：ERROR、MISMATCH、REVIEW_REQUIRED。"""
+        return self in _PROBLEMS
+
+    @property
+    def display_rank(self) -> int:
+        """報告與 PANEL 的顯示順序：ERROR、MISMATCH、REVIEW_REQUIRED、PASS、NOT_APPLICABLE。"""
+        return _DISPLAY_ORDER.index(self)
+
 
 # 整體狀態優先順序：ERROR > REVIEW_REQUIRED > MISMATCH > PASS
 _SEVERITY = {
@@ -31,6 +41,14 @@ _SEVERITY = {
     CheckStatus.REVIEW_REQUIRED: 2,
     CheckStatus.ERROR: 3,
 }
+_PROBLEMS = frozenset({CheckStatus.ERROR, CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED})
+_DISPLAY_ORDER = (
+    CheckStatus.ERROR,
+    CheckStatus.MISMATCH,
+    CheckStatus.REVIEW_REQUIRED,
+    CheckStatus.PASS,
+    CheckStatus.NOT_APPLICABLE,
+)
 
 
 def overall_status(statuses: list[CheckStatus]) -> CheckStatus:

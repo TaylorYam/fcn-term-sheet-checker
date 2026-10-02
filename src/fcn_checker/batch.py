@@ -46,7 +46,6 @@ from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Line, Parse
 
 RESULT_SHEET = "核對結果"
 UNSUPPORTED = "issuer_unsupported"
-PROBLEMS = (CheckStatus.ERROR, CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED)
 RESULT_HEADERS = ("PDF 檔名", "商品代號", "上手", "整體狀態", "問題數", "問題摘要", "已回填", "報告檔名")
 FALLBACK_DATE_FORMAT = "yyyy/m/d"
 DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
@@ -395,7 +394,7 @@ def _date_format(ws: Any, rfmt: ReferenceFormat) -> str:
 
 
 def _summary(report: CheckReport) -> tuple[int, str]:
-    problems = [r for r in report.results if r.status in PROBLEMS]
+    problems = [r for r in report.results if r.status.is_problem]
     parts = [f"{r.rule_id} {r.field}：{r.message or r.reason_code}" for r in problems[:5]]
     if len(problems) > 5:
         parts.append(f"等 {len(problems)} 項")

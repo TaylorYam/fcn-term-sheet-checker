@@ -135,10 +135,7 @@ class ResultPane(ttk.Frame):
         self.outcome = outcome
         self.summary.set(outcome.headline)
         for item in outcome.ordered_items:
-            problems = sum(
-                r.status in (CheckStatus.ERROR, CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED)
-                for r in item.report.results
-            )
+            problems = sum(r.status.is_problem for r in item.report.results)
             key = self.item_table.insert("", "end", values=(item.status_label, item.term_sheet.name, problems))
             self.items[key] = item
         if self.items:

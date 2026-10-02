@@ -16,14 +16,6 @@ from .ingestion import IngestionError, sha256_of
 from .issuers import REGISTRY, Issuer
 from .schema import CheckResult, CheckStatus
 
-_PRIORITY = {
-    CheckStatus.ERROR: 0,
-    CheckStatus.MISMATCH: 1,
-    CheckStatus.REVIEW_REQUIRED: 2,
-    CheckStatus.PASS: 3,
-    CheckStatus.NOT_APPLICABLE: 4,
-}
-
 
 @dataclass(frozen=True)
 class PanelOutcome:
@@ -32,11 +24,11 @@ class PanelOutcome:
     @property
     def ordered_items(self) -> tuple[BatchItem, ...]:
         """有問題的說明書排前面（ERROR、不一致、需人工覆核／未支援上手），再列通過。"""
-        return tuple(sorted(self.batch.items, key=lambda i: _PRIORITY[i.report.status]))
+        return tuple(sorted(self.batch.items, key=lambda i: i.report.status.display_rank))
 
     @staticmethod
     def ordered_results(item: BatchItem) -> tuple[CheckResult, ...]:
-        return tuple(sorted(item.report.results, key=lambda r: _PRIORITY[r.status]))
+        return tuple(sorted(item.report.results, key=lambda r: r.status.display_rank))
 
     @property
     def headline(self) -> str:
