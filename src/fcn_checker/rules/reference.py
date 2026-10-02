@@ -12,7 +12,7 @@ from typing import Any
 
 from ..schema import CheckResult, OrderValue, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import STANDARD_FIELDS, AutocallSchedule
+from ..standard_fields import AutocallSchedule
 from .common import (
     KI_LABEL,
     Context,
@@ -22,6 +22,7 @@ from .common import (
     order_review,
     order_value,
     result,
+    standard_field,
     to_date,
     to_decimal,
     to_int,
@@ -38,15 +39,6 @@ PRICE_COLUMNS = (
     ("ki", "ki_price", "下限價"),
     ("ko", "ko_price", "KO 價"),
 )
-
-
-def standard_field(ctx: Context, name: str) -> ParsedField:
-    """讀說明書標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
-    assert name in STANDARD_FIELDS, f"{name} 不是標準欄位"
-    try:
-        return ctx.ts.f(name)
-    except KeyError:
-        return ParsedField.missing(name, f"上手未提供標準欄位「{name}」")
 
 
 # ---------------------------------------------------------------- 表上事先填好的欄位

@@ -220,7 +220,6 @@ def prices(ctx):
 def document_info(ctx):
     f = ctx.ts.f
     out = []
-    iso = ctx.std.currency_zh_to_iso.get(f("currency_zh").value)
     out.append(
         check(
             "doc.currency_consistency",
@@ -230,30 +229,10 @@ def document_info(ctx):
             f("currency_art5").value,
         )
     )
-    denom = f("denomination")
-    standard = ctx.std.denomination.get(iso)
-    if not denom.ok:
-        out.append(common.doc_review("doc.denomination", "denomination", denom))
-    else:
-        out.append(
-            common.result(
-                "doc.denomination",
-                "denomination",
-                S.PASS if denom.value == standard else S.REVIEW_REQUIRED,
-                expected=standard,
-                actual=denom.value,
-                pf=denom,
-                reason="" if denom.value == standard else "denomination_non_standard",
-            )
-        )
-    for key in ["minimum_trade", "minimum_subscription", "minimum_additional"]:
-        out.append(check("doc.minimum_amounts", key, [denom, f(key)], denom.value, f(key).value))
-    for key in ["subscription_start", "subscription_end"]:
-        out.append(check("doc.subscription_dates", key, [f("trade_date"), f(key)], f("trade_date").value, f(key).value))
-    for key in ["print_date_review", "print_date_final"]:
-        trade, pf = f("trade_date"), f(key)
-        ok = trade.ok and pf.ok and 0 <= (pf.value - trade.value).days <= ctx.std.print_date_max_days_after_trade
-        out.append(check("doc.print_date", key, [trade, pf], "交易日至允許天數", pf.value, ok=ok))
+    out.append(common.denomination(ctx))
+    out.extend(common.min_amounts(ctx))
+    out.extend(common.subscription_dates(ctx))
+    out.extend(common.print_dates(ctx))
 
     def norm(s):
         return squash(s).translate(str.maketrans({"(": "（", ")": "）"}))

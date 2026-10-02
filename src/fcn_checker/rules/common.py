@@ -19,6 +19,7 @@ from ..orders.reference import OrderRecord
 from ..parsers.layout import TextIndex, squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
+from ..standard_fields import STANDARD_FIELDS, Occurrence
 
 
 class TermSheet(Protocol):
@@ -43,6 +44,15 @@ class Context:
 
 
 # ---------------------------------------------------------------- 共用
+
+
+def standard_field(ctx: Context, name: str) -> ParsedField:
+    """讀說明書標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
+    assert name in STANDARD_FIELDS, f"{name} 不是標準欄位"
+    try:
+        return ctx.ts.f(name)
+    except KeyError:
+        return ParsedField.missing(name, f"上手未提供標準欄位「{name}」")
 
 
 def result(
@@ -232,6 +242,136 @@ def approval_date(ctx: Context) -> CheckResult:
         reason="" if ok else "value_mismatch",
         message="" if ok else "受託機構審查通過日期與審查標準不同（可能沿用舊審查日期）",
     )
+
+
+# ---------------------------------------------------------------- 審查標準：說明書各出處（各上手共用，BARC 語意）
+
+
+def denomination(ctx: Context) -> CheckResult:
+    """面額 = 審查標準該幣別的預設值；不同時轉人工覆核（客戶可能要求特殊面額）。"""
+    rid, pf, cz = "doc.denomination", standard_field(ctx, "denomination"), standard_field(ctx, "currency_zh")
+    if not pf.ok:
+        return doc_review(rid, "denomination", pf)
+    iso = ctx.std.currency_zh_to_iso.get(cz.value) if cz.ok else None
+    default = ctx.std.denomination.get(iso) if iso else None
+    if default is None:
+        return result(
+            rid,
+            "denomination",
+            S.REVIEW_REQUIRED,
+            actual=pf.value,
+            pf=pf,
+            reason="currency_unknown",
+            message="無法確認幣別，找不到面額預設值",
+        )
+    ok = pf.value == default
+    return result(
+        rid,
+        "denomination",
+        S.PASS if ok else S.REVIEW_REQUIRED,
+        expected=default,
+        actual=pf.value,
+        pf=pf,
+        reason="" if ok else "denomination_non_default",
+        message="" if ok else f"面額不是 {iso} 預設值；客戶可能要求特殊面額，請人工確認",
+    )
+
+
+def _occurrences(ctx: Context, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
+    container = standard_field(ctx, name)
+    if not container.ok:
+        return (), doc_review(rid, name, container)
+    return container.value, None
+
+
+def min_amounts(ctx: Context) -> list[CheckResult]:
+    """各最低金額出處 = 面額。"""
+    rid, denom = "doc.min_subscription_redemption", standard_field(ctx, "denomination")
+    items, problem = _occurrences(ctx, rid, "min_amounts")
+    if problem:
+        return [problem]
+    out = []
+    for occ in items:
+        pf = occ.value
+        bad = next((x for x in (pf, denom) if not x.ok), None)
+        if bad is not None:
+            out.append(doc_review(rid, occ.field, bad))
+            continue
+        ok = pf.value == denom.value
+        out.append(
+            result(
+                rid,
+                occ.field,
+                S.PASS if ok else S.MISMATCH,
+                expected=denom.value,
+                actual=pf.value,
+                evidence=pf.evidence + denom.evidence,
+                reason="" if ok else "value_mismatch",
+                message="須等於 §6 每單位商品面額",
+            )
+        )
+    return out
+
+
+def subscription_dates(ctx: Context) -> list[CheckResult]:
+    """各受理申購日出處（開始、結束）= 交易日。"""
+    rid, trade = "doc.subscription_start_date", standard_field(ctx, "trade_date")
+    items, problem = _occurrences(ctx, rid, "subscription_dates")
+    if problem:
+        return [problem]
+    out = []
+    for occ in items:
+        pf = occ.value
+        bad = next((x for x in (pf, trade) if not x.ok), None)
+        if bad is not None:
+            out.append(doc_review(rid, occ.field, bad))
+            continue
+        ok = pf.value == trade.value
+        out.append(
+            result(
+                rid,
+                occ.field,
+                S.PASS if ok else S.MISMATCH,
+                expected=trade.value,
+                actual=pf.value,
+                evidence=pf.evidence + trade.evidence,
+                reason="" if ok else "value_mismatch",
+                message=f"{occ.where}須等於交易日",
+            )
+        )
+    return out
+
+
+def print_dates(ctx: Context) -> list[CheckResult]:
+    """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）。"""
+    rid, trade = "doc.print_date", standard_field(ctx, "trade_date")
+    items, problem = _occurrences(ctx, rid, "print_dates")
+    if problem:
+        return [problem]
+    limit = ctx.std.print_date_max_days_after_trade
+    out = []
+    for occ in items:
+        pf = occ.value
+        bad = next((x for x in (pf, trade) if not x.ok), None)
+        if bad is not None:
+            out.append(doc_review(rid, occ.field, bad))
+            continue
+        gap = (pf.value - trade.value).days
+        ok = 0 <= gap <= limit
+        out.append(
+            result(
+                rid,
+                occ.field,
+                S.PASS if ok else S.MISMATCH,
+                expected=f"{trade.value} ～ {trade.value + dt.timedelta(days=limit)}",
+                actual=pf.value,
+                evidence=pf.evidence + trade.evidence,
+                reason="" if ok else "value_mismatch",
+                tolerance=f"交易日當天至交易日後 {limit} 天",
+                message=f"刊印日期為交易日 {gap:+d} 天",
+            )
+        )
+    return out
 
 
 def _codepoints(s: str) -> str:
