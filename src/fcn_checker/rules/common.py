@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Protocol
 
-from ..config import OrderFormat, ReviewStandard
+from ..config import OrderFormat, ReferenceFormat, ReviewStandard
 from ..orders.inquiry import OrderRecord
 from ..parsers.layout import TextIndex, squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
@@ -34,7 +34,7 @@ class Context:
     ts: TermSheet
     order: OrderRecord
     std: ReviewStandard
-    fmt: OrderFormat
+    fmt: OrderFormat | ReferenceFormat  # 詢價表或參考條件表的格式設定
 
 
 # ---------------------------------------------------------------- 共用
@@ -138,10 +138,14 @@ def order_value(
     """取得並轉換下單欄位；缺漏或格式錯誤時回傳 REVIEW 結果。"""
     ov = ctx.order.fields.get(key)
     if ov is None or ov.value is None:
-        return None, ov, order_review(rule_id, field, ov, pf, "order_missing", "詢價表沒有此欄位或值為空白")
+        return (
+            None,
+            ov,
+            order_review(rule_id, field, ov, pf, "order_missing", f"{ctx.order.source}沒有此欄位或值為空白"),
+        )
     v = convert(ov.value)
     if v is None:
-        return None, ov, order_review(rule_id, field, ov, pf, "order_invalid", f"詢價表的值不是{what}")
+        return None, ov, order_review(rule_id, field, ov, pf, "order_invalid", f"{ctx.order.source}的值不是{what}")
     return v, ov, None
 
 
@@ -156,39 +160,40 @@ def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
 
 
 def order_format_checks(order: OrderRecord) -> list[CheckResult]:
+    src = order.source
     out = []
     for col in order.unknown_columns:
         out.append(
             result(
                 "order.unknown_column",
-                "詢價表欄位",
+                f"{src}欄位",
                 S.REVIEW_REQUIRED,
                 expected=None,
                 actual=None,
                 ov=[col],
                 reason="order_unknown_column",
-                message=f"詢價表出現格式設定沒有的欄位「{col.value}」，格式可能已改版",
+                message=f"{src}出現格式設定沒有的欄位「{col.value}」，格式可能已改版",
             )
         )
     for col in order.duplicate_columns:
         out.append(
             result(
                 "order.duplicate_column",
-                "詢價表欄位",
+                f"{src}欄位",
                 S.REVIEW_REQUIRED,
                 ov=[col],
                 reason="order_duplicate_column",
-                message=f"詢價表欄位「{col.value}」重複出現，無法確定以哪一欄為準",
+                message=f"{src}欄位「{col.value}」重複出現，無法確定以哪一欄為準",
             )
         )
     for name in order.missing_columns:
         out.append(
             result(
                 "order.missing_column",
-                "詢價表欄位",
+                f"{src}欄位",
                 S.REVIEW_REQUIRED,
                 reason="order_missing_column",
-                message=f"詢價表缺少格式設定中的欄位「{name}」",
+                message=f"{src}缺少格式設定中的欄位「{name}」",
             )
         )
     return out
@@ -230,7 +235,7 @@ def simple(
 def product_code(ctx: Context) -> CheckResult:
     rid, pf, ov = "field.product_code", ctx.ts.f("product_code"), ctx.order.product_code
     if ov.value is None:
-        return order_review(rid, "product_code", ov, pf, "order_missing", "詢價表沒有商品代號")
+        return order_review(rid, "product_code", ov, pf, "order_missing", f"{ctx.order.source}沒有商品代號")
     if not pf.ok:
         return doc_review(rid, "product_code", pf, ov.value, [ov])
     ok = ov.value == pf.value
@@ -243,7 +248,7 @@ def product_code(ctx: Context) -> CheckResult:
         pf=pf,
         ov=[ov],
         reason="" if ok else "value_mismatch",
-        message="" if ok else "說明書與詢價表的商品代號不同，可能拿錯檔案",
+        message="" if ok else f"說明書與{ctx.order.source}的商品代號不同，可能拿錯檔案",
     )
 
 

@@ -4,7 +4,7 @@
 
 - [x] 選一家 issuer、一個範本版本；確認樣本為文字／掃描／混合 PDF。→ 巴克萊（BARC）中文產品說明書，14 份樣本皆為文字型 PDF。見 [BARC 範本規格](templates/barc-zh-product-description.md)。
 - [ ] 取得可合法使用且去識別的樣本，建立人工標註的 expected output；真實樣本留在 Git 外。（真實樣本已放本機 `data/ts/`；去識別 fixture 尚未建立）
-- [x] 確認權威下單來源（CSV、Excel、系統匯出或其他）與交易配對方式。→ 各家上手原始格式；BARC 為詢價表，以 B3 商品代號配對。見 [BARC 詢價格式](order-formats/barc-inquiry.md)。（原 `FCN參考條件.xlsx` 已停用）
+- [x] 確認權威下單來源（CSV、Excel、系統匯出或其他）與交易配對方式。→ 2026-10-02 起所有上手共用參考條件表，以商品代號對 `TDCC Code`；見[參考條件表格式](order-formats/reference-sheet.md)、[ADR 0004](adr/0004-reference-sheet-as-check-source.md)。（BARC 詢價表已停用，PANEL 改版前保留）
 - [ ] 與作業人員確認首批必核欄位、年率／期率、門檻語意、日期與容差規則。（交易條款、文件資訊與日期規則皆已確認；標的中文名稱核對擱置，見核對規則 §6.2）
 - [x] 確認本機 Python 版本、套件授權與作業環境；鎖定依賴。→ Python ≥ 3.11；PyMuPDF（AGPL-3.0，僅公司內部本機使用）、openpyxl；版本鎖定於 `constraints.txt`（Issue #7）。
 
@@ -29,6 +29,9 @@
 - [x] 第二階段（Issue #9）：配息評價日／支付日表與自動提前出場表解析、保證配息期、日期規則 B／C 類、§16 情境分析價格表重印、最低申購／贖回金額。
 - [x] 依 #38 範圍決定補齊文件內重複出現處、情境試算與審查標準固定值（Issue #41）。
 - [ ] Monthly KI（Issue #10，待樣本，暫時維持人工覆核）。
+- [x] 以參考條件表批量核對並回填 ISIN 與比價日（Issue #43，CLI `fcn-batch`）。
+- [ ] PANEL 改用參考條件表（含批量選檔），並刪除 BARC 詢價表程式與設定（ADR 0004）。
+- [ ] BARC D 型第 1 期期始日就有日期（S08、S10 型）的比價日填法：待有已確認的參考條件表資料。
 
 驗收：合成 PDF + 下單資料可走完整流程，欄位與證據正確；一致、差異、缺值、歧義、未知範本各有可觀察結果。未支援／不完整輸入不會產生整體 PASS。
 

@@ -31,6 +31,7 @@ class CheckReport:
     results: list[CheckResult]
     not_covered: list[dict[str, str]]
     metadata: dict[str, Any] = field(default_factory=dict)
+    backfill: list[Any] = field(default_factory=list)  # 參考條件表流程的回填決策（rules.reference.CellDecision）
 
 
 def _error(rule_id: str, field_: str, e: IngestionError) -> CheckResult:

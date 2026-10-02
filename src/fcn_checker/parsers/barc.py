@@ -127,6 +127,11 @@ def product_code(lines: Sequence[Line]) -> ParsedField:
     return _cover_field("product_code", list(lines), "商品代號", squash)
 
 
+def _isin(text: str) -> str | None:
+    v = squash(text)
+    return v if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}[0-9]", v) else None
+
+
 def _cover_value(lines: list[Line], label: str) -> list[tuple[str, list[Line]]]:
     """p1 兩欄版面：左側標籤、右側數值；多行值以下一個標籤為界。"""
     page1 = [ln for ln in lines if ln.page == 1]
@@ -711,6 +716,7 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     all_lines = list(lines)
 
     flds["product_code"] = product_code(all_lines)
+    flds["isin"] = _cover_field("isin", all_lines, "ISIN", _isin)
     flds["currency_zh"] = _cover_field("currency_zh", all_lines, "計價幣別", lambda s: squash(s))
     flds["name_zh"] = _cover_field("name_zh", all_lines, "商品中文名稱")
     flds["name_en"] = _cover_field("name_en", all_lines, "商品英文名稱", lambda s: re.sub(r"\s+", " ", s).strip())

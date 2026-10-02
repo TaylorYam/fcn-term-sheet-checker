@@ -1,4 +1,6 @@
-# 下單資料格式：BARC 詢價表
+# 下單資料格式：BARC 詢價表（已停用）
+
+> **2026-10-02 起停用**（[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)）：核對條件改用[參考條件表](reference-sheet.md)（`fcn-batch`）。PANEL 與 `fcn-check` 還在使用這個格式，等 PANEL 改用參考條件表時，連同程式與設定一起刪除。
 
 - 設定檔：[`config/order_formats/barc.toml`](../../config/order_formats/barc.toml)
 - 核對規則：[BARC 核對規則](../rules/barc-check-rules.md) §3.2、§3.3

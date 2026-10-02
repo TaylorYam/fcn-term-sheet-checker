@@ -23,6 +23,7 @@ class OrderRecord:
     unknown_columns: list[OrderValue] = field(default_factory=list)  # value = 欄名
     missing_columns: list[str] = field(default_factory=list)  # 設定有、檔案沒有的 Excel 欄名
     duplicate_columns: list[OrderValue] = field(default_factory=list)  # 重複出現的欄名（value = 欄名）
+    source: str = "詢價表"  # 條件來源名稱，用在核對訊息
 
 
 def normalize_cell(v: Any) -> Any:

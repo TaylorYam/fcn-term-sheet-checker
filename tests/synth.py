@@ -786,3 +786,111 @@ def build_inquiry(
         ws.cell(row=5, column=2 + k, value=row.get(h))
     wb.save(path)
     return path
+
+
+# ---------------------------------------------------------------- 參考條件表
+
+REFERENCE_FORMAT = ROOT / "config" / "reference_sheet.toml"
+ISSUER_PREFIXES = ROOT / "config" / "issuer_prefixes.toml"
+SYNTH_ISIN = "XS0000000000"  # 合成說明書封面的 ISIN
+
+REFERENCE_HEADERS = [
+    "庫存狀態",
+    "當日比價",
+    "Product",
+    "發行機構",
+    "TDCC Code",
+    "ISIN Code",
+    "私銀註記",
+    "單位面額",
+    "承作幣別",
+    "交易日",
+    "發行日",
+    *[f"比價日_{i}" for i in range(1, 13)],
+    "最終比價日",
+    "到期日",
+    "KO(%)",
+    "KO(Freq)",
+    "KO(memo)",
+    "K(%)",
+    "KI(%)",
+    "KI(Freq)",
+    "UF",
+    "Coupon p.a. (%)",
+    "天期(月)",
+    "Non-Call(月)",
+    *[f"UL_{i}{suffix}" for i in range(1, 6) for suffix in ("", "_進場價", "_執行價", "_下限價", "_KO價", "_Memo")],
+]
+DATE_FORMAT = "mm-dd-yy"
+
+
+def _xl_date(d: dt.date) -> dt.datetime:
+    return dt.datetime.combine(d, dt.time())
+
+
+def first_callable(s: Spec) -> int:
+    """Non-Call(月)：D 型 = 保證配息期 G（第 G 期期末日起可提前出場）；P 型 = G + 1。"""
+    return s.guaranteed_value if s.ko_obs == "D" else s.guaranteed_value + 1
+
+
+def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
+    """與合成說明書一致的參考條件表列；回填欄位（ISIN、比價日）預設空白。"""
+    row: dict[str, Any] = {
+        "庫存狀態": None,
+        "當日比價": None,
+        "Product": "FCN",
+        "發行機構": "Barclays",
+        "TDCC Code": s.product_code,
+        "ISIN Code": None,
+        "私銀註記": "-",
+        "單位面額": s.denom,
+        "承作幣別": s.ccy,
+        "交易日": _xl_date(s.trade_date),
+        "發行日": _xl_date(s.issue_date),
+        "最終比價日": _xl_date(s.final_date),
+        "到期日": _xl_date(s.maturity_date),
+        "KO(%)": float(s.ko),
+        "KO(Freq)": s.ko_obs,
+        "KO(memo)": "Y" if s.memory else "N",
+        "K(%)": float(s.strike),
+        "KI(%)": float(s.ki_pct) if s.ki != "none" else "-",
+        "KI(Freq)": {"none": "-", "AM": "AM", "D": "D", "M": "M"}[s.ki],
+        "UF": 1.5900000000000034,
+        "Coupon p.a. (%)": float(s.annual),
+        "天期(月)": s.tenor,
+        "Non-Call(月)": first_callable(s),
+    }
+    for i in range(1, 6):
+        u = s.underlyings[i - 1] if i <= len(s.underlyings) else None
+        row[f"UL_{i}"] = u.ticker if u else "-"
+        row[f"UL_{i}_進場價"] = float(u.initial) if u else "-"
+        row[f"UL_{i}_執行價"] = float(price(u.initial, s.strike)) if u else "-"
+        row[f"UL_{i}_下限價"] = float(price(u.initial, s.ki_pct)) if u and s.ki != "none" else "-"
+        row[f"UL_{i}_KO價"] = float(price(u.initial, s.ko)) if u else "-"
+        row[f"UL_{i}_Memo"] = "-"
+    row.update(overrides)
+    return row
+
+
+def build_reference_sheet(
+    path: Path, rows: list[dict[str, Any]], headers: list[str] | None = None, extra_sheets: tuple[str, ...] = ()
+) -> Path:
+    """仿 FCN參考條件 的 `樣本清單`：第 3 列表頭、第 4 列起資料，最右側一個無表頭欄；另有一張其他工作表。"""
+    headers = headers or REFERENCE_HEADERS
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "樣本清單"
+    for k, h in enumerate(headers, start=1):
+        ws.cell(row=3, column=k, value=h)
+    for r, row in enumerate(rows, start=4):
+        for k, h in enumerate(headers, start=1):
+            c = ws.cell(row=r, column=k, value=row.get(h))
+            if isinstance(c.value, dt.datetime):  # 空白格維持「通用格式」，回填時要沿用表上日期格式
+                c.number_format = DATE_FORMAT
+        ws.cell(row=r, column=len(headers) + 9, value=1 if row.get("庫存狀態") else None)
+    other = wb.create_sheet("詢價表格")
+    other["B3"] = "其他工作表（回填時不得改動）"
+    for name in extra_sheets:
+        wb.create_sheet(name)
+    wb.save(path)
+    return path

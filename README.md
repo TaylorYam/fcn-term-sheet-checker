@@ -20,7 +20,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 ## 目前進度（2026-10-01）
 
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
-- 下單資料來源：各家上手原始格式（每家一份格式設定）。BARC 為詢價表，一筆交易一個檔，以儲存格 B3 的商品代號配對：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。舊整理表 `FCN參考條件.xlsx` 已停用（HSBC 暫用新版整理表，見下）。
+- 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`），用 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表已停用，PANEL 與 `fcn-check` 暫時沿用：[BARC 詢價格式](docs/order-formats/barc-inquiry.md)、[核對規則](docs/rules/barc-check-rules.md)。
 - 第二家上手（規格階段）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。尚未實作。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
@@ -33,6 +33,31 @@ python -m pip install -c constraints.txt -e ".[dev]"
 ```
 
 ## 使用方式
+
+### 批量核對與回填（參考條件表）
+
+在專案根目錄執行（設定檔預設讀 `config/`）：
+
+```bash
+fcn-batch data/FCN參考條件_1001.xlsx data/ts/029*.pdf --out runtime/reports
+```
+
+| 參數 | 說明 |
+|---|---|
+| 第 1 個 | 參考條件表 Excel（讀 `樣本清單` 工作表），格式見[參考條件表格式](docs/order-formats/reference-sheet.md) |
+| 其後 | 一或多份說明書 PDF；檔名前三碼是上手編號（`config/issuer_prefixes.toml`），用來挑範本 |
+| `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
+| `--reference-format` | 參考條件表格式設定檔，預設 `config/reference_sheet.toml` |
+| `--issuer-prefixes` | 上手編號對照設定檔，預設 `config/issuer_prefixes.toml` |
+| `--out` | 每份說明書報告的輸出資料夾，預設 `runtime/reports` |
+
+- 每份說明書用商品代號對參考條件表上的 `TDCC Code`，拿那一列的條件來核對。
+- 整份 PASS 的說明書，會把空白的 `ISIN Code`、`比價日_1～12` 回填到新檔 `<原檔名>_回填_<日期時間>.xlsx`，跟原檔放在同一個資料夾。原檔不動，也不覆蓋既有檔案。
+- 新檔多一張 `核對結果` 工作表，列出每份 PDF 的狀態與問題摘要。
+- 上手編號不在對照表、或上手還沒有範本時，標示「未支援上手」。
+- 結束碼同下表：未支援上手算 1；任一份 ERROR 或整批錯誤算 2。
+
+### 單份核對（BARC 詢價表，已停用、PANEL 改版前保留）
 
 在專案根目錄執行（審查標準與詢價格式預設讀 `config/`）：
 
@@ -106,7 +131,7 @@ pytest -q
 ruff check src tests
 ```
 
-測試只透過兩個切點驗證：核對入口 `fcn_checker.checker.run_check`（合成說明書 PDF 與合成詢價表，於測試時由 `tests/synth.py` 產生，數值皆虛構）與 `fcn-check` CLI。`tests/test_real_samples.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過。
+測試只透過公開切點驗證：批量入口 `fcn_checker.batch.run_batch` 與 `fcn-batch` CLI（合成說明書 PDF 與合成參考條件表）、核對入口 `fcn_checker.checker.run_check` 與 `fcn-check` CLI（合成詢價表）。合成資料於測試時由 `tests/synth.py` 產生，數值皆虛構。`tests/test_real_samples*.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過。
 
 ## 文件與開發規則
 
@@ -114,8 +139,9 @@ ruff check src tests
 - [資料契約草案](docs/data-contract.md)
 - [分階段 TODO 與待確認項目](docs/TODO.md)
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
-- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式](docs/order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新](docs/adr/0003-public-github-panel-update.md)
+- [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
+- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已停用）](docs/order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
+- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
 

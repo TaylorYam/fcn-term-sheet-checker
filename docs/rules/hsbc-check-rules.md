@@ -1,7 +1,7 @@
 # 核對規則：HSBC 中文產品說明書
 
 - 文件側：[HSBC 範本規格](../templates/hsbc-zh-product-description.md)
-- 下單側：暫用 FCN參考條件 整理表，見 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md)（設定檔 `config/order_formats/hsbc.toml`）
+- 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md)（設定檔 `config/reference_sheet.toml`）
 - 會隨時間改變的基準見[審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
 - 狀態：規則已與使用者確認（2026-10-01，Issue #32）；尚未實作。實作須在多上手架構調整（Issue #28）合併後進行
 - 本文件只寫與 [BARC 核對規則](barc-check-rules.md) 不同或 HSBC 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號等）沿用 BARC
