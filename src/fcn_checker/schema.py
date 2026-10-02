@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .backfill import CellDecision
 
 
 class FieldStatus(StrEnum):
@@ -153,7 +156,7 @@ class CheckReport:
     results: list[CheckResult]
     not_covered: list[dict[str, str]]
     metadata: dict[str, Any] = field(default_factory=dict)
-    backfill: list[Any] = field(default_factory=list)  # 回填決策（rules.reference.CellDecision）
+    backfill: list[CellDecision] = field(default_factory=list)  # 回填決策
 
 
 @dataclass
