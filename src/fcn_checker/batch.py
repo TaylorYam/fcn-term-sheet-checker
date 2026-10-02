@@ -309,6 +309,7 @@ def _check_one(
         results.extend(column_checks(record))
         _, ts = issuer.parse(found.lines)
         ctx = issuer.context(ts, record, std, rfmt)
+        results.extend(reference.field_rules(ctx))
         results.extend(issuer.rules(ctx))
         sched = issuer.autocall_schedule(ts)
         results.append(reference.first_callable_period(ctx, sched))

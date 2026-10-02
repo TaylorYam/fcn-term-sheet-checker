@@ -108,7 +108,7 @@
 
 | 內容 | 路徑 | 說明 |
 |---|---|---|
-| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、`product_code`、`context`、`rules`（參考條件表欄位規則＋說明書內部規則）、`isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`not_covered` |
+| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、`product_code`、`context`、`rules`（說明書內部規則與審查標準；參考條件表欄位規則由批量入口對所有上手執行）、`isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`not_covered` |
 | 上手編號 | `config/issuer_prefixes.toml`、`config/reference_sheet.toml` | 登記商品代號前三碼 → 上手代號，以及該上手在參考條件表「發行機構」欄的寫法（[參考條件表格式](order-formats/reference-sheet.md)） |
 | 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`、欄位擷取；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
