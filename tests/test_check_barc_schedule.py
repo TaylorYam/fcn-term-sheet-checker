@@ -85,7 +85,8 @@ def test_coupon_payment_before_valuation(tmp_path):
 def test_last_valuation_must_equal_final_valuation_date(tmp_path):
     spec = Spec(ko_obs="P", memory=False, coupon_overrides={(6, "valuation"): "2030 年7 月5 日"})
     report = check(tmp_path, spec)
-    assert problems(report) == {("schedule.final_period", MISMATCH)}
+    # 最晚的比價日也不等於最終比價日 → 回填規則轉人工覆核
+    assert problems(report) == {("schedule.final_period", MISMATCH), ("backfill.compare_dates", REVIEW)}
 
 
 def test_fixed_autocall_redemption_date_must_match_payment(tmp_path):

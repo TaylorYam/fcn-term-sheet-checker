@@ -70,7 +70,7 @@ def slots(d: dict) -> list:
 # ---------------------------------------------------------------- 全部一致 → 回填
 
 
-def test_consistent_daily_term_sheet_passes_and_back_fills_isin_issue_date_and_first_compare_date(tmp_path):
+def test_consistent_daily_term_sheet_passes_and_back_fills_first_and_last_compare_dates(tmp_path):
     spec = Spec()  # D 型、天期 6、第 1 期期末日起可提前出場
     outcome, sheet = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
 
@@ -83,7 +83,27 @@ def test_consistent_daily_term_sheet_passes_and_back_fills_isin_issue_date_and_f
     assert d["發行日"] == dt.datetime.combine(spec.issue_date, dt.time())
     assert row_of(sheet, spec.product_code)["發行日"] is None, "原檔不動"
     first = schedule_rows(spec)[0]["valuation"]
-    assert slots(d) == [first] + ["-"] * 11
+    assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6, "D 型：Non-Call 那期與最後一期"
+
+
+def test_daily_with_non_call_equal_to_tenor_fills_only_the_last_period(tmp_path):
+    spec = Spec(guaranteed=6)  # 第 6 期期末日起才可提前出場 → Non-Call = 天期
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+
+    assert outcome.items[0].report.status == PASS, problems(outcome.items[0])
+    assert slots(row_of(outcome.output, spec.product_code)) == ["-"] * 5 + [spec.final_date] + ["-"] * 6
+
+
+def test_latest_compare_date_must_equal_final_valuation_date(tmp_path):
+    spec = Spec(ko_overrides={(6, "end"): "2030 年7 月9 日"})  # 最後一期期末日晚於最終評價日 2030-07-08
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+
+    item = outcome.items[0]
+    r = only(item, "backfill.compare_dates")
+    assert (r.status, r.reason_code) == (REVIEW, "compare_dates_max_mismatch")
+    assert "2030-07-09" in r.message and "2030-07-08" in r.message
+    assert not item.filled
+    assert slots(row_of(outcome.output, spec.product_code)) == [None] * 12
 
 
 def test_period_end_back_fills_every_compare_date_from_first_callable_period(tmp_path):
@@ -118,15 +138,17 @@ def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     spec = Spec()
     first = schedule_rows(spec)[0]["valuation"]
     issue = dt.datetime.combine(spec.issue_date, dt.time())
+    last = dt.datetime.combine(spec.final_date, dt.time())
     filled = {"ISIN Code": SYNTH_ISIN, "發行日": issue, "比價日_1": dt.datetime.combine(first, dt.time())}
-    filled |= {f"比價日_{i}": "-" for i in range(2, 13)}
+    filled |= {f"比價日_{i}": "-" for i in range(2, 13)} | {"比價日_6": last}
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **filled)])
 
     item = outcome.items[0]
     assert item.report.status == PASS, problems(item)
     assert {d.action for d in item.report.backfill} == {"match"}
     d = row_of(outcome.output, spec.product_code)
-    assert d["ISIN Code"] == SYNTH_ISIN and d["發行日"] == issue and slots(d) == [first] + ["-"] * 11
+    assert d["ISIN Code"] == SYNTH_ISIN and d["發行日"] == issue
+    assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6
 
 
 def test_wrong_existing_compare_date_is_mismatch_and_nothing_is_back_filled(tmp_path):
