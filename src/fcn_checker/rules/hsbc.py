@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from ..config import ReferenceFormat
 from ..parsers.hsbc import HsbcTermSheet
 from ..parsers.layout import squash
 from ..schema import CheckStatus as S
@@ -54,20 +55,20 @@ def enum_field(ctx, name, mapping):
     return r
 
 
-def first_callable(ctx) -> ParsedField:
-    coupons, obs = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation")
+def first_callable(ts) -> ParsedField:
+    coupons, obs = ts.f("coupon_table"), ts.f("ko_observation")
     deps = [coupons, obs]
     if obs.ok and obs.value == "D":
-        deps.append(ctx.ts.f("ko_start"))
+        deps.append(ts.f("ko_start"))
     else:
-        deps.append(ctx.ts.f("ko_table"))
+        deps.append(ts.f("ko_table"))
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
         return ParsedField("first_callable_period", bad.status, evidence=bad.evidence, note=bad.note)
     if obs.value == "D":
-        periods = [r["period"] for r in coupons.value if r["end"] == ctx.ts.f("ko_start").value]
+        periods = [r["period"] for r in coupons.value if r["end"] == ts.f("ko_start").value]
     else:
-        first = ctx.ts.f("ko_table").value[0]
+        first = ts.f("ko_table").value[0]
         periods = [r["period"] for r in coupons.value if r["payment"] == first["payment"]]
     ev = [e for p in deps for e in p.evidence]
     if len(periods) != 1:
@@ -82,7 +83,7 @@ def first_callable(ctx) -> ParsedField:
 
 
 def schedules(ctx):
-    c, obs, first = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation"), first_callable(ctx)
+    c, obs, first = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation"), first_callable(ctx.ts)
     deps = [c, obs, first]
     out = []
     if any(not p.ok for p in deps):
@@ -226,7 +227,7 @@ def prices(ctx):
     rows = pf.value["rows"]
     out = []
     ovs = [ctx.order.fields.get(f"underlying_{i}") for i in range(1, 6)]
-    values = [ov.value if ov else None for ov in ovs]
+    values = [None if ov is None or ov.value == ctx.fmt.empty_value else ov.value for ov in ovs]
     filled = [i for i, v in enumerate(values) if v is not None]
     expected = [values[i] for i in filled]
     if not filled or filled != list(range(len(filled))):
@@ -246,6 +247,13 @@ def prices(ctx):
             ov = ctx.order.fields.get(key)
             actual = row["prices"].get(col) if row else None
             expected = ov.value if ov else None
+            if isinstance(ctx.fmt, ReferenceFormat) and row and col == "ki" and actual is None and expected is None:
+                out.append(
+                    common.order_review("field.prices", key, ov, pf, "order_missing", "無 KI 的下限價須明填空值寫法")
+                )
+                continue
+            if expected == ctx.fmt.empty_value:
+                expected = None
             if actual is None and expected is None:
                 out.append(common.result("field.prices", key, S.NOT_APPLICABLE, pf=pf, ov=[ov]))
                 continue
@@ -395,7 +403,9 @@ def run_all(ctx):
             common.result(
                 "field.ki_pct",
                 "ki_pct",
-                S.NOT_APPLICABLE if ov and ov.value is None else S.MISMATCH,
+                S.NOT_APPLICABLE
+                if ov and ov.value == (ctx.fmt.empty_value if isinstance(ctx.fmt, ReferenceFormat) else None)
+                else (S.REVIEW_REQUIRED if ov is None or ov.value is None else S.MISMATCH),
                 expected=ov.value if ov else None,
                 actual=None,
                 pf=ki,
@@ -411,7 +421,7 @@ def run_all(ctx):
         [
             common.approval_date(ctx),
             common.chairman(ctx),
-            common.fixed_warning(ctx),
+            common.fixed_warning(ctx, issuer=ISSUER),
             common.risk_level(ctx),
             common.forbidden_wording(ctx),
             common.issue_price(ctx),
@@ -421,5 +431,39 @@ def run_all(ctx):
     out.extend(common.distributor_info(ctx, allow_international_phone=True))
     out.extend(common.fees(ctx))
     out.extend(common.product_name(ctx, ISSUER))
-    out.extend(hsbc_scenario.run(ctx, first_callable(ctx)))
+    out.extend(hsbc_scenario.run(ctx, first_callable(ctx.ts)))
     return out
+
+
+def autocall_schedule(ts: HsbcTermSheet) -> ParsedField:
+    """提供共用參考條件表流程的期別與比價日，填格政策由 reference 決定。"""
+    from .reference import AutocallSchedule
+
+    first, obs, coupons = first_callable(ts), ts.f("ko_observation"), ts.f("coupon_table")
+    bad = next((p for p in [first, obs, coupons] if not p.ok), None)
+    if bad is not None:
+        return ParsedField("autocall_schedule", bad.status, evidence=bad.evidence, note=bad.note)
+    if obs.value == "D":
+        dates = {row["period"]: row["end"] for row in coupons.value if row["period"] >= first.value}
+    else:
+        ko = ts.f("ko_table")
+        if not ko.ok:
+            return ParsedField("autocall_schedule", ko.status, evidence=ko.evidence, note=ko.note)
+        dates = {}
+        for row in ko.value:
+            periods = [c["period"] for c in coupons.value if c["payment"] == row["payment"]]
+            if len(periods) != 1:
+                return ParsedField.invalid("autocall_schedule", [], "KO 付款日無法唯一對應期別")
+            dates[periods[0]] = row["decision"]
+    return ParsedField(
+        "autocall_schedule",
+        FieldStatus.PRESENT,
+        AutocallSchedule(obs.value, first.value, len(coupons.value), dates),
+        [e for p in [first, obs, coupons] for e in p.evidence],
+    )
+
+
+def reference_rules(ctx: Context) -> list:
+    """批量流程共用所有 HSBC 規則；回填欄位與 Non-Call 交由共用 reference 規則。"""
+    shared = {"field.isin", "field.first_callable_period", "field.autocall_dates"}
+    return [r for r in run_all(ctx) if r.rule_id not in shared]

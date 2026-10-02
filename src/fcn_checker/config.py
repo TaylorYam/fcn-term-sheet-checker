@@ -1,4 +1,4 @@
-"""載入審查標準與上手詢價格式設定（TOML）。"""
+"""載入審查標準、上手詢價格式、參考條件表格式與上手編號對照設定（TOML）。"""
 
 from __future__ import annotations
 
@@ -69,6 +69,26 @@ class OrderFormat:
     empty_value: str = "-"
     ko_observation_values: dict[str, str] = field(default_factory=dict)
     ko_memory_values: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ReferenceFormat:
+    """參考條件表（多列表格）的版面與欄位對照，所有上手共用。"""
+
+    version: int
+    sheet: str
+    header_row: int
+    first_data_row: int
+    key_column: str
+    issuer_column: str
+    empty_value: str
+    issuer_values: dict[str, str]  # 上手代號 → 發行機構欄的寫法
+    columns: dict[str, str]  # Excel 欄名 → 標準欄位
+    ignored: tuple[str, ...]
+    ko_observation_values: dict[str, str]
+    ko_memory_values: dict[str, bool]
+    ki_type_values: dict[str, str]
+    sha256: str
 
 
 def _load(path: Path, what: str) -> dict[str, Any]:
@@ -158,3 +178,42 @@ def load_order_format(path: Path) -> OrderFormat:
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"詢價格式設定檔缺少或格式錯誤的項目：{e}") from e
+
+
+def load_reference_format(path: Path) -> ReferenceFormat:
+    d = _load(path, "參考條件表格式")
+    try:
+        cols = dict(d["columns"])
+        ignored = tuple(cols.pop("ignored", ()))
+        layout = d["layout"]
+        return ReferenceFormat(
+            version=int(d["version"]),
+            sheet=layout["sheet"],
+            header_row=int(layout["header_row"]),
+            first_data_row=int(layout["first_data_row"]),
+            key_column=layout["key_column"],
+            issuer_column=layout["issuer_column"],
+            empty_value=layout["empty_value"],
+            issuer_values=dict(d["issuer_values"]),
+            columns=cols,
+            ignored=ignored,
+            ko_observation_values=dict(d["values"]["ko_observation"]),
+            ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
+            ki_type_values=dict(d["values"]["ki_type"]),
+            sha256=sha256_of(path),
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e
+
+
+def load_issuer_prefixes(path: Path) -> dict[str, str]:
+    """上手編號（三碼）→ 上手代號。"""
+    d = _load(path, "上手編號對照")
+    try:
+        prefixes = {str(k): str(v) for k, v in d["prefixes"].items()}
+    except (KeyError, TypeError, AttributeError) as e:
+        raise IngestionError("config_invalid", f"上手編號對照設定檔缺少或格式錯誤的項目：{e}") from e
+    bad = [k for k in prefixes if not (len(k) == 3 and k.isdigit())]
+    if bad:
+        raise IngestionError("config_invalid", f"上手編號必須是三位數字：{'、'.join(bad)}")
+    return prefixes

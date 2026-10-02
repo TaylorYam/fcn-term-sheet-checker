@@ -406,3 +406,51 @@ def test_partial_period_coupon_arithmetic(tmp_path, amount, status):
         and x.status == status
         for x in r.results
     )
+
+
+@pytest.mark.parametrize("obs", ["D", "P"])
+def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
+    from fcn_checker.batch import run_batch
+
+    s = Spec(obs=obs, ki="none")
+    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
+    excel = build_inquiry(tmp_path / "order.xlsx", s)
+    wb = openpyxl.load_workbook(excel)
+    ws = wb.active
+    for c in ws[3]:
+        if c.value == "ISIN Code" or str(c.value).startswith("比價日_"):
+            ws.cell(4, c.column).value = None
+    wb.save(excel)
+    wb.close()
+    r = run_batch(
+        [pdf],
+        excel,
+        REVIEW_STANDARD,
+        tmp_path / "reports",
+        reference_format=ROOT / "config/reference_sheet.toml",
+        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
+    )
+    assert r.status == S.PASS, [
+        (x.rule_id, x.field, x.status, x.reason_code)
+        for x in r.items[0].report.results
+        if x.status not in (S.PASS, S.NOT_APPLICABLE)
+    ]
+    assert r.items[0].filled
+    wb = openpyxl.load_workbook(r.output)
+    ws = wb["樣本清單"]
+    vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
+    assert vals["ISIN Code"] == "XS1999900001"
+    assert vals["比價日_2"].date() == s.ends[1]
+    assert vals["比價日_6"] == (
+        "-" if obs == "D" else __import__("datetime").datetime.combine(s.ends[-1], __import__("datetime").time())
+    )
+    assert vals["比價日_1"] == "-"
+    wb.close()
+    wb = openpyxl.load_workbook(excel)
+    ws = wb.active
+    assert all(
+        ws.cell(4, c.column).value is None
+        for c in ws[3]
+        if c.value == "ISIN Code" or str(c.value).startswith("比價日_")
+    )
+    wb.close()

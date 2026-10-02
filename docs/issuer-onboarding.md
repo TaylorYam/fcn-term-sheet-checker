@@ -108,10 +108,11 @@
 
 | 內容 | 路徑 | 說明 |
 |---|---|---|
-| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、規則入口、未涵蓋清單、預設詢價格式設定 |
+| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`：代號、範本、`detect`、`parse`、規則入口、未涵蓋清單、預設詢價格式設定；參考條件表流程另需 `isin`、`autocall_schedule`（第一個可提前出場期與各期比價日）、`reference_rules`、`reference_not_covered` |
+| 上手編號 | `config/issuer_prefixes.toml`、`config/reference_sheet.toml` | 登記商品代號前三碼 → 上手代號，以及該上手在參考條件表「發行機構」欄的寫法（[參考條件表格式](order-formats/reference-sheet.md)） |
 | 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`、欄位擷取；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
-| 詢價表 adapter | `src/fcn_checker/orders/` | 欄名對應走設定檔；版面差異過大才新增 adapter |
+| 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
 | 規則 | `src/fcn_checker/rules/<上手>.py` | 上手專屬規則；通用規則用 `rules/common.py`（§7） |
 | 合成測試資料 | `tests/synth_<上手>.py` | 依該上手版面產生虛構 PDF 與詢價表 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |

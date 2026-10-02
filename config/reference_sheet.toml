@@ -1,23 +1,25 @@
-# PANEL 單筆相容格式：HSBC；批量 CLI 使用共用 reference_sheet.toml（ADR 0004）
+# 參考條件表格式：FCN參考條件 Excel 的「樣本清單」工作表（所有上手共用）
 #
-# HSBC 原始詢價表尚未取得；2026-10-01 起暫用使用者整理的 FCN參考條件 Excel 的「樣本清單」工作表。
-# 一個檔有多家上手、每列一檔商品，以商品代號（TDCC Code）找出對應列。
-# 規則說明見 docs/order-formats/hsbc-fcn-reference.md。
-# 取得 HSBC 原始詢價表後另立格式設定，並更新本檔或停用。
+# 核對條件的來源，也是核對後匯入資料庫的格式（ADR 0004）。每列一檔商品、多家上手混在同一張表。
+# 以說明書商品代號找 TDCC Code 相同的列；該列的發行機構必須是對應上手的值。
+# 回填欄位（ISIN Code、比價日_1～12）由工具依說明書填入；其他欄位由作業人員事先填好，只做核對。
+# 規則說明見 docs/order-formats/reference-sheet.md。
 
-issuer = "HSBC"
 version = 1
-effective_date = 2026-10-01
+effective_date = 2026-10-02
 
 [layout]
-kind = "table"            # 多列表格（BARC 詢價表為 single：一個檔一筆交易）
 sheet = "樣本清單"
 header_row = 3
 first_data_row = 4
-key_column = "TDCC Code"  # 商品代號，用來配對 PDF；同一代號出現多列 → 轉人工覆核
+key_column = "TDCC Code"  # 商品代號，用來配對說明書；同一代號出現多列 → 轉人工覆核
 issuer_column = "發行機構"
-issuer_value = "HSBC"     # 對應列的發行機構必須是這個值，否則轉人工覆核
-empty_value = "-"         # 空值寫法
+empty_value = "-"         # 空值寫法（比價日不需要填的期別也寫 -）
+
+# 上手代號 → 該上手在「發行機構」欄的寫法
+[issuer_values]
+BARC = "Barclays"
+HSBC = "HSBC"
 
 # Excel 欄名 → 標準欄位
 [columns]
@@ -76,12 +78,12 @@ empty_value = "-"         # 空值寫法
 "UL_5_下限價" = "underlying_5_ki_price"
 "UL_5_KO價" = "underlying_5_ko_price"
 
-# 存續或內部資訊，TS 沒有對應資料，不核對
+# 存續或內部資訊，說明書沒有對應資料，不核對；發行機構只用來確認列屬於哪家上手
 ignored = ["庫存狀態", "當日比價", "Product", "發行機構", "私銀註記", "UF",
            "UL_1_Memo", "UL_2_Memo", "UL_3_Memo", "UL_4_Memo", "UL_5_Memo"]
-# 無表頭的欄（例：已 KO 註記 1/0）一律忽略
+# 無表頭的欄（例：已 KO 註記）一律忽略
 
-# KO(Freq)：D 期間每日觀察／P 定期觀察
+# KO(Freq)：D 期間每日觀察／P 每期定日觀察
 [values.ko_observation]
 "D" = "D"
 "P" = "P"
