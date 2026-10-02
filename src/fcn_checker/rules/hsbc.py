@@ -230,7 +230,6 @@ def document_info(ctx):
         )
     )
     out.append(common.denomination(ctx))
-    out.extend(common.min_amounts(ctx))
     out.extend(common.subscription_dates(ctx))
     out.extend(common.print_dates(ctx))
 

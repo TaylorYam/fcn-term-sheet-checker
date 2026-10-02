@@ -21,7 +21,7 @@ SCHEDULE_RULES = (
     "schedule.autocall_dates",
     "doc.autocall_trigger_per_period",
     "doc.scenario_price_table",
-    "doc.min_subscription_redemption",
+    "field.min_amounts",
 )
 
 
@@ -119,8 +119,8 @@ def test_scenario_price_table_reprint(tmp_path):
 
 def test_min_subscription_must_equal_denomination(tmp_path):
     report = check(tmp_path, Spec(min_subscription=20000))
-    assert problems(report) == {("doc.min_subscription_redemption", MISMATCH)}
-    assert results(report, "doc.min_subscription_redemption", "min_redemption")[0].status == PASS
+    assert problems(report) == {("field.min_amounts", MISMATCH)}
+    assert results(report, "field.min_amounts", "min_redemption")[0].status == PASS
 
 
 def test_unreadable_table_cell_requires_review(tmp_path):

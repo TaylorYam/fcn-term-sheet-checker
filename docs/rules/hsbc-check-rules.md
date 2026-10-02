@@ -71,7 +71,7 @@
 | 百分比 | §12(1) 表頭 `(即期初股價的X%)` = §11 定義句；有「觸及不保本價格」欄 ⇔ §11(3) 有 KI 定義 |
 | 記憶式 | 名稱含「記憶式」⇔ §11(2) 為「鎖定股票」寫法 |
 | 情境分析 | §18 重印價格表 = §12(1)（代號與各價格逐格相等）；§18 月配息率 = 年利率 ÷ 12 |
-| 面額 | §7 最低交易金額、第四章 §5 最低申購金額與最低加購金額 = 面額（共用 `doc.min_subscription_redemption`） |
+| 面額 | §7 最低交易金額、第四章 §5 最低申購金額與最低加購金額 = 參考條件表「單位面額」（共用 `field.min_amounts`） |
 | 申購日期 | 第四章 §1 商品開始受理申購日、申購結束受理日 = 交易日（共用 `doc.subscription_start_date`） |
 
 ### 3.6 文件資訊與用語
@@ -170,7 +170,7 @@
 | `field.underlyings`、`field.underlying_prices` | 標的順序／尾碼與各標的四位價格（共用） |
 | `derive.prices`、`doc.price_header_pct` | 價格 = 期初股價 × 百分比；表頭百分比 = 定義句（HSBC 說明書內部） |
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
-| `doc.denomination`、`doc.min_subscription_redemption`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 面額、受理申購開始／結束日 = 交易日、兩個刊印日期在允許天數內（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
+| `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 = 交易日、兩個刊印日期在允許天數內（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
 | `doc.currency_consistency`、`doc.name_consistency` | 文件重複欄位 |
 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_parameters` | 情境每處參數與正式條款一致 |
 | `doc.scenario_calculations`、`doc.scenario_general_annualized` | 本金、配息、部分期間配息、簡單損益；一般到期情境年化率 |

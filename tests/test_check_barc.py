@@ -101,7 +101,8 @@ def test_excel_float_tail_is_cleaned(tmp_path):
         ({"發行日": dt.datetime(2030, 1, 15)}, {"field.issue_date"}),
         ({"最終比價日": dt.datetime(2030, 7, 9)}, {"field.final_valuation_date"}),
         ({"到期日": dt.datetime(2030, 7, 12)}, {"field.maturity_date"}),
-        ({"單位面額": 5000}, {"field.denomination"}),
+        # 最低申購／贖回金額也與表上單位面額比對，所以一起不符
+        ({"單位面額": 5000}, {"field.denomination", "field.min_amounts"}),
         ({"KO(memo)": "N"}, {"field.ko_memory"}),
         ({"KO(Freq)": "P"}, {"field.ko_observation"}),
         ({"KI(Freq)": "AM", "KI(%)": 60.0}, {"field.ki_type", "field.ki_pct"}),

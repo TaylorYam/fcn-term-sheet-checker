@@ -19,6 +19,7 @@ from .common import (
     cmp_pct,
     doc_ki,
     doc_review,
+    occurrences_of,
     order_review,
     order_value,
     result,
@@ -366,6 +367,39 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     return out
 
 
+def min_amounts(ctx: Context) -> list[CheckResult]:
+    """說明書各最低金額出處（最低交易／申購／加購／贖回金額）= 參考條件表「單位面額」。"""
+    rid = "field.min_amounts"
+    items, problem = occurrences_of(ctx, rid, "min_amounts")
+    if problem:
+        return [problem]
+    out = []
+    for occ in items:
+        pf = occ.value
+        v, ov, problem = order_value(ctx, "denomination", rid, occ.field, pf, to_int, "整數")
+        if problem:
+            out.append(problem)
+            continue
+        if not pf.ok:
+            out.append(doc_review(rid, occ.field, pf, v, [ov]))
+            continue
+        ok = pf.value == v
+        out.append(
+            result(
+                rid,
+                occ.field,
+                S.PASS if ok else S.MISMATCH,
+                expected=v,
+                actual=pf.value,
+                pf=pf,
+                ov=[ov],
+                reason="" if ok else "value_mismatch",
+                message=f"{occ.where}須等於參考條件表「單位面額」",
+            )
+        )
+    return out
+
+
 def field_rules(ctx: Context) -> list[CheckResult]:
     """表上作業人員事先填好的欄位逐一與說明書標準欄位比對（Non-Call 與回填欄位見下方）。"""
     dec, intg, date = to_decimal, to_int, to_date
@@ -382,6 +416,7 @@ def field_rules(ctx: Context) -> list[CheckResult]:
         _compare(ctx, "field.final_valuation_date", "final_valuation_date", date, "日期"),
         _compare(ctx, "field.maturity_date", "maturity_date", date, "日期"),
         _compare(ctx, "field.denomination", "denomination", intg, "整數"),
+        *min_amounts(ctx),
         ko_observation(ctx),
         ko_memory(ctx),
         ki_type(ctx),

@@ -797,7 +797,6 @@ def document_rules(ctx: Context) -> list[CheckResult]:
         *autocall_dates(ctx),
         trigger_per_period(ctx),
         scenario_price_table(ctx),
-        *common.min_amounts(ctx),
         *name_consistency(ctx),
         distributor_product_code(ctx),
         currency_consistency(ctx),

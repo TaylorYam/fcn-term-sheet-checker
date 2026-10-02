@@ -277,46 +277,18 @@ def denomination(ctx: Context) -> CheckResult:
     )
 
 
-def _occurrences(ctx: Context, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
+def occurrences_of(ctx: Context, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
+    """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果。"""
     container = standard_field(ctx, name)
     if not container.ok:
         return (), doc_review(rid, name, container)
     return container.value, None
 
 
-def min_amounts(ctx: Context) -> list[CheckResult]:
-    """各最低金額出處 = 面額。"""
-    rid, denom = "doc.min_subscription_redemption", standard_field(ctx, "denomination")
-    items, problem = _occurrences(ctx, rid, "min_amounts")
-    if problem:
-        return [problem]
-    out = []
-    for occ in items:
-        pf = occ.value
-        bad = next((x for x in (pf, denom) if not x.ok), None)
-        if bad is not None:
-            out.append(doc_review(rid, occ.field, bad))
-            continue
-        ok = pf.value == denom.value
-        out.append(
-            result(
-                rid,
-                occ.field,
-                S.PASS if ok else S.MISMATCH,
-                expected=denom.value,
-                actual=pf.value,
-                evidence=pf.evidence + denom.evidence,
-                reason="" if ok else "value_mismatch",
-                message="須等於 §6 每單位商品面額",
-            )
-        )
-    return out
-
-
 def subscription_dates(ctx: Context) -> list[CheckResult]:
     """各受理申購日出處（開始、結束）= 交易日。"""
     rid, trade = "doc.subscription_start_date", standard_field(ctx, "trade_date")
-    items, problem = _occurrences(ctx, rid, "subscription_dates")
+    items, problem = occurrences_of(ctx, rid, "subscription_dates")
     if problem:
         return [problem]
     out = []
@@ -345,7 +317,7 @@ def subscription_dates(ctx: Context) -> list[CheckResult]:
 def print_dates(ctx: Context) -> list[CheckResult]:
     """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）。"""
     rid, trade = "doc.print_date", standard_field(ctx, "trade_date")
-    items, problem = _occurrences(ctx, rid, "print_dates")
+    items, problem = occurrences_of(ctx, rid, "print_dates")
     if problem:
         return [problem]
     limit = ctx.std.print_date_max_days_after_trade

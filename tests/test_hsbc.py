@@ -111,7 +111,7 @@ def test_order_difference_is_reported(tmp_path, field, value, rule):
 @pytest.mark.parametrize(
     "old,new,rule",
     [
-        ("最低交易金額：美元10,000元", "最低交易金額：美元20,000元", "doc.min_subscription_redemption"),
+        ("最低交易金額：美元10,000元", "最低交易金額：美元20,000元", "field.min_amounts"),
         ("商品開始受理申購日：2030年1月7日", "商品開始受理申購日：2030年1月8日", "doc.subscription_start_date"),
         ("(最終版)刊印日期：2030年1月7日", "(最終版)刊印日期：2030年1月9日", "doc.print_date"),
         (
@@ -403,7 +403,7 @@ def test_percentages_are_rounded_to_the_displayed_digits(tmp_path, field, value,
 @pytest.mark.parametrize(
     "rule,fields",
     [
-        ("doc.min_subscription_redemption", {"minimum_trade", "minimum_subscription", "minimum_additional"}),
+        ("field.min_amounts", {"minimum_trade", "minimum_subscription", "minimum_additional"}),
         ("doc.subscription_start_date", {"subscription_start", "subscription_end"}),
         ("doc.print_date", {"print_date_review", "print_date_final"}),
     ],
@@ -425,7 +425,7 @@ def test_each_review_standard_occurrence_is_checked_with_the_shared_rule(tmp_pat
         (
             "最低加購金額：美元10,000元",
             "最低加購金額：美元20,000元",
-            "doc.min_subscription_redemption",
+            "field.min_amounts",
             "minimum_additional",
         ),
         (
