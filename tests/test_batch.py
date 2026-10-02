@@ -1,4 +1,4 @@
-"""測試切點：批量核對入口 run_batch(說明書們, 參考條件表, 審查標準, 報告資料夾) → 結果與回填後的新檔。
+"""測試切點：批量核對入口 run_batch(說明書們, 參考條件表, 審查標準, 輸出資料夾) → 結果、報告與核對結果檔。
 
 只用合成資料（tests/synth.py）；以 openpyxl 讀回產出的 Excel 觀察回填結果。
 """
@@ -9,6 +9,9 @@ import datetime as dt
 from pathlib import Path
 
 import openpyxl
+import pytest
+from openpyxl.formatting.rule import CellIsRule
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from fcn_checker.batch import check_batch, run_batch, save_batch
 from fcn_checker.issuers import BARC
@@ -482,6 +485,48 @@ def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
     assert all(e["錯訊"] for e in errors)
     assert openpyxl.load_workbook(outcome.output)["錯誤清單"]["C2"].alignment.wrap_text
     assert list(sheet_rows(outcome.output)) == [ok.product_code]
+
+
+def edit_sheet(sheet: Path, change) -> None:
+    wb = openpyxl.load_workbook(sheet)
+    change(wb)
+    wb.save(sheet)
+
+
+def test_filter_range_shrinks_with_the_kept_rows_and_the_file_opens_on_the_filled_sheet(tmp_path):
+    a, b = Spec(), Spec(product_code="029199990002")
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(a), reference_row(b, **{"K(%)": 71})])
+
+    def change(wb):
+        wb["樣本清單"].auto_filter.ref = "A3:F5"
+        wb.active = wb["詢價表格"]
+
+    edit_sheet(sheet, change)
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, s) for s in (a, b)], [], sheet=sheet)
+    out = openpyxl.load_workbook(outcome.output)
+    assert out["回填後"].auto_filter.ref == "A3:F4"
+    assert out.active.title == "回填後"
+
+
+@pytest.mark.parametrize(
+    "feature,change",
+    [
+        ("合併儲存格", lambda ws: ws.merge_cells("A4:B4")),
+        ("格式化條件", lambda ws: ws.conditional_formatting.add("H4:H9", CellIsRule(operator="equal", formula=["0"]))),
+        ("資料驗證", lambda ws: ws.add_data_validation(DataValidation(type="list", formula1='"Y,N"', sqref="T4:T9"))),
+        ("公式", lambda ws: ws.cell(1, 1, "=COUNTA(E4:E9)")),
+    ],
+)
+def test_layout_that_cannot_be_trimmed_safely_writes_no_result_file(tmp_path, feature, change):
+    spec = Spec()
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    edit_sheet(sheet, lambda wb: change(wb["樣本清單"]))
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+    assert outcome.output is None and outcome.status == ERROR and not outcome.items[0].filled
+    e = outcome.errors[0]
+    assert (e.rule_id, e.reason_code) == ("output.result_file", "result_layout_unsupported")
+    assert feature in e.message
+    assert list((tmp_path / "reports").glob("*_核對結果_*.xlsx")) == []
 
 
 def test_existing_result_file_is_never_overwritten(tmp_path):

@@ -5,6 +5,9 @@
 - 「錯誤清單」：每份沒通過的說明書一列，依 PDF 輸入順序：TDCC Code、PDF 檔名、錯訊（多條以換行分隔）。
 
 檔名 `<參考條件表檔名>_核對結果_<YYYYMMDD-HHMMSS>.xlsx`，寫到指定資料夾，不覆蓋既有檔案。
+
+「回填後」是刪掉不要的列做出來的。合併儲存格、格式化條件、資料驗證的範圍與公式不會跟著位移，
+`樣本清單` 有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表。篩選範圍跟著資料列數縮小。
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl.styles import Alignment
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -48,12 +51,34 @@ def build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequ
         if name != rfmt.sheet:
             del wb[name]
     ws = wb[rfmt.sheet]
+    unsupported = _unsupported_layout(ws, rfmt.first_data_row)
+    if unsupported:
+        raise IngestionError(
+            "result_layout_unsupported",
+            f"參考條件表「{rfmt.sheet}」有{'、'.join(unsupported)}，刪列後無法保證版面正確，未產生核對結果檔",
+        )
     ws.title = FILLED_SHEET
+    ws.sheet_view.tabSelected = True
+    wb.active = ws
     _keep_rows(ws, rfmt.first_data_row, sorted(set(keep)))
     _error_sheet(wb.create_sheet(ERROR_SHEET), errors)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _unsupported_layout(ws: Worksheet, first: int) -> list[str]:
+    """刪列時不會跟著位移的設定。"""
+    found = []
+    if any(r.max_row >= first for r in ws.merged_cells.ranges):
+        found.append("資料列的合併儲存格")
+    if ws.conditional_formatting:
+        found.append("格式化條件")
+    if ws.data_validations.dataValidation:
+        found.append("資料驗證")
+    if any(c.data_type == "f" for row in ws.iter_rows() for c in row):
+        found.append("公式")
+    return found
 
 
 def _runs(rows: list[int]) -> list[tuple[int, int]]:
@@ -79,6 +104,11 @@ def _keep_rows(ws: Worksheet, first: int, keep: list[int]) -> None:
     for r, dim in enumerate(dims, start=first):
         dim.index = r
         ws.row_dimensions[r] = dim
+    if ws.auto_filter.ref:
+        min_col, min_row, max_col, max_row = range_boundaries(ws.auto_filter.ref)
+        if max_row >= first:
+            last = max(first + len(keep) - 1, min_row)
+            ws.auto_filter.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{last}"
 
 
 def _error_sheet(ws: Worksheet, errors: Sequence[ErrorRow]) -> None:

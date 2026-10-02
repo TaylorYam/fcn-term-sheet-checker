@@ -136,6 +136,7 @@ def test_check_requires_preview_and_writes_nothing(tmp_path):
     assert session.outcome is outcome
     assert [i.term_sheet for i in outcome.ordered_items] == [pdfs[1], pdfs[0]], "有問題的排前面"
     assert "1 份通過" in outcome.headline and "1 份不一致" in outcome.headline
+    assert "按「儲存核對結果」" in outcome.headline and "新檔" not in outcome.headline
     first = outcome.ordered_results(outcome.ordered_items[0])
     assert first[0].status.value == "MISMATCH"
     assert not outcome.batch.output and not any(i.filled for i in outcome.batch.items)
