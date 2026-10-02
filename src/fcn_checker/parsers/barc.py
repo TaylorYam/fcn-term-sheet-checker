@@ -17,7 +17,7 @@ from . import barc_schedule as schedule
 from .layout import Document, LayoutSpec, Span, TextIndex, join_text, parse_date, squash
 
 TEMPLATE_ID = "barc-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 
 # 章名「第一章 商品基本資料」、條號「1.」、子項「(1)」（範本規格 §3）
 LAYOUT = LayoutSpec(
@@ -73,13 +73,22 @@ class Mention:
 
 
 @dataclass
+class HeaderPct:
+    """價格表欄頭「X（為最初價格的N%）」；field 為對應的定義欄位（strike_pct／ko_pct／ki_pct）。"""
+
+    field: str
+    mention: Mention
+
+
+@dataclass
 class BarcTermSheet:
     fields: dict[str, ParsedField]
     price_rows: list[PriceRow]
-    coupon_mentions: dict[str, list[Mention]]  # monthly / annual
+    coupon_mentions: dict[str, list[Mention]]  # monthly / annual / repeat（§9(3)、§16 重複出現的月配息率）
     full_text: TextIndex
     document: Document
     scenario_rows: list[PriceRow] = field(default_factory=list)
+    header_pcts: list[HeaderPct] = field(default_factory=list)
 
     def f(self, name: str) -> ParsedField:
         return self.fields[name]
@@ -486,23 +495,210 @@ def _amount(lines: Sequence[Line], pattern: str, name: str) -> ParsedField:
     return _distinct(name, hits, "第四章找不到此金額")
 
 
-def _chairman(doc: Document) -> ParsedField:
-    arts = doc.articles(2)
-    target = [sp for sp in arts.values() if sp.title.startswith("受託或銷售機構")]
+def _ch2_item(
+    doc: Document, article: str, label: str, name: str, convert: Callable[[str], Any] = str.strip
+) -> ParsedField:
+    """第二章某條（標題以 article 開頭）中「label：值」；值換行時接續同一縮排的下一行。"""
+    target = [sp for sp in doc.articles(2).values() if sp.title.startswith(article)]
     if len(target) != 1:
         return (
-            ParsedField.missing("chairman", "第二章找不到「受託或銷售機構」條")
+            ParsedField.missing(name, f"第二章找不到「{article}」條")
             if not target
-            else ParsedField.ambiguous(
-                "chairman", [], [doc.lines[sp.start] for sp in target], "「受託或銷售機構」條出現多次"
-            )
+            else ParsedField.ambiguous(name, [], [doc.lines[sp.start] for sp in target], f"「{article}」條出現多次")
         )
+    lines = doc.span_lines(target[0])
     hits = []
-    for ln in doc.span_lines(target[0]):
-        m = re.match(r"^負責人姓名[:：]\s*(.+)$", ln.text)
-        if m:
-            hits.append((m.group(1).strip(), [ln]))
-    return _distinct("chairman", hits, "「受託或銷售機構」條找不到「負責人姓名」")
+    for i, ln in enumerate(lines):
+        m = re.match(rf"^{label}[:：]\s*(.+)$", ln.text)
+        if not m:
+            continue
+        block = [ln]
+        for nxt in lines[i + 1 :]:
+            if abs(nxt.x0 - ln.x0) > 3 or re.match(r"^[^:：]{2,12}[:：]", nxt.text):
+                break
+            block.append(nxt)
+        hits.append((convert(m.group(1) + join_text(block[1:])), block))
+    return _distinct(name, hits, f"「{article}」條找不到「{label}」")
+
+
+def _chairman(doc: Document) -> ParsedField:
+    return _ch2_item(doc, "受託或銷售機構", "負責人姓名", "chairman")
+
+
+# ---------------------------------------------------------------- 文件內重複出現處（Issue #38）
+
+
+def _title_name(lines: Sequence[Line]) -> ParsedField:
+    """p1 封面標題（「中文產品說明書」之後、第一個封面標籤之前）的商品名稱。"""
+    p1 = [ln for ln in lines if ln.page == 1]
+    title = next((ln for ln in p1 if "中文產品說明書" in ln.text), None)
+    label = next((ln for ln in p1 if ln.x0 < _COVER_LABEL_MAX_X and re.match(r"^商品代號\s*[:：]", ln.text)), None)
+    if title is None or label is None:
+        return ParsedField.missing("title_name", "p1 找不到封面標題範圍")
+    body = [ln for ln in p1 if title.y0 + 3 < ln.y0 < label.y0 - 3]
+    if not body:
+        return ParsedField.missing("title_name", "p1 封面標題沒有商品名稱")
+    return ParsedField.present("title_name", squash(join_text(body)), body)
+
+
+def _article_value(doc: Document, sp: Span | None, label: str, name: str) -> ParsedField:
+    """第一章某條「label：值」（值去空白）。"""
+    lines = [ln for ln in doc.span_lines(sp) if not re.fullmatch(r"\d{1,2}\.", ln.text)]
+    m = re.search(rf"{label}[:：](.+)$", squash(join_text(lines)))
+    if not m:
+        return ParsedField.missing(name, f"找不到「{label}：」")
+    return ParsedField.present(name, m.group(1), lines)
+
+
+def _issue_price(doc: Document, art6: Span | None) -> ParsedField:
+    lines = doc.span_lines(art6)
+    m = re.search(r"發行價格為商品面額之([\d.]+)%", squash(join_text(lines)))
+    if not m:
+        return ParsedField.missing("issue_price_pct", "第 6 條找不到「發行價格為商品面額之…%」")
+    return ParsedField.present("issue_price_pct", Decimal(m.group(1)), lines)
+
+
+def _distributor_cover(lines: list[Line]) -> dict[str, ParsedField]:
+    """封面「受託或銷售機構之名稱、電話及地址」→ 名稱、電話、地址。"""
+    keys = ("distributor_name_cover", "distributor_phone_cover", "distributor_address_cover")
+    raw = _cover_value(lines, "受託或銷售機構之名稱、電話及地址")
+    if not raw or not raw[0][0]:
+        return {k: ParsedField.missing(k, "封面找不到「受託或銷售機構之名稱、電話及地址」") for k in keys}
+    if len(raw) > 1:
+        return {k: ParsedField.ambiguous(k, [], [ln for _, lns in raw for ln in lns], "封面此欄出現多次") for k in keys}
+    text, lns = raw[0]
+    m = re.fullmatch(r"(.+?)，電話[:：](.+?)，地址[:：](.+)", squash(text))
+    if not m:
+        return {k: ParsedField.invalid(k, lns, "無法拆成「名稱，電話：…，地址：…」") for k in keys}
+    return {k: ParsedField.present(k, v, lns) for k, v in zip(keys, m.groups(), strict=True)}
+
+
+FEE_LABELS = ("申購費用", "提前贖回費用", "管理費用", "分銷費用", "保費費用", "解約費用", "其他費用")
+_FEE_RANGE = re.compile(r"([\d.]+%~[\d.]+%)")
+
+
+def _fees(ch4: list[Line]) -> dict[str, ParsedField]:
+    """第四章「投資人應負擔的各項費用」表：各費用項目的費率區間（費率欄，位於費用項目欄與收取時點欄之間）。"""
+    out: dict[str, ParsedField] = {}
+    start = next((i for i, ln in enumerate(ch4) if ln.text.startswith("投資人應負擔的各項費用")), None)
+    if start is None:
+        return {f"fee_{lab}": ParsedField.missing(f"fee_{lab}", "第四章找不到費用表") for lab in FEE_LABELS}
+    seg = ch4[start:]
+    end = next((i for i, ln in enumerate(seg) if ln.text.startswith("附註")), len(seg))
+    seg = seg[:end]
+    item_hdr = next((ln for ln in seg if ln.text == "費用項目"), None)
+    when_hdr = next((ln for ln in seg if ln.text == "收取時點"), None)
+    if item_hdr is None or when_hdr is None:
+        return {f"fee_{lab}": ParsedField.missing(f"fee_{lab}", "費用表表頭不完整") for lab in FEE_LABELS}
+    rows = [ln for ln in seg if ln.x1 <= item_hdr.x1 + 80 and ln.x0 < item_hdr.x0 and ln.text.startswith(FEE_LABELS)]
+    for k, row in enumerate(rows):
+        label = next(lab for lab in FEE_LABELS if row.text.startswith(lab))
+        nxt = rows[k + 1] if k + 1 < len(rows) else None
+        cells = [
+            ln
+            for ln in seg
+            if ln.page == row.page
+            and item_hdr.x1 < ln.x0 < when_hdr.x0 - 15
+            and row.y0 - 3 <= ln.y0
+            and (nxt is None or nxt.page != row.page or ln.y0 < nxt.y0 - 3)
+        ]
+        ranges = _FEE_RANGE.findall(squash(join_text(cells)))
+        name = f"fee_{label}"
+        if not ranges:
+            out[name] = ParsedField.missing(name, f"「{label}」沒有費率區間")
+        else:
+            out[name] = _distinct(name, [(r, [row, *cells]) for r in ranges])
+    for lab in FEE_LABELS:
+        out.setdefault(f"fee_{lab}", ParsedField.missing(f"fee_{lab}", f"費用表找不到「{lab}」"))
+    return out
+
+
+def _scenario_notional(ti: TextIndex) -> ParsedField:
+    hits = [
+        (int(m.group(1).replace(",", "")), ti.lines_for(m.start(), m.end()))
+        for m in ti.finditer(r"每單位商品面額=([\d,]+)")
+    ]
+    return _distinct("scenario_notional", hits, "第 16 條找不到情境假設「每單位商品面額 =」")
+
+
+_HEADER_PCT = re.compile(r"(執行價格|觸及生效價格|觸發水準)（為最初價格的([\d.]+)%")
+_HEADER_FIELD = {"執行價格": "strike_pct", "觸及生效價格": "ki_pct", "觸發水準": "ko_pct"}
+
+
+def _header_pcts(ti: TextIndex, article: str) -> list[HeaderPct]:
+    """價格表欄頭的百分比（定義句「X」詳見下表所示（…）不符合此寫法，不會被重複計入）。"""
+    return [
+        HeaderPct(_HEADER_FIELD[m.group(1)], Mention(article, Decimal(m.group(2)), ti.lines_for(m.start(), m.end())))
+        for m in ti.finditer(_HEADER_PCT)
+    ]
+
+
+# §16 情境試算中月配息率的寫法：(100% + M%)、乘以M%之配息率、× M%(四捨五入…)、x M% x n
+_SCENARIO_MONTHLY = (
+    r"100%\+([\d.]+)%",
+    r"乘以([\d.]+)%之配息率",
+    r"[×xX]([\d.]+)%(?=\(四捨五|[×xX]\d)",
+)
+
+
+def _repeat_mentions(doc: Document, arts: dict[int, Span], s16: TextIndex) -> list[Mention]:
+    """月配息率在 §9(3)「相關配息率」與 §16 情境試算中的每次出現。
+
+    §9(3) 只有期間每日觀察型態才列出相關配息率（期末定日型態以文字定義，沒有數值），找不到時不列；
+    期間每日觀察型態找不到時由規則轉人工覆核。
+    §16 一定有情境試算；找不到時以 NaN 標記，交由規則轉人工覆核。
+    """
+    out: list[Mention] = []
+    s9 = doc.subitems(arts.get(9))
+    if 3 in s9:
+        ti = TextIndex(doc.span_lines(s9[3]))
+        # 每一處「相關配息率為」後面都必須讀得到數值；讀不到以 NaN 標記，交由規則轉人工覆核
+        for m in ti.finditer(r"相關配息率為"):
+            v = re.match(r"[:：]?([\d.]+)%", ti.text[m.end() :])
+            value = Decimal(v.group(1)) if v else Decimal("NaN")
+            end = m.end() + (v.end() if v else 0)
+            out.append(Mention("第9條(3)", value, ti.lines_for(m.start(), end)))
+    found = sorted(
+        (m for pat in _SCENARIO_MONTHLY for m in s16.finditer(pat)),
+        key=lambda m: m.start(),
+    )
+    for m in found:
+        out.append(Mention("第16條", Decimal(m.group(1)), s16.lines_for(m.start(), m.end())))
+    if not found:
+        out.append(Mention("第16條", Decimal("NaN"), []))
+    return out
+
+
+_RETURN_RE = re.compile(r"\]-1=(-?[\d.]+)%\(平均年化報酬率[:：](-?[\d.]+)%\)")
+_CASES = ("(i)有利情況", "(ii)一般情況", "(iii)最差情況")
+
+
+def _scenario_returns(ti: TextIndex) -> dict[str, ParsedField]:
+    """§16(3) 有利、一般情況的總報酬率與平均年化報酬率；有利情況另記配息期數（相關配息率倍數＋累積配息期數）。"""
+    text = ti.text
+    pos = [text.find(c) for c in _CASES]
+    out: dict[str, ParsedField] = {}
+    for k, name in ((0, "scenario_favourable"), (1, "scenario_general")):
+        if pos[k] < 0 or pos[k + 1] < pos[k]:
+            out[name] = ParsedField.missing(name, f"第 16 條找不到「{_CASES[k]}」或「{_CASES[k + 1]}」")
+            continue
+        seg_start, seg = pos[k], text[pos[k] : pos[k + 1]]
+        returns = list(_RETURN_RE.finditer(seg))
+        if len(returns) != 1:
+            note = "找不到總報酬率算式" if not returns else "總報酬率算式出現多次"
+            out[name] = ParsedField.missing(name, note) if not returns else ParsedField.ambiguous(name, [], [], note)
+            continue
+        r = returns[0]
+        value: dict[str, Any] = {"total": Decimal(r.group(1)), "annualized": Decimal(r.group(2))}
+        if k == 0:
+            rel = re.search(r"100%\+[\d.]+%(?:[×xX](\d+))?", seg)
+            acc = re.search(r"[×xX][\d.]+%[×xX](\d+)", seg)
+            if rel is None:
+                out[name] = ParsedField.missing(name, "有利情況找不到「100% + 相關配息率」算式")
+                continue
+            value["periods"] = int(rel.group(1) or 1) + (int(acc.group(1)) if acc else 0)
+        out[name] = ParsedField.present(name, value, ti.lines_for(seg_start + r.start(), seg_start + r.end()))
+    return out
 
 
 # ---------------------------------------------------------------- 入口
@@ -520,6 +716,12 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds["name_en"] = _cover_field("name_en", all_lines, "商品英文名稱", lambda s: re.sub(r"\s+", " ", s).strip())
     flds["approval_date"] = _cover_field("approval_date", all_lines, "受託或銷售機構審查通過之日期", parse_date)
     flds["print_date"] = _labelled_date(doc.before_chapter1(), r"刊印日期[:：]", "print_date", "「刊印日期」")
+    flds["title_name"] = _title_name(all_lines)
+    flds["distributor_product_code"] = _cover_field(
+        "distributor_product_code", all_lines, "受託或銷售機構商品代號", squash
+    )
+    flds["issuer_name_cover"] = _cover_field("issuer_name_cover", all_lines, "發行機構", squash)
+    flds.update(_distributor_cover(all_lines))
 
     arts = doc.articles(1)
     s13 = doc.subitems(arts.get(13))
@@ -530,6 +732,12 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds["maturity_date"] = _s13_date(doc, s13, 5, "maturity_date")
     flds["ko_observation"] = _ko_observation(doc, arts.get(13))
     flds["denomination"] = _denomination(doc, arts.get(6))
+    flds["issue_price_pct"] = _issue_price(doc, arts.get(6))
+    flds["art1_name"] = _article_value(doc, arts.get(1), "商品名稱", "art1_name")
+    art5 = _article_value(doc, arts.get(5), "計價幣別", "art5_currency")
+    if art5.ok:  # 人民幣後面可能接付款帳戶說明：「人民幣(本商品以人民幣支付…)」
+        art5.value = re.split(r"[(（]", art5.value, maxsplit=1)[0]
+    flds["art5_currency"] = art5
     flds["underlyings"] = _underlyings(doc, arts.get(10))
     flds["monthly_coupon_pct"], flds["coupon_pa_pct"] = _coupon(doc, arts.get(14))
 
@@ -548,17 +756,29 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds["ko_table"] = schedule.ko_table(tables, flds["ko_observation"])
     flds["guaranteed_periods"] = schedule.guaranteed_periods(flds["ko_table"])
     flds["guaranteed_periods_text"] = schedule.guaranteed_periods_text(doc, arts.get(13))
+    flds["observation_t_ranges"] = schedule.observation_t_ranges(doc, arts.get(13))
+
+    s16 = TextIndex(doc.span_lines(arts.get(16)))
+    flds["scenario_notional"] = _scenario_notional(s16)
+    flds.update(_scenario_returns(s16))
+    header_pcts = _header_pcts(TextIndex(s15), "第15條") + _header_pcts(s16, "第16條")
 
     flds["subscription_start_date"] = _labelled_date(
         doc.chapter_lines(4), r"^商品開始受理申購日期[:：]", "subscription_start_date", "第四章「商品開始受理申購日期」"
     )
     flds["chairman"] = _chairman(doc)
+    sq = lambda s: squash(s)  # noqa: E731
+    flds["issuer_name_ch2"] = _ch2_item(doc, "發行機構", "事業名稱", "issuer_name_ch2", sq)
+    flds["distributor_name_ch2"] = _ch2_item(doc, "受託或銷售機構", "事業名稱", "distributor_name_ch2", sq)
+    flds["distributor_address_ch2"] = _ch2_item(doc, "受託或銷售機構", "營業所在地", "distributor_address_ch2", sq)
     ch4 = doc.chapter_lines(4)
+    flds.update(_fees(ch4))
     flds["min_subscription"] = _amount(ch4, r"最低申購金額依受託或銷售機構規定，至少為([\d,]+)", "min_subscription")
     flds["min_redemption"] = _amount(ch4, r"最低贖回商品面額為([\d,]+)", "min_redemption")
 
     mentions = {
         "monthly": _mentions(doc, arts, _MONTHLY_PATTERNS),
         "annual": _mentions(doc, arts, _ANNUAL_PATTERNS),
+        "repeat": _repeat_mentions(doc, arts, s16),
     }
-    return det, BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc, scenario_rows)
+    return det, BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc, scenario_rows, header_pcts)

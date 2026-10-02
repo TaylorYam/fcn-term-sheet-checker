@@ -232,22 +232,34 @@ def guaranteed_periods(ko: ParsedField) -> ParsedField:
     return ParsedField.present(name, g, t.header + anchor.lines)
 
 
-def guaranteed_periods_text(doc: Document, art13: Span | None) -> ParsedField:
-    """§13(7)「自動提前出場觀察期：」定義句（Daily Memory）。第 N 個 → N；t 等於 1 至 n → 0。"""
-    name = "guaranteed_periods_text"
+def _observation_block(doc: Document, art13: Span | None) -> list[Line] | ParsedField:
+    """§13(7)「自動提前出場觀察期：」定義句（Daily Memory）的文字行；找不到時回傳 missing 欄位。"""
     subs = doc.subitems(art13)
     if 7 not in subs:
-        return ParsedField.missing(name, "找不到第 13 條第 (7) 項")
+        return ParsedField.missing("observation_period", "找不到第 13 條第 (7) 項")
     lines = doc.span_lines(subs[7])
     starts = [i for i, ln in enumerate(lines) if ln.text.startswith("自動提前出場觀察期：")]
     if len(starts) != 1:
-        return ParsedField.missing(name, "第 13 條第 (7) 項沒有「自動提前出場觀察期：」定義句")
+        return ParsedField.missing("observation_period", "第 13 條第 (7) 項沒有「自動提前出場觀察期：」定義句")
     i = starts[0]
     block = [lines[i]]
     for ln in lines[i + 1 : i + 6]:
         if abs(ln.x0 - lines[i].x0) > 3:
             break
         block.append(ln)
+    return block
+
+
+def _renamed(pf: ParsedField, name: str) -> ParsedField:
+    return ParsedField(name, pf.status, pf.value, list(pf.evidence), pf.candidates, pf.note)
+
+
+def guaranteed_periods_text(doc: Document, art13: Span | None) -> ParsedField:
+    """§13(7)「自動提前出場觀察期：」定義句（Daily Memory）。第 N 個 → N；t 等於 1 至 n → 0。"""
+    name = "guaranteed_periods_text"
+    block = _observation_block(doc, art13)
+    if isinstance(block, ParsedField):
+        return _renamed(block, name)
     text = squash("".join(ln.text for ln in block))
     m = re.search(r"就(?:首個|第\S{1,3}個)（即t等於(\d+)的情況）自動提前出場觀察期而言，指期末日(\d+)", text)
     if m and m.group(1) == m.group(2):
@@ -255,3 +267,16 @@ def guaranteed_periods_text(doc: Document, art13: Span | None) -> ParsedField:
     if re.search(r"就t等於1至\d+的情況而言，則指自相關期始日起（含）至相關期末日止（含）", text):
         return ParsedField.present(name, 0, block)
     return ParsedField.invalid(name, block, "「自動提前出場觀察期」定義句不屬於已知寫法")
+
+
+def observation_t_ranges(doc: Document, art13: Span | None) -> ParsedField:
+    """§13(7) 定義句中各段 t 的起訖：「t 等於 g」→ (g, g)；「t 等於 a 至 b」→ (a, b)，依出現順序。"""
+    name = "observation_t_ranges"
+    block = _observation_block(doc, art13)
+    if isinstance(block, ParsedField):
+        return _renamed(block, name)
+    text = squash("".join(ln.text for ln in block))
+    ranges = [(int(a), int(b or a)) for a, b in re.findall(r"t等於(\d+)(?:至(\d+))?", text)]
+    if not ranges:
+        return ParsedField.invalid(name, block, "定義句找不到「t 等於…」")
+    return ParsedField.present(name, ranges, block)

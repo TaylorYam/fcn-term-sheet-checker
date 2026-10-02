@@ -27,6 +27,8 @@ def test_confirmed_preview_can_be_checked_without_writing_report(tmp_path):
         "field.monthly_ki",
         "doc.underlying_names",
         "field.isin",
+        "doc.initial_prices",
+        "doc.scenario_other_returns",
     }
     assert session.outcome is outcome
     assert set(tmp_path.iterdir()) == {pdf, excel}
