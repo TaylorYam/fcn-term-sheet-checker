@@ -80,7 +80,7 @@ class PanelSession:
         registry: Sequence[Issuer] = REGISTRY,
         install_root: Path | None = None,
     ):
-        """config_dir 有參考條件表格式與上手編號對照就用它的；沒有（舊安裝）就用 builtin_config_dir（版本內建設定）。
+        """config_dir 有參考條件表格式與上手編號對照就用它的；沒有就用 builtin_config_dir（雙擊入口傳入專案的 config；未指定時為開發環境的 repo config）。
 
         install_root 是根目錄（雙擊入口給的安裝根目錄；沒有時為執行目錄），核對紀錄寫到它的 runtime/核對紀錄。
         """

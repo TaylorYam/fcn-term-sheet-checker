@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-def run(script: str, argv: list[str]) -> None:
+def run(script: str) -> None:
     root = Path(script).resolve().parent
     from fcn_checker.panel import main
 

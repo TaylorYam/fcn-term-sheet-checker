@@ -1,9 +1,7 @@
 # 0003: PANEL 以公開 GitHub main 提供手動更新
 
-- Status: Deprecated（2026-10-02，Issue #85）
+- Status: Superseded by [0006](0006-panel-maintainer-only-no-self-update.md)
 - Date: 2026-10-01
-
-> 2026-10-02 停用：PANEL 只有維護者本人使用，同事不安裝也不使用，「各同事獨立本機安裝」的前提已不成立。整套自動更新（按鈕、`PanelUpdater`、`.local/releases/` 版本資料夾與啟動指標、更新鎖）已移除；維護者在專案資料夾 `git pull` 後重新執行 `setup_panel.cmd`。核對紀錄的程式 commit 改取開發用 Git 的 HEAD 或安裝時記錄的 `.local/installed.json`。以下為原決策紀錄。
 
 ## Context
 

@@ -1,9 +1,12 @@
 """程式版本（核對紀錄用）：開發用 Git 的 HEAD，或 setup_panel.cmd 安裝時記錄的版本。"""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from fcn_checker.version import program_commit, record_installation
 
@@ -23,6 +26,21 @@ def test_program_commit_prefers_git_then_installed_record(tmp_path):
     head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True)
     if head.returncode == 0 and (repo / ".git").exists():
         assert program_commit(tmp_path, package=repo / "src" / "fcn_checker") == head.stdout.strip(), "開發用 Git"
+
+
+def test_installed_package_inside_a_git_checkout_uses_the_installed_record(tmp_path):
+    """維護者的實際環境：專案是 Git，套件裝在 .venv 裡。commit 取安裝時記錄的版本，不是之後 git pull 的 HEAD。"""
+    if shutil.which("git") is None:
+        pytest.skip("沒有 git")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    local = tmp_path / ".local"
+    local.mkdir()
+    (local / "installed.json").write_text(json.dumps({"sha": OLD}))
+    installed = tmp_path / ".venv" / "Lib" / "site-packages" / "fcn_checker"
+    installed.mkdir(parents=True)
+    assert program_commit(tmp_path, package=installed) == OLD
 
 
 def test_invalid_installed_record_is_unknown(tmp_path):

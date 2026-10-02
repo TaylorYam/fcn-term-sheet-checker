@@ -82,13 +82,13 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
 5. 預覽與結果只能查看（人工放行除外，它不改任何檔案，儲存時才生效）。更換來源會清除舊預覽及結果；外部修改或刪除參考條件表、任一 PDF、審查標準或設定檔時，畫面偵測後要求重新載入。讀檔與核對在背景執行，避免重複提交。
 6. 按「儲存核對結果…」，選擇資料夾：核對結果檔 `<原檔名>_核對結果_<日期時間>.xlsx`（「回填後」＋「錯誤清單」）寫到該資料夾，完成訊息列出核對結果檔路徑。原參考條件表不動。內部核對紀錄自動寫到安裝根目錄的 `runtime/核對紀錄/`（更新程式時保留）；紀錄寫不進去時，完成訊息會列出原因。未按儲存不產生任何檔案；檔名已存在時不覆蓋，寫入失敗時列出原因，核對結果仍可查看與重試。
 
-設定檔：PANEL 讀根目錄 `config/` 的 `review_standard.toml`；`reference_sheet.toml` 與 `issuer_prefixes.toml` 若根目錄沒有（例如更新前安裝的環境），改用程式內建的同名設定。畫面上方會顯示實際使用的設定檔路徑。
+設定檔：PANEL 讀專案根目錄 `config/` 的 `review_standard.toml`、`reference_sheet.toml` 與 `issuer_prefixes.toml`。畫面上方會顯示實際使用的設定檔路徑。
 
 ## 更新程式
 
 PANEL 只有維護者本人使用。更新方式：在專案資料夾執行 `git pull`，再重新雙擊 `setup_panel.cmd`。安裝會把程式複製進 `.venv`，只 `git pull` 不會生效。根目錄的 PDF、Excel、核對紀錄（`runtime/`）及 `config` 不受影響；新版的內建設定若有變更，需自行比較後導入根目錄 `config`。
 
-舊版曾提供「更新 GitHub 最新版」按鈕（[ADR 0003](docs/adr/0003-public-github-panel-update.md)，已停用，Issue #85）。它留下的 `.local/releases/`、`.local/current.json`、`.local/update.lock` 已不再使用，可以手動刪除；`.local/installed.json` 是安裝時記錄的版本，請保留。
+舊版曾提供「更新 GitHub 最新版」按鈕（[ADR 0003](docs/adr/0003-public-github-panel-update.md)，已由 [ADR 0006](docs/adr/0006-panel-maintainer-only-no-self-update.md) 取代）。它留下的 `.local/releases/`、`.local/current.json`、`.local/update.lock` 已不再使用，可以手動刪除；`.local/installed.json` 是安裝時記錄的版本，請保留。
 
 ## 開發與測試
 
@@ -110,7 +110,7 @@ ruff check src tests
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
 - [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
 - [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已停用）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)
+- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
 

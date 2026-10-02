@@ -1,6 +1,6 @@
 """程式版本（核對紀錄用）：開發用 Git 工作目錄的 HEAD，或 setup_panel.cmd 安裝時記錄的版本。
 
-更新方式：在專案資料夾 `git pull` 後重新執行 `setup_panel.cmd`（ADR 0003 已取代）。
+更新方式：在專案資料夾 `git pull` 後重新執行 `setup_panel.cmd`（ADR 0006）。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
 PACKAGE_DIR = Path(__file__).resolve().parent
-INSTALLED = Path(".local") / "installed.json"
+INSTALLED_RECORD = Path(".local") / "installed.json"  # setup_panel.cmd 安裝時記錄的版本
 
 
 def git_revision(root: Path) -> str | None:
@@ -57,7 +57,7 @@ def program_commit(root: Path, *, package: Path = PACKAGE_DIR) -> str | None:
     if revision is not None:
         return revision
     try:
-        sha = json.loads((root / INSTALLED).read_text(encoding="utf-8"))["sha"]
+        sha = json.loads((root / INSTALLED_RECORD).read_text(encoding="utf-8"))["sha"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
     return sha if isinstance(sha, str) and SHA.fullmatch(sha) else None
@@ -67,7 +67,7 @@ def record_installation(root: Path) -> None:
     """setup_panel.cmd 安裝成功後記錄版本；沒有 Git（例如 ZIP 安裝）時記為未知。"""
     root = root.resolve()
     sha = git_revision(root)
-    target = root / INSTALLED
+    target = root / INSTALLED_RECORD
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.parent / f"installed-{uuid.uuid4().hex}.tmp"
     try:

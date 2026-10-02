@@ -452,7 +452,7 @@ def test_double_click_launch_runs_from_the_root_and_ignores_old_update_pointer(t
     spec = importlib.util.spec_from_file_location("bootstrap", ROOT / "panel_bootstrap.py")
     bootstrap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bootstrap)
-    bootstrap.run(str(root / "launch_panel.pyw"), [])
+    bootstrap.run(str(root / "launch_panel.pyw"))
 
     args = parse_args(captured["argv"])
     assert args.config_dir == args.builtin_config_dir == root / "config"
