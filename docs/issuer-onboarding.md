@@ -184,7 +184,7 @@ adapter 少交某個標準欄位時，相關規則轉人工覆核並寫出欄位
 
 - 真實說明書、螢光標記 PDF、詢價表、擷取文字與報告只放被 Git 忽略的 `data/`、`runtime/`。
 - Issue、PR、文件、測試與 CI 不得含真實商品代號、ISIN、價格、報價編號或客戶資料。
-- Repo 公開後（[ADR 0003](adr/0003-public-github-panel-update.md)）以上規定更須嚴格遵守；提交前檢查 diff。
+- Repo 若改為公開，以上規定更須嚴格遵守；提交前一律檢查 diff。
 
 ## 10. 檢查清單
 

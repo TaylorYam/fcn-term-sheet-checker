@@ -1,6 +1,6 @@
 # 0003: PANEL 以公開 GitHub main 提供手動更新
 
-- Status: Accepted
+- Status: Superseded by [0006](0006-panel-maintainer-only-no-self-update.md)
 - Date: 2026-10-01
 
 ## Context

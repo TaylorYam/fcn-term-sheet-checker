@@ -436,28 +436,26 @@ def test_panel_accepts_legacy_launcher_arguments(tmp_path):
     assert args.config_dir == tmp_path / "cfg"
 
 
-def test_builtin_config_comes_from_the_launched_release_not_the_package_location(tmp_path, monkeypatch):
-    """PANEL 安裝是 `pip install .`（非 editable）：內建設定必須由啟動的版本資料夾指定，不能靠套件位置推算。"""
+def test_double_click_launch_runs_from_the_root_and_ignores_old_update_pointer(tmp_path, monkeypatch):
+    """雙擊入口一律從專案根目錄啟動；舊版自動更新留下的 .local/current.json 不再使用。"""
     import importlib.util
 
-    root, release = tmp_path / "install", tmp_path / "install" / ".local" / "releases" / "abc"
-    (release / "config").mkdir(parents=True)
-    (root / "config").mkdir()
-    (root / "config" / "review_standard.toml").write_bytes(REVIEW_STANDARD.read_bytes())
-    for f in (REFERENCE_FORMAT, ISSUER_PREFIXES):
-        (release / "config" / f.name).write_bytes(f.read_bytes())
+    root = tmp_path / "install"
+    (root / "config").mkdir(parents=True)
+    for f in (REVIEW_STANDARD, REFERENCE_FORMAT, ISSUER_PREFIXES):
+        (root / "config" / f.name).write_bytes(f.read_bytes())
+    (root / ".local").mkdir()
+    (root / ".local" / "current.json").write_text('{"sha": "' + "2" * 40 + '", "release": ".local/releases/old"}')
 
     captured = {}
-    monkeypatch.setattr("fcn_checker.panel.main", lambda argv, on_ready=None: captured.setdefault("argv", argv))
+    monkeypatch.setattr("fcn_checker.panel.main", lambda argv: captured.setdefault("argv", argv))
     spec = importlib.util.spec_from_file_location("bootstrap", ROOT / "panel_bootstrap.py")
     bootstrap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bootstrap)
-    bootstrap.run(str(release / "launch_panel.pyw"), ["--managed-root", str(root)])
+    bootstrap.run(str(root / "launch_panel.pyw"))
 
     args = parse_args(captured["argv"])
-    assert args.config_dir == root / "config"
-    assert args.builtin_config_dir == release / "config"
+    assert args.config_dir == args.builtin_config_dir == root / "config"
     session = session_from_args(args)
-    assert session.install_root == root.resolve(), "核對紀錄寫到安裝根目錄的 runtime/，不寫進版本資料夾"
-    assert session.reference_format == (release / "config" / REFERENCE_FORMAT.name).resolve()
-    assert session.issuer_prefixes == (release / "config" / ISSUER_PREFIXES.name).resolve()
+    assert session.install_root == root.resolve(), "核對紀錄寫到根目錄的 runtime/"
+    assert session.reference_format == (root / "config" / REFERENCE_FORMAT.name).resolve()
