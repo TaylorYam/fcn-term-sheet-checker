@@ -11,7 +11,7 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .schema import Evidence
+from .schema import Evidence, FieldStatus, ParsedField
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,20 @@ class AutocallSchedule:
     first_callable: int  # 第一個可以提前出場的期別（Non-Call(月)），最小為 1
     periods: int  # 期數
     dates: dict[int, dt.date]  # 期別 → 比價日；至少包含第一個可提前出場期起的每一期
+
+
+@dataclass(frozen=True)
+class Occurrence:
+    """審查標準規則涵蓋的一處出處；每處各自產生一筆結果。"""
+
+    field: str  # 結果的欄位名稱（例：print_date_final）
+    where: str  # 說明書上的位置，用在結果訊息（例：第四章商品開始受理申購日期）
+    value: ParsedField
+
+
+def occurrences(name: str, items: list[Occurrence]) -> ParsedField:
+    """把上手的各出處包成一個標準欄位（清單本身一定存在，各出處自帶狀態與證據）。"""
+    return ParsedField(name, FieldStatus.PRESENT, tuple(items))
 
 
 # 名稱 → 值的形狀
@@ -54,4 +68,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "ko_memory": "bool：是否記憶式",
     "ki_type": "str：none 無 KI／AM 到期觀察／D 每日觀察／M 每月觀察；none 可用 NOT_APPLICABLE 狀態交出",
     "autocall_schedule": "AutocallSchedule：提前出場排程（目前由上手註冊項目的 autocall_schedule 交出）",
+    "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額的各最低金額出處（最低交易／申購／加購／贖回金額）",
+    "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",
+    "print_dates": "tuple[Occurrence, ...]：須在交易日當天至允許天數內的刊印日期出處",
 }

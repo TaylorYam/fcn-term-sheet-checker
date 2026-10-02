@@ -12,16 +12,18 @@ from typing import Any
 
 from ..schema import CheckResult, OrderValue, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import STANDARD_FIELDS, AutocallSchedule
+from ..standard_fields import AutocallSchedule
 from .common import (
     KI_LABEL,
     Context,
     cmp_pct,
     doc_ki,
     doc_review,
+    occurrences_of,
     order_review,
     order_value,
     result,
+    standard_field,
     to_date,
     to_decimal,
     to_int,
@@ -38,15 +40,6 @@ PRICE_COLUMNS = (
     ("ki", "ki_price", "下限價"),
     ("ko", "ko_price", "KO 價"),
 )
-
-
-def standard_field(ctx: Context, name: str) -> ParsedField:
-    """讀說明書標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
-    assert name in STANDARD_FIELDS, f"{name} 不是標準欄位"
-    try:
-        return ctx.ts.f(name)
-    except KeyError:
-        return ParsedField.missing(name, f"上手未提供標準欄位「{name}」")
 
 
 # ---------------------------------------------------------------- 表上事先填好的欄位
@@ -374,6 +367,39 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     return out
 
 
+def min_amounts(ctx: Context) -> list[CheckResult]:
+    """說明書各最低金額出處（最低交易／申購／加購／贖回金額）= 參考條件表「單位面額」。"""
+    rid = "field.min_amounts"
+    items, problem = occurrences_of(ctx, rid, "min_amounts")
+    if problem:
+        return [problem]
+    out = []
+    for occ in items:
+        pf = occ.value
+        v, ov, problem = order_value(ctx, "denomination", rid, occ.field, pf, to_int, "整數")
+        if problem:
+            out.append(problem)
+            continue
+        if not pf.ok:
+            out.append(doc_review(rid, occ.field, pf, v, [ov]))
+            continue
+        ok = pf.value == v
+        out.append(
+            result(
+                rid,
+                occ.field,
+                S.PASS if ok else S.MISMATCH,
+                expected=v,
+                actual=pf.value,
+                pf=pf,
+                ov=[ov],
+                reason="" if ok else "value_mismatch",
+                message=f"{occ.where}須等於參考條件表「單位面額」",
+            )
+        )
+    return out
+
+
 def field_rules(ctx: Context) -> list[CheckResult]:
     """表上作業人員事先填好的欄位逐一與說明書標準欄位比對（Non-Call 與回填欄位見下方）。"""
     dec, intg, date = to_decimal, to_int, to_date
@@ -390,6 +416,7 @@ def field_rules(ctx: Context) -> list[CheckResult]:
         _compare(ctx, "field.final_valuation_date", "final_valuation_date", date, "日期"),
         _compare(ctx, "field.maturity_date", "maturity_date", date, "日期"),
         _compare(ctx, "field.denomination", "denomination", intg, "整數"),
+        *min_amounts(ctx),
         ko_observation(ctx),
         ko_memory(ctx),
         ki_type(ctx),

@@ -123,7 +123,7 @@ PDF 內部另外要求：月配息率在 §9(1)、§14、§15(2)、§17(1) 都�
 | 末期 | 最後一期評價日 = 最終評價日；最後一期支付日 = 到期日 |
 | 情境分析價格表 | §16(3) 重印表 = §15 價格表（逐格相等） |
 | 開始受理申購日期 | 第四章 §1(1) = 交易日 |
-| 最低申購、最低贖回金額 | 第四章 §4、§8 = 面額 |
+| 最低申購、最低贖回金額 | 第四章 §4、§8 = 參考條件表「單位面額」（`field.min_amounts`，2026-10-02 使用者決定） |
 | 觸發百分比 | §13(7) 每期百分比 = §15 定義句 |
 | 商品名稱（2026-10-02） | p1 封面標題 = 封面「商品中文名稱」去掉「（下稱「本商品」）」；第一章 §1 商品名稱 = 封面「商品中文名稱」。忽略空白，括號全半形不計 |
 | 受託機構商品代號 | 封面「受託或銷售機構商品代號」= 封面「商品代號」 |
@@ -261,8 +261,8 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 | `derive.monthly_coupon` | 月配息率推算，容差 ≤ 0.0001 | §3.5 |
 | `doc.coupon_consistency` | 月配息率（§9、§14、§15(2)、§17）與年利率（§9、§14、§17）文件內一致 | §3.5 |
 | `derive.prices` | 執行／KO／下限價 = 最初價格 × %（half-up 4 位） | §3.4 |
-| `doc.denomination` | 面額 = 幣別預設值，否則轉人工 | §3.2 |
-| `doc.subscription_start_date`／`doc.print_date` | D1、E2 | §3.8 |
+| `doc.denomination` | 面額 = 幣別預設值，否則轉人工（各上手共用，`rules/common.py`） | §3.2 |
+| `doc.subscription_start_date`／`doc.print_date` | D1、E2（各上手共用；各上手以標準欄位交出出處清單） | §3.8 |
 | `standard.*` | 審查通過日期、負責人、風險等級、固定警語、禁用語、商品名稱 | §3.9、審查標準 |
 | `order.duplicate_column` | 詢價表欄名重複 → 人工覆核 | §1 |
 | `field.observation_frequency` | 詢價表 天期 ÷ Observation Frequency = 說明書配息表列數 | §3.2 |
@@ -272,7 +272,7 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 | `schedule.autocall_dates` | C1–C4 | §3.8 |
 | `doc.autocall_trigger_per_period` | §13(7) 每期觸發百分比 = §15 定義句 | §3.7 |
 | `doc.scenario_price_table` | §16(3) 重印價格表 = §15 價格表 | §3.7 |
-| `doc.min_subscription_redemption` | 第四章最低申購、最低贖回金額 = 面額 | §3.7 |
+| `field.min_amounts` | 第四章最低申購、最低贖回金額 = 參考條件表「單位面額」（各上手共用，`rules/reference.py`） | §3.7 |
 | `doc.name_consistency` | 封面標題、第一章 §1 商品名稱 = 封面中文名稱 | §3.7 |
 | `doc.distributor_product_code` | 受託或銷售機構商品代號 = 商品代號 | §3.7 |
 | `doc.currency_consistency` | 第一章 §5 計價幣別 = 封面 | §3.7 |

@@ -794,6 +794,21 @@ def parse(lines: Sequence[Line]) -> tuple[DetectionResult, BarcTermSheet]:
     flds.update(_fees(ch4))
     flds["min_subscription"] = _amount(ch4, r"最低申購金額依受託或銷售機構規定，至少為([\d,]+)", "min_subscription")
     flds["min_redemption"] = _amount(ch4, r"最低贖回商品面額為([\d,]+)", "min_redemption")
+    occ = standard_fields.Occurrence
+    flds["min_amounts"] = standard_fields.occurrences(
+        "min_amounts",
+        [
+            occ("min_subscription", "第四章最低申購金額", flds["min_subscription"]),
+            occ("min_redemption", "第四章最低贖回商品面額", flds["min_redemption"]),
+        ],
+    )
+    flds["subscription_dates"] = standard_fields.occurrences(
+        "subscription_dates",
+        [occ("subscription_start_date", "第四章商品開始受理申購日期", flds["subscription_start_date"])],
+    )
+    flds["print_dates"] = standard_fields.occurrences(
+        "print_dates", [occ("print_date", "封面刊印日期", flds["print_date"])]
+    )
 
     mentions = {
         "monthly": _mentions(doc, arts, _MONTHLY_PATTERNS),

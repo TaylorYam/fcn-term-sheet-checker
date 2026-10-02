@@ -71,6 +71,17 @@
 
 樣板出現上表以外的佔位符時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。
 
+### 2.4 各上手共用的出處規則（Issue #55）
+
+下列規則在 `rules/common.py` 只實作一次，所有上手共用，語意與 rule_id 採 BARC 版本。各上手只用標準欄位交出該規則涵蓋的出處清單（`standard_fields.Occurrence`），每處出處各產生一筆結果：
+
+| rule_id | 規則 | 出處清單（標準欄位） |
+|---|---|---|
+| `doc.denomination` | 面額 = 該幣別的 `denomination` 預設值，不同時轉人工覆核（`denomination_non_default`） | `denomination` |
+| `field.min_amounts` | 各最低金額 = 參考條件表「單位面額」（讀參考條件表，所以放在 `rules/reference.py`；2026-10-02 使用者決定） | `min_amounts`：BARC 最低申購、最低贖回；HSBC 最低交易、最低申購、最低加購 |
+| `doc.subscription_start_date` | 受理申購日 = 交易日 | `subscription_dates`：BARC 開始受理日；HSBC 開始受理日、申購結束受理日 |
+| `doc.print_date` | 交易日當天至交易日後 `print_date_max_days_after_trade` 天 | `print_dates`：BARC 一個；HSBC 參考性審閱版、最終版 |
+
 ## 3. 對 14 份 BARC 樣本的驗證結果（2026-10-01，本機探勘）
 
 | 檢查 | 結果 |

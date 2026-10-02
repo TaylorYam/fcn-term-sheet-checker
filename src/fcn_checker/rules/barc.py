@@ -206,74 +206,6 @@ def prices(ctx: Context) -> list[CheckResult]:
 # ---------------------------------------------------------------- 說明書內部規則
 
 
-def denomination(ctx: Context) -> CheckResult:
-    rid, pf, cz = "doc.denomination", ctx.ts.f("denomination"), ctx.ts.f("currency_zh")
-    if not pf.ok:
-        return doc_review(rid, "denomination", pf)
-    iso = ctx.std.currency_zh_to_iso.get(cz.value) if cz.ok else None
-    default = ctx.std.denomination.get(iso) if iso else None
-    if default is None:
-        return result(
-            rid,
-            "denomination",
-            S.REVIEW_REQUIRED,
-            actual=pf.value,
-            pf=pf,
-            reason="currency_unknown",
-            message="無法確認幣別，找不到面額預設值",
-        )
-    ok = pf.value == default
-    return result(
-        rid,
-        "denomination",
-        S.PASS if ok else S.REVIEW_REQUIRED,
-        expected=default,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "denomination_non_default",
-        message="" if ok else f"面額不是 {iso} 預設值；客戶可能要求特殊面額，請人工確認",
-    )
-
-
-def subscription_start(ctx: Context) -> CheckResult:
-    rid, pf, trade = "doc.subscription_start_date", ctx.ts.f("subscription_start_date"), ctx.ts.f("trade_date")
-    for f in (pf, trade):
-        if not f.ok:
-            return doc_review(rid, "subscription_start_date", f)
-    ok = pf.value == trade.value
-    return result(
-        rid,
-        "subscription_start_date",
-        S.PASS if ok else S.MISMATCH,
-        expected=trade.value,
-        actual=pf.value,
-        evidence=pf.evidence + trade.evidence,
-        reason="" if ok else "value_mismatch",
-        message="第四章商品開始受理申購日期須等於交易日",
-    )
-
-
-def print_date(ctx: Context) -> CheckResult:
-    rid, pf, trade = "doc.print_date", ctx.ts.f("print_date"), ctx.ts.f("trade_date")
-    for f in (pf, trade):
-        if not f.ok:
-            return doc_review(rid, "print_date", f)
-    limit = ctx.std.print_date_max_days_after_trade
-    gap = (pf.value - trade.value).days
-    ok = 0 <= gap <= limit
-    return result(
-        rid,
-        "print_date",
-        S.PASS if ok else S.MISMATCH,
-        expected=f"{trade.value} ～ {trade.value + dt.timedelta(days=limit)}",
-        actual=pf.value,
-        evidence=pf.evidence + trade.evidence,
-        reason="" if ok else "value_mismatch",
-        tolerance=f"交易日當天至交易日後 {limit} 天",
-        message=f"刊印日期為交易日 {gap:+d} 天",
-    )
-
-
 # ---------------------------------------------------------------- 配息表與提前出場表（第二階段）
 
 
@@ -520,32 +452,6 @@ def scenario_price_table(ctx: Context) -> CheckResult:
         reason="value_mismatch" if diffs else "",
         message="§16(3) 重印價格表須與 §15 價格表逐格相同",
     )
-
-
-def min_amounts(ctx: Context) -> list[CheckResult]:
-    """第四章最低申購金額、最低贖回商品面額 = §6 面額。"""
-    rid, denom = "doc.min_subscription_redemption", ctx.ts.f("denomination")
-    out = []
-    for field in ("min_subscription", "min_redemption"):
-        pf = ctx.ts.f(field)
-        bad = next((x for x in (pf, denom) if not x.ok), None)
-        if bad is not None:
-            out.append(doc_review(rid, field, bad))
-            continue
-        ok = pf.value == denom.value
-        out.append(
-            result(
-                rid,
-                field,
-                S.PASS if ok else S.MISMATCH,
-                expected=denom.value,
-                actual=pf.value,
-                evidence=pf.evidence + denom.evidence,
-                reason="" if ok else "value_mismatch",
-                message="須等於 §6 每單位商品面額",
-            )
-        )
-    return out
 
 
 # ---------------------------------------------------------------- 文件內重複出現處（Issue #38）
@@ -891,7 +797,6 @@ def document_rules(ctx: Context) -> list[CheckResult]:
         *autocall_dates(ctx),
         trigger_per_period(ctx),
         scenario_price_table(ctx),
-        *min_amounts(ctx),
         *name_consistency(ctx),
         distributor_product_code(ctx),
         currency_consistency(ctx),
@@ -900,9 +805,9 @@ def document_rules(ctx: Context) -> list[CheckResult]:
         *coupon_repeats(ctx),
         *scenario_returns(ctx),
         observation_t_range(ctx),
-        denomination(ctx),
-        subscription_start(ctx),
-        print_date(ctx),
+        common.denomination(ctx),
+        *common.subscription_dates(ctx),
+        *common.print_dates(ctx),
         approval_date(ctx),
         chairman(ctx),
         fixed_warning(ctx),

@@ -111,8 +111,8 @@ def test_order_difference_is_reported(tmp_path, field, value, rule):
 @pytest.mark.parametrize(
     "old,new,rule",
     [
-        ("最低交易金額：美元10,000元", "最低交易金額：美元20,000元", "doc.minimum_amounts"),
-        ("商品開始受理申購日：2030年1月7日", "商品開始受理申購日：2030年1月8日", "doc.subscription_dates"),
+        ("最低交易金額：美元10,000元", "最低交易金額：美元20,000元", "field.min_amounts"),
+        ("商品開始受理申購日：2030年1月7日", "商品開始受理申購日：2030年1月8日", "doc.subscription_start_date"),
         ("(最終版)刊印日期：2030年1月7日", "(最終版)刊印日期：2030年1月9日", "doc.print_date"),
         (
             "[受託或銷售機構]審查通過之日期：2026年6月11日",
@@ -398,6 +398,54 @@ def test_percentages_are_rounded_to_the_displayed_digits(tmp_path, field, value,
     x = only(r, "field." + field)
     assert x.status == status
     assert x.tolerance == "依說明書顯示位數四捨五入後比對"
+
+
+@pytest.mark.parametrize(
+    "rule,fields",
+    [
+        ("field.min_amounts", {"minimum_trade", "minimum_subscription", "minimum_additional"}),
+        ("doc.subscription_start_date", {"subscription_start", "subscription_end"}),
+        ("doc.print_date", {"print_date_review", "print_date_final"}),
+    ],
+)
+def test_each_review_standard_occurrence_is_checked_with_the_shared_rule(tmp_path, rule, fields):
+    r = check(tmp_path)
+    assert {x.field for x in r.results if x.rule_id == rule and x.status == S.PASS} == fields
+
+
+@pytest.mark.parametrize(
+    "old,new,rule,field",
+    [
+        (
+            "商品申購結束受理日：2030年1月7日",
+            "商品申購結束受理日：2030年1月8日",
+            "doc.subscription_start_date",
+            "subscription_end",
+        ),
+        (
+            "最低加購金額：美元10,000元",
+            "最低加購金額：美元20,000元",
+            "field.min_amounts",
+            "minimum_additional",
+        ),
+        (
+            "(參考性審閱版)內容，刊印日期：2030年1月7日",
+            "(參考性審閱版)內容，刊印日期：2030年1月20日",
+            "doc.print_date",
+            "print_date_review",
+        ),
+    ],
+)
+def test_only_the_differing_occurrence_mismatches(tmp_path, old, new, rule, field):
+    r = check(tmp_path, Spec(replacements={old: new}))
+    bad = {x.field for x in r.results if x.rule_id == rule and x.status == S.MISMATCH}
+    assert bad == {field}
+
+
+def test_non_default_denomination_requires_review_like_barc(tmp_path):
+    r = check(tmp_path, Spec(replacements={"每單位面額：美元10,000元": "每單位面額：美元20,000元"}))
+    x = only(r, "doc.denomination")
+    assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "denomination_non_default")
 
 
 def test_ki_pct_must_be_empty_when_the_document_has_no_ki(tmp_path):
