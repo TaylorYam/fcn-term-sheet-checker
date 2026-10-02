@@ -98,7 +98,7 @@ def test_excel_float_tail_is_cleaned(tmp_path):
         # 天期不同時，月配息率推算也會不符
         ({"天期(月)": 9}, {"field.tenor_months", "derive.monthly_coupon"}),
         ({"交易日": dt.datetime(2030, 1, 8)}, {"field.trade_date"}),
-        ({"發行日": dt.datetime(2030, 1, 15)}, {"field.issue_date"}),
+        ({"發行日": dt.datetime(2030, 1, 15)}, {"backfill.issue_date"}),
         ({"最終比價日": dt.datetime(2030, 7, 9)}, {"field.final_valuation_date"}),
         ({"到期日": dt.datetime(2030, 7, 12)}, {"field.maturity_date"}),
         # 最低申購／贖回金額也與表上單位面額比對，所以一起不符

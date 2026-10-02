@@ -1,7 +1,7 @@
 """參考條件表的共用規則：表上事先填好的欄位與 Non-Call(月) 的核對。
 
 各上手只交出說明書標準欄位（standard_fields.py）與提前出場排程；比對在這裡實作一次，所有上手共用。
-空值寫法一律取自參考條件表格式設定（`empty_value`）。回填欄位（ISIN、比價日）見 backfill.py。
+空值寫法一律取自參考條件表格式設定（`empty_value`）。回填欄位（ISIN、發行日、比價日）見 backfill.py。
 """
 
 from __future__ import annotations
@@ -412,7 +412,6 @@ def field_rules(ctx: Context) -> list[CheckResult]:
         _compare(ctx, "field.coupon_pa_pct", "coupon_pa_pct", dec, "數字", cmp_pct, PCT_TOLERANCE),
         _compare(ctx, "field.tenor_months", "tenor_months", intg, "整數"),
         _compare(ctx, "field.trade_date", "trade_date", date, "日期"),
-        _compare(ctx, "field.issue_date", "issue_date", date, "日期"),
         _compare(ctx, "field.final_valuation_date", "final_valuation_date", date, "日期"),
         _compare(ctx, "field.maturity_date", "maturity_date", date, "日期"),
         _compare(ctx, "field.denomination", "denomination", intg, "整數"),

@@ -314,9 +314,10 @@ def _check_one(
         sched = issuer.autocall_schedule(ts)
         results.append(reference.first_callable_period(ctx, sched))
         isin_result, isin_cells = backfill.isin(ctx, rfmt, row, issuer.isin(ts))
+        issue_result, issue_cells = backfill.issue_date(ctx, rfmt, row)
         dates_result, date_cells = backfill.compare_dates(ctx, rfmt, row, sched)
-        results.extend([isin_result, dates_result])
-        item.report.backfill = isin_cells + date_cells
+        results.extend([isin_result, issue_result, dates_result])
+        item.report.backfill = isin_cells + issue_cells + date_cells
         item.report.not_covered = [dict(n) for n in issuer.not_covered]
     item.report.status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
     return item

@@ -1,4 +1,4 @@
-"""回填欄位（ISIN Code、比價日_1～12）的整段流程，所有上手共用（ADR 0004）。
+"""回填欄位（ISIN Code、發行日、比價日_1～12）的整段流程，所有上手共用（ADR 0004）。
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
 - 只有整份核對 PASS 的說明書才寫入（`fillable`）。
@@ -126,10 +126,10 @@ def expected_slots(sched: AutocallSchedule, tenor: int | None, empty: str) -> li
 # ---------------------------------------------------------------- 回填規則
 
 
-def isin(
-    ctx: Context, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
+def _single(
+    rid: str, key: str, what: str, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
 ) -> tuple[CheckResult, list[CellDecision]]:
-    rid, key = "backfill.isin", "isin"
+    """只有一格的回填欄位：表上值與說明書值比對並決定這一格的處理。"""
     ov: OrderValue | None = row.fields.get(key)
     missing = _missing_columns(fmt, row, [key])
     if missing:
@@ -148,10 +148,22 @@ def isin(
             pf=pf,
             ov=[ov],
             reason="" if ok else "value_mismatch",
-            message=_fill_message([d]) or ("" if ok else "表上 ISIN 與說明書不同，保留原值"),
+            message=_fill_message([d]) or ("" if ok else f"表上{what}與說明書不同，保留原值"),
         ),
         [d],
     )
+
+
+def isin(
+    ctx: Context, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
+) -> tuple[CheckResult, list[CellDecision]]:
+    return _single("backfill.isin", "isin", " ISIN ", fmt, row, pf)
+
+
+def issue_date(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+    """說明書發行日取自標準欄位 `issue_date`（BARC 第一章 §13(3)、HSBC 第一章 §15(2)）。"""
+    key = "issue_date"
+    return _single("backfill.issue_date", key, "發行日", fmt, row, standard_field(ctx, key))
 
 
 def compare_dates(

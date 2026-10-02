@@ -78,7 +78,7 @@ class Spec:
     issuer_cover: str = "英商巴克萊銀行股份有限公司（Barclays Bank PLC）"
     cross_page_price_table: bool = False
     mention_overrides: dict[str, str] = field(default_factory=dict)  # "§9"/"§15"/"§17" → 月配息率文字
-    omit: frozenset[str] = frozenset()  # 例：{"trade_date"}
+    omit: frozenset[str] = frozenset()  # 例：{"trade_date"}、{"issue_date"}
     extra_strike_def: str | None = None  # 第二個執行價格定義（歧義）
     # ---- 第二階段：配息表、提前出場表、§16、第四章 ----
     guaranteed: int | None = None  # 保證配息期；None → Daily 為 1、Period End 為 0
@@ -314,7 +314,7 @@ def build_pdf(path: Path, s: Spec) -> Path:
         sub(2, f"交易日：{zh_date(s.trade_date)}")
     else:
         sub(2, "交易日：另行公告")
-    sub(3, f"發行日：{zh_date(s.issue_date)}")
+    sub(3, f"發行日：{zh_date(s.issue_date)}" if "issue_date" not in s.omit else "發行日：另行公告")
     sub(4, f"最終評價日**：係指{zh_date(s.final_date)}，應視為評價日，如該日為「中斷日」應適用評價日有關")
     w.line(97.7, "「中斷日」之順延規定（並請參閱本條第(9)項之說明）")
     sub(5, f"到期日或最終實物贖回日†*：{zh_date(s.maturity_date)}（並請參閱本條第(9)項之說明）")
@@ -635,13 +635,12 @@ def first_callable(s: Spec) -> int:
 
 
 def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
-    """與合成說明書一致的 BARC 參考條件表列；回填欄位（ISIN、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
+    """與合成說明書一致的 BARC 參考條件表列；回填欄位（ISIN、發行日、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
     fields: dict[str, Any] = {
         "product_code": s.product_code,
         "denomination": s.denom,
         "currency": s.ccy,
         "trade_date": _xl_date(s.trade_date),
-        "issue_date": _xl_date(s.issue_date),
         "final_valuation_date": _xl_date(s.final_date),
         "maturity_date": _xl_date(s.maturity_date),
         "ko_pct": float(s.ko),

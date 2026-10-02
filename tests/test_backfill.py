@@ -1,4 +1,4 @@
-"""回填欄位（ISIN Code、比價日_1～12）：缺欄時的處理、顯示標籤、儲存前的參考條件表變更檢查。
+"""回填欄位（ISIN Code、發行日、比價日_1～12）：缺欄時的處理、顯示標籤、儲存前的參考條件表變更檢查。
 
 測試切點是批量入口 check_batch／save_batch；回填與日期格式的一般流程見 test_batch.py。
 """
@@ -51,6 +51,21 @@ def test_sheet_without_a_compare_date_column_requires_review_naming_it(tmp_path)
 def test_sheet_without_isin_column_requires_review_naming_it(tmp_path):
     headers = [h for h in REFERENCE_HEADERS if h != "ISIN Code"]
     assert_column_missing(run(tmp_path, headers=headers), "backfill.isin", "ISIN Code", tmp_path)
+
+
+def test_sheet_without_issue_date_column_requires_review_naming_it(tmp_path):
+    headers = [h for h in REFERENCE_HEADERS if h != "發行日"]
+    assert_column_missing(run(tmp_path, headers=headers), "backfill.issue_date", "發行日", tmp_path)
+
+
+def test_format_without_issue_date_column_name_requires_review_naming_the_field(tmp_path):
+    fmt = tmp_path / "reference_sheet.toml"
+    text = REFERENCE_FORMAT.read_text(encoding="utf-8")
+    assert '"發行日" = "issue_date"\n' in text
+    fmt.write_text(text.replace('"發行日" = "issue_date"\n', ""), encoding="utf-8")
+    headers = [h for h in REFERENCE_HEADERS if h != "發行日"]
+    outcome = run(tmp_path, headers=headers, reference_format=fmt)
+    assert_column_missing(outcome, "backfill.issue_date", "issue_date", tmp_path)
 
 
 def test_format_without_a_compare_date_column_name_requires_review_naming_the_field(tmp_path):
