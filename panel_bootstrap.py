@@ -39,8 +39,10 @@ def run(script: str, argv: list[str]) -> None:
 
     main(
         [
-            "--order-formats-dir",
-            str(root / "config/order_formats"),
+            "--config-dir",
+            str(root / "config"),
+            "--builtin-config-dir",
+            str(Path(script).resolve().parent / "config"),
             "--review-standard",
             str(root / "config/review_standard.toml"),
             "--install-root",

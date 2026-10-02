@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import fitz  # PyMuPDF
+
+from .schema import CheckResult, CheckStatus
 
 
 class IngestionError(Exception):
@@ -14,6 +17,21 @@ class IngestionError(Exception):
     def __init__(self, reason_code: str, message: str):
         super().__init__(message)
         self.reason_code = reason_code
+
+
+def error_result(rule_id: str, field: str, e: IngestionError) -> CheckResult:
+    """輸入檔問題轉成 ERROR 結果。"""
+    return CheckResult(
+        rule_id=rule_id, field=field, status=CheckStatus.ERROR, reason_code=e.reason_code, message=str(e)
+    )
+
+
+def file_meta(path: Path | None) -> dict[str, Any]:
+    """報告 metadata 用的檔名與 sha256；檔案不存在時 sha256 為 None。"""
+    meta: dict[str, Any] = {"file": path.name if path else None, "sha256": None}
+    if path is not None and path.is_file():
+        meta["sha256"] = sha256_of(path)
+    return meta
 
 
 def sha256_of(path: Path) -> str:

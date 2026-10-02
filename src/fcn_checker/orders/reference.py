@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import openpyxl
 from openpyxl.utils import get_column_letter
@@ -14,9 +17,38 @@ from openpyxl.utils import get_column_letter
 from ..config import ReferenceFormat
 from ..ingestion import IngestionError
 from ..schema import OrderValue
-from .inquiry import OrderRecord, normalize_cell
 
 SOURCE = "參考條件表"
+
+
+@dataclass
+class OrderRecord:
+    """核對規則使用的一筆條件：參考條件表的一列，轉成標準欄位。"""
+
+    product_code: OrderValue
+    fields: dict[str, OrderValue]
+    unknown_columns: list[OrderValue] = field(default_factory=list)  # value = 欄名
+    missing_columns: list[str] = field(default_factory=list)  # 設定有、檔案沒有的 Excel 欄名
+    duplicate_columns: list[OrderValue] = field(default_factory=list)  # 重複出現的欄名（value = 欄名）
+    source: str = SOURCE  # 條件來源名稱，用在核對訊息
+
+
+def normalize_cell(v: Any) -> Any:
+    """Excel 值標準化：數字轉 Decimal 並四捨五入到 9 位清除浮點尾數；日期轉 date；空字串轉 None。"""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return Decimal(v)
+    if isinstance(v, float):
+        return Decimal(repr(round(v, 9)))
+    if isinstance(v, dt.datetime):
+        return v.date()
+    if isinstance(v, str):
+        s = v.strip()
+        return s or None
+    return v
 
 
 @dataclass
@@ -35,6 +67,7 @@ class ReferenceSheet:
     unknown_columns: list[OrderValue] = field(default_factory=list)
     missing_columns: list[str] = field(default_factory=list)
     duplicate_columns: list[OrderValue] = field(default_factory=list)
+    sheet_names: tuple[str, ...] = ()  # 檔案內所有工作表名稱
 
     def find(self, product_code: str) -> list[ReferenceRow]:
         return [r for r in self.rows if r.product_code.value == product_code]
@@ -47,7 +80,6 @@ class ReferenceSheet:
             list(self.unknown_columns),
             list(self.missing_columns),
             list(self.duplicate_columns),
-            source=SOURCE,
         )
 
 
@@ -123,4 +155,4 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
                 cells,
             )
         )
-    return ReferenceSheet(fmt.sheet, rows, unknown, missing, duplicate)
+    return ReferenceSheet(fmt.sheet, rows, unknown, missing, duplicate, tuple(wb.sheetnames))

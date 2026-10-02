@@ -1,4 +1,4 @@
-"""載入審查標準、上手詢價格式、參考條件表格式與上手編號對照設定（TOML）。"""
+"""載入審查標準、參考條件表格式與上手編號對照設定（TOML）。"""
 
 from __future__ import annotations
 
@@ -46,21 +46,6 @@ class ReviewStandard:
 
 
 @dataclass(frozen=True)
-class OrderFormat:
-    issuer: str
-    version: int
-    sheet: str
-    product_code_cell: str
-    header_row: int
-    data_row: int
-    columns: dict[str, str]  # Excel 欄名 → 標準欄位
-    ignored: tuple[str, ...]
-    ko_type_values: dict[str, dict[str, Any]]
-    ki_type_values: dict[str, str]
-    sha256: str
-
-
-@dataclass(frozen=True)
 class ReferenceFormat:
     """參考條件表（多列表格）的版面與欄位對照，所有上手共用。"""
 
@@ -78,6 +63,17 @@ class ReferenceFormat:
     ko_memory_values: dict[str, bool]
     ki_type_values: dict[str, str]
     sha256: str
+
+
+# 開發環境（editable 安裝）的 repo config；PANEL 安裝是非 editable，內建設定由啟動的版本資料夾另外指定
+BUILTIN_CONFIG = Path(__file__).resolve().parents[2] / "config"
+
+
+def resolve_config(name: str, config_dir: Path | None, builtin_dir: Path | None = None) -> Path:
+    """config_dir 有該設定檔就用它；沒有就用程式內建的同名設定（舊安裝的根目錄 config 沒有新增的設定檔）。"""
+    if config_dir is not None and (Path(config_dir) / name).is_file():
+        return (Path(config_dir) / name).resolve()
+    return (Path(builtin_dir or BUILTIN_CONFIG) / name).resolve()
 
 
 def _load(path: Path, what: str) -> dict[str, Any]:
@@ -127,28 +123,6 @@ def load_review_standard(path: Path) -> ReviewStandard:
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"審查標準設定檔缺少或格式錯誤的項目：{e}") from e
-
-
-def load_order_format(path: Path) -> OrderFormat:
-    d = _load(path, "詢價格式")
-    try:
-        cols = dict(d["columns"])
-        ignored = tuple(cols.pop("ignored", ()))
-        return OrderFormat(
-            issuer=d["issuer"],
-            version=int(d["version"]),
-            sheet=d["layout"]["sheet"],
-            product_code_cell=d["layout"]["product_code_cell"],
-            header_row=int(d["layout"]["header_row"]),
-            data_row=int(d["layout"]["data_row"]),
-            columns=cols,
-            ignored=ignored,
-            ko_type_values=dict(d["values"]["ko_type"]),
-            ki_type_values=dict(d["values"]["ki_type"]),
-            sha256=sha256_of(path),
-        )
-    except (KeyError, TypeError, ValueError) as e:
-        raise IngestionError("config_invalid", f"詢價格式設定檔缺少或格式錯誤的項目：{e}") from e
 
 
 def load_reference_format(path: Path) -> ReferenceFormat:

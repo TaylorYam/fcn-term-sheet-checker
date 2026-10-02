@@ -1,6 +1,6 @@
-"""測試切點 1：核對入口 run_check(說明書, 詢價表, 審查標準, 格式設定) → 完整核對結果。
+"""BARC 說明書核對：透過批量核對入口 check_batch(說明書, 參考條件表, 審查標準)，一次一份說明書。
 
-只用合成資料（tests/synth.py），不直接測擷取或解析的內部函式。
+只用合成資料（tests/synth.py），不直接測擷取或解析的內部函式。回填與批量流程本身見 test_batch.py。
 """
 
 from __future__ import annotations
@@ -11,9 +11,20 @@ from pathlib import Path
 
 import pytest
 
-from fcn_checker.checker import run_check
+from fcn_checker.batch import check_batch
 from fcn_checker.schema import CheckStatus
-from synth import ORDER_FORMAT, REVIEW_STANDARD, UL, Spec, build_inquiry, build_not_barc_pdf, build_pdf
+from synth import (
+    ISSUER_PREFIXES,
+    REFERENCE_FORMAT,
+    REFERENCE_HEADERS,
+    REVIEW_STANDARD,
+    UL,
+    Spec,
+    build_not_barc_pdf,
+    build_pdf,
+    build_reference_sheet,
+    reference_row,
+)
 
 PASS, MISMATCH, REVIEW, NA, ERROR = (
     CheckStatus.PASS,
@@ -24,20 +35,20 @@ PASS, MISMATCH, REVIEW, NA, ERROR = (
 )
 
 
-def check(
-    tmp_path: Path,
-    spec: Spec | None = None,
-    *,
-    pdf_spec: Spec | None = None,
-    overrides=None,
-    extra_columns=None,
-    product_code=None,
-    stop_on_pairing_failure=False,
-):
+def check_pdf(tmp_path: Path, pdf: Path, spec: Spec | None = None, *, overrides=None, headers=None):
+    """以合成參考條件表（一列，依 spec）核對一份說明書，回傳該份的 CheckReport。"""
     spec = spec or Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", pdf_spec or spec)
-    inq = build_inquiry(tmp_path / "inquiry.xlsx", spec, overrides, extra_columns, product_code)
-    return run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT, stop_on_pairing_failure=stop_on_pairing_failure)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **(overrides or {}))], headers)
+    outcome = check_batch(
+        [pdf], sheet, REVIEW_STANDARD, reference_format=REFERENCE_FORMAT, issuer_prefixes=ISSUER_PREFIXES
+    )
+    return outcome.items[0].report
+
+
+def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, overrides=None, headers=None):
+    spec = spec or Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
+    return check_pdf(tmp_path, pdf, spec, overrides=overrides, headers=headers)
 
 
 def problems(report) -> set[tuple[str, CheckStatus]]:
@@ -62,12 +73,12 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
     assert trade.expected == dt.date(2030, 1, 7) and trade.actual == dt.date(2030, 1, 7)
     assert trade.document_evidence and trade.document_evidence[0].page >= 1
     assert "交易日" in trade.document_evidence[0].text
-    assert trade.order_source == ["詢價表格!W5"]
+    assert trade.order_source == ["樣本清單!J4"]
     meta = report.metadata
     assert len(meta["inputs"]["term_sheet"]["sha256"]) == 64
-    assert len(meta["inputs"]["order"]["sha256"]) == 64
+    assert len(meta["inputs"]["reference_sheet"]["sha256"]) == 64
     assert meta["review_standard"]["version"] == 3
-    assert meta["order_format"]["issuer"] == "BARC"
+    assert meta["reference_format"]["version"] == 1
     assert meta["program_version"] and meta["extractor"].startswith("PyMuPDF")
     assert report.not_covered, "第二階段規則應列在未涵蓋清單"
 
@@ -114,34 +125,37 @@ def test_price_table_cross_page_thousands_and_wrapped_names(tmp_path):
 
 def test_excel_float_tail_is_cleaned(tmp_path):
     spec = Spec(strike=Decimal("63.13"))
-    report = check(tmp_path, spec, overrides={"Strike (%)": 63.129999999999995})
+    report = check(tmp_path, spec, overrides={"K(%)": 63.129999999999995})
     assert results(report, "field.strike_pct")[0].status == PASS
 
 
-# ---------------------------------------------------------------- 詢價表 vs 說明書：單一欄位不一致
+# ---------------------------------------------------------------- 參考條件表 vs 說明書：單一欄位不一致
 
 
 @pytest.mark.parametrize(
     ("overrides", "expected"),
     [
-        ({"Currency": "JPY"}, {"field.currency"}),
-        ({"BBG Code 2": "ZQH UQ"}, {"field.underlyings"}),
-        ({"BBG Code 3": None}, {"field.underlyings"}),
-        ({"Strike (%)": 75.0}, {"field.strike_pct"}),
-        ({"KO Barrier (%)": 105.0}, {"field.ko_pct"}),
+        ({"承作幣別": "JPY"}, {"field.currency"}),
+        ({"UL_2": "ZQH UQ"}, {"field.underlyings"}),
+        ({"UL_3": "-"}, {"field.underlyings"}),
+        ({"K(%)": 75.0}, {"field.strike_pct"}),
+        ({"KO(%)": 105.0}, {"field.ko_pct"}),
         # 年利率不同時，由它推算的月配息率也會不符
         ({"Coupon p.a. (%)": 12.5}, {"field.coupon_pa_pct", "derive.monthly_coupon"}),
-        # 天期不同時，期數（天期 ÷ 觀察頻率 vs 配息表列數）與月配息率推算也會不符
-        ({"Tenor (m)": 9}, {"field.tenor_months", "field.observation_frequency", "derive.monthly_coupon"}),
-        ({"Trade Date": dt.datetime(2030, 1, 8)}, {"field.trade_date"}),
-        ({"Issue Date": dt.datetime(2030, 1, 15)}, {"field.issue_date"}),
-        ({"Final Valuation Date": dt.datetime(2030, 7, 9)}, {"field.final_valuation_date"}),
-        ({"Maturity Date": dt.datetime(2030, 7, 12)}, {"field.maturity_date"}),
-        ({"Effective Date offset": 8}, {"field.issue_date_offset_days"}),
-        ({"KO Type": "Daily"}, {"field.ko_type"}),
-        ({"KO Type": "Period End Memory"}, {"field.ko_type"}),
-        ({"Barrier Type": "EKI", "KI Barrier (%)": 60.0}, {"field.ki_type", "field.ki_pct"}),
-        ({"KI Barrier (%)": 60.0}, {"field.ki_pct"}),
+        # 天期不同時，月配息率推算也會不符
+        ({"天期(月)": 9}, {"field.tenor_months", "derive.monthly_coupon"}),
+        ({"交易日": dt.datetime(2030, 1, 8)}, {"field.trade_date"}),
+        ({"發行日": dt.datetime(2030, 1, 15)}, {"field.issue_date"}),
+        ({"最終比價日": dt.datetime(2030, 7, 9)}, {"field.final_valuation_date"}),
+        ({"到期日": dt.datetime(2030, 7, 12)}, {"field.maturity_date"}),
+        ({"單位面額": 5000}, {"field.denomination"}),
+        ({"KO(memo)": "N"}, {"field.ko_memory"}),
+        ({"KO(Freq)": "P"}, {"field.ko_observation"}),
+        ({"KI(Freq)": "AM", "KI(%)": 60.0}, {"field.ki_type", "field.ki_pct"}),
+        ({"KI(%)": 60.0}, {"field.ki_pct"}),
+        ({"Non-Call(月)": 2}, {"field.first_callable_period"}),
+        ({"UL_1_進場價": 123.46}, {"field.underlying_prices"}),
+        ({"UL_3_KO價": 1234.57}, {"field.underlying_prices"}),
     ],
 )
 def test_single_field_mismatch(tmp_path, overrides, expected):
@@ -151,20 +165,16 @@ def test_single_field_mismatch(tmp_path, overrides, expected):
 
 
 def test_ki_pct_mismatch_when_both_have_ki(tmp_path):
-    report = check(tmp_path, Spec(ki="AM"), overrides={"KI Barrier (%)": 65.0})
+    report = check(tmp_path, Spec(ki="AM"), overrides={"KI(%)": 65.0})
     assert problems(report) == {("field.ki_pct", MISMATCH)}
 
 
-def test_product_code_mismatch(tmp_path):
-    report = check(tmp_path, product_code="029199990002")
-    assert problems(report) == {("field.product_code", MISMATCH)}
-    assert any(r.rule_id == "field.currency" for r in report.results)
-
-
-def test_product_code_mismatch_stops_when_requested(tmp_path):
-    report = check(tmp_path, product_code="029199990002", stop_on_pairing_failure=True)
-    assert problems(report) == {("field.product_code", MISMATCH)}
-    assert not any(r.rule_id == "field.currency" for r in report.results)
+def test_product_code_without_reference_row_stops_before_field_checks(tmp_path):
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    report = check_pdf(tmp_path, pdf, Spec(product_code="029199990002"))
+    assert problems(report) == {("batch.pairing", REVIEW)}
+    assert not any(r.rule_id.startswith("field.") for r in report.results)
 
 
 # ---------------------------------------------------------------- 推算規則
@@ -193,9 +203,14 @@ def test_coupon_mentions_must_agree_within_document(tmp_path):
 
 def test_price_derivation_error(tmp_path):
     report = check(tmp_path, Spec(price_overrides={(2, "strike"): "61.0500"}))
-    assert problems(report) == {("derive.prices", MISMATCH)}
+    # 說明書內部推算不符，也跟表上（以正確推算值填入）的執行價不同
+    assert problems(report) == {("derive.prices", MISMATCH), ("field.underlying_prices", MISMATCH)}
     bad = [r for r in results(report, "derive.prices") if r.status == MISMATCH]
     assert len(bad) == 1 and bad[0].expected == Decimal("61.0400") and bad[0].actual == Decimal("61.0500")
+    sheet = [r for r in results(report, "field.underlying_prices") if r.status == MISMATCH]
+    assert [(r.field, r.expected, r.actual) for r in sheet] == [
+        ("ZQH UW 執行價", Decimal("61.0400"), Decimal("61.0500"))
+    ]
 
 
 def test_non_default_denomination_requires_review(tmp_path):
@@ -204,15 +219,16 @@ def test_non_default_denomination_requires_review(tmp_path):
     assert report.status == REVIEW
 
 
-# ---------------------------------------------------------------- 詢價表格式
+# ---------------------------------------------------------------- 參考條件表格式
 
 
 @pytest.mark.parametrize(
     ("kwargs", "rule_id"),
     [
-        ({"overrides": {"KO Type": "Weekly Memory"}}, "field.ko_type"),
-        ({"overrides": {"Barrier Type": "XKI"}}, "field.ki_type"),
-        ({"extra_columns": {"Coupon Freq": "M"}}, "order.unknown_column"),
+        ({"overrides": {"KO(Freq)": "W"}}, "field.ko_observation"),
+        ({"overrides": {"KO(memo)": "?"}}, "field.ko_memory"),
+        ({"overrides": {"KI(Freq)": "X"}}, "field.ki_type"),
+        ({"headers": [*REFERENCE_HEADERS, "Coupon Freq"]}, "order.unknown_column"),
     ],
 )
 def test_unknown_order_vocabulary_requires_review(tmp_path, kwargs, rule_id):
@@ -222,7 +238,7 @@ def test_unknown_order_vocabulary_requires_review(tmp_path, kwargs, rule_id):
 
 
 def test_duplicate_order_column_requires_review(tmp_path):
-    report = check(tmp_path, extra_columns={"Strike (%)": 75.0})  # 第二個同名欄位
+    report = check(tmp_path, headers=[*REFERENCE_HEADERS, "K(%)"])  # 第二個同名欄位
     assert ("order.duplicate_column", REVIEW) in problems(report)
     assert report.status == REVIEW
 
@@ -245,9 +261,7 @@ def test_monthly_ki_is_not_supported_in_phase_one(tmp_path):
 
 
 def test_non_barc_document_requires_review(tmp_path):
-    pdf = build_not_barc_pdf(tmp_path / "other.pdf")
-    inq = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    report = run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT)
+    report = check_pdf(tmp_path, build_not_barc_pdf(tmp_path / "029199990001_TS.pdf"))
     assert report.status == REVIEW
     assert results(report, "template.detect")[0].status == REVIEW
     assert report.template is None
@@ -348,10 +362,9 @@ def test_subscription_start_must_equal_trade_date(tmp_path):
 
 
 def test_corrupt_pdf_is_error_not_crash(tmp_path):
-    pdf = tmp_path / "broken.pdf"
+    pdf = tmp_path / "029199990001_TS.pdf"
     pdf.write_bytes(b"%PDF-1.7\nthis is not a pdf")
-    inq = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    report = run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT)
+    report = check_pdf(tmp_path, pdf)
     assert report.status == ERROR
     assert results(report, "input.term_sheet")[0].reason_code == "pdf_unreadable"
 
@@ -360,10 +373,9 @@ def test_encrypted_pdf_is_error(tmp_path):
     import fitz
 
     src = build_pdf(tmp_path / "plain.pdf", Spec())
-    enc = tmp_path / "enc.pdf"
+    enc = tmp_path / "029199990001_TS.pdf"
     fitz.open(src).save(enc, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="o", user_pw="u")
-    inq = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    report = run_check(enc, inq, REVIEW_STANDARD, ORDER_FORMAT)
+    report = check_pdf(tmp_path, enc)
     assert report.status == ERROR
     assert results(report, "input.term_sheet")[0].reason_code == "pdf_encrypted"
 
@@ -372,10 +384,9 @@ def test_same_input_gives_same_result_except_time(tmp_path):
     from fcn_checker.reporting import to_json
 
     spec = Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", spec)
-    inq = build_inquiry(tmp_path / "inquiry.xlsx", spec)
-    a = to_json(run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT))
-    b = to_json(run_check(pdf, inq, REVIEW_STANDARD, ORDER_FORMAT))
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    a = to_json(check_pdf(tmp_path, pdf, spec))
+    b = to_json(check_pdf(tmp_path, pdf, spec))
     a["metadata"].pop("generated_at")
     b["metadata"].pop("generated_at")
     assert a == b
