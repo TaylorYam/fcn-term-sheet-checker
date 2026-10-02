@@ -103,7 +103,7 @@ def test_selection_is_required_and_changing_it_clears_preview(tmp_path):
         session.load_preview()
 
 
-@pytest.mark.parametrize("kind", ["broken_excel", "result_sheet", "missing_sheet"])
+@pytest.mark.parametrize("kind", ["broken_excel", "missing_sheet"])
 def test_invalid_reference_sheet_never_leaves_valid_preview(tmp_path, kind):
     sheet, pdfs = inputs(tmp_path)
     session = session_for(tmp_path, sheet, pdfs)
@@ -112,10 +112,7 @@ def test_invalid_reference_sheet_never_leaves_valid_preview(tmp_path, kind):
         sheet.write_bytes(b"not an Excel")
     else:
         wb = openpyxl.load_workbook(sheet)
-        if kind == "result_sheet":
-            wb.create_sheet("核對結果")
-        else:
-            wb["樣本清單"].title = "其他"
+        wb["樣本清單"].title = "其他"
         wb.save(sheet)
     with pytest.raises(IngestionError):
         session.load_preview()
@@ -177,7 +174,7 @@ def test_changing_sources_clears_result_and_requires_new_preview(tmp_path, chang
 # ---------------------------------------------------------------- 儲存
 
 
-def test_save_writes_reports_and_back_filled_copy_only_when_asked(tmp_path):
+def test_save_writes_reports_and_result_file_only_when_asked(tmp_path):
     spec = Spec()
     sheet, pdfs = inputs(tmp_path, spec)
     original = sheet.read_bytes()
@@ -191,13 +188,14 @@ def test_save_writes_reports_and_back_filled_copy_only_when_asked(tmp_path):
     assert not (tmp_path / "reports").exists()
     receipt = session.save(tmp_path / "reports", now=NOW)
     assert receipt.complete
-    assert receipt.output == tmp_path / "FCN參考條件_回填_20300203-040506.xlsx"
-    assert str(receipt.output) in receipt.summary
+    assert receipt.output == tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
+    assert f"核對結果檔：{receipt.output}" in receipt.summary
     assert {p.name for p in (tmp_path / "reports").iterdir()} == {
         f"{pdfs[0].stem}_20300203-040506.check.json",
         f"{pdfs[0].stem}_20300203-040506.check.md",
+        receipt.output.name,
     }
-    ws = openpyxl.load_workbook(receipt.output)["樣本清單"]
+    ws = openpyxl.load_workbook(receipt.output)["回填後"]
     assert ws["F4"].value == SYNTH_ISIN
     assert sheet.read_bytes() == original
     assert session.outcome is outcome
@@ -230,7 +228,6 @@ def test_save_after_sources_changed_is_refused(tmp_path):
     with pytest.raises(IngestionError):
         session.save(tmp_path / "reports", now=NOW)
     assert not (tmp_path / "reports").exists()
-    assert list(tmp_path.glob("*_回填_*.xlsx")) == []
 
 
 # ---------------------------------------------------------------- 設定檔與啟動參數

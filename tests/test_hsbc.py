@@ -551,7 +551,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     ]
     assert r.items[0].filled
     wb = openpyxl.load_workbook(r.output)
-    ws = wb["樣本清單"]
+    ws = wb["回填後"]
     vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
     assert vals["ISIN Code"] == "XS1999900001"
     assert vals["發行日"] == dt.datetime(2030, 1, 14)
@@ -595,6 +595,8 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
     assert [d.action for d in report.backfill if d.column == "發行日"] == [action]
     assert report.status == status
     assert not any(x.rule_id == "field.issue_date" for x in report.results)
-    ws = openpyxl.load_workbook(r.output)["樣本清單"]
-    vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
-    assert vals["發行日"] == kept
+    ws = openpyxl.load_workbook(r.output)["回填後"]
+    if status == S.PASS:
+        assert {c.value: ws.cell(4, c.column).value for c in ws[3]}["發行日"] == kept
+    else:
+        assert ws.max_row == 3, "沒通過的列不出現在「回填後」"

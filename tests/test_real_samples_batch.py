@@ -39,7 +39,7 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def outcome(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("real_batch")
-    sheet = shutil.copy(REFERENCE, tmp / REFERENCE.name)  # 新檔寫在原檔旁邊，不在 data/ 產生檔案
+    sheet = shutil.copy(REFERENCE, tmp / REFERENCE.name)  # 不在 data/ 產生檔案
     return run_batch(
         PDFS,
         Path(sheet),
@@ -89,8 +89,8 @@ def test_passing_barc_rows_are_marked_filled(outcome):
     assert all(d.action == "match" for i in passed for d in i.report.backfill)
 
 
-def rows_by_code(path: Path) -> dict[str, dict]:
-    ws = openpyxl.load_workbook(path, data_only=True)["樣本清單"]
+def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
+    ws = openpyxl.load_workbook(path, data_only=True)[sheet]
     headers = [c.value for c in ws[3]]
     rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=4, values_only=True))
     return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
@@ -109,6 +109,7 @@ def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     )
     codes = [i.product_code for i in filled.items if i.filled]
     assert len(codes) >= 9, "BARC 5 份＋HSBC 至少 4 份通過並回填"
-    got, want = rows_by_code(filled.output), rows_by_code(REFERENCE)
+    got, want = rows_by_code(filled.output, "回填後"), rows_by_code(REFERENCE)
+    assert set(got) == set(codes), "「回填後」只有通過且回填的列"
     for code in codes:
         assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code

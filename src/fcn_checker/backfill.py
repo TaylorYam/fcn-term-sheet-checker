@@ -2,7 +2,8 @@
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
 - 只有整份核對 PASS 的說明書才寫入（`fillable`）。
-- 寫入新檔：沿用表上既有日期格式；原檔不動、不覆蓋既有檔案；開檔前確認參考條件表與核對時相同。
+- 寫入：開檔前確認參考條件表與核對時相同，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
+  原檔不動，回填結果由核對結果檔（result_file.py）帶出。
 - 決策的顯示標籤（`BackfillAction.label`）只在這裡定義，報告與 PANEL 共用。
 
 比價日填法：
@@ -237,7 +238,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
     )
 
 
-# ---------------------------------------------------------------- 寫入新檔
+# ---------------------------------------------------------------- 寫入
 
 
 def fillable(report: CheckReport) -> bool:
@@ -285,12 +286,3 @@ def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -
                     cell.number_format = fmt
         filled.append(ok)
     return filled
-
-
-def write_new(data: bytes, out: Path) -> None:
-    """寫出回填新檔；檔案已存在時不覆蓋，丟出 IngestionError。"""
-    try:
-        with out.open("xb") as f:
-            f.write(data)
-    except OSError as e:
-        raise IngestionError("output_exists", f"無法寫入新檔 {out.name}：{e}") from e

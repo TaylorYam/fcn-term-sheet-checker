@@ -37,20 +37,28 @@ def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], **kw):
     return outcome, sheet
 
 
-def row_of(path: Path, product_code: str) -> dict:
-    ws = openpyxl.load_workbook(path)["樣本清單"]
+def sheet_rows(path: Path, sheet: str = "回填後") -> dict[str, dict]:
+    """TDCC Code → 該列（第 3 列表頭、第 4 列起資料）；預設讀核對結果檔的「回填後」。"""
+    ws = openpyxl.load_workbook(path)[sheet]
     headers = [c.value for c in ws[3]]
-    for r in ws.iter_rows(min_row=4, values_only=True):
-        d = dict(zip(headers, r, strict=False))
-        if d.get("TDCC Code") == product_code:
-            return d
-    raise AssertionError(f"新檔找不到 {product_code}")
+    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=4, values_only=True))
+    return {d["TDCC Code"]: d for d in rows if d.get("TDCC Code")}
 
 
-def result_rows(path: Path) -> list[dict]:
-    ws = openpyxl.load_workbook(path)["核對結果"]
+def row_of(path: Path, product_code: str) -> dict:
+    rows = sheet_rows(path)
+    assert product_code in rows, f"「回填後」找不到 {product_code}"
+    return rows[product_code]
+
+
+def error_rows(path: Path) -> list[dict]:
+    ws = openpyxl.load_workbook(path)["錯誤清單"]
     rows = list(ws.iter_rows(values_only=True))
     return [dict(zip(rows[0], r, strict=True)) for r in rows[1:]]
+
+
+def header_cell(ws, header: str, row: int):
+    return ws.cell(row, next(c.column for c in ws[3] if c.value == header))
 
 
 def problems(item) -> list[tuple[str, str, str]]:
@@ -77,11 +85,11 @@ def test_consistent_daily_term_sheet_passes_and_back_fills_first_and_last_compar
     item = outcome.items[0]
     assert item.report.status == PASS, problems(item)
     assert item.filled
-    assert outcome.output == tmp_path / "FCN參考條件_回填_20300203-040506.xlsx"
+    assert outcome.output == tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
     d = row_of(outcome.output, spec.product_code)
     assert d["ISIN Code"] == SYNTH_ISIN
     assert d["發行日"] == dt.datetime.combine(spec.issue_date, dt.time())
-    assert row_of(sheet, spec.product_code)["發行日"] is None, "原檔不動"
+    assert sheet_rows(sheet, "樣本清單")[spec.product_code]["發行日"] is None, "原檔不動"
     first = schedule_rows(spec)[0]["valuation"]
     assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6, "D 型：Non-Call 那期與最後一期"
 
@@ -103,7 +111,7 @@ def test_latest_compare_date_must_equal_final_valuation_date(tmp_path):
     assert (r.status, r.reason_code) == (REVIEW, "compare_dates_max_mismatch")
     assert "2030-07-09" in r.message and "2030-07-08" in r.message
     assert not item.filled
-    assert slots(row_of(outcome.output, spec.product_code)) == [None] * 12
+    assert spec.product_code not in sheet_rows(outcome.output)
 
 
 def test_period_end_back_fills_every_compare_date_from_first_callable_period(tmp_path):
@@ -162,9 +170,7 @@ def test_wrong_existing_compare_date_is_mismatch_and_nothing_is_back_filled(tmp_
     r = only(item, "backfill.compare_dates")
     assert r.status == MISMATCH
     assert item.report.status == MISMATCH and not item.filled
-    d = row_of(outcome.output, spec.product_code)
-    assert d["比價日_1"] == wrong, "不一致的格子保留原值"
-    assert d["ISIN Code"] is None and d["比價日_2"] is None, "沒通過就不回填任何格子"
+    assert spec.product_code not in sheet_rows(outcome.output), "沒通過就不回填，也不出現在「回填後」"
 
 
 def test_dash_where_a_compare_date_is_expected_is_mismatch(tmp_path):
@@ -178,7 +184,7 @@ def test_wrong_isin_is_mismatch_and_keeps_original(tmp_path):
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"ISIN Code": "XS9999999999"})])
     r = only(outcome.items[0], "backfill.isin")
     assert (r.status, r.expected, r.actual) == (MISMATCH, "XS9999999999", SYNTH_ISIN)
-    assert row_of(outcome.output, spec.product_code)["ISIN Code"] == "XS9999999999"
+    assert spec.product_code not in sheet_rows(outcome.output)
 
 
 def test_wrong_issue_date_is_mismatch_and_keeps_original(tmp_path):
@@ -190,7 +196,7 @@ def test_wrong_issue_date_is_mismatch_and_keeps_original(tmp_path):
     assert (r.status, r.expected, r.actual) == (MISMATCH, wrong.date(), spec.issue_date)
     assert [d.action for d in item.report.backfill if d.column == "發行日"] == ["mismatch"]
     assert item.report.status == MISMATCH and not item.filled
-    assert row_of(outcome.output, spec.product_code)["發行日"] == wrong
+    assert spec.product_code not in sheet_rows(outcome.output)
 
 
 def test_issue_date_missing_from_term_sheet_requires_review_and_is_not_back_filled(tmp_path):
@@ -200,7 +206,7 @@ def test_issue_date_missing_from_term_sheet_requires_review_and_is_not_back_fill
     assert only(item, "backfill.issue_date").status == REVIEW
     assert not [d for d in item.report.backfill if d.column == "發行日"]
     assert not item.filled
-    assert row_of(outcome.output, spec.product_code)["發行日"] is None
+    assert spec.product_code not in sheet_rows(outcome.output)
 
 
 def test_non_call_must_be_the_first_callable_period(tmp_path):
@@ -247,8 +253,9 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
     assert (r.status, r.reason_code) == (REVIEW, "issuer_unsupported")
     assert item.unsupported and item.report.status == REVIEW
     assert not any(x.rule_id.startswith("field.") for x in item.report.results)
-    result = result_rows(outcome.output)[0]
-    assert result["整體狀態"] == "未支援上手" and result["已回填"] == "否"
+    [error] = error_rows(outcome.output)
+    assert error["TDCC Code"] == spec.product_code, "取不到封面商品代號時用檔名前 12 碼"
+    assert "未支援上手" in error["錯訊"]
 
 
 def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
@@ -315,10 +322,11 @@ def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back
         assert item.report.status == REVIEW and not item.filled
         assert not any(x.rule_id.startswith(("field.", "backfill.")) for x in item.report.results)
     assert second.report.status == PASS and second.filled
-    assert row_of(outcome.output, spec.product_code)["ISIN Code"] is None
+    assert list(sheet_rows(outcome.output)) == [other.product_code]
     assert row_of(outcome.output, other.product_code)["ISIN Code"] == SYNTH_ISIN
-    rows = result_rows(outcome.output)
-    assert new.name in rows[0]["問題摘要"] and old.name in rows[2]["問題摘要"]
+    errors = error_rows(outcome.output)
+    assert [e["PDF 檔名"] for e in errors] == [old.name, new.name]
+    assert new.name in errors[0]["錯訊"] and old.name in errors[1]["錯訊"]
 
 
 def test_same_pdf_selected_twice_says_so_and_same_names_show_full_paths(tmp_path):
@@ -343,12 +351,12 @@ def test_reference_row_of_another_issuer_requires_review(tmp_path):
     assert not any(x.rule_id.startswith("field.") for x in outcome.items[0].report.results)
 
 
-def test_rows_without_selected_pdf_are_untouched(tmp_path):
+def test_rows_without_selected_pdf_are_left_out_of_the_result_file(tmp_path):
     spec, other = Spec(), Spec(product_code="029199990002")
     outcome, sheet = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec), reference_row(other)])
     assert outcome.items[0].filled
-    d = row_of(outcome.output, other.product_code)
-    assert d["ISIN Code"] is None and slots(d) == [None] * 12
+    assert list(sheet_rows(outcome.output)) == [spec.product_code]
+    assert error_rows(outcome.output) == []
 
 
 # ---------------------------------------------------------------- 表上事先填好的欄位
@@ -414,65 +422,87 @@ def test_unknown_reference_column_requires_review(tmp_path):
     assert r.status == REVIEW and "參考條件表" in r.message and "新欄位" in r.message
 
 
-# ---------------------------------------------------------------- 輸出新檔
+# ---------------------------------------------------------------- 核對結果檔
 
 
-def test_original_file_is_untouched_and_other_sheets_and_formats_are_kept(tmp_path):
-    spec = Spec()
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+def test_result_file_keeps_only_passing_rows_in_sheet_order_with_the_original_layout(tmp_path):
+    a, b, c, d = (Spec(product_code=f"02919999000{n}") for n in (1, 2, 3, 4))
+    rows = [reference_row(a), reference_row(b, **{"K(%)": 71}), reference_row(c), reference_row(d)]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
+    wb = openpyxl.load_workbook(sheet)
+    ws = wb["樣本清單"]
+    ws["A1"] = "FCN 參考條件"
+    ws.column_dimensions["E"].width = 17
+    for r in range(4, 8):
+        ws.row_dimensions[r].height = 20 + r
+    wb.save(sheet)
     before = sheet.read_bytes()
-    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, s) for s in (c, b, a)], [], sheet=sheet)  # d 這批沒選到
 
-    assert outcome.items[0].filled
-    assert sheet.read_bytes() == before
+    assert [i.filled for i in outcome.items] == [True, False, True]
+    assert outcome.output == tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
+    assert sheet.read_bytes() == before, "原檔不動"
+    assert list(tmp_path.glob("*_回填_*.xlsx")) == []
     out = openpyxl.load_workbook(outcome.output)
-    assert out.sheetnames == ["樣本清單", "詢價表格", "核對結果"]
-    assert out["詢價表格"]["B3"].value == "其他工作表（回填時不得改動）"
-    ws = out["樣本清單"]
-    assert ws["L4"].number_format == DATE_FORMAT, "回填的日期沿用表上既有日期格式"
-    assert ws["M4"].value == "-" and ws["M4"].number_format == "General"
+    assert out.sheetnames == ["回填後", "錯誤清單"], "原檔其他工作表不帶入"
+    ws, original = out["回填後"], openpyxl.load_workbook(sheet)["樣本清單"]
+    assert [[x.value for x in r] for r in ws.iter_rows(max_row=3)] == [
+        [x.value for x in r] for r in original.iter_rows(max_row=3)
+    ]
+    assert ws.column_dimensions["E"].width == 17
+    assert list(sheet_rows(outcome.output)) == [a.product_code, c.product_code], "只留通過的列，順序照原表"
+    assert ws.max_row == 5
+    assert [ws.row_dimensions[r].height for r in (4, 5)] == [24, 26], "列高跟著列走"
+    for r in (4, 5):
+        assert header_cell(ws, "發行日", r).number_format == DATE_FORMAT, "回填的日期沿用表上既有日期格式"
+        assert header_cell(ws, "比價日_2", r).value == "-"
 
 
-def test_result_sheet_lists_every_pdf(tmp_path):
-    ok, bad = Spec(), Spec(product_code="029199990002")
-    pdfs = [pdf_for(tmp_path, ok), pdf_for(tmp_path, bad)]
-    outcome, _ = batch(tmp_path, pdfs, [reference_row(ok), reference_row(bad, **{"K(%)": 71})])
+def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
+    ok, bad, missing = Spec(), Spec(product_code="029199990002"), Spec(product_code="029199990003")
+    unsupported = Spec(product_code="999199990001")
+    unreadable = tmp_path / "029199990009_TS.pdf"
+    unreadable.write_bytes(b"not a pdf")
+    nameless = tmp_path / "說明書.pdf"
+    nameless.write_bytes(b"not a pdf")
+    pdfs = [pdf_for(tmp_path, s) for s in (bad, ok, missing, unsupported)] + [unreadable, nameless]
+    rows = [reference_row(ok), reference_row(bad, **{"K(%)": 71, "KO(%)": 101})]
+    outcome, _ = batch(tmp_path, pdfs, rows)
 
-    rows = result_rows(outcome.output)
-    assert [r["PDF 檔名"] for r in rows] == [p.name for p in pdfs]
-    assert rows[0] | {"問題摘要": None} == {
-        "PDF 檔名": pdfs[0].name,
-        "商品代號": ok.product_code,
-        "上手": "BARC",
-        "整體狀態": "PASS（通過）",
-        "問題數": 0,
-        "問題摘要": None,
-        "已回填": "是",
-        "報告檔名": f"{pdfs[0].stem}_20300203-040506.check.md",
-    }
-    assert rows[1]["整體狀態"] == "MISMATCH（不一致）" and rows[1]["已回填"] == "否"
-    assert rows[1]["問題摘要"] == "K(%)對不起來：參考條件表 71.00／說明書 70.00", "問題摘要用中文錯訊，不含 rule_id"
-    assert (tmp_path / "reports" / f"{pdfs[1].stem}_20300203-040506.check.json").is_file()
+    errors = error_rows(outcome.output)
+    assert [(e["TDCC Code"], e["PDF 檔名"]) for e in errors] == [
+        (bad.product_code, pdfs[0].name),
+        (missing.product_code, pdfs[2].name),
+        (unsupported.product_code, pdfs[3].name),
+        ("029199990009", unreadable.name),
+        (None, nameless.name),
+    ], "每份沒通過的 PDF 一列，依輸入順序；TDCC Code 取封面商品代號、檔名前 12 碼，都取不到時留白"
+    lines = errors[0]["錯訊"].split("\n")
+    assert len(lines) == 2 and "K(%)對不起來：參考條件表 71.00／說明書 70.00" in lines, "多條錯訊在同一格，以換行分隔"
+    assert all(e["錯訊"] for e in errors)
+    assert openpyxl.load_workbook(outcome.output)["錯誤清單"]["C2"].alignment.wrap_text
+    assert list(sheet_rows(outcome.output)) == [ok.product_code]
 
 
-def test_existing_output_file_is_never_overwritten(tmp_path):
+def test_existing_result_file_is_never_overwritten(tmp_path):
     spec = Spec()
-    taken = tmp_path / "FCN參考條件_回填_20300203-040506.xlsx"
+    taken = tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
+    taken.parent.mkdir()
     taken.write_bytes(b"keep")
     outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
     assert taken.read_bytes() == b"keep"
     assert outcome.output is None and outcome.status == ERROR
-    assert outcome.errors[0].rule_id == "output.reference_sheet"
+    assert (outcome.errors[0].rule_id, outcome.errors[0].reason_code) == ("output.result_file", "output_exists")
     assert not outcome.items[0].filled
 
 
-def test_reference_sheet_with_result_sheet_is_rejected_before_checking(tmp_path):
+def test_batch_error_writes_no_result_file(tmp_path):
     spec = Spec()
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], extra_sheets=("核對結果",))
-    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+    outcome, _ = batch(
+        tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], reference_format=tmp_path / "missing.toml"
+    )
     assert outcome.status == ERROR and outcome.items == [] and outcome.output is None
-    assert outcome.errors[0].reason_code == "reference_result_sheet_exists"
-    assert list(tmp_path.glob("*_回填_*.xlsx")) == []
+    assert not (tmp_path / "reports").exists()
 
 
 def test_unreadable_pdf_does_not_stop_the_batch(tmp_path):
@@ -483,7 +513,7 @@ def test_unreadable_pdf_does_not_stop_the_batch(tmp_path):
     assert outcome.items[0].report.status == ERROR
     assert outcome.items[1].report.status == PASS and outcome.items[1].filled
     assert outcome.status == ERROR
-    assert [r["整體狀態"] for r in result_rows(outcome.output)] == ["ERROR（執行錯誤）", "PASS（通過）"]
+    assert [e["PDF 檔名"] for e in error_rows(outcome.output)] == [broken.name]
 
 
 def test_unexpected_error_in_one_pdf_is_reported_and_the_batch_continues(tmp_path):
@@ -530,10 +560,10 @@ def test_existing_reports_are_never_overwritten(tmp_path):
     item = outcome.items[0]
     assert taken.read_text(encoding="utf-8") == "keep"
     assert item.save_error and item.report_paths == ()
-    assert outcome.output is not None, "報告寫不進去不影響回填新檔"
+    assert outcome.output is not None, "報告寫不進去不影響核對結果檔"
 
 
-def test_reference_sheet_changed_after_check_is_not_back_filled(tmp_path):
+def test_reference_sheet_changed_after_check_writes_nothing(tmp_path):
     spec = Spec()
     pdf = pdf_for(tmp_path, spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
@@ -544,3 +574,4 @@ def test_reference_sheet_changed_after_check_is_not_back_filled(tmp_path):
     assert outcome.output is None and outcome.status == ERROR
     assert outcome.errors[0].reason_code == "reference_changed"
     assert not outcome.items[0].filled
+    assert not (tmp_path / "reports").exists(), "核對結果檔與報告都不寫"

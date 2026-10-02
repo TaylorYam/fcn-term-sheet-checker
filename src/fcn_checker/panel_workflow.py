@@ -63,7 +63,7 @@ class SaveReceipt:
     def summary(self) -> str:
         if self.cancelled:
             return "已取消儲存，核對結果仍保留。"
-        lines = [f"回填新檔：{self.output}" if self.output else "回填新檔：未儲存"]
+        lines = [f"核對結果檔：{self.output}" if self.output else "核對結果檔：未儲存"]
         lines.append(f"報告：已儲存 {len(self.report_paths)} 個檔案")
         lines.extend(self.errors)
         return "\n".join(lines)
@@ -184,14 +184,14 @@ class PanelSession:
         self.message = self._outcome.headline
         return self._outcome
 
-    def save(self, reports_dir: Path | None, *, now: dt.datetime | None = None) -> SaveReceipt:
-        """寫報告到 reports_dir、回填新檔到參考條件表旁；reports_dir 為 None 表示使用者取消。"""
-        if reports_dir is None:
+    def save(self, out_dir: Path | None, *, now: dt.datetime | None = None) -> SaveReceipt:
+        """寫報告與核對結果檔到 out_dir；out_dir 為 None 表示使用者取消。"""
+        if out_dir is None:
             return SaveReceipt(cancelled=True)
         outcome = self.outcome
         if outcome is None:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
-        batch = save_batch(outcome.batch, Path(reports_dir), now=now)
+        batch = save_batch(outcome.batch, Path(out_dir), now=now)
         errors = [f"{i.term_sheet.name} 報告未儲存：{i.save_error}" for i in batch.items if i.save_error]
         errors += [e.message for e in batch.errors]
         if self.outcome is not outcome:

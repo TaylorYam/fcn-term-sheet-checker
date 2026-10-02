@@ -20,8 +20,9 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="fcn-batch",
         description=(
-            "以參考條件表（FCN參考條件 的「樣本清單」）批量核對多份說明書 PDF；整份通過的說明書回填 ISIN 與比價日，"
-            "結果另存為新檔（原檔不動），每份說明書另有 JSON 與 Markdown 報告。"
+            "以參考條件表（FCN參考條件 的「樣本清單」）批量核對多份說明書 PDF；結果存成一份核對結果檔"
+            "（「回填後」：整份通過且回填 ISIN、發行日、比價日的列；「錯誤清單」：沒通過的說明書與錯訊），"
+            "原檔不動；每份說明書另有 JSON 與 Markdown 報告。"
         ),
     )
     p.add_argument("reference_sheet", type=Path, help="參考條件表 Excel（.xlsx）")
@@ -44,7 +45,12 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("config/issuer_prefixes.toml"),
         help="上手編號對照設定檔（預設 config/issuer_prefixes.toml）",
     )
-    p.add_argument("--out", type=Path, default=Path("runtime/reports"), help="報告輸出資料夾（預設 runtime/reports）")
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=Path("runtime/reports"),
+        help="核對結果檔與每份報告的輸出資料夾（預設 runtime/reports）",
+    )
     return p
 
 
@@ -77,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  [ERROR] {e.field}：{e.message}", file=sys.stderr)
     print(f"整體狀態：{outcome.status.value}（{STATUS_ZH[outcome.status]}）")
     if outcome.output is not None:
-        print(f"回填新檔：{outcome.output}")
+        print(f"核對結果檔：{outcome.output}")
     if outcome.items:
         print(f"報告資料夾：{args.out}")
     return EXIT[outcome.status]

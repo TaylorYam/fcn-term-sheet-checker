@@ -248,7 +248,7 @@ def test_encrypted_pdf_message_is_plain_chinese(tmp_path):
     assert_plain_chinese(report)
 
 
-# ---------------------------------------------------------------- 「核對結果」工作表與 PANEL 共用錯訊
+# ---------------------------------------------------------------- 錯誤清單與 PANEL 共用錯訊
 
 
 def test_panel_detail_uses_the_shared_message_without_rule_id(tmp_path):
