@@ -39,7 +39,6 @@ def test_real_hsbc_samples_match_exploration():
         {
             ("standard.approval_date", "value_mismatch"): 2,
             ("batch.pairing", "reference_row_missing"): 1,
-            ("doc.scenario_calculations", "value_mismatch"): 1,
         }
     )
     paired = [r for r in reports if not any(x.reason_code == "reference_row_missing" for x in r.results)]

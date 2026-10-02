@@ -260,7 +260,8 @@ def run(ctx):
                 segment,
                 m.start(),
                 m.end(),
-                valid=values == expected_values and actual == expected,
+                # Issuers may sum unrounded coupons, so only the printed total gets a 0.01 rounding allowance.
+                valid=values == expected_values and abs(actual - expected) <= Q2,
             )
         if i > 0:
             annual = list(segment.finditer(r"平均年化報酬率\(以簡單平均年化報酬率之方式計算\)為" + N + "%"))
