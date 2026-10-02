@@ -529,7 +529,6 @@ def test_partial_period_coupon_arithmetic(tmp_path, amount, status):
     ],
 )
 def test_profit_total_allows_rounding_difference_only(tmp_path, items, total, status):
-    # Issuers sum unrounded coupons, so only the printed total may differ from the printed items by 0.01.
     s = Spec(partial_coupon=True)
     s.replacements = {
         "損益=美元10,000.00+美元200.00+美元25.00-美元10,000.00=美元225.00": (
@@ -538,6 +537,7 @@ def test_profit_total_allows_rounding_difference_only(tmp_path, items, total, st
     }
     r = check(tmp_path, s)
     [profit] = [x for x in r.results if x.field.startswith("s1.profit.")]
+    assert profit.rule_id == "doc.scenario_calculations" and profit.tolerance
     assert profit.status == status and profit.actual == Decimal(total)
     assert r.status == status
 

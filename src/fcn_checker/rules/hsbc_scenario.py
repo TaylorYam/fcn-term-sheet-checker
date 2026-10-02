@@ -12,6 +12,8 @@ from . import common
 
 N = r"([\d,]+(?:\.\d+)?)"
 Q2, Q4 = Decimal("0.01"), Decimal("0.0001")
+# Issuers may sum unrounded coupons, so only the printed profit total may differ from its printed items.
+PROFIT_TOLERANCE = Decimal("0.01")
 
 
 def number(s):
@@ -53,7 +55,7 @@ def run(ctx):
     out = []
     serial = 0
 
-    def compare(rid, label, expected, actual, index, start, end, valid=None):
+    def compare(rid, label, expected, actual, index, start, end, valid=None, tolerance=None):
         nonlocal serial
         serial += 1
         ok = expected == actual if valid is None else valid
@@ -65,6 +67,7 @@ def run(ctx):
                 expected=expected,
                 actual=actual,
                 reason="" if ok else "value_mismatch",
+                tolerance=tolerance,
                 evidence=[Evidence.of(x) for x in index.lines_for(start, end)],
             )
         )
@@ -260,8 +263,8 @@ def run(ctx):
                 segment,
                 m.start(),
                 m.end(),
-                # Issuers may sum unrounded coupons, so only the printed total gets a 0.01 rounding allowance.
-                valid=values == expected_values and abs(actual - expected) <= Q2,
+                valid=values == expected_values and abs(actual - expected) <= PROFIT_TOLERANCE,
+                tolerance=f"損益總額與各項加總相差 ≤ {PROFIT_TOLERANCE}；各項金額須完全相等",
             )
         if i > 0:
             annual = list(segment.finditer(r"平均年化報酬率\(以簡單平均年化報酬率之方式計算\)為" + N + "%"))
