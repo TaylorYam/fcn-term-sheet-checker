@@ -11,7 +11,7 @@ Choose the route before creating an Issue:
 - Bug, cause and correct behavior clear: inspect relevant code → create a GitHub Issue → `/implement <issue>` → `/code-review`. Add a regression test when reasonable.
 - Bug, cause unclear: `/diagnosing-bugs` → establish reproduction → identify root cause → confirm correct behavior → create a GitHub Issue → `/implement <issue>` → `/code-review`. Keep hypotheses separate from confirmed causes.
 - External or incoming Issue: existing Issue → `/triage <issue>` → `ready-for-agent` → `/implement <issue>` → `/code-review`.
-- New issuer or new template version: follow `docs/issuer-onboarding.md` (samples → exploration → spec docs PR → implementation Issue → `/implement` → `/code-review` → trial run).
+- New issuer or new template version: follow `docs/issuer-onboarding.md` (samples → exploration → independent developer and operator highlights merged by intersection → spec docs PR → implementation Issue → `/implement` → `/code-review` → trial run).
 
 Use `/triage` mainly for Issues created by others. An implementation-ready Issue created by this agent, `/to-spec`, or `/to-tickets` does not need another triage. Use `/to-tickets` only when the work is too large for one Issue / PR.
 
