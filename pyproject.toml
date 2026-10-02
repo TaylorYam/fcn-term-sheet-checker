@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fcn-checker"
 version = "0.1.0"
-description = "FCN Term Sheet 核對工具：說明書 PDF × 參考條件表／上手詢價表（本機 CLI，規則式，不使用 LLM）"
+description = "FCN Term Sheet 核對工具：說明書 PDF × 參考條件表（本機 CLI，規則式，不使用 LLM）"
 requires-python = ">=3.11"
 dependencies = [
     "pymupdf>=1.24,<2",
@@ -19,8 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-fcn-check = "fcn_checker.cli:main"
-fcn-batch = "fcn_checker.cli:batch_main"
+fcn-batch = "fcn_checker.cli:main"
 fcn-panel = "fcn_checker.panel:main"
 
 [tool.setuptools.packages.find]

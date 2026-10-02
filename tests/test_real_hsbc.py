@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fcn_checker.checker import run_check
+from fcn_checker.batch import check_batch
 from fcn_checker.schema import CheckStatus as S
 from hsbc_synth import ORDER_FORMAT, REVIEW_STANDARD, ROOT
 
@@ -20,7 +20,16 @@ pytestmark = [
 
 
 def test_real_hsbc_samples_match_exploration():
-    reports = [run_check(pdf, ORDER, REVIEW_STANDARD, ORDER_FORMAT) for pdf in PDFS]
+    reports = [
+        i.report
+        for i in check_batch(
+            PDFS,
+            ORDER,
+            REVIEW_STANDARD,
+            reference_format=ORDER_FORMAT,
+            issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
+        ).items
+    ]
     assert len(reports) == 8 and all(r.template == "hsbc-zh-pd" for r in reports)
     bad = Counter(
         (x.rule_id, x.reason_code) for r in reports for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)
@@ -28,11 +37,12 @@ def test_real_hsbc_samples_match_exploration():
     assert bad == Counter(
         {
             ("standard.approval_date", "value_mismatch"): 2,
-            ("order.table_pairing", "order_row_missing"): 1,
+            ("batch.pairing", "reference_row_missing"): 1,
+            ("backfill.compare_dates", "value_mismatch"): 4,
             ("doc.scenario_calculations", "value_mismatch"): 1,
         }
     )
-    paired = [r for r in reports if not any(x.reason_code == "order_row_missing" for x in r.results)]
+    paired = [r for r in reports if not any(x.reason_code == "reference_row_missing" for x in r.results)]
     assert len(paired) == 7 and all(
         not any(x.status in (S.REVIEW_REQUIRED, S.ERROR) for x in r.results) for r in paired
     )

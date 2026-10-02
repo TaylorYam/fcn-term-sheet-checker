@@ -1,4 +1,4 @@
-"""合成測試資料：仿 BARC 中文產品說明書版面的 PDF 與 BARC 詢價表 Excel。
+"""合成測試資料：仿 BARC 中文產品說明書版面的 PDF 與參考條件表 Excel。
 
 所有數值、代號、名稱皆為虛構；不含任何真實交易資料。版面座標依範本規格
 docs/templates/barc-zh-product-description.md 觀察值設定。
@@ -18,7 +18,6 @@ import openpyxl
 
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_STANDARD = ROOT / "config" / "review_standard.toml"
-ORDER_FORMAT = ROOT / "config" / "order_formats" / "barc.toml"
 
 _STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
 FIXED_WARNING = _STD["risk"]["fixed_warning"]
@@ -47,7 +46,7 @@ DEFAULT_ULS = (
 
 @dataclass
 class Spec:
-    """合成說明書與詢價表的共同參數。預設兩者完全一致。"""
+    """合成說明書與參考條件表的共同參數。預設兩者完全一致。"""
 
     product_code: str = "029199990001"
     currency_zh: str = "美元"
@@ -699,93 +698,6 @@ def build_not_barc_pdf(path: Path) -> Path:
     w.line(41.0, "發行機構:")
     w.put(301.4, w.y - 13, "法商範例銀行（Example Bank SA）")
     return w.finish(path)
-
-
-# ---------------------------------------------------------------- 詢價表
-
-INQUIRY_HEADERS = [
-    "Product",
-    "Currency",
-    "Guaranteed Periods (m)",
-    "BBG Code 1",
-    "BBG Code 2",
-    "BBG Code 3",
-    "BBG Code 4",
-    "BBG Code 5",
-    "Strike (%)",
-    "KO Type",
-    "KO Barrier (%)",
-    "Coupon p.a. (%)",
-    "Upfront / Note Price (%)",
-    "Tenor (m)",
-    "Barrier Type",
-    "KI Barrier (%)",
-    "Observation Frequency (m)",
-    "OTC",
-    "Funding Spread (bps)",
-    "Effective Date offset",
-    "Notional",
-    "Trade Date",
-    "Issue Date",
-    "Final Valuation Date",
-    "Maturity Date",
-    "Quote ID",
-]
-
-
-def inquiry_row(s: Spec) -> dict[str, Any]:
-    ko_type = ("Daily" if s.ko_obs == "D" else "Period End") + (" Memory" if s.memory else "")
-    barrier = {"none": "None", "AM": "EKI", "D": "AKI", "M": "MKI"}[s.ki]
-    row: dict[str, Any] = {
-        "Product": "FCN",
-        "Currency": s.ccy,
-        "Guaranteed Periods (m)": s.guaranteed_value,
-        "Strike (%)": float(s.strike),
-        "KO Type": ko_type,
-        "KO Barrier (%)": float(s.ko),
-        "Coupon p.a. (%)": float(s.annual),
-        "Upfront / Note Price (%)": 98.5,
-        "Tenor (m)": s.tenor,
-        "Barrier Type": barrier,
-        "KI Barrier (%)": float(s.ki_pct) if s.ki != "none" else 0,
-        "Observation Frequency (m)": 1,
-        "OTC": "Note",
-        "Funding Spread (bps)": 50,
-        "Effective Date offset": (s.issue_date - s.trade_date).days,
-        "Notional": 1000000,
-        "Trade Date": dt.datetime.combine(s.trade_date, dt.time()),
-        "Issue Date": dt.datetime.combine(s.issue_date, dt.time()),
-        "Final Valuation Date": dt.datetime.combine(s.final_date, dt.time()),
-        "Maturity Date": dt.datetime.combine(s.maturity_date, dt.time()),
-        "Quote ID": "Q-SYNTH-0001",
-    }
-    for i in range(1, 6):
-        row[f"BBG Code {i}"] = s.underlyings[i - 1].ticker if i <= len(s.underlyings) else None
-    return row
-
-
-def build_inquiry(
-    path: Path,
-    s: Spec,
-    overrides: dict[str, Any] | None = None,
-    extra_columns: dict[str, Any] | None = None,
-    product_code: str | None = None,
-) -> Path:
-    row = inquiry_row(s)
-    row.update(overrides or {})
-    headers = INQUIRY_HEADERS + list(extra_columns or {})
-    row.update(extra_columns or {})
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "詢價表格"
-    ws["A1"] = "BARC 詢價表（合成測試資料）"
-    ws["A3"] = "TDCC Code"
-    ws["B3"] = product_code if product_code is not None else s.product_code
-    for k, h in enumerate(headers):
-        ws.cell(row=4, column=2 + k, value=h)
-        ws.cell(row=5, column=2 + k, value=row.get(h))
-    wb.save(path)
-    return path
 
 
 # ---------------------------------------------------------------- 參考條件表

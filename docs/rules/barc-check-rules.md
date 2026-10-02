@@ -1,7 +1,7 @@
 # 核對規則：BARC 中文產品說明書
 
 - 文件側：[BARC 範本規格](../templates/barc-zh-product-description.md)
-- 下單側：2026-10-02 起為[參考條件表](../order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`，[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)），對照見 §9。§1～§8 描述的 BARC 詢價表流程已停用，PANEL 改版前暫時保留，見 [BARC 詢價格式](../order-formats/barc-inquiry.md)（設定檔 `config/order_formats/barc.toml`）
+- 下單側：2026-10-02 起為[參考條件表](../order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`，[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)），對照見 §9。§1～§8 中與 BARC 詢價表欄位對照的部分（Guaranteed Periods、Observation Frequency、Effective Date offset、KO Type／Barrier Type 值）已隨詢價表流程刪除（Issue #46），只保留為歷史紀錄；說明書內部規則與審查標準仍然有效
 - 會隨時間改變的基準（審查通過日期、固定警語、負責人、名稱格式、面額預設值等）見 [審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
 - 狀態：規則已與使用者確認（2026-10-01）；第一階段已實作（Issue #7，`src/fcn_checker/rules/barc.py`，實作對照見 §8），第二階段（配息表、提前出場表、保證配息期等）待另開 Issue；§6.2 擱置、§6.4 需更多詢價表樣本驗證
 - 依 Issue #38 的範圍決定（使用者螢光標記與程式規則取交集，差異逐項決定），Issue #41 補齊文件內重複出現處、情境試算與審查標準固定值的核對（§3.7、§3.9、§7）
@@ -294,7 +294,7 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 
 ## 9. 參考條件表流程（2026-10-02，Issue #43）
 
-表上事先填好的欄位與說明書比對；說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：`rules/barc.py` 的 `reference_rules`、`autocall_schedule`，共用的 Non-Call 與回填規則在 `rules/reference.py`。
+表上事先填好的欄位與說明書比對；說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：`rules/barc.py` 的 `run_all`、`autocall_schedule`，共用的 Non-Call 與回填規則在 `rules/reference.py`。
 
 | 參考條件表欄 | 說明書來源 | 規則 |
 |---|---|---|

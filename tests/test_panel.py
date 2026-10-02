@@ -1,323 +1,284 @@
-"""PANEL 工作流程入口：只用合成檔案，不依賴桌面或 parser 內部。"""
+"""PANEL 工作流程入口（PanelSession）：參考條件表＋多份說明書的預覽、核對、儲存與失效檢查。
 
+只用合成檔案，不依賴桌面視窗或 parser 內部。核對規則本身見 test_check_barc*.py、test_batch.py。
+"""
+
+import datetime as dt
 from dataclasses import FrozenInstanceError
-from decimal import Decimal
+from pathlib import Path
 
 import fitz
+import openpyxl
 import pytest
 
 from fcn_checker.ingestion import IngestionError
+from fcn_checker.panel import parse_args
 from fcn_checker.panel_workflow import PanelSession
-from synth import ORDER_FORMAT, REVIEW_STANDARD, Spec, build_inquiry, build_not_barc_pdf, build_pdf
+from synth import (
+    ISSUER_PREFIXES,
+    REFERENCE_FORMAT,
+    REVIEW_STANDARD,
+    ROOT,
+    SYNTH_ISIN,
+    Spec,
+    build_pdf,
+    build_reference_sheet,
+    reference_row,
+)
+
+NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 
 
-def test_confirmed_preview_can_be_checked_without_writing_report(tmp_path):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel)
-    with pytest.raises(IngestionError, match="預覽"):
-        session.start_check()
-    session.load_preview()
-    outcome = session.start_check()
-    assert not outcome.stopped
-    assert "已核對項目一致" in outcome.headline
-    assert "人工" in outcome.headline
-    assert {n["rule_id"] for n in outcome.report.not_covered} == {
-        "field.monthly_ki",
-        "doc.underlying_names",
-        "field.isin",
-        "doc.initial_prices",
-        "doc.scenario_other_returns",
-    }
-    assert session.outcome is outcome
-    assert set(tmp_path.iterdir()) == {pdf, excel}
+def inputs(tmp_path: Path, *specs: Spec, rows: list[dict] | None = None):
+    specs = specs or (Spec(),)
+    pdfs = [build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s) for s in specs]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows or [reference_row(s) for s in specs])
+    return sheet, pdfs
 
 
-@pytest.mark.parametrize("kind", ["mismatch", "missing_pdf", "missing_excel", "ambiguous"])
-def test_pairing_failure_stops_panel_before_general_checks(tmp_path, kind):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(
-        tmp_path / "inquiry.xlsx", Spec(product_code="029199990002") if kind == "mismatch" else Spec()
-    )
-    if kind == "missing_excel":
-        import openpyxl
-
-        with_excel = openpyxl.load_workbook(excel)
-        with_excel["詢價表格"]["B3"] = None
-        with_excel.save(excel)
-        with_excel.close()
-    elif kind in ("missing_pdf", "ambiguous"):
-        with fitz.open(pdf) as doc:
-            page = doc[0]
-            if kind == "missing_pdf":
-                page.add_redact_annot(page.search_for("029199990001")[0])
-                page.apply_redactions()
-            else:
-                page.insert_text((41, 820), "商品代號:", fontname="china-t", fontsize=10)
-                page.insert_text((301, 820), "029199990003", fontsize=10)
-            doc.saveIncr()
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel)
-    session.load_preview()
-    outcome = session.start_check()
-    assert outcome.stopped
-    assert "停止" in outcome.headline
-    assert not any(r.rule_id == "field.currency" for r in outcome.report.results)
-    assert outcome.report.status.value != "PASS"
+def session_for(tmp_path: Path, sheet, pdfs, standard=REVIEW_STANDARD, config_dir=None) -> PanelSession:
+    session = PanelSession(standard, config_dir or ROOT / "config")
+    session.select(sheet, pdfs)
+    return session
 
 
-def test_missing_general_field_continues_and_preserves_other_differences(tmp_path):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec(omit=frozenset({"trade_date"})))
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec(), overrides={"Coupon p.a. (%)": 9})
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel)
-    session.load_preview()
-    outcome = session.start_check()
-    assert not outcome.stopped
-    assert outcome.report.status.value == "REVIEW_REQUIRED"
-    trade = next(r for r in outcome.report.results if r.rule_id == "field.trade_date")
-    assert trade.status.value == "REVIEW_REQUIRED" and not trade.document_evidence
-    coupon = next(r for r in outcome.report.results if r.rule_id == "field.coupon_pa_pct")
-    assert coupon.status.value == "MISMATCH" and coupon.document_evidence and coupon.order_source
-    assert outcome.ordered_results[0].status.value == "MISMATCH"
+# ---------------------------------------------------------------- 預覽
 
 
-@pytest.mark.parametrize("changed", ["selection", "pdf", "standard"])
-def test_changing_sources_clears_check_result_and_requires_new_preview(tmp_path, changed):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    standard = tmp_path / "standard.toml"
-    standard.write_bytes(REVIEW_STANDARD.read_bytes())
-    session = PanelSession(ORDER_FORMAT, standard)
-    session.select(pdf, excel)
-    session.load_preview()
-    session.start_check()
-    if changed == "selection":
-        session.select(pdf, excel)
-    elif changed == "pdf":
-        build_pdf(pdf, Spec(tenor=7))
-    else:
-        standard.write_text(standard.read_text(encoding="utf-8") + "\n# change\n", encoding="utf-8")
-    assert session.outcome is None
-    with pytest.raises(IngestionError, match="預覽"):
-        session.start_check()
+def test_preview_lists_each_pdf_without_writing_anything(tmp_path):
+    ok, unknown, other = Spec(), Spec(product_code="029199990002"), Spec(product_code="999199990001")
+    sheet, pdfs = inputs(tmp_path, ok, unknown, other, rows=[reference_row(ok)])
+    before = set(tmp_path.iterdir())
+    session = session_for(tmp_path, sheet, pdfs)
 
-
-def test_preview_shows_pdf_product_code_and_readonly_conditions(tmp_path):
-    spec = Spec(currency_zh="日幣", tenor=7)
-    pdf = build_pdf(tmp_path / "ts.pdf", spec)
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", spec)
-    session = PanelSession(ORDER_FORMAT)
-    session.select(pdf, excel)
     preview = session.load_preview()
-
-    assert preview.product_code_evidence[0].page == 1
-    assert preview.product_code == "029199990001"
-    coupon = next(row for row in preview.conditions if row.label == "Coupon p.a. (%)")
-    assert coupon.value == Decimal("12")
-    assert coupon.source == "詢價表格!M5"
+    first, missing, unsupported = preview.rows
+    assert (first.issuer, first.product_code, first.reference_row, first.problem) == ("BARC", ok.product_code, 4, "")
+    assert first.product_code_evidence[0].page == 1
+    assert missing.reference_row is None and "找不到" in missing.problem
+    assert unsupported.unsupported and "未支援上手" in unsupported.problem
     assert session.preview == preview
-    assert set(tmp_path.iterdir()) == {pdf, excel}
+    assert set(tmp_path.iterdir()) == before
     with pytest.raises(FrozenInstanceError):
-        coupon.value = "modified"
+        first.problem = "modified"
 
 
-def test_changing_selection_clears_previous_preview(tmp_path):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    session = PanelSession(ORDER_FORMAT)
-    session.select(pdf, excel)
+def test_preview_reports_reference_sheet_column_problems(tmp_path):
+    from synth import REFERENCE_HEADERS
+
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)], [*REFERENCE_HEADERS, "新欄位"])
+    preview = session_for(tmp_path, sheet, [pdf]).load_preview()
+    assert any("新欄位" in w for w in preview.warnings)
+
+
+def test_pdf_product_code_is_never_taken_from_the_sheet(tmp_path):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec)
+    with fitz.open(pdfs[0]) as doc:
+        page = doc[0]
+        page.add_redact_annot(page.search_for(spec.product_code)[0])
+        page.apply_redactions()
+        doc.saveIncr()
+    row = session_for(tmp_path, sheet, pdfs).load_preview().rows[0]
+    assert row.product_code is None and row.problem
+
+
+def test_selection_is_required_and_changing_it_clears_preview(tmp_path):
+    sheet, pdfs = inputs(tmp_path)
+    session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()
-    session.select(pdf, None)
+    session.select(sheet, [])
     assert session.preview is None
     with pytest.raises(IngestionError, match="請先選取"):
         session.load_preview()
 
 
-@pytest.mark.parametrize("changed", ["pdf", "excel", "format"])
-def test_changed_source_invalidates_preview_and_can_be_reloaded(tmp_path, changed):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    fmt = tmp_path / "barc.toml"
-    fmt.write_bytes(ORDER_FORMAT.read_bytes())
-    session = PanelSession(fmt)
-    session.select(pdf, excel)
+@pytest.mark.parametrize("kind", ["broken_excel", "result_sheet", "missing_sheet"])
+def test_invalid_reference_sheet_never_leaves_valid_preview(tmp_path, kind):
+    sheet, pdfs = inputs(tmp_path)
+    session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()
-    if changed == "pdf":
-        build_pdf(pdf, Spec(tenor=7))
-    elif changed == "excel":
-        build_inquiry(excel, Spec(annual=Decimal("9")))
+    if kind == "broken_excel":
+        sheet.write_bytes(b"not an Excel")
     else:
-        fmt.write_text(fmt.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-    assert session.preview is None
-    assert "重新載入" in session.message
+        wb = openpyxl.load_workbook(sheet)
+        if kind == "result_sheet":
+            wb.create_sheet("核對結果")
+        else:
+            wb["樣本清單"].title = "其他"
+        wb.save(sheet)
+    with pytest.raises(IngestionError):
+        session.load_preview()
+    assert session.preview is None and session.message
+
+
+# ---------------------------------------------------------------- 核對
+
+
+def test_check_requires_preview_and_writes_nothing(tmp_path):
+    ok, bad = Spec(), Spec(product_code="029199990002")
+    sheet, pdfs = inputs(tmp_path, ok, bad, rows=[reference_row(ok), reference_row(bad, **{"K(%)": 71})])
+    session = session_for(tmp_path, sheet, pdfs)
+    with pytest.raises(IngestionError, match="預覽"):
+        session.start_check()
+    session.load_preview()
+    before = set(tmp_path.rglob("*"))
+
+    outcome = session.start_check()
+    assert set(tmp_path.rglob("*")) == before
+    assert session.outcome is outcome
+    assert [i.term_sheet for i in outcome.ordered_items] == [pdfs[1], pdfs[0]], "有問題的排前面"
+    assert "1 份通過" in outcome.headline and "1 份不一致" in outcome.headline
+    first = outcome.ordered_results(outcome.ordered_items[0])
+    assert first[0].status.value == "MISMATCH"
+    assert not outcome.batch.output and not any(i.filled for i in outcome.batch.items)
+
+
+@pytest.mark.parametrize("changed", ["selection", "pdf", "sheet", "standard", "config"])
+def test_changing_sources_clears_result_and_requires_new_preview(tmp_path, changed):
+    sheet, pdfs = inputs(tmp_path)
+    standard = tmp_path / "standard.toml"
+    standard.write_bytes(REVIEW_STANDARD.read_bytes())
+    config = tmp_path / "config"
+    config.mkdir()
+    for f in (REFERENCE_FORMAT, ISSUER_PREFIXES):
+        (config / f.name).write_bytes(f.read_bytes())
+    session = session_for(tmp_path, sheet, pdfs, standard, config)
+    session.load_preview()
+    session.start_check()
+    if changed == "selection":
+        session.select(sheet, pdfs)
+    elif changed == "pdf":
+        build_pdf(pdfs[0], Spec(tenor=7))
+    elif changed == "sheet":
+        build_reference_sheet(sheet, [reference_row(Spec(), **{"K(%)": 71})])
+    elif changed == "standard":
+        standard.write_text(standard.read_text(encoding="utf-8") + "\n# change\n", encoding="utf-8")
+    else:
+        prefixes = config / ISSUER_PREFIXES.name
+        prefixes.write_text(prefixes.read_text(encoding="utf-8") + "\n# change\n", encoding="utf-8")
+    assert session.outcome is None and session.preview is None
+    assert "重新載入" in session.message or changed == "selection"
+    with pytest.raises(IngestionError, match="預覽"):
+        session.start_check()
     assert session.load_preview() is not None
 
 
-@pytest.mark.parametrize("kind", ["unknown_pdf", "broken_pdf", "broken_excel", "unsupported", "wrong_format"])
-def test_invalid_inputs_never_leave_valid_preview(tmp_path, kind):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    fmt = tmp_path / "format.toml"
-    fmt.write_bytes(ORDER_FORMAT.read_bytes())
-    session = PanelSession(fmt)
-    session.select(pdf, excel)
-    session.load_preview()
-    if kind == "unknown_pdf":
-        build_not_barc_pdf(pdf)
-    elif kind == "broken_pdf":
-        pdf.write_bytes(b"not a PDF")
-    elif kind == "broken_excel":
-        excel.write_bytes(b"not an Excel")
-    elif kind == "unsupported":
-        session.select(pdf, excel, issuer="OTHER", template="other")
-    else:
-        fmt.write_text(fmt.read_text(encoding="utf-8").replace('issuer = "BARC"', 'issuer = "OTHER"'), encoding="utf-8")
+# ---------------------------------------------------------------- 儲存
+
+
+def test_save_writes_reports_and_back_filled_copy_only_when_asked(tmp_path):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec)
+    original = sheet.read_bytes()
+    session = session_for(tmp_path, sheet, pdfs)
     with pytest.raises(IngestionError):
-        session.load_preview()
-    assert session.preview is None
-    assert session.message
-
-
-def test_heading_is_not_used_for_product_code(tmp_path):
-    pdf = build_pdf(tmp_path / "misleading-title.pdf", Spec())
-    with fitz.open(pdf) as doc:
-        page = doc[0]
-        rect = page.search_for("英商巴克萊銀行")[0]
-        page.add_redact_annot(rect)
-        page.apply_redactions()
-        doc.saveIncr()
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    session = PanelSession(ORDER_FORMAT)
-    session.select(pdf, excel)
-    preview = session.load_preview()
-    assert preview.product_code == "029199990001"
-
-
-def test_pdf_code_is_not_replaced_by_excel_code(tmp_path):
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec(product_code="029199990002"))
-    session = PanelSession(ORDER_FORMAT)
-    session.select(pdf, excel)
-    preview = session.load_preview()
-    assert preview.product_code == "029199990001"
-    assert preview.conditions[0].value == "029199990002"
-
-
-@pytest.mark.parametrize("kind", ["missing", "ambiguous"])
-def test_unreliable_pdf_code_is_not_guessed(tmp_path, kind):
-    pdf = build_pdf(tmp_path / "029199990003.pdf", Spec())
-    with fitz.open(pdf) as doc:
-        page = doc[0]
-        if kind == "missing":
-            page.add_redact_annot(page.search_for("029199990001")[0])
-            page.apply_redactions()
-        else:
-            page.insert_text((41, 820), "商品代號:", fontname="china-t", fontsize=10)
-            page.insert_text((301, 820), "029199990004", fontsize=10)
-        doc.saveIncr()
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    session = PanelSession(ORDER_FORMAT)
-    session.select(pdf, excel)
-    preview = session.load_preview()
-    assert preview.product_code is None
-    assert preview.product_code_note
-
-
-def test_manual_save_cancel_failure_and_stale(tmp_path):
-    import json
-
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "order.xlsx", Spec())
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel)
-    with pytest.raises(IngestionError):
-        session.save_report(tmp_path / "reports")
+        session.save(tmp_path / "reports", now=NOW)
     session.load_preview()
     outcome = session.start_check()
-    assert session.save_report(None).cancelled
+
+    assert session.save(None).cancelled
     assert not (tmp_path / "reports").exists()
-    receipt = session.save_report(tmp_path / "reports")
+    receipt = session.save(tmp_path / "reports", now=NOW)
     assert receipt.complete
-    assert len(receipt.paths) == 2
-    data = json.loads(receipt.paths[0].read_text(encoding="utf-8"))
-    assert data["metadata"] == outcome.report.metadata
-    assert data["not_covered"]
-    assert "PDF" in receipt.paths[1].read_text(encoding="utf-8")
-    second = session.save_report(tmp_path / "reports")
-    assert second.complete and second.paths != receipt.paths
+    assert receipt.output == tmp_path / "FCN參考條件_回填_20300203-040506.xlsx"
+    assert str(receipt.output) in receipt.summary
+    assert {p.name for p in (tmp_path / "reports").iterdir()} == {
+        f"{pdfs[0].stem}_20300203-040506.check.json",
+        f"{pdfs[0].stem}_20300203-040506.check.md",
+    }
+    ws = openpyxl.load_workbook(receipt.output)["樣本清單"]
+    assert ws["F4"].value == SYNTH_ISIN
+    assert sheet.read_bytes() == original
+    assert session.outcome is outcome
+
+    again = session.save(tmp_path / "reports", now=NOW + dt.timedelta(seconds=1))
+    assert again.complete and again.output != receipt.output
+
+
+def test_save_failure_is_reported_and_result_is_kept(tmp_path):
+    sheet, pdfs = inputs(tmp_path)
+    session = session_for(tmp_path, sheet, pdfs)
+    session.load_preview()
+    outcome = session.start_check()
     blocked = tmp_path / "blocked"
     blocked.write_text("keep")
-    failed = session.save_report(blocked)
-    assert not failed.complete and failed.error
-    assert session.outcome is outcome
+
+    receipt = session.save(blocked, now=NOW)
+    assert not receipt.complete
+    assert "報告未儲存" in receipt.summary
     assert blocked.read_text() == "keep"
-    excel.unlink()
-    with pytest.raises(IngestionError):
-        session.save_report(tmp_path / "reports")
-    assert len(list((tmp_path / "reports").iterdir())) == 4
-
-
-def test_save_collision_and_partial_failure(tmp_path, monkeypatch):
-    from pathlib import Path
-    from types import SimpleNamespace
-
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "order.xlsx", Spec())
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel)
-    session.load_preview()
-    outcome = session.start_check()
-    monkeypatch.setattr("uuid.uuid4", lambda: SimpleNamespace(hex="fixed"))
-    directory = tmp_path / "reports"
-    directory.mkdir()
-    original_open = Path.open
-
-    def fail_markdown(path, mode="r", *args, **kwargs):
-        if mode == "x" and path.suffix == ".md":
-            raise PermissionError("synthetic denied")
-        return original_open(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", fail_markdown)
-    partial = session.save_report(directory)
-    assert not partial.complete and len(partial.paths) == 1
-    assert "synthetic denied" in partial.error
-    assert "Markdown：未儲存" in partial.summary
     assert session.outcome is outcome
-    original = partial.paths[0].read_bytes()
-
-    # Collision at filesystem boundary, independent of clock timing.
-    def collide(path, mode="r", *args, **kwargs):
-        if mode == "x":
-            return original_open(partial.paths[0], mode, *args, **kwargs)
-        return original_open(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", collide)
-    collision = session.save_report(directory)
-    assert not collision.complete and collision.error and not collision.paths
-    assert partial.paths[0].read_bytes() == original
 
 
-def test_issuer_options_and_default_order_format_come_from_registry(tmp_path, monkeypatch):
-    from fcn_checker.issuers import REGISTRY
-    from fcn_checker.panel_workflow import SUPPORTED_TEMPLATES
-    from synth import ROOT
-
-    assert {(c.issuer, c.template) for c in SUPPORTED_TEMPLATES} == {(i.code, i.template_id) for i in REGISTRY}
-    pdf = build_pdf(tmp_path / "ts.pdf", Spec())
-    excel = build_inquiry(tmp_path / "inquiry.xlsx", Spec())
-    monkeypatch.chdir(ROOT)
-    session = PanelSession(review_standard=REVIEW_STANDARD)
-    assert session.order_format == ORDER_FORMAT.resolve()
-    session.select(pdf, excel)
+def test_save_after_sources_changed_is_refused(tmp_path):
+    sheet, pdfs = inputs(tmp_path)
+    session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()
-    assert not session.start_check().stopped
+    session.start_check()
+    build_reference_sheet(sheet, [reference_row(Spec(), **{"K(%)": 71})])
+    with pytest.raises(IngestionError):
+        session.save(tmp_path / "reports", now=NOW)
+    assert not (tmp_path / "reports").exists()
+    assert list(tmp_path.glob("*_回填_*.xlsx")) == []
 
 
-def test_order_formats_dir_does_not_depend_on_working_directory(tmp_path, monkeypatch):
-    from synth import ROOT
+# ---------------------------------------------------------------- 設定檔與啟動參數
 
-    monkeypatch.chdir(tmp_path)
-    session = PanelSession(review_standard=REVIEW_STANDARD, order_formats_dir=ROOT / "config" / "order_formats")
-    assert session.order_format == ORDER_FORMAT.resolve()
+
+def test_config_falls_back_to_builtin_files_when_root_config_lacks_them(tmp_path):
+    old_install = tmp_path / "config"
+    old_install.mkdir()
+    (old_install / "review_standard.toml").write_bytes(REVIEW_STANDARD.read_bytes())
+    session = PanelSession(old_install / "review_standard.toml", old_install)
+    assert session.reference_format == REFERENCE_FORMAT.resolve()
+    assert session.issuer_prefixes == ISSUER_PREFIXES.resolve()
+    assert str(REFERENCE_FORMAT.resolve()) in "\n".join(str(p) for _, p in session.config_paths)
+
+    own = old_install / "issuer_prefixes.toml"
+    own.write_bytes(ISSUER_PREFIXES.read_bytes())
+    assert PanelSession(old_install / "review_standard.toml", old_install).issuer_prefixes == own.resolve()
+
+
+def test_panel_accepts_legacy_launcher_arguments(tmp_path):
+    args = parse_args(
+        [
+            "--order-formats-dir",
+            str(tmp_path / "config" / "order_formats"),
+            "--review-standard",
+            str(tmp_path / "config" / "review_standard.toml"),
+            "--install-root",
+            str(tmp_path),
+        ]
+    )
+    assert args.config_dir == tmp_path / "config", "舊啟動器只給 order_formats 資料夾：取其上一層 config"
+    args = parse_args(["--config-dir", str(tmp_path / "cfg")])
+    assert args.config_dir == tmp_path / "cfg"
+
+
+def test_builtin_config_comes_from_the_launched_release_not_the_package_location(tmp_path, monkeypatch):
+    """PANEL 安裝是 `pip install .`（非 editable）：內建設定必須由啟動的版本資料夾指定，不能靠套件位置推算。"""
+    import importlib.util
+
+    root, release = tmp_path / "install", tmp_path / "install" / ".local" / "releases" / "abc"
+    (release / "config").mkdir(parents=True)
+    (root / "config").mkdir()
+    (root / "config" / "review_standard.toml").write_bytes(REVIEW_STANDARD.read_bytes())
+    for f in (REFERENCE_FORMAT, ISSUER_PREFIXES):
+        (release / "config" / f.name).write_bytes(f.read_bytes())
+
+    captured = {}
+    monkeypatch.setattr("fcn_checker.panel.main", lambda argv, on_ready=None: captured.setdefault("argv", argv))
+    spec = importlib.util.spec_from_file_location("bootstrap", ROOT / "panel_bootstrap.py")
+    bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bootstrap)
+    bootstrap.run(str(release / "launch_panel.pyw"), ["--managed-root", str(root)])
+
+    args = parse_args(captured["argv"])
+    assert args.config_dir == root / "config"
+    assert args.builtin_config_dir == release / "config"
+    session = PanelSession(args.review_standard, args.config_dir, builtin_config_dir=args.builtin_config_dir)
+    assert session.reference_format == (release / "config" / REFERENCE_FORMAT.name).resolve()
+    assert session.issuer_prefixes == (release / "config" / ISSUER_PREFIXES.name).resolve()

@@ -127,6 +127,18 @@ class CheckResult:
 
 
 @dataclass
+class CheckReport:
+    """一份說明書的完整核對結果。"""
+
+    status: CheckStatus
+    template: str | None
+    results: list[CheckResult]
+    not_covered: list[dict[str, str]]
+    metadata: dict[str, Any] = field(default_factory=dict)
+    backfill: list[Any] = field(default_factory=list)  # 回填決策（rules.reference.CellDecision）
+
+
+@dataclass
 class DetectionResult:
     """範本辨識結果：全部條件成立才 matched；failed 為不成立的條件說明。"""
 

@@ -161,10 +161,10 @@
 
 | rule_id | 核對內容 |
 |---|---|
-| `template.detect`、`template.product_prefix` | 已知章條錨點及上手代號前綴 |
-| `order.table_pairing`、`order.unknown_column`、`order.missing_column`、`order.duplicate_column` | 整理表唯一列與欄名；無表頭欄忽略 |
-| `field.product_code`、`field.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | PDF 與整理表核心條件 |
-| `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`field.autocall_dates` | 型態、首可 KO 期與比價日 |
+| `template.detect`、`batch.issuer_prefix` | 已知章條錨點及上手代號前綴 |
+| `batch.pairing`、`order.unknown_column`、`order.missing_column`、`order.duplicate_column` | 整理表唯一列與欄名；無表頭欄忽略 |
+| `field.product_code`、`backfill.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | PDF 與整理表核心條件 |
+| `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`backfill.compare_dates` | 型態、首可 KO 期與比價日 |
 | `field.underlyings`、`field.prices`、`derive.prices`、`doc.price_header_pct` | 五個標的槽、順序／尾碼、四位價格與百分比推導 |
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
 | `doc.currency_consistency`、`doc.denomination`、`doc.minimum_amounts`、`doc.subscription_dates`、`doc.print_date`、`doc.name_consistency` | 文件重複欄位與審查日期規範 |
@@ -172,6 +172,12 @@
 | `doc.scenario_calculations`、`doc.scenario_general_annualized` | 本金、配息、部分期間配息、簡單損益；一般到期情境年化率 |
 | `standard.*` | 審查日期、負責人、固定名稱／電話／地址、法人全名、三處警語、風險等級、禁用詞、費率、發行價格、商品命名 |
 
-本機八份範本均可辨識。新版整理表可配對七份；未列入的樣本回報 `order_row_missing`，不擅用另一列。七份核對保留兩份舊審查日期差異，另有 H07 有利情境的簡單損益加總差異（依明列兩項已進位配息金額加總，相差 0.01），均保留原文證據。完整交易資料與逐項報告只留在本機，不提交 Git。
+本機八份範本均可辨識。新版整理表可配對七份；未列入的樣本回報 `reference_row_missing`，不擅用另一列。七份核對保留兩份舊審查日期差異，另有 H07 有利情境的簡單損益加總差異（依明列兩項已進位配息金額加總，相差 0.01），均保留原文證據。完整交易資料與逐項報告只留在本機，不提交 Git。
 
 HSBC 複雜股數、零股、最差情境完整贖回、有利／最差年化率、外部股價／匯率／交易日曆及 Monthly KI 列為未涵蓋；未知或缺漏的必核內容轉人工覆核。
+
+### 8.1 與最新參考條件表架構整合
+
+依 Accepted ADR 0004 及 Issue #43／#46，HSBC 與 BARC 使用同一個 `check_batch`／CLI／PANEL 流程及 `config/reference_sheet.toml`。原 Issue #34 的單筆 `run_check` 與 HSBC 專屬 Excel 設定已隨共用架構停用，不重新引入。
+
+比價日採共用新填法：D 型只填首個可 KO 期，P 型填首可 KO 期起每一期；覆蓋 §3.4／舊探勘中 D 型還填最後一期的敘述。ISIN 與比價日空白時由正式條款提出回填決策，已有值只比對，整份 PASS 才另存新檔。真實表另外有四份 D 型仍保留舊最後一期日期，會回報比價日差異，原檔與既有值均不修改。§3.7 的單份 H02 螢光範圍及情境 A 算法維持不變。

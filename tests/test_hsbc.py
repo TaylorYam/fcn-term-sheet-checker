@@ -1,8 +1,9 @@
-"""HSBC 黑箱回歸：合成資料經 run_check、CLI、PANEL；不直接測 parser。"""
+"""HSBC 黑箱回歸：合成資料經 check_batch、CLI、PANEL；不直接測 parser。"""
 
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import json
 from decimal import Decimal
 
@@ -10,18 +11,32 @@ import fitz
 import openpyxl
 import pytest
 
-from fcn_checker.checker import run_check
+from fcn_checker.batch import check_batch
 from fcn_checker.cli import main
 from fcn_checker.issuers import HSBC, REGISTRY
 from fcn_checker.panel_workflow import PanelSession
+from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
 from hsbc_synth import ORDER_FORMAT, REVIEW_STANDARD, ROOT, Spec, build_inquiry, build_pdf
+
+
+def run_check(pdf, excel, standard, fmt, registry=REGISTRY):
+    """單份測試仍經公開批量入口，不直接呼叫 parser／規則。"""
+    out = check_batch(
+        [pdf],
+        excel,
+        standard,
+        reference_format=fmt,
+        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
+        registry=registry,
+    )
+    return out.items[0].report if out.items else CheckReport(out.status, None, list(out.errors), [])
 
 
 def check(tmp_path, spec=None, overrides=None):
     s = spec or Spec()
     return run_check(
-        build_pdf(tmp_path / "ts.pdf", s),
+        build_pdf(tmp_path / f"{s.code}_TS.pdf", s),
         build_inquiry(tmp_path / "order.xlsx", s, overrides),
         REVIEW_STANDARD,
         ORDER_FORMAT,
@@ -53,7 +68,7 @@ def test_supported_types_pass(tmp_path, obs, memory, ki, count):
 @pytest.mark.parametrize(
     "field,value,rule",
     [
-        ("isin", "XS1999900002", "field.isin"),
+        ("isin", "XS1999900002", "backfill.isin"),
         ("denomination", 20000, "field.denomination"),
         ("trade_date", "2031-01-07", "field.trade_date"),
         ("issue_date", "2031-01-14", "field.issue_date"),
@@ -76,9 +91,9 @@ def test_supported_types_pass(tmp_path, obs, memory, ki, count):
         ("underlying_1_ki_price", 61, "field.prices"),
         ("underlying_1_ko_price", 101, "field.prices"),
         ("underlying_5", "ZZ5 UW", "field.underlyings"),
-        ("autocall_date_3", "2030-04-07", "field.autocall_dates"),
-        ("autocall_date_2", "-", "field.autocall_dates"),
-        ("autocall_date_6", "2030-07-08", "field.autocall_dates"),
+        ("autocall_date_3", "2030-04-07", "backfill.compare_dates"),
+        ("autocall_date_2", "-", "backfill.compare_dates"),
+        ("autocall_date_6", "2030-07-08", "backfill.compare_dates"),
     ],
 )
 def test_order_difference_is_reported(tmp_path, field, value, rule):
@@ -137,7 +152,6 @@ def test_document_difference_is_reported(tmp_path, old, new, rule):
         ("ko_memory", "X"),
         ("ki_type", "M"),
         ("coupon_pa_pct", "?"),
-        ("autocall_date_2", "bad"),
         ("underlying_1", "-"),
     ],
 )
@@ -149,15 +163,15 @@ def test_unknown_or_missing_order_value_requires_review(tmp_path, field, value):
 @pytest.mark.parametrize(
     "change,reason",
     [
-        ("missing_row", "order_row_missing"),
-        ("duplicate_row", "order_row_ambiguous"),
-        ("issuer", "issuer_mismatch"),
-        ("missing_key", "order_pairing_column"),
+        ("missing_row", "reference_row_missing"),
+        ("duplicate_row", "reference_row_duplicate"),
+        ("issuer", "reference_issuer_mismatch"),
+        ("missing_key", "reference_key_missing"),
     ],
 )
 def test_table_pairing_failures_stop_rules(tmp_path, change, reason):
     s = Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", s)
+    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     wb = openpyxl.load_workbook(excel)
     ws = wb.active
@@ -201,23 +215,23 @@ def test_partial_coupon_and_unrounded_total(tmp_path):
 
 def test_cli_and_panel_select_hsbc(tmp_path, monkeypatch):
     s = Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", s)
+    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     monkeypatch.chdir(ROOT)
     out = tmp_path / "reports"
-    assert main([str(pdf), str(excel), "--out", str(out)]) == 0
-    data = json.loads((out / "ts.check.json").read_text(encoding="utf-8"))
-    assert data["template"] == HSBC.template_id and data["metadata"]["order_format"]["issuer"] == "HSBC"
+    assert main([str(excel), str(pdf), "--out", str(out)]) == 0
+    data = json.loads(next(out.glob("*.check.json")).read_text(encoding="utf-8"))
+    assert data["template"] == HSBC.template_id
     assert "HSBC" in [x.code for x in REGISTRY]
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel, issuer=HSBC.code, template=HSBC.template_id)
+    session = PanelSession(REVIEW_STANDARD, ROOT / "config")
+    session.select(excel, [pdf])
     session.load_preview()
-    assert session.start_check().report.status == S.PASS
+    assert session.start_check().batch.status == S.PASS
 
 
 def test_ambiguous_registry_and_damaged_pdf(tmp_path):
     s = Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", s)
+    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     fake = dataclasses.replace(HSBC, code="FAKE")
     r = run_check(pdf, excel, REVIEW_STANDARD, ORDER_FORMAT, registry=(HSBC, fake))
@@ -228,9 +242,9 @@ def test_ambiguous_registry_and_damaged_pdf(tmp_path):
 
 def test_encrypted_pdf_is_not_checked(tmp_path):
     s = Spec()
-    plain = build_pdf(tmp_path / "ts.pdf", s)
+    plain = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
-    encrypted = tmp_path / "encrypted.pdf"
+    encrypted = tmp_path / f"{s.code}_encrypted.pdf"
     with fitz.open(plain) as d:
         d.save(encrypted, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="fake-owner", user_pw="fake-user")
     assert run_check(encrypted, excel, REVIEW_STANDARD, ORDER_FORMAT).status == S.ERROR
@@ -322,7 +336,7 @@ def test_missing_ambiguous_or_unknown_document_requires_review(tmp_path, old, ne
 )
 def test_header_validation(tmp_path, mode, rule):
     s = Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", s)
+    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     wb = openpyxl.load_workbook(excel)
     ws = wb.active
@@ -343,7 +357,7 @@ def test_header_validation(tmp_path, mode, rule):
 
 def test_panel_preview_selects_the_matching_table_row(tmp_path):
     s = Spec()
-    pdf = build_pdf(tmp_path / "ts.pdf", s)
+    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     wb = openpyxl.load_workbook(excel)
     ws = wb.active
@@ -352,13 +366,12 @@ def test_panel_preview_selects_the_matching_table_row(tmp_path):
     ws.cell(4, ws.max_column, "HSBC")
     wb.save(excel)
     wb.close()
-    session = PanelSession(ORDER_FORMAT, REVIEW_STANDARD)
-    session.select(pdf, excel, issuer=HSBC.code, template=HSBC.template_id)
+    session = PanelSession(REVIEW_STANDARD, ROOT / "config")
+    session.select(excel, [pdf])
     preview = session.load_preview()
-    assert preview.product_code == s.code
-    assert preview.conditions[0].value == s.code
-    assert preview.conditions[0].source.endswith("A5")
-    assert session.start_check().report.status == S.PASS
+    assert preview.rows[0].product_code == s.code
+    assert preview.rows[0].reference_row == 5
+    assert session.start_check().batch.status == S.PASS
 
 
 @pytest.mark.parametrize(
@@ -441,9 +454,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
     assert vals["ISIN Code"] == "XS1999900001"
     assert vals["比價日_2"].date() == s.ends[1]
-    assert vals["比價日_6"] == (
-        "-" if obs == "D" else __import__("datetime").datetime.combine(s.ends[-1], __import__("datetime").time())
-    )
+    assert vals["比價日_6"] == ("-" if obs == "D" else dt.datetime.combine(s.ends[-1], dt.time()))
     assert vals["比價日_1"] == "-"
     wb.close()
     wb = openpyxl.load_workbook(excel)

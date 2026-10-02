@@ -11,7 +11,7 @@ from pathlib import Path
 
 import openpyxl
 
-from fcn_checker.batch import run_batch
+from fcn_checker.batch import check_batch, run_batch, save_batch
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
 from synth import (
@@ -216,8 +216,8 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
 
 
 def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
-    spec = Spec(product_code="325199990001")  # 325 = HSBC：對照表有，範本尚未建立
-    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")])
+    spec = Spec(product_code="325199990001")  # 325 = HSBC：對照表有，本測試 registry 刻意不註冊 HSBC
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")], registry=(BARC,))
     item = outcome.items[0]
     assert item.unsupported and item.issuer == "HSBC"
     assert "HSBC" in only(item, "batch.issuer_prefix").message
@@ -378,11 +378,11 @@ def test_result_sheet_lists_every_pdf(tmp_path):
         "問題數": 0,
         "問題摘要": None,
         "已回填": "是",
-        "報告檔名": f"{pdfs[0].stem}.check.md",
+        "報告檔名": f"{pdfs[0].stem}_20300203-040506.check.md",
     }
     assert rows[1]["整體狀態"] == "MISMATCH（不一致）" and rows[1]["已回填"] == "否"
     assert "field.strike_pct" in rows[1]["問題摘要"]
-    assert (tmp_path / "reports" / f"{pdfs[1].stem}.check.json").is_file()
+    assert (tmp_path / "reports" / f"{pdfs[1].stem}_20300203-040506.check.json").is_file()
 
 
 def test_existing_output_file_is_never_overwritten(tmp_path):
@@ -426,4 +426,51 @@ def test_unexpected_error_in_one_pdf_is_reported_and_the_batch_continues(tmp_pat
     item = outcome.items[0]
     assert item.report.status == ERROR
     assert only(item, "batch.unexpected").message == "IndexError: synthetic parser failure"
-    assert outcome.output is not None and (tmp_path / "reports" / f"{spec.product_code}_TS.check.md").is_file()
+    assert (
+        outcome.output is not None
+        and (tmp_path / "reports" / f"{spec.product_code}_TS_20300203-040506.check.md").is_file()
+    )
+
+
+def test_check_writes_nothing_until_saved(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    before = set(tmp_path.rglob("*"))
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    outcome = check_batch([pdf], sheet, REVIEW_STANDARD, **kw)
+    assert outcome.status == PASS and outcome.output is None and not outcome.items[0].filled
+    assert set(tmp_path.rglob("*")) == before
+
+    save_batch(outcome, tmp_path / "reports", now=NOW)
+    assert outcome.items[0].filled and outcome.output.is_file()
+    assert {p.name for p in outcome.items[0].report_paths} == {
+        f"{pdf.stem}_20300203-040506.check.json",
+        f"{pdf.stem}_20300203-040506.check.md",
+    }
+
+
+def test_existing_reports_are_never_overwritten(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    taken = tmp_path / "reports" / f"{pdf.stem}_20300203-040506.check.json"
+    taken.parent.mkdir()
+    taken.write_text("keep", encoding="utf-8")
+    outcome, _ = batch(tmp_path, [pdf], [reference_row(spec)])
+    item = outcome.items[0]
+    assert taken.read_text(encoding="utf-8") == "keep"
+    assert item.save_error and item.report_paths == ()
+    assert outcome.output is not None, "報告寫不進去不影響回填新檔"
+
+
+def test_reference_sheet_changed_after_check_is_not_back_filled(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    outcome = check_batch([pdf], sheet, REVIEW_STANDARD, **kw)
+    build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 71})])  # 核對後被改過
+    save_batch(outcome, tmp_path / "reports", now=NOW)
+    assert outcome.output is None and outcome.status == ERROR
+    assert outcome.errors[0].reason_code == "reference_changed"
+    assert not outcome.items[0].filled

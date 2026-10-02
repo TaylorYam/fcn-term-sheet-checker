@@ -1,6 +1,6 @@
 """BARC 專屬核對規則（docs/rules/barc-check-rules.md）；共用規則見 rules/common.py。
 
-規則只接收標準化後的說明書欄位、下單欄位與審查標準；不讀檔、不改來源值。
+規則只接收標準化後的說明書欄位、參考條件表欄位與審查標準；不讀檔、不改來源值。
 每條規則產生一或多筆 CheckResult；抓不到、歧義、未知值一律轉人工覆核，不猜值。
 """
 
@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from ..config import ReferenceFormat
 from ..parsers.barc import BarcTermSheet
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..parsers.layout import squash
@@ -56,7 +55,6 @@ NOT_COVERED: list[dict[str, str]] = [
         "rule_id": "doc.underlying_names",
         "description": "標的名稱：不核對，上手依彭博代號帶入名稱，以代號為準（核對規則 §6.2）",
     },
-    {"rule_id": "field.isin", "description": "ISIN（詢價表沒有，暫不核對；參考條件表流程會核對並回填）"},
     {"rule_id": "doc.initial_prices", "description": "最初價格本身的外部正確性（無權威來源，Issue #38 排除）"},
     {
         "rule_id": "doc.scenario_other_returns",
@@ -64,9 +62,6 @@ NOT_COVERED: list[dict[str, str]] = [
     },
 ]
 
-
-# 參考條件表流程已核對 ISIN，不列入未涵蓋
-REFERENCE_NOT_COVERED = [n for n in NOT_COVERED if n["rule_id"] != "field.isin"]
 
 ISSUER = "BARC"
 
@@ -150,156 +145,10 @@ def underlyings(ctx: Context) -> CheckResult:
     )
 
 
-def ko_type(ctx: Context) -> CheckResult:
-    rid = "field.ko_type"
-    obs, mem = ctx.ts.f("ko_observation"), ctx.ts.f("ko_memory")
-    v, ov, problem = order_value(
-        ctx, "ko_type", rid, "ko_type", obs, lambda x: x if isinstance(x, str) else None, "文字"
-    )
-    if problem:
-        return problem
-    mapped = ctx.fmt.ko_type_values.get(v)
-    if mapped is None:
-        return order_review(rid, "ko_type", ov, obs, "order_unknown_value", f"KO Type「{v}」不在格式設定的允許值內")
-    for pf in (obs, mem):
-        if not pf.ok:
-            return doc_review(rid, "ko_type", pf, v, [ov])
-    exp = (mapped["observation"], bool(mapped["memory"]))
-    act = (obs.value, mem.value)
-
-    def label(t: tuple[str, bool]) -> str:
-        return f"{OBS_LABEL[t[0]]}／{'記憶式' if t[1] else '非記憶式'}"
-
-    ok = exp == act
-    return result(
-        rid,
-        "ko_type",
-        S.PASS if ok else S.MISMATCH,
-        expected=f"{v}（{label(exp)}）",
-        actual=label(act),
-        evidence=obs.evidence + mem.evidence,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-    )
-
-
-def _order_ki(ctx: Context, rid: str, pf: ParsedField) -> tuple[str | None, OrderValue | None, CheckResult | None]:
-    v, ov, problem = order_value(
-        ctx, "ki_type", rid, "ki_type", pf, lambda x: x if isinstance(x, str) else None, "文字"
-    )
-    if problem:
-        return None, ov, problem
-    mapped = ctx.fmt.ki_type_values.get(v)
-    if mapped is None:
-        return (
-            None,
-            ov,
-            order_review(rid, "ki_type", ov, pf, "order_unknown_value", f"Barrier Type「{v}」不在格式設定的允許值內"),
-        )
-    return mapped, ov, None
-
-
 def _doc_ki(pf: ParsedField) -> str | None:
     if pf.status in (FieldStatus.PRESENT, FieldStatus.NOT_APPLICABLE) and pf.value in KI_LABEL:
         return pf.value
     return None
-
-
-def ki_type(ctx: Context) -> CheckResult:
-    rid, pf = "field.ki_type", ctx.ts.f("ki_type")
-    mapped, ov, problem = _order_ki(ctx, rid, pf)
-    if problem:
-        return problem
-    doc = _doc_ki(pf)
-    if doc is None:
-        return doc_review(rid, "ki_type", pf, mapped, [ov])
-    if "M" in (mapped, doc):
-        return result(
-            rid,
-            "ki_type",
-            S.REVIEW_REQUIRED,
-            expected=KI_LABEL[mapped],
-            actual=KI_LABEL[doc],
-            pf=pf,
-            ov=[ov],
-            reason="monthly_ki_unsupported",
-            message="Monthly KI 尚無樣本，說明書判斷方式未確認（第二階段），請人工覆核",
-        )
-    ok = mapped == doc
-    return result(
-        rid,
-        "ki_type",
-        S.PASS if ok else S.MISMATCH,
-        expected=f"{ov.value}（{KI_LABEL[mapped]}）",
-        actual=KI_LABEL[doc],
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-    )
-
-
-def ki_pct(ctx: Context) -> CheckResult:
-    rid, pf, kt = "field.ki_pct", ctx.ts.f("ki_pct"), ctx.ts.f("ki_type")
-    ov = ctx.order.fields.get("ki_pct")
-    if ov is None:
-        return order_review(rid, "ki_pct", ov, pf, "order_missing", "詢價表沒有 KI Barrier 欄位")
-    order_v = Decimal(0) if ov.value is None else to_decimal(ov.value)
-    if order_v is None:
-        return order_review(rid, "ki_pct", ov, pf, "order_invalid", "詢價表的值不是數字")
-    doc = _doc_ki(kt)
-    if doc is None:
-        return doc_review(rid, "ki_pct", kt, order_v, [ov])
-    if doc == "none":
-        ok = order_v == 0
-        return result(
-            rid,
-            "ki_pct",
-            S.NOT_APPLICABLE if ok else S.MISMATCH,
-            expected=order_v,
-            actual=None,
-            evidence=kt.evidence,
-            ov=[ov],
-            reason="" if ok else "value_mismatch",
-            message="說明書無 KI；詢價表 KI Barrier 應為 0" if not ok else "雙方皆無 KI（由說明書明確判定）",
-        )
-    if not pf.ok:
-        return doc_review(rid, "ki_pct", pf, order_v, [ov])
-    ok, shown = cmp_pct(order_v, pf.value)
-    return result(
-        rid,
-        "ki_pct",
-        S.PASS if ok else S.MISMATCH,
-        expected=shown,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        tolerance="依說明書顯示位數四捨五入後比對",
-    )
-
-
-def issue_date_offset(ctx: Context) -> CheckResult:
-    rid, key = "field.issue_date_offset_days", "issue_date_offset_days"
-    trade, issue = ctx.ts.f("trade_date"), ctx.ts.f("issue_date")
-    v, ov, problem = order_value(ctx, key, rid, key, issue, to_int, "整數")
-    if problem:
-        return problem
-    for pf in (trade, issue):
-        if not pf.ok:
-            return doc_review(rid, key, pf, v, [ov])
-    days = (issue.value - trade.value).days
-    ok = v == days
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=v,
-        actual=days,
-        evidence=trade.evidence + issue.evidence,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message="說明書發行日 − 交易日（日曆天）",
-    )
 
 
 # ---------------------------------------------------------------- 推算規則
@@ -531,79 +380,6 @@ def _header_ev(table: Table) -> list[Evidence]:
 
 def _periods(rows: list[ScheduleRow]) -> str:
     return "、".join(f"第 {r.t} 期" for r in rows)
-
-
-def observation_frequency(ctx: Context) -> CheckResult:
-    """配息期數：詢價表 天期 ÷ Observation Frequency = 說明書配息表列數。"""
-    rid, field = "field.observation_frequency", "observation_frequency_months"
-    table = ctx.ts.f("coupon_table")
-    tenor, ov_t, p1 = order_value(ctx, "tenor_months", rid, field, table, to_int, "整數")
-    freq, ov_f, p2 = order_value(ctx, field, rid, field, table, to_int, "整數")
-    for p in (p1, p2):
-        if p:
-            return p
-    if freq <= 0 or tenor % freq:
-        return result(
-            rid,
-            field,
-            S.REVIEW_REQUIRED,
-            ov=[ov_t, ov_f],
-            reason="order_invalid",
-            message="天期無法被觀察頻率整除，無法推算期數",
-        )
-    if not table.ok:
-        return doc_review(rid, field, table, tenor // freq, [ov_t, ov_f])
-    n = len(table.value.rows)
-    ok = n == tenor // freq
-    return result(
-        rid,
-        field,
-        S.PASS if ok else S.MISMATCH,
-        expected=tenor // freq,
-        actual=n,
-        evidence=_header_ev(table.value),
-        ov=[ov_t, ov_f],
-        reason="" if ok else "value_mismatch",
-        message=f"期數：詢價表 {tenor} ÷ {freq}；說明書配息表 {n} 列",
-    )
-
-
-def guaranteed_periods(ctx: Context) -> CheckResult:
-    """保證配息期：詢價表 vs 說明書提前出場表；Daily Memory 另以 §13(7) 定義句交叉驗證。"""
-    rid, field = "field.guaranteed_periods", "guaranteed_periods"
-    pf, text = ctx.ts.f(field), ctx.ts.f("guaranteed_periods_text")
-    v, ov, problem = order_value(ctx, field, rid, field, pf, to_int, "整數")
-    if problem:
-        return problem
-    if not pf.ok:
-        return doc_review(rid, field, pf, v, [ov])
-    if text.status not in (FieldStatus.PRESENT, FieldStatus.MISSING):
-        return doc_review(rid, field, text, v, [ov])
-    if text.ok and text.value != pf.value:
-        return result(
-            rid,
-            field,
-            S.REVIEW_REQUIRED,
-            expected=v,
-            actual={"表格": pf.value, "定義句": text.value},
-            evidence=pf.evidence + text.evidence,
-            ov=[ov],
-            reason="document_inconsistent",
-            message="提前出場表與 §13(7)「自動提前出場觀察期」定義句推得的保證配息期不同",
-        )
-    ok = v == pf.value
-    source = "提前出場表與 §13(7) 定義句" if text.ok else "提前出場表"
-    return result(
-        rid,
-        field,
-        S.PASS if ok else S.MISMATCH,
-        expected=v,
-        actual=pf.value,
-        evidence=pf.evidence + (text.evidence if text.ok else []),
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message=f"說明書值由{source}推得",
-    )
 
 
 def coupon_dates(ctx: Context) -> list[CheckResult]:
@@ -941,7 +717,7 @@ def scenario_notional(ctx: Context) -> CheckResult:
 
 
 def price_header_pct(ctx: Context) -> list[CheckResult]:
-    """§15 價格表與 §16 情境表欄頭「X（為最初價格的N%）」= §15 定義句的百分比（執行價格另與詢價表 K 比對）。"""
+    """§15 價格表與 §16 情境表欄頭「X（為最初價格的N%）」= §15 定義句的百分比（執行價格另與參考條件表 K(%) 比對）。"""
     rid = "doc.price_header_pct"
     out = []
     for field in ("strike_pct", "ko_pct", "ki_pct"):
@@ -1129,10 +905,7 @@ def observation_t_range(ctx: Context) -> CheckResult:
     )
 
 
-# ---------------------------------------------------------------- 入口
-
-
-# ---------------------------------------------------------------- 參考條件表（ADR 0004）
+# ---------------------------------------------------------------- 參考條件表欄位
 
 
 def autocall_schedule(ts: BarcTermSheet) -> ParsedField:
@@ -1185,11 +958,6 @@ def autocall_schedule(ts: BarcTermSheet) -> ParsedField:
     return ParsedField(name, FieldStatus.PRESENT, sched, list(g.evidence))
 
 
-def _ref_fmt(ctx: Context) -> ReferenceFormat:
-    assert isinstance(ctx.fmt, ReferenceFormat)
-    return ctx.fmt
-
-
 def _mapped(
     ctx: Context, rid: str, key: str, pf: ParsedField, values: dict[str, Any], column: str
 ) -> tuple[Any, OrderValue | None, CheckResult | None]:
@@ -1203,7 +971,7 @@ def _mapped(
 
 def ko_observation(ctx: Context) -> CheckResult:
     rid, key, pf = "field.ko_observation", "ko_observation", ctx.ts.f("ko_observation")
-    mapped, ov, problem = _mapped(ctx, rid, key, pf, _ref_fmt(ctx).ko_observation_values, "KO(Freq)")
+    mapped, ov, problem = _mapped(ctx, rid, key, pf, ctx.fmt.ko_observation_values, "KO(Freq)")
     if problem:
         return problem
     if not pf.ok:
@@ -1223,7 +991,7 @@ def ko_observation(ctx: Context) -> CheckResult:
 
 def ko_memory(ctx: Context) -> CheckResult:
     rid, key, pf = "field.ko_memory", "ko_memory", ctx.ts.f("ko_memory")
-    mapped, ov, problem = _mapped(ctx, rid, key, pf, _ref_fmt(ctx).ko_memory_values, "KO(memo)")
+    mapped, ov, problem = _mapped(ctx, rid, key, pf, ctx.fmt.ko_memory_values, "KO(memo)")
     if problem:
         return problem
     if not pf.ok:
@@ -1245,9 +1013,9 @@ def ko_memory(ctx: Context) -> CheckResult:
     )
 
 
-def ki_type_ref(ctx: Context) -> CheckResult:
+def ki_type(ctx: Context) -> CheckResult:
     rid, key, pf = "field.ki_type", "ki_type", ctx.ts.f("ki_type")
-    mapped, ov, problem = _mapped(ctx, rid, key, pf, _ref_fmt(ctx).ki_type_values, "KI(Freq)")
+    mapped, ov, problem = _mapped(ctx, rid, key, pf, ctx.fmt.ki_type_values, "KI(Freq)")
     if problem:
         return problem
     doc = _doc_ki(pf)
@@ -1278,10 +1046,10 @@ def ki_type_ref(ctx: Context) -> CheckResult:
     )
 
 
-def ki_pct_ref(ctx: Context) -> CheckResult:
+def ki_pct(ctx: Context) -> CheckResult:
     """KI(%)：說明書無 KI 時表上必須是空值寫法 `-`；有 KI 時數值相等。"""
     rid, key, pf, kt = "field.ki_pct", "ki_pct", ctx.ts.f("ki_pct"), ctx.ts.f("ki_type")
-    dash = _ref_fmt(ctx).empty_value
+    dash = ctx.fmt.empty_value
     v, ov, problem = order_value(ctx, key, rid, key, pf, lambda x: x if x == dash else to_decimal(x), f"數字或 {dash}")
     if problem:
         return problem
@@ -1341,7 +1109,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     rid, table, uls = "field.underlying_prices", ctx.ts.f("price_table"), ctx.ts.f("underlyings")
     if not table.ok:
         return [doc_review(rid, "price_table", table)]
-    dash = _ref_fmt(ctx).empty_value
+    dash = ctx.fmt.empty_value
     out = []
     for i, row in enumerate(ctx.ts.price_rows, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
@@ -1392,22 +1160,38 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def reference_rules(ctx: Context) -> list[CheckResult]:
-    """參考條件表流程：表上事先填好的欄位逐一核對，再加上說明書內部規則。回填欄位與 Non-Call 由共用規則處理。"""
+# ---------------------------------------------------------------- 入口
+
+
+def run_all(ctx: Context) -> list[CheckResult]:
+    """表上事先填好的欄位逐一核對，再加上說明書內部規則與審查標準。回填欄位與 Non-Call 由 rules/reference.py 處理。"""
+    dec, intg, date = to_decimal, to_int, to_date
+    pct_tol = "依說明書顯示位數四捨五入後比對"
     return [
-        *_shared_order_rules(ctx),
+        product_code(ctx),
+        currency(ctx),
+        underlyings(ctx),
+        simple(ctx, "field.strike_pct", "strike_pct", dec, "數字", cmp_pct, pct_tol),
+        simple(ctx, "field.ko_pct", "ko_pct", dec, "數字", cmp_pct, pct_tol),
+        simple(ctx, "field.coupon_pa_pct", "coupon_pa_pct", dec, "數字", cmp_pct, pct_tol),
+        simple(ctx, "field.tenor_months", "tenor_months", intg, "整數"),
+        simple(ctx, "field.trade_date", "trade_date", date, "日期"),
+        simple(ctx, "field.issue_date", "issue_date", date, "日期"),
+        simple(ctx, "field.final_valuation_date", "final_valuation_date", date, "日期"),
+        simple(ctx, "field.maturity_date", "maturity_date", date, "日期"),
+        simple(ctx, "field.denomination", "denomination", intg, "整數"),
         ko_observation(ctx),
         ko_memory(ctx),
-        ki_type_ref(ctx),
-        ki_pct_ref(ctx),
-        simple(ctx, "field.denomination", "denomination", to_int, "整數"),
+        ki_type(ctx),
+        ki_pct(ctx),
         *underlying_prices(ctx),
+        monthly_coupon(ctx),
         *document_rules(ctx),
     ]
 
 
 def document_rules(ctx: Context) -> list[CheckResult]:
-    """說明書內部規則與審查標準：不使用下單資料，詢價表與參考條件表兩條路共用。"""
+    """說明書內部規則與審查標準：不使用參考條件表的值。"""
     return [
         *coupon_consistency(ctx),
         *prices(ctx),
@@ -1438,38 +1222,4 @@ def document_rules(ctx: Context) -> list[CheckResult]:
         *distributor_info(ctx),
         *fees(ctx),
         issue_price(ctx),
-    ]
-
-
-def _shared_order_rules(ctx: Context) -> list[CheckResult]:
-    """詢價表與參考條件表欄位名稱相同的比對。"""
-    dec, intg, date = to_decimal, to_int, to_date
-    pct_tol = "依說明書顯示位數四捨五入後比對"
-    return [
-        product_code(ctx),
-        currency(ctx),
-        underlyings(ctx),
-        simple(ctx, "field.strike_pct", "strike_pct", dec, "數字", cmp_pct, pct_tol),
-        simple(ctx, "field.ko_pct", "ko_pct", dec, "數字", cmp_pct, pct_tol),
-        simple(ctx, "field.coupon_pa_pct", "coupon_pa_pct", dec, "數字", cmp_pct, pct_tol),
-        simple(ctx, "field.tenor_months", "tenor_months", intg, "整數"),
-        simple(ctx, "field.trade_date", "trade_date", date, "日期"),
-        simple(ctx, "field.issue_date", "issue_date", date, "日期"),
-        simple(ctx, "field.final_valuation_date", "final_valuation_date", date, "日期"),
-        simple(ctx, "field.maturity_date", "maturity_date", date, "日期"),
-        monthly_coupon(ctx),
-    ]
-
-
-def run_all(ctx: Context) -> list[CheckResult]:
-    """詢價表流程（PANEL 使用，ADR 0004：PANEL 改用參考條件表時移除）。"""
-    return [
-        *_shared_order_rules(ctx),
-        ko_type(ctx),
-        ki_type(ctx),
-        ki_pct(ctx),
-        issue_date_offset(ctx),
-        observation_frequency(ctx),
-        guaranteed_periods(ctx),
-        *document_rules(ctx),
     ]
