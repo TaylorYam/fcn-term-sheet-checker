@@ -8,6 +8,7 @@ adapter 沒交出的欄位視為缺漏（`not_provided`），相關規則轉人�
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
@@ -19,7 +20,7 @@ from .schema import Evidence, FieldStatus, ParsedField
 class TermSheet(Protocol):
     """上手 adapter 讀出的說明書：`f(name)` 交出標準欄位（及上手專屬欄位），`full_text` 為全文索引。
 
-    `f` 不丟例外：沒有交出的欄位回傳 `not_provided(name)`。
+    `f` 不丟例外：沒有交出的欄位回傳 `not_provided(name)`（實作可直接用 `lookup`）。
     各上手的實作可另外帶該上手規則需要的專屬資料（例：BARC 價格表原文列、HSBC 情境文字索引）。
     """
 
@@ -30,7 +31,14 @@ class TermSheet(Protocol):
 
 def not_provided(name: str) -> ParsedField:
     """上手 adapter 沒有交出的欄位：缺漏，說明寫出欄位名稱。"""
-    return ParsedField.missing(name, f"上手未提供標準欄位「{name}」")
+    kind = "標準欄位" if is_standard(name) else "欄位"
+    return ParsedField.missing(name, f"上手未提供{kind}「{name}」")
+
+
+def lookup(fields: Mapping[str, ParsedField], name: str) -> ParsedField:
+    """`TermSheet.f` 的共用實作：有交出就回傳該欄位，沒有就是 `not_provided`。"""
+    pf = fields.get(name)
+    return not_provided(name) if pf is None else pf
 
 
 @dataclass(frozen=True)
@@ -65,8 +73,6 @@ def occurrences(name: str, items: list[Occurrence]) -> ParsedField:
     """把上手的各出處包成一個標準欄位（清單本身一定存在，各出處自帶狀態與證據）。"""
     return ParsedField(name, FieldStatus.PRESENT, tuple(items))
 
-
-FEE_PREFIX = "fee_"  # 費用表各項目：fee_<費用項目>，費用項目依審查標準 [fees]
 
 # 名稱 → 值的形狀
 STANDARD_FIELDS: dict[str, str] = {
@@ -105,9 +111,18 @@ STANDARD_FIELDS: dict[str, str] = {
     "distributor_address_cover": "str：封面受託或銷售機構地址",
     "distributor_name_ch2": "str：第二章受託或銷售機構事業名稱",
     "distributor_address_ch2": "str：第二章受託或銷售機構營業所在地",
-    FEE_PREFIX + "<費用項目>": "str：第四章費用表該費用項目的費率區間（例：0%~5%）；費用項目名稱同審查標準 [fees] 的鍵",
 }
+
+# 另有一組費用欄位：每個費用項目一個，名稱由 fee_field 產生
+FEE_FIELD_SHAPE = "str：第四章費用表該費用項目的費率區間（例：0%~5%）；費用項目名稱同審查標準 [fees] 的鍵"
+_FEE_PREFIX = "fee_"
+
+
+def fee_field(label: str) -> str:
+    """費用項目（例：申購費用）的標準欄位名稱。"""
+    return _FEE_PREFIX + label
 
 
 def is_standard(name: str) -> bool:
-    return name in STANDARD_FIELDS or (name.startswith(FEE_PREFIX) and len(name) > len(FEE_PREFIX))
+    """是否為標準欄位：STANDARD_FIELDS 的名稱，或某個費用項目的費用欄位。"""
+    return name in STANDARD_FIELDS or (name.startswith(_FEE_PREFIX) and len(name) > len(_FEE_PREFIX))

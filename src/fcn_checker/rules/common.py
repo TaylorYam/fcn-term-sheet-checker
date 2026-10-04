@@ -19,7 +19,7 @@ from ..orders.reference import OrderRecord
 from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import FEE_PREFIX, Occurrence, TermSheet, is_standard, not_provided
+from ..standard_fields import Occurrence, TermSheet, fee_field, is_standard, not_provided
 
 
 @dataclass
@@ -519,7 +519,7 @@ def fees(ctx: Context) -> list[CheckResult]:
     """第四章費用表：審查標準列出的各費用項目費率區間逐字相等。"""
     rid = "standard.fees"
     return [
-        _fixed_text(rid, label, standard_field(ctx, FEE_PREFIX + label), exp, f"「{label}」費率")
+        _fixed_text(rid, label, standard_field(ctx, fee_field(label)), exp, f"「{label}」費率")
         for label, exp in ctx.std.fees.items()
     ]
 
@@ -568,17 +568,18 @@ def product_name(ctx: Context) -> list[CheckResult]:
     rid, issuer = "standard.product_name", ctx.issuer
     tpl = ctx.issuer_std.product_name
     if tpl is None:
+        names = {field: standard_field(ctx, field) for field in ("name_zh", "name_en")}
         return [
             result(
                 rid,
                 field,
                 S.REVIEW_REQUIRED,
-                actual=standard_field(ctx, field).value,
-                pf=standard_field(ctx, field),
+                actual=pf.value,
+                pf=pf,
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的商品名稱樣板（product_name.{issuer.lower()}）",
             )
-            for field in ("name_zh", "name_en")
+            for field, pf in names.items()
         ]
     tenor, cz, mem = (
         standard_field(ctx, "tenor_months"),

@@ -97,7 +97,7 @@ class HsbcTermSheet:
     scenario_index: ScenarioIndex  # 第 18 條情境文字（保留相鄰數字行的邊界）
 
     def f(self, name: str) -> ParsedField:
-        return self.fields.get(name) or standard_fields.not_provided(name)
+        return standard_fields.lookup(self.fields, name)
 
 
 def _standard_prices(table: ParsedField) -> ParsedField:
@@ -234,9 +234,10 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     ]:
         put(name, ch4, pattern, convert)
     for label in ["申購費用", "提前贖回費用", "分銷費用"]:
+        fee = standard_fields.fee_field(label)
         anchors = [ln for ln in ch4 if ln.x0 < 100 and squash(ln.text).startswith(label)]
         if len(anchors) != 1:
-            fields["fee_" + label] = ParsedField.missing("fee_" + label, "費用列錨點缺漏／重複")
+            fields[fee] = ParsedField.missing(fee, "費用列錨點缺漏／重複")
             continue
         lab = anchors[0]
         next_rows = [
@@ -252,7 +253,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         ]
         end = min(next_rows) if next_rows else lab.y0 + 100
         region = [ln for ln in ch4 if ln.page == lab.page and 150 < ln.x0 < 230 and lab.y0 - 1 <= ln.y0 < end - 1]
-        put("fee_" + label, region, r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)")
+        put(fee, region, r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)")
     occ = standard_fields.Occurrence
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
