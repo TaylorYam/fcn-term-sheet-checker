@@ -146,9 +146,9 @@ class PanelSession:
         """目前預覽與結果所依據的來源快照；沒有預覽時為 None。"""
         return self._snapshot
 
-    def invalidate(self, snapshot: SourceSnapshot | None = None) -> None:
-        """來源已變更：清除預覽與結果。給了 snapshot 時，只在它仍是目前的快照時才清除（背景檢查回來時用）。"""
-        if snapshot is not None and snapshot is not self._snapshot:
+    def invalidate(self, snapshot: SourceSnapshot) -> None:
+        """snapshot 已確認失效：它仍是目前的快照時清除預覽與結果（背景檢查回來時已重新載入就不動）。"""
+        if snapshot is not self._snapshot:
             return
         if self._preview is not None:
             self._clear()
@@ -270,6 +270,8 @@ class PanelSession:
         outcome = self.outcome
         if outcome is None:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
-        self._require_sources()
-        batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)
+        batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)  # 儲存前確認整份來源快照
+        if any(e.reason_code == "source_changed" for e in batch.errors):
+            self.invalidate(self._snapshot)
+            raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
         return SaveReceipt(output=batch.output, errors=tuple(e.message for e in batch.errors))

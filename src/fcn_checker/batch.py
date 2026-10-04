@@ -30,6 +30,7 @@ from typing import Any, TypeVar
 
 import fitz
 import openpyxl
+from openpyxl.workbook.workbook import Workbook
 
 from . import __version__, backfill, reporting, result_file
 from .config import (
@@ -593,7 +594,7 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
     return outcome
 
 
-def _open_unchanged_reference(outcome: BatchOutcome) -> Any:
+def _open_unchanged_reference(outcome: BatchOutcome) -> Workbook:
     """確認整份來源快照仍一致後，開啟參考條件表準備回填；任何來源變更或讀不到時丟出 IngestionError。"""
     if outcome.snapshot is None or not outcome.snapshot.still_valid():
         raise IngestionError("source_changed", "參考條件表、說明書或設定檔在核對後已變更或無法讀取，請重新核對後再儲存")

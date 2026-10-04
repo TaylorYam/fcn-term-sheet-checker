@@ -208,6 +208,19 @@ def test_release_and_save_check_the_sources_first(tmp_path, action):
     assert not (tmp_path / "reports").exists()
 
 
+def test_pdf_missing_at_preview_is_listed_and_the_rest_still_loads(tmp_path):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec)
+    missing = tmp_path / "029199990009_TS.pdf"
+    session = session_for(tmp_path, sheet, [*pdfs, missing])
+    preview = session.load_preview()
+    assert [bool(r.problem) for r in preview.rows] == [False, True]
+    assert "找不到說明書" in preview.rows[1].problem
+    assert session.check_sources(), "選取時就不存在的說明書不算來源變更"
+    session.start_check()
+    assert session.save(tmp_path / "reports", now=NOW).output is not None
+
+
 def test_unchanged_sources_pass_the_check(tmp_path):
     sheet, pdfs = inputs(tmp_path)
     session = session_for(tmp_path, sheet, pdfs)

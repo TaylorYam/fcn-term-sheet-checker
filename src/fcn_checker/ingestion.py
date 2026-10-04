@@ -51,7 +51,10 @@ class SourceSnapshot:
 
     def sha256(self, path: Path) -> str | None:
         path = Path(path)
-        return next(h for p, h in self.files if p == path)
+        for p, h in self.files:
+            if p == path:
+                return h
+        raise KeyError(f"{path} 不在來源快照中")
 
     def meta(self, path: Path) -> dict[str, Any]:
         """核對紀錄 metadata 用的檔名、完整路徑與 sha256。"""
