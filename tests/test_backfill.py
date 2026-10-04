@@ -96,7 +96,7 @@ def test_panel_shows_the_backfill_labels(tmp_path):
 
 def test_save_checks_the_reference_sheet_hash_recorded_on_the_batch(tmp_path):
     outcome = run(tmp_path)
-    assert outcome.reference_sha256 == sha256_of(outcome.reference_sheet)
+    assert outcome.snapshot.sha256(outcome.reference_sheet) == sha256_of(outcome.reference_sheet)
     # 每份說明書 metadata 裡的檔案資訊只是記錄，不作為儲存前的檢查依據
     outcome.items[0].report.metadata["inputs"]["reference_sheet"]["sha256"] = "0" * 64
     save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)

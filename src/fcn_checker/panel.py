@@ -12,7 +12,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
-from .ingestion import IngestionError
+from .ingestion import IngestionError, SourceSnapshot
 from .messages import STATUS_ZH, problem_message, subject
 from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
 from .schema import CheckResult, CheckStatus
@@ -257,9 +257,10 @@ class PanelWindow:
         self.pending: Future[BatchPreview] | None = None
         self.check_pending: Future[PanelOutcome] | None = None
         self.save_pending: Future[SaveReceipt] | None = None
+        self.release_pending: Future[IngestionError | None] | None = None
         self.has_result = False
-        self.validation: Future[BatchPreview | None] | None = None
-        self.checking_for: BatchPreview | None = None
+        self.validation: Future[bool] | None = None  # 背景只計算來源快照是否仍一致，不改工作階段
+        self.checking_for: SourceSnapshot | None = None
         self.closed = False
         self.shown: BatchPreview | None = None
         self.sheet_path: Path | None = None
@@ -372,7 +373,7 @@ class PanelWindow:
             self.status_label.configure(wraplength=max(300, event.width - 60))
 
     def _busy_any(self) -> bool:
-        return any(f is not None for f in (self.pending, self.check_pending, self.save_pending))
+        return any(f is not None for f in (self.pending, self.check_pending, self.save_pending, self.release_pending))
 
     def _clear(self):
         self.shown = None
@@ -487,23 +488,38 @@ class PanelWindow:
         self.status.set(outcome.headline)
 
     def toggle_release(self, item: BatchItem):
-        """人工放行（先確認全部錯訊）或取消放行；結果失效時顯示原因。"""
+        """人工放行（先確認全部錯訊）或取消放行；放行前的來源檢查在背景執行，結果失效時清空畫面並顯示原因。"""
         if self._busy_any():
             return
-        try:
-            if item.released:
-                self.session.cancel_release(item)
-            else:
-                text = (
-                    f"{item.term_sheet.name}\n\n這份說明書的問題：\n"
-                    + "\n".join(f"・{m}" for m in item.problem_messages)
-                    + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
-                )
-                if not messagebox.askyesno("人工放行", text, parent=self.root):
-                    return
-                self.session.release(item)
-        except IngestionError as e:
-            self.status.set(str(e))
+        action = self.session.cancel_release if item.released else self.session.release
+        if not item.released:
+            text = (
+                f"{item.term_sheet.name}\n\n這份說明書的問題：\n"
+                + "\n".join(f"・{m}" for m in item.problem_messages)
+                + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
+            )
+            if not messagebox.askyesno("人工放行", text, parent=self.root):
+                return
+
+        def run() -> IngestionError | None:
+            try:
+                action(item)
+            except IngestionError as e:
+                return e
+            return None
+
+        self._busy(True)
+        self.status.set("確認來源中…")
+        self.release_pending = self.executor.submit(run)
+        self.root.after(
+            80, lambda: self._after("release_pending", lambda e: self._show_release(item, e), "人工放行失敗")
+        )
+
+    def _show_release(self, item: BatchItem, error: IngestionError | None):
+        if error is not None:
+            if self.session.outcome is None:  # 來源已變更、結果失效：清空畫面，不顯示空結果
+                self._clear()
+            self.status.set(str(error))
             return
         self.results.show(self.session.outcome, select=item)
         self.status.set(self.session.message)
@@ -533,19 +549,22 @@ class PanelWindow:
             return
         if self.validation is not None and self.validation.done():
             try:
-                valid = self.validation.result() is not None
+                valid = self.validation.result()
             except Exception:
                 valid = False
-            if not self._busy_any() and self.shown is self.checking_for and not valid:
-                self._clear()
-                self.status.set(self.session.message)
+            if not self._busy_any() and not valid:  # 回到主執行緒才清除；快照已換過（重新載入）就不動
+                self.session.invalidate(self.checking_for)
+                if self.session.preview is None and self.shown is not None:
+                    self._clear()
+                    self.status.set(self.session.message)
             self.validation = None
             self.checking_for = None
             self.root.after(1500, self._watch_sources)
             return
-        if not self._busy_any() and self.shown is not None and self.validation is None:
-            self.checking_for = self.shown
-            self.validation = self.executor.submit(lambda: self.session.preview)
+        snapshot = self.session.snapshot
+        if not self._busy_any() and snapshot is not None and self.validation is None:
+            self.checking_for = snapshot
+            self.validation = self.executor.submit(snapshot.still_valid)
         self.root.after(100 if self.validation is not None else 1500, self._watch_sources)
 
     def close(self):

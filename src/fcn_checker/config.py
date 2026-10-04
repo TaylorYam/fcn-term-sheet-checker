@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from .ingestion import IngestionError, sha256_of
+from .ingestion import IngestionError
 
 # 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）
 NAME_FLAGS = ("memory", "maxi", "daily")
@@ -74,7 +74,6 @@ class ReviewStandard:
     currency_zh_to_iso: dict[str, str]
     denomination: dict[str, int]
     print_date_max_days_after_trade: int
-    sha256: str
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
     distributor_phone_equivalents: tuple[str, ...] = ()
 
@@ -110,7 +109,6 @@ class ReferenceFormat:
     ko_observation_values: dict[str, str]
     ko_memory_values: dict[str, bool]
     ki_type_values: dict[str, str]
-    sha256: str
 
 
 # 開發環境（editable 安裝）的 repo config；PANEL 安裝是非 editable，內建設定由雙擊入口另外指定（專案的 config）
@@ -187,7 +185,6 @@ def load_review_standard(path: Path) -> ReviewStandard:
             currency_zh_to_iso=dict(d["currency"]),
             denomination={k: int(v) for k, v in d["denomination"].items()},
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
-            sha256=sha256_of(path),
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"審查標準設定檔缺少或格式錯誤的項目：{e}") from e
@@ -213,7 +210,6 @@ def load_reference_format(path: Path) -> ReferenceFormat:
             ko_observation_values=dict(d["values"]["ko_observation"]),
             ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
             ki_type_values=dict(d["values"]["ki_type"]),
-            sha256=sha256_of(path),
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e

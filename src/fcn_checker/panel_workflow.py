@@ -11,9 +11,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from .batch import BatchItem, BatchOutcome, BatchPreview, Category, check_batch, preview_batch, save_batch
+from .batch import (
+    BatchItem,
+    BatchOutcome,
+    BatchPreview,
+    Category,
+    check_batch,
+    preview_batch,
+    save_batch,
+    source_paths,
+)
 from .config import resolve_config
-from .ingestion import IngestionError, sha256_of
+from .ingestion import IngestionError, SourceSnapshot
 from .issuers import REGISTRY, Issuer
 from .schema import CheckResult
 
@@ -68,7 +77,11 @@ class SaveReceipt:
 
 
 class PanelSession:
-    """UI 與測試共用的工作階段；任何來源或設定檔變更都使預覽與結果失效。"""
+    """UI 與測試共用的工作階段；任何來源或設定檔變更都使預覽與結果失效。
+
+    讀取 preview／outcome 不讀檔、不改狀態；來源是否變更由 check_sources 明確檢查（開始核對、放行、
+    儲存時也各檢查一次）。PANEL 視窗在背景執行緒用 snapshot.still_valid() 計算，回主執行緒再 invalidate。
+    """
 
     def __init__(
         self,
@@ -92,7 +105,7 @@ class PanelSession:
         self.term_sheets: tuple[Path, ...] = ()
         self.message = "請選取參考條件表與說明書 PDF。"
         self._preview: BatchPreview | None = None
-        self._hashes: tuple[str, ...] = ()
+        self._snapshot: SourceSnapshot | None = None  # 載入預覽前取的來源快照
         self._outcome: PanelOutcome | None = None
 
     @property
@@ -110,35 +123,55 @@ class PanelSession:
         self.message = "來源已更新，請重新載入預覽。"
 
     def _clear(self) -> None:
-        self._preview, self._hashes, self._outcome = None, (), None
+        self._preview, self._snapshot, self._outcome = None, None, None
 
-    def _fingerprints(self) -> tuple[str, ...]:
+    def _take_snapshot(self) -> SourceSnapshot:
         if self.reference_sheet is None or not self.term_sheets:
             raise IngestionError("selection_missing", "請先選取參考條件表與至少一份說明書 PDF。")
-        paths = (self.reference_sheet, *self.term_sheets, *(p for _, p in self.config_paths))
-        return tuple(sha256_of(p) for p in paths)
-
-    def _unchanged(self) -> bool:
-        try:
-            return self._hashes == self._fingerprints()
-        except (OSError, IngestionError):
-            return False
+        paths = source_paths(
+            self.term_sheets, self.reference_sheet, self.review_standard, self.reference_format, self.issuer_prefixes
+        )
+        return SourceSnapshot.take(paths)
 
     @property
     def preview(self) -> BatchPreview | None:
-        if self._preview is not None and not self._unchanged():
-            self._clear()
-            self.message = "來源檔案或設定檔已變更／無法讀取，請重新載入預覽。"
         return self._preview
 
     @property
     def outcome(self) -> PanelOutcome | None:
-        return self._outcome if self.preview is not None else None
+        return self._outcome
+
+    @property
+    def snapshot(self) -> SourceSnapshot | None:
+        """目前預覽與結果所依據的來源快照；沒有預覽時為 None。"""
+        return self._snapshot
+
+    def invalidate(self, snapshot: SourceSnapshot) -> None:
+        """snapshot 已確認失效：它仍是目前的快照時清除預覽與結果（背景檢查回來時已重新載入就不動）。"""
+        if snapshot is not self._snapshot:
+            return
+        if self._preview is not None:
+            self._clear()
+            self.message = "來源檔案或設定檔已變更／無法讀取，請重新載入預覽。"
+
+    def check_sources(self) -> bool:
+        """明確檢查來源：預覽仍依據相同的來源時為 True；變更或讀不到時清除預覽與結果並回傳 False。"""
+        snapshot = self._snapshot
+        if snapshot is None:
+            return False
+        if snapshot.still_valid():
+            return True
+        self.invalidate(snapshot)
+        return False
+
+    def _require_sources(self) -> None:
+        if not self.check_sources():
+            raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
 
     def load_preview(self) -> BatchPreview:
         self._clear()
         try:
-            before = self._fingerprints()
+            before = self._take_snapshot()
             preview = preview_batch(
                 self.term_sheets,
                 self.reference_sheet,
@@ -146,7 +179,7 @@ class PanelSession:
                 issuer_prefixes=self.issuer_prefixes,
                 registry=self.registry,
             )
-            if before != self._fingerprints():
+            if not before.still_valid():
                 raise IngestionError("source_changed", "讀取期間來源已變更，請重新載入預覽。")
         except OSError as e:
             self.message = "來源檔案或設定無法讀取，請確認檔案存在且有讀取權限。"
@@ -154,7 +187,7 @@ class PanelSession:
         except IngestionError as e:
             self.message = str(e)
             raise
-        self._preview, self._hashes = preview, before
+        self._preview, self._snapshot = preview, before
         ready = sum(not r.problem for r in preview.rows)
         self.message = f"預覽已載入：{ready}／{len(preview.rows)} 份可以核對。請確認商品代號與對到的列，再開始核對。"
         return preview
@@ -163,7 +196,7 @@ class PanelSession:
         if self.preview is None:
             raise IngestionError("preview_required", "請先載入並確認當次預覽，來源變更後須重新載入。")
         self._outcome = None
-        hashes = self._hashes
+        snapshot = self._snapshot
         try:
             batch = check_batch(
                 self.term_sheets,
@@ -173,7 +206,7 @@ class PanelSession:
                 issuer_prefixes=self.issuer_prefixes,
                 registry=self.registry,
             )
-            if hashes != self._fingerprints():
+            if batch.snapshot != snapshot or not snapshot.still_valid():  # 預覽後、核對期間都不能變
                 self._clear()
                 raise IngestionError("source_changed", "核對期間來源或設定檔已變更，請重新載入預覽。")
         except OSError as e:
@@ -193,6 +226,12 @@ class PanelSession:
             raise IngestionError("result_required", "這份結果已失效，請重新核對後再人工放行。")
         return outcome
 
+    def _current_checked(self, item: BatchItem) -> PanelOutcome:
+        """放行／取消放行前：先確認是當次結果，再明確檢查來源。"""
+        outcome = self._current(item)
+        self._require_sources()
+        return outcome
+
     def release_problem(self, item: BatchItem) -> str:
         """不能人工放行的原因（PANEL 顯示用）；空字串表示可以放行。結果已失效時也不能放行。"""
         try:
@@ -209,13 +248,13 @@ class PanelSession:
 
     def release(self, item: BatchItem) -> None:
         """人工放行：視同通過，儲存時回填、不列入錯誤清單；重新載入或重新核對即清除。"""
-        outcome = self._current(item)
+        outcome = self._current_checked(item)
         was_saved = outcome.batch.output is not None
         outcome.batch.release(item)
         self._after_release_change(outcome, was_saved)
 
     def cancel_release(self, item: BatchItem) -> None:
-        outcome = self._current(item)
+        outcome = self._current_checked(item)
         was_saved = outcome.batch.output is not None
         outcome.batch.cancel_release(item)
         self._after_release_change(outcome, was_saved)
@@ -231,8 +270,8 @@ class PanelSession:
         outcome = self.outcome
         if outcome is None:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
-        batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)
-        errors = [e.message for e in batch.errors]
-        if self.outcome is not outcome:
-            errors.append("儲存期間來源已變更；已寫入的檔案屬於先前核對，請重新載入。")
-        return SaveReceipt(output=batch.output, errors=tuple(errors))
+        batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)  # 儲存前確認整份來源快照
+        if any(e.reason_code == "source_changed" for e in batch.errors):
+            self.invalidate(self._snapshot)
+            raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
+        return SaveReceipt(output=batch.output, errors=tuple(e.message for e in batch.errors))

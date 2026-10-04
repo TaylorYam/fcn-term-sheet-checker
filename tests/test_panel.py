@@ -166,11 +166,68 @@ def test_changing_sources_clears_result_and_requires_new_preview(tmp_path, chang
     else:
         prefixes = config / ISSUER_PREFIXES.name
         prefixes.write_text(prefixes.read_text(encoding="utf-8") + "\n# change\n", encoding="utf-8")
+    assert not session.check_sources()
     assert session.outcome is None and session.preview is None
     assert "重新載入" in session.message or changed == "selection"
     with pytest.raises(IngestionError, match="預覽"):
         session.start_check()
     assert session.load_preview() is not None
+
+
+def test_reading_preview_and_outcome_never_touches_the_files(tmp_path):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
+    session = session_for(tmp_path, sheet, pdfs)
+    session.load_preview()
+    outcome = session.start_check()
+    (item,) = outcome.batch.items
+    pdfs[0].unlink()  # 外部刪掉說明書
+
+    assert session.preview is not None and session.outcome is outcome, "讀取屬性不讀檔、不清狀態"
+    assert session.release_state(item).allowed, "顯示放行按鈕狀態也不讀檔"
+    assert session.check_sources() is False, "明確檢查才失效"
+    assert session.preview is None and session.outcome is None
+    assert "重新載入" in session.message
+
+
+@pytest.mark.parametrize("action", ["release", "save"])
+def test_release_and_save_check_the_sources_first(tmp_path, action):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
+    session = session_for(tmp_path, sheet, pdfs)
+    session.load_preview()
+    (item,) = session.start_check().batch.items
+    build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 72})])  # 外部改了參考條件表
+
+    with pytest.raises(IngestionError, match="重新"):
+        if action == "release":
+            session.release(item)
+        else:
+            session.save(tmp_path / "reports", now=NOW)
+    assert not item.released and session.outcome is None, "結果失效，畫面要清空"
+    assert not (tmp_path / "reports").exists()
+
+
+def test_pdf_missing_at_preview_is_listed_and_the_rest_still_loads(tmp_path):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec)
+    missing = tmp_path / "029199990009_TS.pdf"
+    session = session_for(tmp_path, sheet, [*pdfs, missing])
+    preview = session.load_preview()
+    assert [bool(r.problem) for r in preview.rows] == [False, True]
+    assert "找不到說明書" in preview.rows[1].problem
+    assert session.check_sources(), "選取時就不存在的說明書不算來源變更"
+    session.start_check()
+    assert session.save(tmp_path / "reports", now=NOW).output is not None
+
+
+def test_unchanged_sources_pass_the_check(tmp_path):
+    sheet, pdfs = inputs(tmp_path)
+    session = session_for(tmp_path, sheet, pdfs)
+    assert not session.check_sources(), "還沒有預覽"
+    session.load_preview()
+    outcome = session.start_check()
+    assert session.check_sources() and session.outcome is outcome
 
 
 # ---------------------------------------------------------------- 儲存
@@ -321,7 +378,7 @@ def test_release_is_cleared_when_the_result_is_replaced(tmp_path, action):
         assert session.outcome is None
     else:
         build_reference_sheet(session.reference_sheet, [reference_row(spec, **{"K(%)": 72})])
-        assert session.outcome is None
+        assert not session.check_sources() and session.outcome is None
     with pytest.raises(IngestionError):
         session.release(outcome.batch.items[0])
 
