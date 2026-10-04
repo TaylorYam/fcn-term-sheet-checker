@@ -9,12 +9,13 @@ import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
-from .batch import BatchItem, BatchOutcome, BatchPreview, check_batch, preview_batch, save_batch
+from .batch import BatchItem, BatchOutcome, BatchPreview, Category, check_batch, preview_batch, save_batch
 from .config import resolve_config
 from .ingestion import IngestionError, sha256_of
 from .issuers import REGISTRY, Issuer
-from .schema import CheckResult, CheckStatus
+from .schema import CheckResult
 
 
 @dataclass(frozen=True)
@@ -35,18 +36,16 @@ class PanelOutcome:
         if self.batch.errors:
             return "核對未完成：" + "；".join(e.message for e in self.batch.errors)
         items = self.batch.items
-        unsupported = sum(i.unsupported for i in items)
-        counts = {s: sum(i.status == s and not i.unsupported and not i.released for i in items) for s in CheckStatus}
-        parts = [
-            f"{counts[CheckStatus.PASS]} 份通過",
-            f"{sum(i.released for i in items)} 份人工放行",
-            f"{counts[CheckStatus.MISMATCH]} 份不一致",
-            f"{counts[CheckStatus.REVIEW_REQUIRED]} 份需人工覆核",
-            f"{unsupported} 份未支援上手",
-            f"{counts[CheckStatus.ERROR]} 份執行錯誤",
-        ]
+        parts = [f"{sum(i.category == c for i in items)} 份{c.value}" for c in Category]
         tail = "按「儲存核對結果」後才會寫出核對結果檔（通過與人工放行的說明書回填在「回填後」）。"
         return f"共 {len(items)} 份：" + "、".join(parts) + "。" + tail
+
+
+class ReleaseState(NamedTuple):
+    """PANEL 人工放行按鈕：能否按下，以及要顯示的不能放行原因（空字串表示不顯示）。"""
+
+    allowed: bool
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -202,22 +201,28 @@ class PanelSession:
             return str(e)
         return item.release_problem
 
+    def release_state(self, item: BatchItem) -> ReleaseState:
+        """PANEL 放行按鈕：能否按下，以及要顯示的不能放行原因（已通過的不必說明）。"""
+        problem = self.release_problem(item)
+        shown = "" if item.category == Category.PASSED else problem
+        return ReleaseState(not problem, shown)
+
     def release(self, item: BatchItem) -> None:
         """人工放行：視同通過，儲存時回填、不列入錯誤清單；重新載入或重新核對即清除。"""
         outcome = self._current(item)
-        if item.release_problem:
-            raise IngestionError("release_refused", item.release_problem)
-        item.released = True
-        self._refresh_after_release(outcome)
+        was_saved = outcome.batch.output is not None
+        outcome.batch.release(item)
+        self._after_release_change(outcome, was_saved)
 
     def cancel_release(self, item: BatchItem) -> None:
         outcome = self._current(item)
-        item.released = False
-        self._refresh_after_release(outcome)
+        was_saved = outcome.batch.output is not None
+        outcome.batch.cancel_release(item)
+        self._after_release_change(outcome, was_saved)
 
-    def _refresh_after_release(self, outcome: PanelOutcome) -> None:
-        outcome.batch.refresh_status()
-        self.message = outcome.headline
+    def _after_release_change(self, outcome: PanelOutcome, was_saved: bool) -> None:
+        stale = "上一次儲存的核對結果檔已不是目前的結果，請再儲存一次。" if was_saved else ""
+        self.message = stale + outcome.headline
 
     def save(self, out_dir: Path | None, *, now: dt.datetime | None = None) -> SaveReceipt:
         """寫核對結果檔到 out_dir、核對紀錄到根目錄；out_dir 為 None 表示使用者取消。"""

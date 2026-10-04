@@ -16,7 +16,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from fcn_checker import __version__
 from fcn_checker.batch import check_batch, run_batch, save_batch
-from fcn_checker.ingestion import sha256_of
+from fcn_checker.ingestion import IngestionError, sha256_of
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD
@@ -604,6 +604,159 @@ def test_reference_sheet_changed_after_check_writes_nothing(tmp_path):
     assert not outcome.items[0].filled
     assert not (tmp_path / "reports").exists(), "不寫核對結果檔"
     assert not (tmp_path / "runtime").exists(), "也不寫核對紀錄"
+
+
+# ---------------------------------------------------------------- 人工放行
+
+
+def checked(tmp_path: Path, pdfs: list[Path], rows: list[dict]):
+    """只核對不儲存（PANEL 的用法）：之後可放行再 save_batch。"""
+    tmp_path.mkdir(exist_ok=True)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    return check_batch(pdfs, sheet, REVIEW_STANDARD, **kw)
+
+
+def saved(outcome, tmp_path: Path, now: dt.datetime = NOW):
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=now)
+    record = tmp_path / "runtime" / "核對紀錄" / f"{now:%Y%m%d-%H%M%S}.json"
+    return outcome.output, json.loads(record.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("row", "original"),
+    [({"K(%)": 71}, "不一致"), ({"K(%)": None}, "需人工覆核")],
+    ids=["mismatch", "review"],
+)
+def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
+    spec = Spec()
+    outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **row)])
+    (item,) = outcome.items
+    assert outcome.status != PASS and item.release_problem == ""
+
+    outcome.release(item)
+    assert item.released and item.status_label == f"人工放行（原：{original}）"
+    assert outcome.status == PASS, "整批狀態不必另外重算"
+
+    result, record = saved(outcome, tmp_path)
+    assert list(sheet_rows(result)) == [spec.product_code], "回填後只有這一列"
+    assert row_of(result, spec.product_code)["ISIN Code"] == SYNTH_ISIN
+    assert error_rows(result) == [], "人工放行的說明書不列入錯誤清單"
+    assert item.filled
+    (entry,) = record["items"]
+    assert entry["manual_release"] is True and entry["filled"] is True
+    assert entry["status"] != "PASS", "核對紀錄保留原判定"
+    assert record["status"] == "PASS"
+
+
+def test_released_flag_cannot_be_set_from_outside(tmp_path):
+    import dataclasses
+
+    from fcn_checker.batch import BatchItem
+
+    spec = Spec()
+    outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
+    (item,) = outcome.items
+    with pytest.raises(AttributeError):
+        item.released = True
+    with pytest.raises(TypeError):
+        BatchItem(item.term_sheet, item.report, _released=True)
+    with pytest.raises((TypeError, ValueError)):  # init=False 欄位：3.13 為 TypeError、3.11 為 ValueError
+        dataclasses.replace(item, _released=True)
+
+
+def test_only_items_of_this_outcome_can_be_released(tmp_path):
+    spec = Spec()
+    rows = [reference_row(spec, **{"K(%)": 71})]
+    first = checked(tmp_path / "a", [pdf_for(tmp_path, spec)], rows)
+    second = checked(tmp_path / "b", [pdf_for(tmp_path, spec)], rows)
+    with pytest.raises(IngestionError, match="重新核對"):
+        second.release(first.items[0])
+    assert not first.items[0].released and second.status == MISMATCH
+
+
+def test_cancelled_release_returns_to_the_original_result(tmp_path):
+    spec = Spec()
+    outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
+    (item,) = outcome.items
+    outcome.release(item)
+    outcome.cancel_release(item)
+    assert not item.released and item.status_label.startswith("MISMATCH") and outcome.status == MISMATCH
+
+    result, record = saved(outcome, tmp_path)
+    assert spec.product_code not in sheet_rows(result)
+    assert [e["PDF 檔名"] for e in error_rows(result)] == [item.term_sheet.name]
+    assert record["items"][0]["manual_release"] is False and not item.filled
+
+
+def test_changing_a_release_after_saving_clears_the_saved_state(tmp_path):
+    spec = Spec()
+    outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
+    (item,) = outcome.items
+    outcome.release(item)
+    first, _ = saved(outcome, tmp_path)
+    assert item.filled and outcome.output == first
+
+    outcome.cancel_release(item)
+    assert outcome.output is None and outcome.record is None and not item.filled, "要再儲存一次"
+
+    second, _ = saved(outcome, tmp_path, NOW + dt.timedelta(seconds=1))
+    assert spec.product_code in sheet_rows(first)
+    assert spec.product_code not in sheet_rows(second) and len(error_rows(second)) == 1
+
+
+def test_release_problem_messages_match_the_error_list(tmp_path):
+    spec = Spec()
+    outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71, "KO(%)": 99})])
+    (item,) = outcome.items
+    result, _ = saved(outcome, tmp_path)
+    (error,) = error_rows(result)
+    assert len(item.problem_messages) == 2
+    assert error["錯訊"] == "\n".join(item.problem_messages), "放行確認視窗與錯誤清單列出同樣的錯訊"
+
+
+def _unreadable(tmp_path: Path, spec: Spec) -> Path:
+    pdf = tmp_path / f"{spec.product_code}_TS.pdf"
+    pdf.write_bytes(b"not a pdf")
+    return pdf
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("pass", "已經通過"),
+        ("backfill_unknown", "回填值無法確定"),
+        ("backfill_conflict", "請先修正參考條件表"),
+        ("shared_row", "同一批有多份說明書對到同一列"),
+        ("missing_row", "沒有對到參考條件表的列"),
+        ("unsupported", "未支援上手"),
+        ("error", "執行錯誤"),
+    ],
+)
+def test_release_is_refused_when_backfill_is_not_trustworthy(tmp_path, case, reason):
+    spec = Spec()
+    rows = [reference_row(spec)]
+    pdfs = [pdf_for(tmp_path, spec)]
+    if case == "backfill_unknown":
+        spec = Spec(omit=frozenset({"issue_date"}))
+        pdfs = [pdf_for(tmp_path, spec)]
+    elif case == "backfill_conflict":
+        rows = [reference_row(spec, **{"ISIN Code": "XS9999999999"})]
+    elif case == "shared_row":
+        pdfs = [pdf_for(tmp_path, spec, f"{spec.product_code}_{v}.pdf") for v in ("舊版", "新版")]
+    elif case == "missing_row":
+        rows = [reference_row(Spec(product_code="029199990009"))]
+    elif case == "unsupported":
+        pdfs = [pdf_for(tmp_path, Spec(product_code="999199990001"))]
+    elif case == "error":
+        pdfs = [_unreadable(tmp_path, spec)]
+    outcome = checked(tmp_path, pdfs, rows)
+    item = outcome.items[0]
+
+    assert reason in item.release_problem
+    with pytest.raises(IngestionError, match=reason):
+        outcome.release(item)
+    assert not item.released
 
 
 # ---------------------------------------------------------------- 核對紀錄

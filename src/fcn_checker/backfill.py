@@ -1,7 +1,7 @@
 """回填欄位（ISIN Code、發行日、比價日_1～12）的整段流程，所有上手共用（ADR 0004）。
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
-- 只有整份核對 PASS（`fillable`）或人工放行（PANEL）的說明書才寫入。
+- 只寫入呼叫端交來的說明書：批量入口依每份的類別決定（整份 PASS 或人工放行，`BatchItem.fillable`）。
 - 寫入：開檔前確認參考條件表與核對時相同，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
   原檔不動，回填結果由核對結果檔（result_file.py）帶出。
 - 決策的顯示標籤（`BackfillAction.label`）只在這裡定義，PANEL 使用。
@@ -241,18 +241,16 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
 # ---------------------------------------------------------------- 寫入
 
 
-def fillable(report: CheckReport) -> bool:
-    """只有整份核對 PASS 的說明書才回填（人工放行另由批量入口決定）。"""
-    return report.status == S.PASS
+def conflicts_with_sheet(report: CheckReport) -> bool:
+    """參考條件表的回填欄位已有和說明書不同的值。"""
+    return any(d.action == BackfillAction.MISMATCH for d in report.backfill)
 
 
-def release_problem(report: CheckReport) -> str:
-    """從回填來看不能人工放行的原因；空字串表示回填值確定且不和參考條件表打架。"""
-    if any(d.action == BackfillAction.MISMATCH for d in report.backfill):
-        return "參考條件表回填欄位已有不同的值，請先修正參考條件表再核對"
-    if not report.backfill or any(r.rule_id.startswith("backfill.") and r.status != S.PASS for r in report.results):
-        return "回填值無法確定，請人工處理"
-    return ""
+def values_certain(report: CheckReport) -> bool:
+    """每個回填欄位都有確定的回填決策（回填規則全部通過）。哪些說明書要回填由批量入口決定。"""
+    return bool(report.backfill) and not any(
+        r.rule_id.startswith("backfill.") and r.status != S.PASS for r in report.results
+    )
 
 
 def open_reference(path: Path, expected_sha256: str | None) -> Workbook:

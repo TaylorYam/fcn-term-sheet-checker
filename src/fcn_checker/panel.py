@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 from .batch import BatchItem, BatchPreview
 from .ingestion import IngestionError
 from .messages import STATUS_ZH, problem_message, subject
-from .panel_workflow import PanelOutcome, PanelSession, SaveReceipt
+from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
 from .schema import CheckResult, CheckStatus
 
 
@@ -102,18 +102,18 @@ def _write(widget: tk.Text, text: str) -> None:
 class ResultPane(ttk.Frame):
     """左側逐份說明書清單（問題優先）；右側選取那份的逐欄結果，選取列可查看完整值與原文證據。
 
-    下方「人工放行」按鈕對選取的說明書操作；能否放行由 release_problem 判斷，按下時呼叫 on_release。
+    下方「人工放行」按鈕對選取的說明書操作；能否放行與顯示的原因由 release_state 提供，按下時呼叫 on_release。
     """
 
     def __init__(
         self,
         parent,
         pixels,
-        release_problem: Callable[[BatchItem], str],
+        release_state: Callable[[BatchItem], ReleaseState],
         on_release: Callable[[BatchItem], None],
     ):
         super().__init__(parent, padding=8)
-        self.release_problem, self.on_release = release_problem, on_release
+        self.release_state, self.on_release = release_state, on_release
         self.items: dict[str, BatchItem] = {}
         self.rows: dict[str, CheckResult] = {}
         self.outcome: PanelOutcome | None = None
@@ -192,10 +192,9 @@ class ResultPane(ttk.Frame):
             self.release_button.configure(text="取消放行", state="normal")
             self.release_reason.set("已人工放行：儲存時視同通過並回填，不列入錯誤清單。")
         else:
-            problem = self.release_problem(item)
-            self.release_button.configure(text="人工放行…", state="disabled" if problem else "normal")
-            show = problem and item.status != CheckStatus.PASS  # 已通過的不必說明
-            self.release_reason.set(f"不能人工放行：{problem}" if show else "")
+            allowed, reason = self.release_state(item)
+            self.release_button.configure(text="人工放行…", state="normal" if allowed else "disabled")
+            self.release_reason.set(f"不能人工放行：{reason}" if reason else "")
 
     def _release(self):
         item = self.selected_item()
@@ -349,7 +348,7 @@ class PanelWindow:
         ttk.Label(preview_frame, textvariable=self.preview_warnings, wraplength=pixels(1000)).grid(
             row=1, column=0, sticky="w", pady=(8, 0)
         )
-        self.results = ResultPane(self.tabs, pixels, self.session.release_problem, self.toggle_release)
+        self.results = ResultPane(self.tabs, pixels, self.session.release_state, self.toggle_release)
         self.tabs.add(self.results, text="核對結果")
         self.not_covered = ttk.Frame(self.tabs, padding=12)
         self.tabs.add(self.not_covered, text="待處理")
@@ -495,10 +494,9 @@ class PanelWindow:
             if item.released:
                 self.session.cancel_release(item)
             else:
-                messages = dict.fromkeys(problem_message(r) for r in item.report.results if r.status.is_problem)
                 text = (
                     f"{item.term_sheet.name}\n\n這份說明書的問題：\n"
-                    + "\n".join(f"・{m}" for m in messages)
+                    + "\n".join(f"・{m}" for m in item.problem_messages)
                     + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
                 )
                 if not messagebox.askyesno("人工放行", text, parent=self.root):
