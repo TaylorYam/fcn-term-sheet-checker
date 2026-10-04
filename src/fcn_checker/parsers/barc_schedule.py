@@ -14,7 +14,8 @@ from decimal import Decimal
 
 from ..schema import Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import AutocallSchedule
-from .layout import Document, Span, parse_date, squash
+from ..text import squash
+from .layout import Document, Span, parse_date
 
 # 表頭文字 → 欄位鍵
 HEADER_KEYS = {

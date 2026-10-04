@@ -11,7 +11,7 @@ import datetime as dt
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Protocol
 
 from ..config import IssuerStandard, ReferenceFormat, ReviewStandard
 from ..orders.reference import OrderRecord
@@ -20,19 +20,38 @@ from ..schema import CheckStatus as S
 from ..standard_fields import Occurrence, TermSheet, is_standard, not_provided
 
 
+class RuleContext(Protocol):
+    """兩種規則輸入共同的部分：結果工具（`standard_field`、`order_value`）只依賴這些。"""
+
+    ts: TermSheet
+
+    @property
+    def issuer_std(self) -> IssuerStandard: ...
+
+    @property
+    def sheet_source(self) -> str: ...
+
+    def sheet_field(self, key: str) -> OrderValue | None: ...
+
+
+class _IssuerStandardOf:
+    std: ReviewStandard
+    issuer: str  # 上手代號；上手專屬的審查標準值由 issuer_std 依此解析
+
+    @property
+    def issuer_std(self) -> IssuerStandard:
+        return self.std.for_issuer(self.issuer)
+
+
 @dataclass
-class Context:
+class Context(_IssuerStandardOf):
     """各上手共用的規則（參考條件表欄位、Non-Call、回填、審查標準）的輸入：含參考條件表的列與格式設定。"""
 
     ts: TermSheet
     order: OrderRecord
     std: ReviewStandard
     fmt: ReferenceFormat
-    issuer: str  # 上手代號；上手專屬的審查標準值由 issuer_std 依此解析
-
-    @property
-    def issuer_std(self) -> IssuerStandard:
-        return self.std.for_issuer(self.issuer)
+    issuer: str
 
     @property
     def sheet_source(self) -> str:
@@ -43,7 +62,7 @@ class Context:
 
 
 @dataclass
-class IssuerContext:
+class IssuerContext(_IssuerStandardOf):
     """上手說明書內部規則的輸入：讀出結果、審查標準、上手代號，不含參考條件表（ADR 0005）。
 
     唯一例外是上手在註冊表宣告的參考條件表欄位（`Issuer.reference_fields`），只有這些讀得到。
@@ -54,10 +73,6 @@ class IssuerContext:
     issuer: str
     declared: Mapping[str, OrderValue | None]  # 上手宣告的參考條件表欄位 → 該列的值
     sheet_source: str
-
-    @property
-    def issuer_std(self) -> IssuerStandard:
-        return self.std.for_issuer(self.issuer)
 
     def sheet_field(self, key: str) -> OrderValue | None:
         if key not in self.declared:
@@ -80,7 +95,7 @@ def read_standard(ts: TermSheet, name: str) -> ParsedField:
         return not_provided(name)
 
 
-def standard_field(ctx: Context | IssuerContext, name: str) -> ParsedField:
+def standard_field(ctx: RuleContext, name: str) -> ParsedField:
     return read_standard(ctx.ts, name)
 
 
@@ -182,7 +197,7 @@ def to_date(v: Any) -> dt.date | None:
 
 
 def order_value(
-    ctx: Context | IssuerContext,
+    ctx: RuleContext,
     key: str,
     rule_id: str,
     field: str,
@@ -221,7 +236,7 @@ def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
     return q == doc_v, q
 
 
-def occurrences_of(ctx: Context, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
+def occurrences_of(ctx: RuleContext, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
     """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果。"""
     container = standard_field(ctx, name)
     if not container.ok:

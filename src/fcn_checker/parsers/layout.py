@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ..schema import Line
-from ..text import squash  # noqa: F401  各上手 parser 沿用 layout.squash
+from ..text import squash
 
 DATE_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 

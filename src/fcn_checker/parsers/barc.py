@@ -14,8 +14,9 @@ from typing import Any
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..text import squash
 from . import barc_schedule as schedule
-from .layout import Document, LayoutSpec, Span, TextIndex, join_text, parse_date, squash
+from .layout import Document, LayoutSpec, Span, TextIndex, join_text, parse_date
 
 TEMPLATE_ID = "barc-zh-pd"
 PARSER_VERSION = "2"

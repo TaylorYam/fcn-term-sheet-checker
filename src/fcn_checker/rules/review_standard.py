@@ -16,6 +16,7 @@ from ..text import squash
 from .kit import Context, doc_review, occurrences_of, result, standard_field
 
 __all__ = ["review_standard_rules"]
+
 # ---------------------------------------------------------------- 審查標準
 
 

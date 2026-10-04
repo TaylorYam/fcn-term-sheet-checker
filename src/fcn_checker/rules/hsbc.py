@@ -13,6 +13,7 @@ from ..schema import CheckStatus as S
 from ..schema import FieldStatus
 from ..text import squash
 from . import hsbc_scenario, kit
+from .kit import IssuerContext
 
 ISSUER = "HSBC"
 Q4 = Decimal("0.0001")
@@ -26,7 +27,6 @@ NOT_COVERED = [
 
 
 # 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 HsbcTermSheet
-Context = kit.IssuerContext
 
 
 def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
@@ -213,7 +213,7 @@ def document_info(ctx):
     return out
 
 
-def run_all(ctx: Context) -> list:
+def run_all(ctx: IssuerContext) -> list:
     """說明書內部規則：只用讀出結果與審查標準，不碰參考條件表。"""
     out = prices(ctx)
     out.extend(schedules(ctx))
