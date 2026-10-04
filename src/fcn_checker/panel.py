@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 from .batch import BatchItem, BatchPreview
 from .ingestion import IngestionError
 from .messages import STATUS_ZH, problem_message, subject
-from .panel_workflow import PanelOutcome, PanelSession, SaveReceipt
+from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
 from .schema import CheckResult, CheckStatus
 
 
@@ -109,7 +109,7 @@ class ResultPane(ttk.Frame):
         self,
         parent,
         pixels,
-        release_state: Callable[[BatchItem], tuple[bool, str]],
+        release_state: Callable[[BatchItem], ReleaseState],
         on_release: Callable[[BatchItem], None],
     ):
         super().__init__(parent, padding=8)

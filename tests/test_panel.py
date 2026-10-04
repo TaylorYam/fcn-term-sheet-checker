@@ -258,16 +258,30 @@ def saved(session: PanelSession, tmp_path: Path):
     return wb["回填後"], wb["錯誤清單"], record
 
 
-def test_release_and_cancel_update_the_headline(tmp_path):
+@pytest.mark.parametrize(
+    ("row", "original"), [({"K(%)": 71}, "不一致"), ({"K(%)": None}, "需人工覆核")], ids=["mismatch", "review"]
+)
+def test_release_and_cancel_update_the_headline(tmp_path, row, original):
+    spec = Spec()
+    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **row)])
+    (item,) = outcome.batch.items
+    session.release(item)
+    assert item.released
+    assert "0 份通過、1 份人工放行" in session.message and f"0 份{original}" in session.message
+    assert "再儲存" not in session.message, "還沒儲存過，不必提醒"
+    session.cancel_release(item)
+    assert not item.released
+    assert "0 份人工放行" in session.message and f"1 份{original}" in session.message
+
+
+def test_changing_a_release_after_saving_says_to_save_again(tmp_path):
     spec = Spec()
     session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
     (item,) = outcome.batch.items
     session.release(item)
-    assert item.released
-    assert "0 份通過、1 份人工放行、0 份不一致" in session.message
+    assert session.save(tmp_path / "reports", now=NOW).complete
     session.cancel_release(item)
-    assert not item.released
-    assert "0 份人工放行、1 份不一致" in session.message
+    assert "上一次儲存的核對結果檔已不是目前的結果，請再儲存一次" in session.message
 
 
 def test_release_button_state_hides_the_reason_for_passed_term_sheets(tmp_path):

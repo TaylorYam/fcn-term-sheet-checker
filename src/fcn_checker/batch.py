@@ -51,7 +51,6 @@ from .standard_fields import TermSheet
 
 UNSUPPORTED = "issuer_unsupported"
 SHARED_ROW = "reference_row_shared"
-RELEASABLE = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED)  # 可以人工放行的原判定
 T = TypeVar("T")
 DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
 DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
@@ -89,7 +88,7 @@ class BatchItem:
     product_code: str | None = None
     reference_row: int | None = None  # 對到的參考條件表列號
     filled: bool = False
-    _released: bool = field(default=False, repr=False)  # 只能經 BatchOutcome.release／cancel_release 改變
+    _released: bool = field(default=False, init=False, repr=False)  # 只能經 BatchOutcome.release／cancel_release 改變
 
     @property
     def released(self) -> bool:
@@ -134,12 +133,12 @@ class BatchItem:
     @property
     def release_problem(self) -> str:
         """不能人工放行的原因；空字串表示可以放行。只有回填值確定且不和參考條件表打架時才能放行。"""
-        report = self.report
-        if report.status == CheckStatus.PASS:
+        report, category = self.report, self.category  # 已人工放行的仍依原判定檢查（可重複放行）
+        if category == Category.PASSED:
             return "已經通過，不需要人工放行"
-        if self.unsupported:
+        if category == Category.UNSUPPORTED:
             return "未支援上手，沒有可以回填的值"
-        if report.status not in RELEASABLE:
+        if category == Category.ERROR:
             return "執行錯誤，沒有可以回填的值"
         if any(r.reason_code == SHARED_ROW for r in report.results):
             return "同一批有多份說明書對到同一列，不能人工放行"
@@ -172,16 +171,16 @@ class BatchOutcome:
 
     def release(self, item: BatchItem) -> None:
         """人工放行：視同通過，儲存時回填、不列入錯誤清單；不能放行時丟出 IngestionError（原因見 release_problem）。"""
-        self._own(item)
+        self._require_member(item)
         if item.release_problem:
             raise IngestionError("release_refused", item.release_problem)
         self._set_released(item, True)
 
     def cancel_release(self, item: BatchItem) -> None:
-        self._own(item)
+        self._require_member(item)
         self._set_released(item, False)
 
-    def _own(self, item: BatchItem) -> None:
+    def _require_member(self, item: BatchItem) -> None:
         if not any(i is item for i in self.items):
             raise IngestionError("result_required", "這份說明書不在這次核對結果中，請重新核對後再人工放行。")
 

@@ -16,7 +16,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from fcn_checker import __version__
 from fcn_checker.batch import check_batch, run_batch, save_batch
-from fcn_checker.ingestion import sha256_of
+from fcn_checker.ingestion import IngestionError, sha256_of
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD
@@ -611,6 +611,7 @@ def test_reference_sheet_changed_after_check_writes_nothing(tmp_path):
 
 def checked(tmp_path: Path, pdfs: list[Path], rows: list[dict]):
     """只核對不儲存（PANEL 的用法）：之後可放行再 save_batch。"""
+    tmp_path.mkdir(exist_ok=True)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
     kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
     return check_batch(pdfs, sheet, REVIEW_STANDARD, **kw)
@@ -638,6 +639,7 @@ def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
     assert outcome.status == PASS, "整批狀態不必另外重算"
 
     result, record = saved(outcome, tmp_path)
+    assert list(sheet_rows(result)) == [spec.product_code], "回填後只有這一列"
     assert row_of(result, spec.product_code)["ISIN Code"] == SYNTH_ISIN
     assert error_rows(result) == [], "人工放行的說明書不列入錯誤清單"
     assert item.filled
@@ -648,10 +650,29 @@ def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
 
 
 def test_released_flag_cannot_be_set_from_outside(tmp_path):
+    import dataclasses
+
+    from fcn_checker.batch import BatchItem
+
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
+    (item,) = outcome.items
     with pytest.raises(AttributeError):
-        outcome.items[0].released = True
+        item.released = True
+    with pytest.raises(TypeError):
+        BatchItem(item.term_sheet, item.report, _released=True)
+    with pytest.raises((TypeError, ValueError)):  # init=False 欄位：3.13 為 TypeError、3.11 為 ValueError
+        dataclasses.replace(item, _released=True)
+
+
+def test_only_items_of_this_outcome_can_be_released(tmp_path):
+    spec = Spec()
+    rows = [reference_row(spec, **{"K(%)": 71})]
+    first = checked(tmp_path / "a", [pdf_for(tmp_path, spec)], rows)
+    second = checked(tmp_path / "b", [pdf_for(tmp_path, spec)], rows)
+    with pytest.raises(IngestionError, match="重新核對"):
+        second.release(first.items[0])
+    assert not first.items[0].released and second.status == MISMATCH
 
 
 def test_cancelled_release_returns_to_the_original_result(tmp_path):
@@ -713,8 +734,6 @@ def _unreadable(tmp_path: Path, spec: Spec) -> Path:
     ],
 )
 def test_release_is_refused_when_backfill_is_not_trustworthy(tmp_path, case, reason):
-    from fcn_checker.ingestion import IngestionError
-
     spec = Spec()
     rows = [reference_row(spec)]
     pdfs = [pdf_for(tmp_path, spec)]
