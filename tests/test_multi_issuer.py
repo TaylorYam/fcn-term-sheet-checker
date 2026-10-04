@@ -196,7 +196,7 @@ def test_read_term_sheet_gives_missing_for_a_field_it_does_not_provide(tmp_path,
 
 
 def test_shared_rules_can_only_read_standard_fields():
-    from fcn_checker.rules.common import read_standard
+    from fcn_checker.rules.kit import read_standard
 
     class AnyTermSheet:
         full_text = None
@@ -206,6 +206,50 @@ def test_shared_rules_can_only_read_standard_fields():
 
     with pytest.raises(ValueError, match="price_table"):
         read_standard(AnyTermSheet(), "price_table")  # BARC 專屬欄位，共用規則不能讀
+
+
+def _check_with_issuer_rules(tmp_path, rules, **overrides):
+    from fcn_checker.batch import check_batch
+    from harness import ISSUER_PREFIXES
+    from reference_synth import REFERENCE_FORMAT
+
+    adapter = barc_adapter(rules=rules, **overrides)
+    tmp_path.mkdir(exist_ok=True)
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    return check_batch([pdf], sheet, REVIEW_STANDARD, registry=(adapter,), **kw).items[0].report
+
+
+def _reads_annual_coupon(ctx):
+    """上手規則讀參考條件表「年利率」（ADR 0005 唯一例外的寫法）。"""
+    from fcn_checker.rules.kit import order_value, result, to_decimal
+
+    annual, ov, problem = order_value(
+        ctx, "coupon_pa_pct", "fake.sheet_read", "coupon_pa_pct", None, to_decimal, "數字"
+    )
+    return [problem or result("fake.sheet_read", "coupon_pa_pct", PASS, expected=annual, ov=[ov])]
+
+
+def test_issuer_rules_read_only_the_reference_sheet_fields_they_declare(tmp_path):
+    report = _check_with_issuer_rules(tmp_path / "declared", _reads_annual_coupon, reference_fields=("coupon_pa_pct",))
+    r = only(report, "fake.sheet_read")
+    assert r.status == PASS and r.expected is not None, "宣告過的參考條件表欄位讀得到"
+
+    report = _check_with_issuer_rules(tmp_path / "undeclared", _reads_annual_coupon, reference_fields=())
+    assert not [r for r in report.results if r.rule_id == "fake.sheet_read"]
+    error = only(report, "batch.unexpected")
+    assert "coupon_pa_pct" in error.message, "讀未宣告的參考條件表欄位是開發期錯誤，寫出欄位名稱"
+
+
+def test_issuer_rules_get_no_reference_row_or_format(tmp_path):
+    seen = []
+    report = _check_with_issuer_rules(tmp_path, lambda ctx: seen.append(ctx) or [])
+    assert report.status == PASS
+    [ctx] = seen
+    assert not hasattr(ctx, "order") and not hasattr(ctx, "fmt"), "上手規則不碰參考條件表（ADR 0005）"
+    assert ctx.ts is not None and ctx.std is not None and ctx.issuer == "BARC"
 
 
 def test_each_term_sheet_is_detected_and_read_once_per_check(tmp_path):

@@ -31,7 +31,7 @@ from openpyxl.workbook.workbook import Workbook
 from .config import ReferenceFormat
 from .ingestion import IngestionError, sha256_of
 from .orders.reference import ReferenceRow
-from .rules.common import Context, doc_review, result
+from .rules.kit import Context, doc_review, result
 from .rules.reference import standard_field
 from .schema import CheckReport, CheckResult, OrderValue, ParsedField
 from .schema import CheckStatus as S

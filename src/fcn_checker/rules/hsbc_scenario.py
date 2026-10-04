@@ -8,7 +8,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from ..parsers.hsbc import ScenarioIndex
 from ..schema import CheckStatus as S
 from ..schema import Evidence
-from . import common
+from . import kit
 
 N = r"([\d,]+(?:\.\d+)?)"
 Q2, Q4 = Decimal("0.01"), Decimal("0.0001")
@@ -30,15 +30,15 @@ def run(ctx):
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
         return [
-            common.doc_review("doc.scenario_parameters", "scenario", bad),
-            common.doc_review("doc.scenario_calculations", "scenario", bad),
+            kit.doc_review("doc.scenario_parameters", "scenario", bad),
+            kit.doc_review("doc.scenario_calculations", "scenario", bad),
         ]
     ti = ts.scenario_index
     headings = list(ti.finditer(r"情境分析([一二三四五六])\)"))
     expected_count = 3 if ts.f("ki_type").ok and ts.f("ki_type").value == "none" else 4
     if len(headings) != expected_count or [m[1] for m in headings] != list("一二三四")[:expected_count]:
         return [
-            common.result(
+            kit.result(
                 "doc.scenario_parameters",
                 "scenario",
                 S.REVIEW_REQUIRED,
@@ -60,7 +60,7 @@ def run(ctx):
         serial += 1
         ok = expected == actual if valid is None else valid
         out.append(
-            common.result(
+            kit.result(
                 rid,
                 f"{label}.{serial}",
                 S.PASS if ok else S.MISMATCH,
@@ -74,7 +74,7 @@ def run(ctx):
 
     def missing(label, index):
         out.append(
-            common.result(
+            kit.result(
                 "doc.scenario_calculations",
                 label,
                 S.REVIEW_REQUIRED,
@@ -120,7 +120,7 @@ def run(ctx):
         worst = "交割股數" in text or "零股數" in text or "實物給付" in text
         expected_period = first.value if i == 0 and first.ok else tenor
         if i == 0 and not first.ok:
-            out.append(common.doc_review("doc.scenario_calculations", "first_callable_period", first))
+            out.append(kit.doc_review("doc.scenario_calculations", "first_callable_period", first))
         mentions(segment, r"(?:存續期間|本商品於)(\d+)個月", Decimal(tenor), f"s{i + 1}.tenor", required=False)
         mentions(segment, r"於(\d+)個月存續期間", Decimal(tenor), f"s{i + 1}.tenor", required=i > 0)
         mentions(segment, r"共(\d+)次配息", Decimal(tenor), f"s{i + 1}.coupon_count", required=i > 0)

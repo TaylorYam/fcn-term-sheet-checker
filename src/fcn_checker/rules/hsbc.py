@@ -9,10 +9,10 @@ import datetime as dt
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.layout import squash
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus
-from . import common, hsbc_scenario
+from ..text import squash
+from . import hsbc_scenario, kit
 
 ISSUER = "HSBC"
 Q4 = Decimal("0.0001")
@@ -25,16 +25,16 @@ NOT_COVERED = [
 ]
 
 
-# 單份核對以共用 Context 呼叫本模組規則；ctx.ts 為 HsbcTermSheet
-Context = common.Context
+# 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 HsbcTermSheet
+Context = kit.IssuerContext
 
 
 def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
-        return common.doc_review(rid, field, bad, expected)
+        return kit.doc_review(rid, field, bad, expected)
     good = expected == actual if ok is None else ok
-    return common.result(
+    return kit.result(
         rid,
         field,
         S.PASS if good else S.MISMATCH,
@@ -52,7 +52,7 @@ def schedules(ctx):
     if any(not p.ok for p in deps):
         bad = next(p for p in deps if not p.ok)
         return [
-            common.doc_review(rid, "schedule", bad)
+            kit.doc_review(rid, "schedule", bad)
             for rid in [
                 "schedule.coupon_dates",
                 "schedule.autocall_dates",
@@ -142,8 +142,7 @@ def prices(ctx):
     scenario = ctx.ts.f("scenario_table")
     if not pf.ok:
         return [
-            common.doc_review(rid, "prices", pf)
-            for rid in ["derive.prices", "doc.price_header_pct", "doc.scenario_table"]
+            kit.doc_review(rid, "prices", pf) for rid in ["derive.prices", "doc.price_header_pct", "doc.scenario_table"]
         ]
     rows = pf.value["rows"]
     out = []
@@ -160,7 +159,7 @@ def prices(ctx):
         pct = ctx.ts.f(col + "_pct")
         if pct.status == FieldStatus.NOT_APPLICABLE:
             out.append(
-                common.result(
+                kit.result(
                     "doc.price_header_pct",
                     col,
                     S.PASS if col not in headers else S.MISMATCH,
@@ -172,7 +171,7 @@ def prices(ctx):
             continue
         out.append(check("doc.price_header_pct", col, [pf, pct], pct.value, headers.get(col)))
     if not scenario.ok:
-        out.append(common.doc_review("doc.scenario_table", "prices", scenario))
+        out.append(kit.doc_review("doc.scenario_table", "prices", scenario))
     else:
         # Chinese label is deliberately excluded; currency and exchange are internal consistency only.
         def normalized(table):

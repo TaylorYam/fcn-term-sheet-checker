@@ -10,10 +10,11 @@ from collections.abc import Callable
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from ..orders.reference import OrderRecord
 from ..schema import CheckResult, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import AutocallSchedule
-from .common import (
+from .kit import (
     KI_LABEL,
     Context,
     cmp_pct,
@@ -29,7 +30,7 @@ from .common import (
     to_int,
 )
 
-__all__ = ["AutocallSchedule", "field_rules", "first_callable_period"]
+__all__ = ["AutocallSchedule", "column_checks", "field_rules", "first_callable_period"]
 
 Q4 = Decimal("0.0001")
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
@@ -454,3 +455,46 @@ def first_callable_period(ctx: Context) -> CheckResult:
         reason="" if ok else "value_mismatch",
         message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）",
     )
+
+
+# ---------------------------------------------------------------- 表頭欄位
+
+
+def column_checks(order: OrderRecord) -> list[CheckResult]:
+    src = order.source
+    out = []
+    for col in order.unknown_columns:
+        out.append(
+            result(
+                "order.unknown_column",
+                f"{src}欄位",
+                S.REVIEW_REQUIRED,
+                expected=None,
+                actual=None,
+                ov=[col],
+                reason="order_unknown_column",
+                message=f"{src}出現格式設定沒有的欄位「{col.value}」，格式可能已改版",
+            )
+        )
+    for col in order.duplicate_columns:
+        out.append(
+            result(
+                "order.duplicate_column",
+                f"{src}欄位",
+                S.REVIEW_REQUIRED,
+                ov=[col],
+                reason="order_duplicate_column",
+                message=f"{src}欄位「{col.value}」重複出現，無法確定以哪一欄為準",
+            )
+        )
+    for name in order.missing_columns:
+        out.append(
+            result(
+                "order.missing_column",
+                f"{src}欄位",
+                S.REVIEW_REQUIRED,
+                reason="order_missing_column",
+                message=f"{src}缺少格式設定中的欄位「{name}」",
+            )
+        )
+    return out

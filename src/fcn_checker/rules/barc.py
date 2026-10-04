@@ -1,6 +1,6 @@
 """BARC 專屬核對規則（docs/rules/barc-check-rules.md）：說明書內部規則與審查標準。
 
-參考條件表欄位的比對見 rules/reference.py（各上手共用）；共用工具見 rules/common.py。
+參考條件表欄位的比對見 rules/reference.py（各上手共用）；共用工具見 rules/kit.py。
 規則只接收標準化後的說明書欄位與審查標準；不讀檔、不改來源值。
 每條規則產生一或多筆 CheckResult；抓不到、歧義、未知值一律轉人工覆核，不猜值。
 """
@@ -11,11 +11,11 @@ import datetime as dt
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
-from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, ParsedField
 from ..schema import CheckStatus as S
-from . import common
-from .common import (
+from ..text import squash
+from .kit import (
+    IssuerContext,
     doc_ki,
     doc_review,
     order_value,
@@ -47,8 +47,11 @@ NOT_COVERED: list[dict[str, str]] = [
 ISSUER = "BARC"
 
 
-# 單份核對以共用 Context 呼叫本模組規則；ctx.ts 為 BarcTermSheet
-Context = common.Context
+# 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 BarcTermSheet
+Context = IssuerContext
+
+# 本上手規則可讀的參考條件表欄位（ADR 0005 唯一例外：月配息率推算用表上年利率與天期，Issue #54）
+REFERENCE_FIELDS = ("coupon_pa_pct", "tenor_months")
 
 
 # ---------------------------------------------------------------- 推算規則

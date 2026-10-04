@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ..schema import Line
+from ..text import squash  # noqa: F401  各上手 parser 沿用 layout.squash
 
 DATE_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 
@@ -45,11 +46,6 @@ def parse_date(text: str) -> dt.date | None:
         return dt.date(*map(int, m.groups()))
     except ValueError:
         return None
-
-
-def squash(text: str) -> str:
-    """移除所有空白（含換行）。"""
-    return re.sub(r"\s+", "", text)
 
 
 def join_text(lines: Sequence[Line]) -> str:
