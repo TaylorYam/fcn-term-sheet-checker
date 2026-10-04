@@ -12,7 +12,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
-from .ingestion import IngestionError
+from .ingestion import IngestionError, SourceSnapshot
 from .messages import STATUS_ZH, problem_message, subject
 from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
 from .schema import CheckResult, CheckStatus
@@ -258,8 +258,8 @@ class PanelWindow:
         self.check_pending: Future[PanelOutcome] | None = None
         self.save_pending: Future[SaveReceipt] | None = None
         self.has_result = False
-        self.validation: Future[BatchPreview | None] | None = None
-        self.checking_for: BatchPreview | None = None
+        self.validation: Future[bool] | None = None  # 背景只計算來源快照是否仍一致，不改工作階段
+        self.checking_for: SourceSnapshot | None = None
         self.closed = False
         self.shown: BatchPreview | None = None
         self.sheet_path: Path | None = None
@@ -503,6 +503,8 @@ class PanelWindow:
                     return
                 self.session.release(item)
         except IngestionError as e:
+            if self.session.outcome is None:  # 來源已變更、結果失效：清空畫面，不顯示空結果
+                self._clear()
             self.status.set(str(e))
             return
         self.results.show(self.session.outcome, select=item)
@@ -533,19 +535,22 @@ class PanelWindow:
             return
         if self.validation is not None and self.validation.done():
             try:
-                valid = self.validation.result() is not None
+                valid = self.validation.result()
             except Exception:
                 valid = False
-            if not self._busy_any() and self.shown is self.checking_for and not valid:
-                self._clear()
-                self.status.set(self.session.message)
+            if not self._busy_any() and not valid:  # 回到主執行緒才清除；快照已換過（重新載入）就不動
+                self.session.invalidate(self.checking_for)
+                if self.session.preview is None and self.shown is not None:
+                    self._clear()
+                    self.status.set(self.session.message)
             self.validation = None
             self.checking_for = None
             self.root.after(1500, self._watch_sources)
             return
-        if not self._busy_any() and self.shown is not None and self.validation is None:
-            self.checking_for = self.shown
-            self.validation = self.executor.submit(lambda: self.session.preview)
+        snapshot = self.session.snapshot
+        if not self._busy_any() and snapshot is not None and self.validation is None:
+            self.checking_for = snapshot
+            self.validation = self.executor.submit(snapshot.still_valid)
         self.root.after(100 if self.validation is not None else 1500, self._watch_sources)
 
     def close(self):

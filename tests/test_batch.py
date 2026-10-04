@@ -591,19 +591,51 @@ def test_check_writes_nothing_until_saved(tmp_path):
     assert outcome.items[0].filled and outcome.output.is_file() and outcome.record.is_file()
 
 
-def test_reference_sheet_changed_after_check_writes_nothing(tmp_path):
+@pytest.mark.parametrize("changed", ["sheet", "pdf", "standard", "prefixes"])
+def test_any_source_changed_after_check_writes_nothing(tmp_path, changed):
     spec = Spec()
     pdf = pdf_for(tmp_path, spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    outcome = check_batch([pdf], sheet, REVIEW_STANDARD, **kw)
-    build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 71})])  # 核對後被改過
+    standard, prefixes = tmp_path / "standard.toml", tmp_path / "prefixes.toml"
+    standard.write_bytes(REVIEW_STANDARD.read_bytes())
+    prefixes.write_bytes(ISSUER_PREFIXES.read_bytes())
+    outcome = check_batch([pdf], sheet, standard, reference_format=REFERENCE_FORMAT, issuer_prefixes=prefixes)
+    if changed == "sheet":
+        build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 71})])
+    elif changed == "pdf":
+        build_pdf(pdf, Spec(tenor=7))
+    else:
+        path = standard if changed == "standard" else prefixes
+        path.write_text(path.read_text(encoding="utf-8") + "\n# 核對後被改過\n", encoding="utf-8")
     save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
     assert outcome.output is None and outcome.status == ERROR
-    assert outcome.errors[0].reason_code == "reference_changed"
+    assert outcome.errors[0].reason_code == "source_changed"
     assert not outcome.items[0].filled
     assert not (tmp_path / "reports").exists(), "不寫核對結果檔"
     assert not (tmp_path / "runtime").exists(), "也不寫核對紀錄"
+
+
+def test_pdf_missing_since_the_check_does_not_block_saving_but_one_that_appears_does(tmp_path):
+    spec = Spec()
+    missing = tmp_path / "029199990009_TS.pdf"
+    outcome = checked(tmp_path, [pdf_for(tmp_path, spec), missing], [reference_row(spec)])
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
+    assert outcome.output is not None, "核對時就不存在的說明書記成執行錯誤，其他照常儲存"
+
+    pdf_for(tmp_path, Spec(product_code="029199990009"))  # 核對後才出現
+    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW + dt.timedelta(seconds=1))
+    assert outcome.output is None and outcome.errors[0].reason_code == "source_changed"
+
+
+def test_record_hashes_come_from_the_snapshot_taken_before_reading(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    outcome, sheet = batch(tmp_path, [pdf], [reference_row(spec)])
+    record = json.loads(outcome.record.read_text(encoding="utf-8"))
+    snapshot = outcome.snapshot
+    assert record["metadata"]["inputs"]["reference_sheet"]["sha256"] == snapshot.sha256(sheet)
+    assert record["items"][0]["metadata"]["inputs"]["term_sheet"]["sha256"] == snapshot.sha256(pdf)
+    assert record["metadata"]["review_standard"]["sha256"] == snapshot.sha256(REVIEW_STANDARD)
 
 
 # ---------------------------------------------------------------- 人工放行

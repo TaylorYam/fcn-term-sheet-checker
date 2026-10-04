@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,16 +28,39 @@ def error_result(rule_id: str, field: str, e: IngestionError) -> CheckResult:
     )
 
 
-def file_meta(path: Path | None) -> dict[str, Any]:
-    """核對紀錄 metadata 用的檔名、完整路徑與 sha256；檔案不存在時 sha256 為 None。"""
-    meta: dict[str, Any] = {
-        "file": path.name if path else None,
-        "path": str(path.resolve()) if path else None,
-        "sha256": None,
-    }
-    if path is not None and path.is_file():
-        meta["sha256"] = sha256_of(path)
-    return meta
+def _sha256_or_none(path: Path) -> str | None:
+    try:
+        return sha256_of(path)
+    except OSError:
+        return None
+
+
+@dataclass(frozen=True)
+class SourceSnapshot:
+    """一次核對的來源快照：參考條件表、各份說明書與設定檔的路徑和 sha256，在讀取任何來源之前取一次。
+
+    核對紀錄的 hash 取自這裡；之後要確認「來源還是不是同一份」時明確呼叫 `still_valid`（重新計算 hash）。
+    讀不到的檔案 sha256 為 None。
+    """
+
+    files: tuple[tuple[Path, str | None], ...]
+
+    @classmethod
+    def take(cls, paths: Sequence[Path]) -> SourceSnapshot:
+        return cls(tuple((Path(p), _sha256_or_none(Path(p))) for p in paths))
+
+    def sha256(self, path: Path) -> str | None:
+        path = Path(path)
+        return next(h for p, h in self.files if p == path)
+
+    def meta(self, path: Path) -> dict[str, Any]:
+        """核對紀錄 metadata 用的檔名、完整路徑與 sha256。"""
+        path = Path(path)
+        return {"file": path.name, "path": str(path.resolve()), "sha256": self.sha256(path)}
+
+    def still_valid(self) -> bool:
+        """每個檔案都與取快照時相同：內容一樣；取快照時就讀不到的，現在也還讀不到（那份說明書已記成執行錯誤）。"""
+        return all(_sha256_or_none(p) == h for p, h in self.files)
 
 
 def write_new(path: Path, data: bytes, what: str) -> None:

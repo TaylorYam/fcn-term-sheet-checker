@@ -2,7 +2,7 @@
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
 - 只寫入呼叫端交來的說明書：批量入口依每份的類別決定（整份 PASS 或人工放行，`BatchItem.fillable`）。
-- 寫入：開檔前確認參考條件表與核對時相同，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
+- 寫入：批量入口以來源快照確認來源與核對時相同後才開檔，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
   原檔不動，回填結果由核對結果檔（result_file.py）帶出。
 - 決策的顯示標籤（`BackfillAction.label`）只在這裡定義，PANEL 使用。
 
@@ -29,7 +29,7 @@ import openpyxl
 from openpyxl.workbook.workbook import Workbook
 
 from .config import ReferenceFormat
-from .ingestion import IngestionError, sha256_of
+from .ingestion import IngestionError
 from .orders.reference import ReferenceRow
 from .rules.kit import Context, doc_review, result
 from .rules.reference import standard_field
@@ -253,14 +253,8 @@ def values_certain(report: CheckReport) -> bool:
     )
 
 
-def open_reference(path: Path, expected_sha256: str | None) -> Workbook:
-    """開啟參考條件表準備回填；檔案與核對時記錄的 hash 不同（或無法讀取）時丟出 IngestionError。"""
-    try:
-        changed = expected_sha256 is None or sha256_of(path) != expected_sha256
-    except OSError:
-        changed = True
-    if changed:
-        raise IngestionError("reference_changed", "參考條件表在核對後已變更或無法讀取，請重新核對後再儲存")
+def open_reference(path: Path) -> Workbook:
+    """開啟參考條件表準備回填（來源是否與核對時相同由批量入口以來源快照確認）。"""
     try:
         return openpyxl.load_workbook(path)  # 不用 data_only：保留公式與格式
     except Exception as e:

@@ -40,7 +40,7 @@ from .config import (
     load_review_standard,
 )
 from .extraction import extract_lines
-from .ingestion import IngestionError, error_result, file_meta, open_pdf
+from .ingestion import IngestionError, SourceSnapshot, error_result, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
 from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
@@ -158,7 +158,7 @@ class BatchOutcome:
     reference_format: ReferenceFormat | None = None
     output: Path | None = None  # 核對結果檔；尚未儲存或儲存失敗時為 None
     errors: list[CheckResult] = field(default_factory=list)  # 整批錯誤（設定檔、參考條件表、寫檔）
-    reference_sha256: str | None = None  # 核對時參考條件表的 hash；儲存前據此確認檔案未變更
+    snapshot: SourceSnapshot | None = None  # 核對前取的來源快照；核對紀錄的 hash 取自它，儲存前據此確認來源未變更
     metadata: dict[str, Any] = field(default_factory=dict)  # 整批執行 metadata（程式版本、設定檔與參考條件表 hash）
     record: Path | None = None  # 核對紀錄；尚未儲存或寫入失敗時為 None
 
@@ -451,12 +451,23 @@ def preview_batch(
 # ---------------------------------------------------------------- 核對
 
 
-def _item_metadata(pdf: Path, meta: dict[str, Any]) -> dict[str, Any]:
+def source_paths(
+    term_sheets: Sequence[Path],
+    reference_sheet: Path,
+    review_standard: Path,
+    reference_format: Path,
+    issuer_prefixes: Path,
+) -> tuple[Path, ...]:
+    """一次核對的全部來源（來源快照涵蓋的檔案）；CLI 與 PANEL 用同一份清單，快照才能直接比較。"""
+    return tuple(map(Path, (reference_sheet, *term_sheets, review_standard, reference_format, issuer_prefixes)))
+
+
+def _item_metadata(pdf: Path, meta: dict[str, Any], snapshot: SourceSnapshot) -> dict[str, Any]:
     return {
         **meta,
         "generated_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "parser": None,
-        "inputs": {**meta["inputs"], "term_sheet": file_meta(pdf)},
+        "inputs": {**meta["inputs"], "term_sheet": snapshot.meta(pdf)},
     }
 
 
@@ -466,9 +477,10 @@ def _check_one(
     rfmt: ReferenceFormat,
     std: ReviewStandard,
     meta: dict[str, Any],
+    snapshot: SourceSnapshot,
 ) -> BatchItem:
     pdf = found.pdf
-    metadata = _item_metadata(pdf, meta)
+    metadata = _item_metadata(pdf, meta, snapshot)
     issuer = found.issuer
     if found.pages is not None:
         metadata["inputs"]["term_sheet"]["pages"] = found.pages
@@ -491,38 +503,46 @@ def check_batch(
     issuer_prefixes: Path = DEFAULT_ISSUER_PREFIXES,
     registry: Sequence[Issuer] = REGISTRY,
 ) -> BatchOutcome:
-    """逐份核對，不寫任何檔案。設定檔或參考條件表本身有問題時，回傳整批錯誤、不核對任何說明書。"""
+    """逐份核對，不寫任何檔案。設定檔或參考條件表本身有問題時，回傳整批錯誤、不核對任何說明書。
+
+    讀取任何來源之前先取來源快照（BatchOutcome.snapshot）。
+    """
     reference_sheet = Path(reference_sheet)
+    snapshot = SourceSnapshot.take(
+        source_paths(term_sheets, reference_sheet, review_standard, reference_format, issuer_prefixes)
+    )
     try:
         std = load_review_standard(Path(review_standard))
         rfmt = load_reference_format(Path(reference_format))
         prefixes = load_issuer_prefixes(Path(issuer_prefixes))
         sheet = load_reference_sheet(reference_sheet, rfmt)
     except IngestionError as e:
-        return BatchOutcome([], reference_sheet, errors=[error_result("input.batch", "批量輸入", e)])
+        return BatchOutcome([], reference_sheet, errors=[error_result("input.batch", "批量輸入", e)], snapshot=snapshot)
 
     meta = {
         "program_version": __version__,
         "extractor": f"PyMuPDF {fitz.VersionBind}",
         "excel_reader": f"openpyxl {openpyxl.__version__}",
-        "inputs": {"reference_sheet": file_meta(reference_sheet)},
-        "review_standard": {**file_meta(Path(review_standard)), "version": std.version},
-        "reference_format": {**file_meta(Path(reference_format)), "version": rfmt.version},
-        "issuer_prefixes": file_meta(Path(issuer_prefixes)),
+        "inputs": {"reference_sheet": snapshot.meta(reference_sheet)},
+        "review_standard": {**snapshot.meta(review_standard), "version": std.version},
+        "reference_format": {**snapshot.meta(reference_format), "version": rfmt.version},
+        "issuer_prefixes": snapshot.meta(issuer_prefixes),
     }
     items: list[BatchItem] = []
     for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
         try:
-            item = _check_one(found, sheet, rfmt, std, meta)
+            item = _check_one(found, sheet, rfmt, std, meta, snapshot)
         except Exception as e:  # 單份非預期錯誤不中斷整批
             pdf = found.pdf
-            item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta)))
+            item = BatchItem(
+                pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta, snapshot))
+            )
         items.append(item)
     return BatchOutcome(
         items,
         reference_sheet,
         rfmt,
-        reference_sha256=meta["inputs"]["reference_sheet"]["sha256"],
+        snapshot=snapshot,
         metadata=meta,
     )
 
@@ -538,7 +558,7 @@ def _error_row(item: BatchItem) -> result_file.ErrorRow:
 
 
 def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.datetime | None = None) -> BatchOutcome:
-    """確認參考條件表與核對時相同後，寫核對結果檔到 out_dir、核對紀錄到 root/runtime/核對紀錄（都不覆蓋）。
+    """確認來源（參考條件表、說明書、設定檔）都與核對時相同後，寫核對結果檔到 out_dir、核對紀錄到 root/runtime/核對紀錄（都不覆蓋）。
 
     root 是根目錄（CLI 為執行目錄、PANEL 為安裝根目錄）。核對紀錄寫入失敗只記成整批錯誤，不影響核對結果檔；
     寫檔失敗不清除核對結果，可以再儲存一次。
@@ -552,9 +572,9 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
         outcome,
         "output.result_file",
         "核對結果檔",
-        lambda: backfill.open_reference(outcome.reference_sheet, outcome.reference_sha256),
+        lambda: _open_unchanged_reference(outcome),
     )
-    if wb is not None:  # 參考條件表核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
+    if wb is not None:  # 來源核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
         filled = [i.fillable for i in items]
         to_fill = [i for i, ok in zip(items, filled, strict=True) if ok]
         backfill.apply(wb, rfmt, [i.report for i in to_fill])
@@ -571,6 +591,13 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
             outcome, "output.record", "核對紀錄", lambda: reporting.save_record(outcome, Path(root), now)
         )
     return outcome
+
+
+def _open_unchanged_reference(outcome: BatchOutcome) -> Any:
+    """確認整份來源快照仍一致後，開啟參考條件表準備回填；任何來源變更或讀不到時丟出 IngestionError。"""
+    if outcome.snapshot is None or not outcome.snapshot.still_valid():
+        raise IngestionError("source_changed", "參考條件表、說明書或設定檔在核對後已變更或無法讀取，請重新核對後再儲存")
+    return backfill.open_reference(outcome.reference_sheet)
 
 
 def _attempt(outcome: BatchOutcome, rule_id: str, what: str, step: Callable[[], T]) -> T | None:
