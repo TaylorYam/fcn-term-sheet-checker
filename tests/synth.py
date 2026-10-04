@@ -690,5 +690,6 @@ def barc_adapter(**overrides: Any) -> Issuer:
         "detect": lambda lines: parser.detect(parser.document(lines)),
         "read": parser.read,
         "rules": rules.run_all,
+        "reference_fields": rules.REFERENCE_FIELDS,
     }
     return Issuer(**{**fields, **overrides})

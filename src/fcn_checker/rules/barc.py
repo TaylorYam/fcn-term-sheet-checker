@@ -1,6 +1,6 @@
 """BARC 專屬核對規則（docs/rules/barc-check-rules.md）：說明書內部規則與審查標準。
 
-參考條件表欄位的比對見 rules/reference.py（各上手共用）；共用工具見 rules/common.py。
+參考條件表欄位的比對見 rules/reference.py（各上手共用）；共用工具見 rules/kit.py。
 規則只接收標準化後的說明書欄位與審查標準；不讀檔、不改來源值。
 每條規則產生一或多筆 CheckResult；抓不到、歧義、未知值一律轉人工覆核，不猜值。
 """
@@ -11,11 +11,11 @@ import datetime as dt
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
-from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, ParsedField
 from ..schema import CheckStatus as S
-from . import common
-from .common import (
+from ..text import squash
+from .kit import (
+    IssuerContext,
     doc_ki,
     doc_review,
     order_value,
@@ -47,14 +47,16 @@ NOT_COVERED: list[dict[str, str]] = [
 ISSUER = "BARC"
 
 
-# 單份核對以共用 Context 呼叫本模組規則；ctx.ts 為 BarcTermSheet
-Context = common.Context
+# 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 BarcTermSheet
+
+# 本上手規則可讀的參考條件表欄位（ADR 0005 唯一例外：月配息率推算用表上年利率與天期，Issue #54）
+REFERENCE_FIELDS = ("coupon_pa_pct", "tenor_months")
 
 
 # ---------------------------------------------------------------- 推算規則
 
 
-def monthly_coupon(ctx: Context) -> CheckResult:
+def monthly_coupon(ctx: IssuerContext) -> CheckResult:
     """月配息率 = 年利率 × 天期 ÷ 12 ÷ 期數（期數 = 說明書配息表列數）；與說明書差 ≤ 0.0001 視為一致。"""
     rid, field = "derive.monthly_coupon", "monthly_coupon_pct"
     pf, table = ctx.ts.f(field), ctx.ts.f("coupon_table")
@@ -84,7 +86,7 @@ def monthly_coupon(ctx: Context) -> CheckResult:
     )
 
 
-def coupon_consistency(ctx: Context) -> list[CheckResult]:
+def coupon_consistency(ctx: IssuerContext) -> list[CheckResult]:
     """月配息率在 §9(1)、§14、§15(2)、§17(1) 相同；年利率在 §9(1)、§14、§17(1) 相同。"""
     rid = "doc.coupon_consistency"
     out = []
@@ -122,7 +124,7 @@ def coupon_consistency(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def prices(ctx: Context) -> list[CheckResult]:
+def prices(ctx: IssuerContext) -> list[CheckResult]:
     """各標的執行／KO／下限價 = 最初價格 × 對應百分比，四捨五入（half-up）到 4 位。"""
     rid = "derive.prices"
     table, uls = ctx.ts.f("price_table"), ctx.ts.f("underlyings")
@@ -214,7 +216,7 @@ def _periods(rows: list[ScheduleRow]) -> str:
     return "、".join(f"第 {r.t} 期" for r in rows)
 
 
-def coupon_dates(ctx: Context) -> list[CheckResult]:
+def coupon_dates(ctx: IssuerContext) -> list[CheckResult]:
     """B1、B2：期數 = 天期；評價日、支付日逐期遞增；每期評價日 < 支付日。"""
     rid = "schedule.coupon_dates"
     table, tenor = ctx.ts.f("coupon_table"), ctx.ts.f("tenor_months")
@@ -261,7 +263,7 @@ def coupon_dates(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def final_period(ctx: Context) -> list[CheckResult]:
+def final_period(ctx: IssuerContext) -> list[CheckResult]:
     """A3、A4：末期評價日 = 最終評價日；末期支付日 = 到期日。"""
     rid = "schedule.final_period"
     table = ctx.ts.f("coupon_table")
@@ -292,7 +294,7 @@ def final_period(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def autocall_dates(ctx: Context) -> list[CheckResult]:
+def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
     """C1–C4：自動提前出場表與配息表的日期關係。"""
     rid = "schedule.autocall_dates"
     coupon, ko = ctx.ts.f("coupon_table"), ctx.ts.f("ko_table")
@@ -352,7 +354,7 @@ def autocall_dates(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def _period_starts(ctx: Context, rid: str, kt: Table) -> CheckResult:
+def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
     """C4：第 1 期期始日為 N/A 或發行日後 1 個平日；之後各期 = 前一期期末日後 1 個平日。
 
     前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。
@@ -381,7 +383,7 @@ def _period_starts(ctx: Context, rid: str, kt: Table) -> CheckResult:
     )
 
 
-def trigger_per_period(ctx: Context) -> CheckResult:
+def trigger_per_period(ctx: IssuerContext) -> CheckResult:
     """§13(7) 每期觸發百分比 = §15 觸發百分比定義句。"""
     rid, ko, pct = "doc.autocall_trigger_per_period", ctx.ts.f("ko_table"), ctx.ts.f("ko_pct")
     if not ko.ok:
@@ -414,7 +416,7 @@ def trigger_per_period(ctx: Context) -> CheckResult:
     )
 
 
-def scenario_price_table(ctx: Context) -> CheckResult:
+def scenario_price_table(ctx: IssuerContext) -> CheckResult:
     """§16(3) 情境分析重印價格表逐格 = §15 價格表。"""
     rid, s15, s16 = "doc.scenario_price_table", ctx.ts.f("price_table"), ctx.ts.f("scenario_price_table")
     for x in (s15, s16):
@@ -468,7 +470,7 @@ def _equal(rid: str, field: str, pf: ParsedField, ref: ParsedField, expected: ob
     )
 
 
-def name_consistency(ctx: Context) -> list[CheckResult]:
+def name_consistency(ctx: IssuerContext) -> list[CheckResult]:
     """封面標題與第一章第 1 條商品名稱 = 封面「商品中文名稱」（標題不含「（下稱「本商品」）」）。"""
     rid, cover = "doc.name_consistency", ctx.ts.f("name_zh")
     title = _equal(
@@ -486,7 +488,7 @@ def name_consistency(ctx: Context) -> list[CheckResult]:
     return [title, art1]
 
 
-def distributor_product_code(ctx: Context) -> CheckResult:
+def distributor_product_code(ctx: IssuerContext) -> CheckResult:
     code = ctx.ts.f("product_code")
     return _equal(
         "doc.distributor_product_code",
@@ -498,7 +500,7 @@ def distributor_product_code(ctx: Context) -> CheckResult:
     )
 
 
-def currency_consistency(ctx: Context) -> CheckResult:
+def currency_consistency(ctx: IssuerContext) -> CheckResult:
     cz = ctx.ts.f("currency_zh")
     return _equal(
         "doc.currency_consistency",
@@ -510,7 +512,7 @@ def currency_consistency(ctx: Context) -> CheckResult:
     )
 
 
-def scenario_notional(ctx: Context) -> CheckResult:
+def scenario_notional(ctx: IssuerContext) -> CheckResult:
     denom = ctx.ts.f("denomination")
     return _equal(
         "doc.scenario_notional",
@@ -522,7 +524,7 @@ def scenario_notional(ctx: Context) -> CheckResult:
     )
 
 
-def price_header_pct(ctx: Context) -> list[CheckResult]:
+def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
     """§15 價格表與 §16 情境表欄頭「X（為最初價格的N%）」= §15 定義句的百分比（執行價格另與參考條件表 K(%) 比對）。"""
     rid = "doc.price_header_pct"
     out = []
@@ -560,7 +562,7 @@ def price_header_pct(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def coupon_repeats(ctx: Context) -> list[CheckResult]:
+def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
     """§9(3) 相關配息率與 §16 情境試算中每次出現的月配息率 = §14 正式月配息率。"""
     rid, pf = "doc.coupon_repeats", ctx.ts.f("monthly_coupon_pct")
     mentions = ctx.ts.coupon_mentions["repeat"]
@@ -617,7 +619,7 @@ def _shown(value: Decimal, like: Decimal) -> Decimal:
     return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
 
 
-def scenario_returns(ctx: Context) -> list[CheckResult]:
+def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
     """§16(3) 有利情況：總報酬率 = 月配息率 × 配息期數；一般情況：總報酬率 = 月配息率 × 總期數、
     平均年化報酬率 = 正式年利率。有利情況的年化率取決於持有期間，不核對（列未涵蓋）。"""
     rid = "doc.scenario_returns"
@@ -672,7 +674,7 @@ def scenario_returns(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def observation_t_range(ctx: Context) -> CheckResult:
+def observation_t_range(ctx: IssuerContext) -> CheckResult:
     """§13(7) 自動提前出場觀察期定義句（Daily Memory）各段 t 的起訖：
     保證配息期 G ≥ 1 → (G, G) 與 (G+1, 總期數)；G = 0 → (1, 總期數)。總期數 = 配息表列數。"""
     rid, field = "doc.observation_t_range", "observation_t_ranges"
@@ -714,12 +716,12 @@ def observation_t_range(ctx: Context) -> CheckResult:
 # ---------------------------------------------------------------- 入口
 
 
-def run_all(ctx: Context) -> list[CheckResult]:
+def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """參考條件表欄位規則（rules/reference.py）之後執行：月配息率推算，再加上說明書內部規則與審查標準。"""
     return [monthly_coupon(ctx), *document_rules(ctx)]
 
 
-def document_rules(ctx: Context) -> list[CheckResult]:
+def document_rules(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：不使用參考條件表的值。"""
     return [
         *coupon_consistency(ctx),

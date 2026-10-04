@@ -43,7 +43,7 @@ from .ingestion import IngestionError, error_result, file_meta, open_pdf
 from .issuers import REGISTRY, Issuer, by_code, detect
 from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
-from .rules.common import doc_review, read_standard
+from .rules.kit import doc_review, read_standard
 from .schema import CheckReport, CheckResult, CheckStatus, Evidence, ParsedField, overall_status
 from .single_check import Paired, check_document
 from .standard_fields import TermSheet

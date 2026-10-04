@@ -37,3 +37,4 @@ HSBC（Issue #34）上線後，BARC 與 HSBC 在同一套批量核對流程裡�
 - HSBC 的結果依 BARC 語意調整（Issue #54、#55）；BARC 的核對結論不變。
 - 規則的出處清單（例：HSBC 有兩個刊印日期）由各上手以標準欄位交出（`standard_fields.Occurrence`），共用規則逐處核對。
 - 標準欄位清單成為 adapter 與共用規則之間的契約；新增共用規則需要的欄位時，要同步更新 `STANDARD_FIELDS` 與各上手的 `read`。
+- （2026-10-04 補充，Issue #90）上手說明書內部規則改收縮小的 `IssuerContext`（讀出結果、審查標準、上手代號），拿不到參考條件表的列與格式設定。上述 BARC 月配息率推算的例外改為在上手註冊項目以 `reference_fields` 逐一宣告（BARC：年利率、天期），單份核對只交出宣告的欄位，讀未宣告的欄位是開發期錯誤；這是上手 adapter 的第五樣東西，決定本身不變。共用規則的程式位置改為：結果工具 `rules/kit.py`、審查標準規則 `rules/review_standard.py`（只有 `review_standard_rules` 一個進入點）、參考條件表欄名檢查併入 `rules/reference.py`。

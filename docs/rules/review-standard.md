@@ -73,7 +73,7 @@
 
 ### 2.4 各上手共用的出處規則（Issue #55）
 
-下列規則在 `rules/common.py` 只實作一次，所有上手共用，語意與 rule_id 採 BARC 版本。各上手只用標準欄位交出該規則涵蓋的出處清單（`standard_fields.Occurrence`），每處出處各產生一筆結果：
+下列規則在 `rules/review_standard.py` 只實作一次，所有上手共用，語意與 rule_id 採 BARC 版本。各上手只用標準欄位交出該規則涵蓋的出處清單（`standard_fields.Occurrence`），每處出處各產生一筆結果：
 
 | rule_id | 規則 | 出處清單（標準欄位） |
 |---|---|---|

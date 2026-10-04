@@ -261,7 +261,7 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 | `derive.monthly_coupon` | 月配息率推算，容差 ≤ 0.0001 | §3.5 |
 | `doc.coupon_consistency` | 月配息率（§9、§14、§15(2)、§17）與年利率（§9、§14、§17）文件內一致 | §3.5 |
 | `derive.prices` | 執行／KO／下限價 = 最初價格 × %（half-up 4 位） | §3.4 |
-| `doc.denomination` | 面額 = 幣別預設值，否則轉人工（各上手共用，`rules/common.py`） | §3.2 |
+| `doc.denomination` | 面額 = 幣別預設值，否則轉人工（各上手共用，`rules/review_standard.py`） | §3.2 |
 | `doc.subscription_start_date`／`doc.print_date` | D1、E2（各上手共用；各上手以標準欄位交出出處清單） | §3.8 |
 | `standard.*` | 審查通過日期、負責人、風險等級、固定警語、禁用語、商品名稱 | §3.9、審查標準 |
 | `order.duplicate_column` | 詢價表欄名重複 → 人工覆核 | §1 |
@@ -294,7 +294,7 @@ C4 的「平日」目前只排除週末；正式實作時若要排除假日，�
 
 ## 9. 參考條件表流程（2026-10-02，Issue #43）
 
-表上事先填好的欄位與說明書比對；說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：表上欄位的比對與 Non-Call 在各上手共用的 `rules/reference.py`（讀說明書標準欄位，見 `standard_fields.py`），回填規則在共用的 `backfill.py`；審查標準規則在共用的 `rules/common.py`；提前出場排程在擷取端（`parsers/barc_schedule.py` 的 `autocall_schedule`）；`rules/barc.py` 只剩月配息率推算與說明書內部規則。
+表上事先填好的欄位與說明書比對；說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：表上欄位的比對與 Non-Call 在各上手共用的 `rules/reference.py`（讀說明書標準欄位，見 `standard_fields.py`），回填規則在共用的 `backfill.py`；審查標準規則在共用的 `rules/review_standard.py`；提前出場排程在擷取端（`parsers/barc_schedule.py` 的 `autocall_schedule`）；`rules/barc.py` 只剩月配息率推算與說明書內部規則。
 
 | 參考條件表欄 | 說明書來源 | 規則 |
 |---|---|---|

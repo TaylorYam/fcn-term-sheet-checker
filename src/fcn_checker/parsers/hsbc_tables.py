@@ -6,7 +6,8 @@ import re
 from decimal import Decimal
 
 from ..schema import Line, ParsedField
-from .layout import TextIndex, parse_date, squash
+from ..text import squash
+from .layout import TextIndex, parse_date
 
 PRICE_LABELS = {"期初股價": "initial", "執行價": "strike", "自動提前到期價格": "ko", "觸及不保本價格": "ki"}
 NUMBER = re.compile(r"[\d,]+\.\d{4}")

@@ -1,6 +1,6 @@
-"""上手註冊表：每家上手的識別資料、範本辨識、讀出與說明書內部規則（ADR 0005）。
+"""上手註冊表：每家上手的識別資料、範本辨識、讀出、說明書內部規則與其可讀的參考條件表欄位（ADR 0005）。
 
-上手 adapter 只提供這四樣；參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填都是各上手共用的規則，
+上手 adapter 只提供這五樣；參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填都是各上手共用的規則，
 由單份核對（single_check.py）依序執行。新增上手時在 `REGISTRY` 登記一筆，並在 `config/issuer_prefixes.toml`
 登記上手編號（docs/issuer-onboarding.md §6）；批量入口、CLI 與 PANEL 都由這裡分派。
 """
@@ -14,7 +14,7 @@ from .parsers import barc as barc_parser
 from .parsers import hsbc as hsbc_parser
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
-from .rules.common import Context
+from .rules.kit import IssuerContext
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Line
 from .standard_fields import TermSheet
 
@@ -31,8 +31,10 @@ class Issuer:
     detect: Callable[[Sequence[Line]], DetectionResult]
     # 讀出：文字行 → 標準欄位（standard_fields.STANDARD_FIELDS）＋該上手規則需要的專屬資料；每份只呼叫一次
     read: Callable[[Sequence[Line]], TermSheet]
-    # 說明書內部規則：只用讀出結果與審查標準（例外：BARC 月配息率推算另讀表上年利率與天期，見 Issue #54 決定）
-    rules: Callable[[Context], list[CheckResult]]
+    # 說明書內部規則：只用讀出結果與審查標準，拿不到參考條件表的列與格式設定
+    rules: Callable[[IssuerContext], list[CheckResult]]
+    # 說明書內部規則可讀的參考條件表欄位（ADR 0005 的例外，須逐一宣告；目前只有 BARC 月配息率推算的年利率與天期，Issue #54）
+    reference_fields: tuple[str, ...] = ()
 
 
 BARC = Issuer(
@@ -44,6 +46,7 @@ BARC = Issuer(
     detect=lambda lines: barc_parser.detect(barc_parser.document(lines)),
     read=barc_parser.read,
     rules=barc_rules.run_all,
+    reference_fields=barc_rules.REFERENCE_FIELDS,
 )
 
 HSBC = Issuer(

@@ -9,8 +9,9 @@ from decimal import Decimal, InvalidOperation
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..text import squash
 from . import hsbc_tables as tables
-from .layout import Document, LayoutSpec, TextIndex, parse_date, squash
+from .layout import Document, LayoutSpec, TextIndex, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
 PARSER_VERSION = "1"

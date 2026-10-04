@@ -1,235 +1,26 @@
-"""各上手共用的核對規則與工具（docs/rules/review-standard.md 及各上手核對規則）。
+"""審查標準規則：各上手共用，依上手代號取得已解析的審查標準（docs/rules/review-standard.md）。
 
-規則只接收標準化後的說明書欄位、下單欄位與審查標準；不讀檔、不改來源值。
-說明書欄位一律使用標準欄位名稱（例如 `trade_date`、`strike_pct`），上手專屬規則放在各上手模組。
-抓不到、歧義、未知值一律轉人工覆核，不猜值。
+只用說明書標準欄位、全文索引與審查標準，不碰參考條件表。對外只有 `review_standard_rules` 一個進入點。
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any
 
-from ..config import NAME_FLAGS, IssuerStandard, ReferenceFormat, ReviewStandard
-from ..orders.reference import OrderRecord
-from ..parsers.layout import squash
-from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
+from ..config import NAME_FLAGS
+from ..schema import CheckResult, Evidence, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import Occurrence, TermSheet, fee_field, is_standard, not_provided
+from ..standard_fields import fee_field
+from ..text import squash
+from .kit import Context, doc_review, occurrences_of, result, standard_field
 
-
-@dataclass
-class Context:
-    ts: TermSheet
-    order: OrderRecord
-    std: ReviewStandard
-    fmt: ReferenceFormat
-    issuer: str  # 上手代號；上手專屬的審查標準值由 issuer_std 依此解析
-
-    @property
-    def issuer_std(self) -> IssuerStandard:
-        return self.std.for_issuer(self.issuer)
-
-
-# ---------------------------------------------------------------- 共用
-
-
-def read_standard(ts: TermSheet, name: str) -> ParsedField:
-    """共用規則讀說明書欄位的唯一方式：只能讀標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
-    if not is_standard(name):
-        raise ValueError(f"{name} 不是標準欄位；共用規則需要的欄位要先加進 standard_fields.STANDARD_FIELDS")
-    try:
-        return ts.f(name)
-    except KeyError:  # adapter 未照契約實作 f 時也不讓整份說明書變成執行錯誤
-        return not_provided(name)
-
-
-def standard_field(ctx: Context, name: str) -> ParsedField:
-    return read_standard(ctx.ts, name)
-
-
-def result(
-    rule_id: str,
-    field: str,
-    status: S,
-    *,
-    expected: Any = None,
-    actual: Any = None,
-    pf: ParsedField | None = None,
-    ov: list[OrderValue | None] | None = None,
-    reason: str = "",
-    message: str = "",
-    tolerance: str | None = None,
-    evidence: list[Evidence] | None = None,
-    column: str | None = None,
-) -> CheckResult:
-    """`column` 為錯訊用的參考條件表欄名；未指定時取自 `ov` 的來源欄名。"""
-    if column is None:
-        column = "、".join(dict.fromkeys(o.column for o in ov or [] if o is not None and o.column))
-    return CheckResult(
-        rule_id=rule_id,
-        field=field,
-        status=status,
-        expected=expected,
-        actual=actual,
-        tolerance=tolerance,
-        reason_code=reason,
-        message=message,
-        document_evidence=list(evidence if evidence is not None else (pf.evidence if pf else [])),
-        order_source=[o.source for o in (ov or []) if o is not None],
-        column=column,
-    )
-
-
-DOC_REASON = {
-    FieldStatus.MISSING: ("document_missing", "說明書抓不到此欄位"),
-    FieldStatus.AMBIGUOUS: ("document_ambiguous", "說明書出現多個不同的值"),
-    FieldStatus.INVALID: ("document_invalid", "說明書的值無法辨識"),
-}
-
-
-def doc_review(
-    rule_id: str, field: str, pf: ParsedField, expected: Any = None, ov: list[OrderValue | None] | None = None
-) -> CheckResult:
-    reason, msg = DOC_REASON.get(pf.status, ("document_not_applicable", "說明書判定此欄位不適用"))
-    detail = f"：{pf.note}" if pf.note else ""
-    actual = pf.candidates or None
-    return result(
-        rule_id,
-        field,
-        S.REVIEW_REQUIRED,
-        expected=expected,
-        actual=actual,
-        pf=pf,
-        ov=ov,
-        reason=reason,
-        message=msg + detail,
-    )
-
-
-def order_review(
-    rule_id: str, field: str, ov: OrderValue | None, pf: ParsedField | None, reason: str, message: str
-) -> CheckResult:
-    return result(
-        rule_id,
-        field,
-        S.REVIEW_REQUIRED,
-        expected=ov.value if ov else None,
-        actual=pf.value if pf and pf.ok else None,
-        pf=pf,
-        ov=[ov],
-        reason=reason,
-        message=message,
-    )
-
-
-def to_decimal(v: Any) -> Decimal | None:
-    if isinstance(v, Decimal):
-        return v
-    if isinstance(v, str):
-        try:
-            return Decimal(v.strip())
-        except InvalidOperation:
-            return None
-    return None
-
-
-def to_int(v: Any) -> int | None:
-    d = to_decimal(v)
-    if d is None or d != d.to_integral_value():
-        return None
-    return int(d)
-
-
-def to_date(v: Any) -> dt.date | None:
-    return v if isinstance(v, dt.date) and not isinstance(v, dt.datetime) else None
-
-
-def order_value(
-    ctx: Context, key: str, rule_id: str, field: str, pf: ParsedField | None, convert: Callable[[Any], Any], what: str
-) -> tuple[Any, OrderValue | None, CheckResult | None]:
-    """取得並轉換下單欄位；缺漏或格式錯誤時回傳 REVIEW 結果。"""
-    ov = ctx.order.fields.get(key)
-    if ov is None or ov.value is None:
-        return (
-            None,
-            ov,
-            order_review(rule_id, field, ov, pf, "order_missing", f"{ctx.order.source}沒有此欄位或值為空白"),
-        )
-    v = convert(ov.value)
-    if v is None:
-        return None, ov, order_review(rule_id, field, ov, pf, "order_invalid", f"{ctx.order.source}的值不是{what}")
-    return v, ov, None
-
-
-KI_LABEL = {"none": "無 KI", "AM": "到期觀察", "D": "每日觀察", "M": "每月觀察（Monthly KI）"}
-
-
-def doc_ki(pf: ParsedField) -> str | None:
-    """說明書 KI 型態（標準欄位 `ki_type`）；無 KI 可用 NOT_APPLICABLE 狀態交出。抓不到或未知值回傳 None。"""
-    if pf.status in (FieldStatus.PRESENT, FieldStatus.NOT_APPLICABLE) and pf.value in KI_LABEL:
-        return pf.value
-    return None
-
-
-def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
-    """百分比：下單值依說明書顯示位數四捨五入（half-up）後比對。"""
-    exp = doc_v.as_tuple().exponent
-    q = order_v.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else order_v
-    return q == doc_v, q
-
-
-# ---------------------------------------------------------------- 範本與格式
-
-
-def column_checks(order: OrderRecord) -> list[CheckResult]:
-    src = order.source
-    out = []
-    for col in order.unknown_columns:
-        out.append(
-            result(
-                "order.unknown_column",
-                f"{src}欄位",
-                S.REVIEW_REQUIRED,
-                expected=None,
-                actual=None,
-                ov=[col],
-                reason="order_unknown_column",
-                message=f"{src}出現格式設定沒有的欄位「{col.value}」，格式可能已改版",
-            )
-        )
-    for col in order.duplicate_columns:
-        out.append(
-            result(
-                "order.duplicate_column",
-                f"{src}欄位",
-                S.REVIEW_REQUIRED,
-                ov=[col],
-                reason="order_duplicate_column",
-                message=f"{src}欄位「{col.value}」重複出現，無法確定以哪一欄為準",
-            )
-        )
-    for name in order.missing_columns:
-        out.append(
-            result(
-                "order.missing_column",
-                f"{src}欄位",
-                S.REVIEW_REQUIRED,
-                reason="order_missing_column",
-                message=f"{src}缺少格式設定中的欄位「{name}」",
-            )
-        )
-    return out
-
+__all__ = ["review_standard_rules"]
 
 # ---------------------------------------------------------------- 審查標準
 
 
-def approval_date(ctx: Context) -> CheckResult:
+def _approval_date(ctx: Context) -> CheckResult:
     rid, pf = "standard.approval_date", standard_field(ctx, "approval_date")
     if not pf.ok:
         return doc_review(rid, "approval_date", pf, ctx.std.approval_date)
@@ -249,7 +40,7 @@ def approval_date(ctx: Context) -> CheckResult:
 # ---------------------------------------------------------------- 審查標準：說明書各出處（各上手共用，BARC 語意）
 
 
-def denomination(ctx: Context) -> CheckResult:
+def _denomination(ctx: Context) -> CheckResult:
     """面額 = 審查標準該幣別的預設值；不同時轉人工覆核（客戶可能要求特殊面額）。"""
     rid, pf, cz = "doc.denomination", standard_field(ctx, "denomination"), standard_field(ctx, "currency_zh")
     if not pf.ok:
@@ -279,15 +70,7 @@ def denomination(ctx: Context) -> CheckResult:
     )
 
 
-def occurrences_of(ctx: Context, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
-    """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果。"""
-    container = standard_field(ctx, name)
-    if not container.ok:
-        return (), doc_review(rid, name, container)
-    return container.value, None
-
-
-def subscription_dates(ctx: Context) -> list[CheckResult]:
+def _subscription_dates(ctx: Context) -> list[CheckResult]:
     """各受理申購日出處（開始、結束）= 交易日。"""
     rid, trade = "doc.subscription_start_date", standard_field(ctx, "trade_date")
     items, problem = occurrences_of(ctx, rid, "subscription_dates")
@@ -316,7 +99,7 @@ def subscription_dates(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def print_dates(ctx: Context) -> list[CheckResult]:
+def _print_dates(ctx: Context) -> list[CheckResult]:
     """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）。"""
     rid, trade = "doc.print_date", standard_field(ctx, "trade_date")
     items, problem = occurrences_of(ctx, rid, "print_dates")
@@ -352,7 +135,7 @@ def _codepoints(s: str) -> str:
     return " ".join(f"{c}U+{ord(c):04X}" for c in s)
 
 
-def chairman(ctx: Context) -> CheckResult:
+def _chairman(ctx: Context) -> CheckResult:
     rid, pf, exp = "standard.chairman", standard_field(ctx, "chairman"), ctx.std.chairman
     if not pf.ok:
         return doc_review(rid, "chairman", pf, exp)
@@ -370,7 +153,7 @@ def chairman(ctx: Context) -> CheckResult:
     )
 
 
-def fixed_warning(ctx: Context) -> CheckResult:
+def _fixed_warning(ctx: Context) -> CheckResult:
     """該上手適用的固定風險警語（有上手版本就用，否則用預設）逐字出現的次數 = 審查標準。"""
     rid, std = "standard.fixed_warning", ctx.issuer_std
     ti = ctx.ts.full_text
@@ -393,7 +176,7 @@ def fixed_warning(ctx: Context) -> CheckResult:
     )
 
 
-def risk_level(ctx: Context) -> CheckResult:
+def _risk_level(ctx: Context) -> CheckResult:
     rid = "standard.risk_level"
     ti = ctx.ts.full_text
     found = [(m.group(1), m) for m in re.finditer(r"【(RR\d)】", ti.text)]
@@ -422,7 +205,7 @@ def risk_level(ctx: Context) -> CheckResult:
     )
 
 
-def forbidden_wording(ctx: Context) -> CheckResult:
+def _forbidden_wording(ctx: Context) -> CheckResult:
     rid = "standard.forbidden_wording"
     ti = ctx.ts.full_text
     text = ti.text
@@ -464,7 +247,7 @@ def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str)
     )
 
 
-def issuer_name(ctx: Context) -> list[CheckResult]:
+def _issuer_name(ctx: Context) -> list[CheckResult]:
     """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。"""
     rid, issuer = "standard.issuer_name", ctx.issuer
     expected = ctx.issuer_std.issuer_name
@@ -484,7 +267,7 @@ def issuer_name(ctx: Context) -> list[CheckResult]:
     return [_fixed_text(rid, name, standard_field(ctx, name), expected, what) for name, what in fields]
 
 
-def distributor_info(ctx: Context) -> list[CheckResult]:
+def _distributor_info(ctx: Context) -> list[CheckResult]:
     """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準；電話另接受審查標準列出的等價寫法。"""
     rid, std = "standard.distributor", ctx.issuer_std
     checks = (
@@ -515,7 +298,7 @@ def distributor_info(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def fees(ctx: Context) -> list[CheckResult]:
+def _fees(ctx: Context) -> list[CheckResult]:
     """第四章費用表：審查標準列出的各費用項目費率區間逐字相等。"""
     rid = "standard.fees"
     return [
@@ -524,7 +307,7 @@ def fees(ctx: Context) -> list[CheckResult]:
     ]
 
 
-def issue_price(ctx: Context) -> CheckResult:
+def _issue_price(ctx: Context) -> CheckResult:
     """發行價格 = 商品面額之 N%（審查標準）；不同時轉人工覆核（可能為特殊條件），不判為錯誤。"""
     rid, pf, exp = "standard.issue_price", standard_field(ctx, "issue_price_pct"), ctx.std.issue_price_pct
     if not pf.ok:
@@ -560,7 +343,7 @@ def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], Pa
     return flags, None
 
 
-def product_name(ctx: Context) -> list[CheckResult]:
+def _product_name(ctx: Context) -> list[CheckResult]:
     """用說明書的天期、幣別、是否記憶式（樣板有用到時再加標的數、KO 觀察方式）組出預期名稱後比對。
 
     名稱樣板依上手讀取審查標準 `product_name.<上手代號小寫>`；沒有樣板時轉人工覆核。中文名稱括號全半形不計。
@@ -650,17 +433,17 @@ def product_name(ctx: Context) -> list[CheckResult]:
 def review_standard_rules(ctx: Context) -> list[CheckResult]:
     """審查標準規則：各上手共用，依上手代號取得已解析的審查標準；只用說明書，不碰參考條件表。"""
     return [
-        denomination(ctx),
-        *subscription_dates(ctx),
-        *print_dates(ctx),
-        approval_date(ctx),
-        chairman(ctx),
-        fixed_warning(ctx),
-        risk_level(ctx),
-        forbidden_wording(ctx),
-        *product_name(ctx),
-        *issuer_name(ctx),
-        *distributor_info(ctx),
-        *fees(ctx),
-        issue_price(ctx),
+        _denomination(ctx),
+        *_subscription_dates(ctx),
+        *_print_dates(ctx),
+        _approval_date(ctx),
+        _chairman(ctx),
+        _fixed_warning(ctx),
+        _risk_level(ctx),
+        _forbidden_wording(ctx),
+        *_product_name(ctx),
+        *_issuer_name(ctx),
+        *_distributor_info(ctx),
+        *_fees(ctx),
+        _issue_price(ctx),
     ]
