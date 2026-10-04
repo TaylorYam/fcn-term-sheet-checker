@@ -16,10 +16,12 @@ from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
 from .kit import (
+    HEADER_PCT_ITEM,
     IssuerContext,
     doc_ki,
     doc_review,
     order_value,
+    price_item,
     result,
     to_decimal,
     to_int,
@@ -28,13 +30,7 @@ from .kit import (
 Q4 = Decimal("0.0001")
 MONTHLY_TOLERANCE = Decimal("0.0001")
 PRICE_LABEL = {"strike": "執行價", "ko": "KO 價", "ki": "下限價（觸及生效價）"}
-PRICE_ITEM = {"strike": "執行價", "ko": "KO價", "ki": "下限價"}  # 項目名稱 UL_n <名稱>，同參考條件表欄名
 PRICE_PCT_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}
-HEADER_PCT_ITEM = {  # 同 HSBC 的價格表欄頭百分比項目名稱
-    "strike_pct": "價格表執行價格欄頭百分比",
-    "ko_pct": "價格表 KO 價格欄頭百分比",
-    "ki_pct": "價格表 KI 價格欄頭百分比",
-}
 
 # 第二階段或暫不核對的規則：列入報告「未涵蓋」區，不影響也不假裝通過
 NOT_COVERED: list[dict[str, str]] = [
@@ -65,13 +61,14 @@ REFERENCE_FIELDS = ("coupon_pa_pct", "tenor_months")
 
 def monthly_coupon(ctx: IssuerContext) -> CheckResult:
     """月配息率 = 年利率 × 天期 ÷ 12 ÷ 期數（期數 = 說明書配息表列數）；與說明書差 ≤ 0.0001 視為一致。"""
-    rid, field, item = "derive.monthly_coupon", "monthly_coupon_pct", Item.expected("月配息率 %")
+    rid, field = "derive.monthly_coupon", "monthly_coupon_pct"
     pf, table = ctx.ts.f(field), ctx.ts.f("coupon_table")
     annual, ov_a, p1 = order_value(ctx, "coupon_pa_pct", rid, field, pf, to_decimal, "數字", name="年利率 %")
     tenor, ov_t, p2 = order_value(ctx, "tenor_months", rid, field, pf, to_int, "整數", name="天期（月）")
     for p in (p1, p2):
         if p:
             return p
+    item = Item.derived("月配息率 %", [ov_a, ov_t])  # 預期值由表上年利率與天期推算
     if not pf.ok:
         return doc_review(rid, field, pf, None, [ov_a, ov_t], item=item)
     if not table.ok:
@@ -180,7 +177,7 @@ def prices(ctx: IssuerContext) -> list[CheckResult]:
         for col in ("strike", "ko", "ki"):
             if col not in row.values:
                 continue
-            field, price = f"{label} {PRICE_LABEL[col]}", Item.expected(f"UL_{i + 1} {PRICE_ITEM[col]}")
+            field, price = f"{label} {PRICE_LABEL[col]}", Item.expected(price_item(i + 1, col))
             pct = ctx.ts.f(PRICE_PCT_FIELD[col])
             if not pct.ok:
                 out.append(doc_review(rid, field, pct, item=price))
@@ -571,7 +568,7 @@ def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
     rid = "doc.price_header_pct"
     out = []
     for field in ("strike_pct", "ko_pct", "ki_pct"):
-        item = Item.expected(HEADER_PCT_ITEM[field])
+        item = Item.expected(HEADER_PCT_ITEM[field.removesuffix("_pct")])
         mentions = [h.mention for h in ctx.ts.header_pcts if h.field == field]
         if field == "strike_pct" and not any(m.article == "第15條" for m in mentions):
             out.append(

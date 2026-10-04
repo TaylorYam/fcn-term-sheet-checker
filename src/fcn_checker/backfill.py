@@ -177,7 +177,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
     rid, key, sched = "backfill.compare_dates", "compare_dates", standard_field(ctx, "autocall_schedule")
     stds = [f"autocall_date_{n}" for n in range(1, SLOTS + 1)]
     ovs = [row.fields.get(s) for s in stds]
-    item = Item.sheet(COMPARE_DATES, ovs)
+    item = Item.group(COMPARE_DATES, ovs)
     missing = _missing_columns(fmt, row, stds)
     if missing:
         return _column_missing(rid, key, missing, ovs, item), []

@@ -137,7 +137,8 @@ class OrderValue:
 class ItemSource(StrEnum):
     """核對結果的預期值從哪裡來；錯訊依此決定句型。"""
 
-    REFERENCE = "reference"  # 參考條件表（項目的 columns 為 Excel 欄名）
+    REFERENCE = "reference"  # 直接比對參考條件表的值（錯訊寫「<項目>對不起來：參考條件表 …／說明書 …」）
+    REFERENCE_DERIVED = "reference_derived"  # 由參考條件表的值推算（例：月配息率；錯訊附「參考條件表」值與推算說明）
     STANDARD = "standard"  # 審查標準
     EXPECTED = "expected"  # 說明書其他位置或由說明書推算（錯訊寫「預期」）
     NONE = "none"  # 不比對值：配對、範本、讀檔、寫檔、參考條件表表頭
@@ -148,23 +149,37 @@ def column_label(column: str) -> str:
     return re.sub(r"^(UL_\d+)_", r"\1 ", column)
 
 
+def _columns(ovs: list[OrderValue | None] | None) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(o.column for o in ovs or [] if o is not None and o.column))
+
+
 @dataclass(frozen=True)
 class Item:
     """一條核對結果在講哪一項：作業人員看得懂的中文名稱與預期值出處，由規則建立結果時給（Issue #91）。"""
 
     name: str  # 例：UL_2 KO價、情境 3 損益金額、受託機構負責人
     source: ItemSource
-    columns: tuple[str, ...] = ()  # 參考條件表的 Excel 欄名（出處為參考條件表時）
+    columns: tuple[str, ...] = ()  # 讀到的參考條件表 Excel 欄名
+    grouped: bool = False  # 多欄合起來核對（例：標的、比價日），核對紀錄的 column 寫項目名稱
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("核對結果的項目名稱不可空白")
 
+    @property
+    def record_column(self) -> str:
+        """核對紀錄的 `column`：多欄合起來核對時為項目名稱，否則為讀到的 Excel 欄名。"""
+        return self.name if self.grouped else "、".join(self.columns)
+
     @classmethod
     def sheet(cls, name: str, ovs: list[OrderValue | None] | None = None) -> Item:
-        """參考條件表欄位：名稱固定（例：比價日），欄名取自讀到的參考條件表值。"""
-        columns = tuple(dict.fromkeys(o.column for o in ovs or [] if o is not None and o.column))
-        return cls(name, ItemSource.REFERENCE, columns)
+        """直接比對參考條件表的值，名稱固定（例：最低申購金額與「單位面額」比對）。"""
+        return cls(name, ItemSource.REFERENCE, _columns(ovs))
+
+    @classmethod
+    def group(cls, name: str, ovs: list[OrderValue | None] | None = None) -> Item:
+        """多欄參考條件表合起來核對（例：UL_1～UL_5 為「標的」、比價日_1～12 為「比價日」）。"""
+        return cls(name, ItemSource.REFERENCE, _columns(ovs), grouped=True)
 
     @classmethod
     def column(cls, fallback: str, ovs: list[OrderValue | None] | None = None) -> Item:
@@ -173,6 +188,11 @@ class Item:
         if len(item.columns) == 1:
             return cls(column_label(item.columns[0]), ItemSource.REFERENCE, item.columns)
         return item
+
+    @classmethod
+    def derived(cls, name: str, ovs: list[OrderValue | None]) -> Item:
+        """由參考條件表的值推算的預期值（例：月配息率由年利率與天期推算）。"""
+        return cls(name, ItemSource.REFERENCE_DERIVED, _columns(ovs))
 
     @classmethod
     def standard(cls, name: str) -> Item:

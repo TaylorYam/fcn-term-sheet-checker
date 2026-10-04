@@ -52,7 +52,7 @@ def _result_dict(r: CheckResult) -> dict[str, Any]:
         "message": r.message,
         "document_evidence": [e.to_dict() for e in r.document_evidence],
         "order_source": list(r.order_source),
-        "column": "、".join(r.item.columns),
+        "column": r.item.record_column,
         "item": {"name": r.item.name, "source": r.item.source.value, "columns": list(r.item.columns)},
     }
 

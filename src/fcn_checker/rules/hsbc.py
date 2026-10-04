@@ -30,12 +30,6 @@ NOT_COVERED = [
 # 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 HsbcTermSheet
 
 
-PRICE_ITEM = {"strike": "執行價", "ko": "KO價", "ki": "下限價"}  # 項目名稱 UL_n <名稱>，同參考條件表欄名
-HEADER_PCT_ITEM = {
-    "strike": "價格表執行價格欄頭百分比",
-    "ko": "價格表 KO 價格欄頭百分比",
-    "ki": "價格表 KI 價格欄頭百分比",
-}
 PRICE_TABLE = Item.expected("價格表")
 
 
@@ -171,7 +165,7 @@ def prices(ctx):
                 continue
             pct = ctx.ts.f(col + "_pct")
             exp = (row["prices"]["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP) if pct.ok else None
-            name = f"UL_{i} {PRICE_ITEM[col]}"
+            name = kit.price_item(i, col)
             out.append(check("derive.prices", f"underlying_{i}_{col}_price", name, [pf, pct], exp, actual))
     headers = pf.value["headers"]
     for col in ["strike", "ko", "ki"]:
@@ -185,11 +179,11 @@ def prices(ctx):
                     expected=None,
                     actual=headers.get(col),
                     pf=pf,
-                    item=Item.expected(HEADER_PCT_ITEM[col]),
+                    item=Item.expected(kit.HEADER_PCT_ITEM[col]),
                 )
             )
             continue
-        out.append(check("doc.price_header_pct", col, HEADER_PCT_ITEM[col], [pf, pct], pct.value, headers.get(col)))
+        out.append(check("doc.price_header_pct", col, kit.HEADER_PCT_ITEM[col], [pf, pct], pct.value, headers.get(col)))
     if not scenario.ok:
         out.append(kit.doc_review("doc.scenario_table", "prices", scenario, item=Item.expected("情境試算價格表")))
     else:

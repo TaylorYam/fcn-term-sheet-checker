@@ -83,6 +83,21 @@ class IssuerContext(_IssuerStandardOf):
         return self.declared[key]
 
 
+# ---------------------------------------------------------------- 兩家上手共用的項目名稱
+
+PRICE_ITEM = {"initial": "進場價", "strike": "執行價", "ko": "KO價", "ki": "下限價"}  # 同 Excel 欄名 UL_n_<名稱>
+HEADER_PCT_ITEM = {
+    "strike": "價格表執行價格欄頭百分比",
+    "ko": "價格表 KO 價格欄頭百分比",
+    "ki": "價格表 KI 價格欄頭百分比",
+}
+
+
+def price_item(n: int, col: str) -> str:
+    """第 n 檔標的（從 1 起）某價格的項目名稱，例：UL_2 KO價。"""
+    return f"UL_{n} {PRICE_ITEM[col]}"
+
+
 # ---------------------------------------------------------------- 共用
 
 

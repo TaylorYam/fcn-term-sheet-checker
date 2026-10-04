@@ -265,8 +265,7 @@ def _unexpected(e: Exception) -> CheckResult:
     )
 
 
-def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = None) -> CheckResult:
-    """辨識或配對問題；`field_` 為 issuer 或 product_code。"""
+def _review(rule_id: str, field_: str, item: Item, reason: str, message: str, actual: Any = None) -> CheckResult:
     return CheckResult(
         rule_id=rule_id,
         field=field_,
@@ -274,7 +273,7 @@ def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = 
         actual=actual,
         reason_code=reason,
         message=message,
-        item=ISSUER_ITEM if field_ == "issuer" else PRODUCT_CODE_ITEM,
+        item=item,
     )
 
 
@@ -298,13 +297,13 @@ def _identify(
     out.issuer_code = prefixes.get(prefix)
     if out.issuer_code is None:
         msg = f"檔名上手編號「{prefix}」不在上手編號對照表，未支援上手"
-        results.append(_review("batch.issuer_prefix", "issuer", UNSUPPORTED, msg))
+        results.append(_review("batch.issuer_prefix", "issuer", ISSUER_ITEM, UNSUPPORTED, msg))
         return out
     issuer = by_code(out.issuer_code, registry)
     if issuer is None:
         code = out.issuer_code
         msg = f"上手編號 {prefix} 對應 {code}，但 {code} 還沒有說明書範本，未支援上手"
-        results.append(_review("batch.issuer_prefix", "issuer", UNSUPPORTED, msg))
+        results.append(_review("batch.issuer_prefix", "issuer", ISSUER_ITEM, UNSUPPORTED, msg))
         return out
 
     detected, template_result = detect(lines, registry)
@@ -316,6 +315,7 @@ def _identify(
             _review(
                 "batch.issuer_prefix",
                 "issuer",
+                ISSUER_ITEM,
                 "issuer_prefix_mismatch",
                 f"檔名上手編號 {prefix} 對應 {issuer.code}，但說明書內容是 {detected.code} 範本，可能檔名取錯或檔案放錯",
                 actual=detected.code,
@@ -335,17 +335,21 @@ def _identify(
         return out
     if not str(pc.value).startswith(prefix):
         msg = f"說明書商品代號 {pc.value} 的前三碼與檔名上手編號 {prefix} 不同"
-        results.append(_review("batch.issuer_prefix", "product_code", "issuer_prefix_mismatch", msg, actual=pc.value))
+        results.append(
+            _review(
+                "batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, "issuer_prefix_mismatch", msg, actual=pc.value
+            )
+        )
         return out
 
     rows = sheet.find(pc.value)
     if not rows:
         msg = f"參考條件表找不到 TDCC Code {pc.value} 的列"
-        results.append(_review("batch.pairing", "product_code", "reference_row_missing", msg))
+        results.append(_review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, "reference_row_missing", msg))
         return out
     if len(rows) > 1:
         msg = f"參考條件表有 {len(rows)} 列 TDCC Code 為 {pc.value}"
-        r = _review("batch.pairing", "product_code", "reference_row_duplicate", msg)
+        r = _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, "reference_row_duplicate", msg)
         r.order_source = [x.product_code.source for x in rows]
         results.append(r)
         return out
@@ -355,6 +359,7 @@ def _identify(
         r = _review(
             "batch.pairing",
             "issuer",
+            ISSUER_ITEM,
             "reference_issuer_mismatch",
             f"參考條件表該列發行機構是「{row.issuer.value}」，{issuer.code} 應為「{expected_issuer}」",
             actual=row.issuer.value,

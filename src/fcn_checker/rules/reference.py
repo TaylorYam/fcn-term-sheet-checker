@@ -24,6 +24,7 @@ from .kit import (
     occurrences_of,
     order_review,
     order_value,
+    price_item,
     result,
     standard_field,
     to_date,
@@ -37,11 +38,11 @@ Q4 = Decimal("0.0001")
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
 OBS_LABEL = {"D": "期間每日觀察", "P": "期末定日觀察"}
 UNDERLYINGS = "標的"  # UL_1～UL_5 合起來核對，項目用這個名稱
-PRICE_COLUMNS = (  # 價格列的鍵、標準欄位、核對結果欄位用的中文、項目名稱（同 Excel 欄名 UL_n_<名稱>）
-    ("initial", "initial_price", "進場價", "進場價"),
-    ("strike", "strike_price", "執行價", "執行價"),
-    ("ki", "ki_price", "下限價", "下限價"),
-    ("ko", "ko_price", "KO 價", "KO價"),
+PRICE_COLUMNS = (  # 價格列的鍵、標準欄位、核對結果欄位用的中文
+    ("initial", "initial_price", "進場價"),
+    ("strike", "strike_price", "執行價"),
+    ("ki", "ki_price", "下限價"),
+    ("ko", "ko_price", "KO 價"),
 )
 
 
@@ -162,11 +163,11 @@ def underlyings(ctx: Context) -> CheckResult:
             ov=ovs,
             reason="order_invalid",
             message=f"{ctx.order.source}的標的代號中間有空白欄",
-            item=Item.sheet(UNDERLYINGS, ovs),
+            item=Item.group(UNDERLYINGS, ovs),
         )
     tickers = [str(values[i]) for i in filled]
     used = [ovs[i] for i in filled]
-    item = Item.sheet(UNDERLYINGS, used)
+    item = Item.group(UNDERLYINGS, used)
     if not pf.ok:
         return doc_review(rid, "underlyings", pf, tickers, used, item=item)
     ok = tickers == pf.value
@@ -351,8 +352,8 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
         ev = list(row.evidence)
-        for col, std, zh, short in PRICE_COLUMNS:
-            field, name = f"{label} {zh}", f"UL_{i} {short}"
+        for col, std, zh in PRICE_COLUMNS:
+            field, name = f"{label} {zh}", price_item(i, col)
             ov = ctx.order.fields.get(f"underlying_{i}_{std}")
             if ov is None or ov.value is None:
                 message = f"{ctx.order.source}沒有此欄位或值為空白"
@@ -414,7 +415,7 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
         if problem:
             out.append(problem)
             continue
-        item = Item.column(occ.name, [ov])
+        item = Item.sheet(occ.name, [ov])  # 各出處分開寫（例：最低申購金額），不寫成「單位面額」
         if not pf.ok:
             out.append(doc_review(rid, occ.field, pf, v, [ov], item=item))
             continue

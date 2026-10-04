@@ -465,6 +465,24 @@ def test_hsbc_broken_term_sheet_messages_name_their_items(tmp_path, obs):
     assert_every_problem_names_its_item(report)
 
 
+def test_each_minimum_amount_names_itself(tmp_path):
+    report = check(tmp_path, Spec(min_subscription=1, min_redemption=1))
+
+    msgs = [problem_message(r) for r in issues(report) if r.rule_id == "field.min_amounts"]
+    assert msgs == [
+        "最低申購金額對不起來：參考條件表 10000／說明書 1",
+        "最低贖回商品面額對不起來：參考條件表 10000／說明書 1",
+    ]
+
+
+def test_monthly_coupon_derived_from_the_sheet_shows_the_sheet_side(tmp_path):
+    report = check(tmp_path, overrides={"Coupon p.a. (%)": 13})
+
+    [r] = [r for r in issues(report) if r.rule_id == "derive.monthly_coupon"]
+    msg = problem_message(r)
+    assert msg.startswith("月配息率 %：推算：13") and msg.endswith("（參考條件表 1.0833／說明書 1.0000）"), msg
+
+
 def test_price_derivation_names_the_underlying_the_same_way_for_both_issuers(tmp_path):
     (tmp_path / "barc").mkdir()
     (tmp_path / "hsbc").mkdir()
