@@ -46,7 +46,7 @@ from .issuers import REGISTRY, Issuer, by_code, detect
 from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
 from .rules.kit import doc_review, read_standard
-from .schema import CheckReport, CheckResult, CheckStatus, Evidence, ParsedField, overall_status
+from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Item, ParsedField, overall_status
 from .single_check import Paired, check_document
 from .standard_fields import TermSheet
 
@@ -250,6 +250,10 @@ class _Identified:
         self.shared = True
 
 
+# 辨識與配對結果的項目：只寫說明，不附雙方值
+ISSUER_ITEM, PRODUCT_CODE_ITEM = Item.note("上手"), Item.note("商品代號")
+
+
 def _unexpected(e: Exception) -> CheckResult:
     return CheckResult(
         rule_id="batch.unexpected",
@@ -257,10 +261,12 @@ def _unexpected(e: Exception) -> CheckResult:
         status=CheckStatus.ERROR,
         reason_code="unexpected_error",
         message=f"{type(e).__name__}: {e}",
+        item=Item.note("說明書"),
     )
 
 
 def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = None) -> CheckResult:
+    """辨識或配對問題；`field_` 為 issuer 或 product_code。"""
     return CheckResult(
         rule_id=rule_id,
         field=field_,
@@ -268,6 +274,7 @@ def _review(rule_id: str, field_: str, reason: str, message: str, actual: Any = 
         actual=actual,
         reason_code=reason,
         message=message,
+        item=ISSUER_ITEM if field_ == "issuer" else PRODUCT_CODE_ITEM,
     )
 
 
@@ -324,7 +331,7 @@ def _identify(
 
     pc = out.product_code = read_standard(out.ts, "product_code")
     if not pc.ok:
-        results.append(doc_review("batch.pairing", "product_code", pc))
+        results.append(doc_review("batch.pairing", "product_code", pc, item=PRODUCT_CODE_ITEM))
         return out
     if not str(pc.value).startswith(prefix):
         msg = f"說明書商品代號 {pc.value} 的前三碼與檔名上手編號 {prefix} 不同"
@@ -366,6 +373,7 @@ def _identify(
             document_evidence=pc.evidence,
             order_source=[row.product_code.source],
             message=f"對應參考條件表第 {row.row} 列",
+            item=PRODUCT_CODE_ITEM,
         )
     )
     return out

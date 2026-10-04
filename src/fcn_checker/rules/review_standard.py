@@ -1,6 +1,7 @@
 """審查標準規則：各上手共用，依上手代號取得已解析的審查標準（docs/rules/review-standard.md）。
 
 只用說明書標準欄位、全文索引與審查標準，不碰參考條件表。對外只有 `review_standard_rules` 一個進入點。
+項目：standard.* 的預期值出自審查標準；面額、受理申購日、刊印日期（doc.*）的錯訊沿用「預期」。
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ import datetime as dt
 import re
 
 from ..config import NAME_FLAGS
-from ..schema import CheckResult, Evidence, ParsedField
+from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import fee_field
 from ..text import squash
@@ -21,9 +22,13 @@ __all__ = ["review_standard_rules"]
 
 
 def _approval_date(ctx: Context) -> CheckResult:
-    rid, pf = "standard.approval_date", standard_field(ctx, "approval_date")
+    rid, pf, item = (
+        "standard.approval_date",
+        standard_field(ctx, "approval_date"),
+        Item.standard("受託機構審查通過日期"),
+    )
     if not pf.ok:
-        return doc_review(rid, "approval_date", pf, ctx.std.approval_date)
+        return doc_review(rid, "approval_date", pf, ctx.std.approval_date, item=item)
     ok = pf.value == ctx.std.approval_date
     return result(
         rid,
@@ -34,6 +39,7 @@ def _approval_date(ctx: Context) -> CheckResult:
         pf=pf,
         reason="" if ok else "value_mismatch",
         message="" if ok else "受託機構審查通過日期與審查標準不同（可能沿用舊審查日期）",
+        item=item,
     )
 
 
@@ -43,8 +49,9 @@ def _approval_date(ctx: Context) -> CheckResult:
 def _denomination(ctx: Context) -> CheckResult:
     """面額 = 審查標準該幣別的預設值；不同時轉人工覆核（客戶可能要求特殊面額）。"""
     rid, pf, cz = "doc.denomination", standard_field(ctx, "denomination"), standard_field(ctx, "currency_zh")
+    item = Item.expected("面額")
     if not pf.ok:
-        return doc_review(rid, "denomination", pf)
+        return doc_review(rid, "denomination", pf, item=item)
     iso = ctx.std.currency_zh_to_iso.get(cz.value) if cz.ok else None
     default = ctx.std.denomination.get(iso) if iso else None
     if default is None:
@@ -56,6 +63,7 @@ def _denomination(ctx: Context) -> CheckResult:
             pf=pf,
             reason="currency_unknown",
             message="無法確認幣別，找不到面額預設值",
+            item=item,
         )
     ok = pf.value == default
     return result(
@@ -67,21 +75,22 @@ def _denomination(ctx: Context) -> CheckResult:
         pf=pf,
         reason="" if ok else "denomination_non_default",
         message="" if ok else f"面額不是 {iso} 預設值；客戶可能要求特殊面額，請人工確認",
+        item=item,
     )
 
 
 def _subscription_dates(ctx: Context) -> list[CheckResult]:
     """各受理申購日出處（開始、結束）= 交易日。"""
     rid, trade = "doc.subscription_start_date", standard_field(ctx, "trade_date")
-    items, problem = occurrences_of(ctx, rid, "subscription_dates")
+    items, problem = occurrences_of(ctx, rid, "subscription_dates", Item.expected("受理申購日"))
     if problem:
         return [problem]
     out = []
     for occ in items:
-        pf = occ.value
+        pf, item = occ.value, Item.expected(occ.name)
         bad = next((x for x in (pf, trade) if not x.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, occ.field, bad))
+            out.append(doc_review(rid, occ.field, bad, item=item))
             continue
         ok = pf.value == trade.value
         out.append(
@@ -94,6 +103,7 @@ def _subscription_dates(ctx: Context) -> list[CheckResult]:
                 evidence=pf.evidence + trade.evidence,
                 reason="" if ok else "value_mismatch",
                 message=f"{occ.where}須等於交易日",
+                item=item,
             )
         )
     return out
@@ -102,16 +112,16 @@ def _subscription_dates(ctx: Context) -> list[CheckResult]:
 def _print_dates(ctx: Context) -> list[CheckResult]:
     """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）。"""
     rid, trade = "doc.print_date", standard_field(ctx, "trade_date")
-    items, problem = occurrences_of(ctx, rid, "print_dates")
+    items, problem = occurrences_of(ctx, rid, "print_dates", Item.expected("刊印日期"))
     if problem:
         return [problem]
     limit = ctx.std.print_date_max_days_after_trade
     out = []
     for occ in items:
-        pf = occ.value
+        pf, item = occ.value, Item.expected(occ.name)
         bad = next((x for x in (pf, trade) if not x.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, occ.field, bad))
+            out.append(doc_review(rid, occ.field, bad, item=item))
             continue
         gap = (pf.value - trade.value).days
         ok = 0 <= gap <= limit
@@ -126,6 +136,7 @@ def _print_dates(ctx: Context) -> list[CheckResult]:
                 reason="" if ok else "value_mismatch",
                 tolerance=f"交易日當天至交易日後 {limit} 天",
                 message=f"刊印日期為交易日 {gap:+d} 天",
+                item=item,
             )
         )
     return out
@@ -137,8 +148,9 @@ def _codepoints(s: str) -> str:
 
 def _chairman(ctx: Context) -> CheckResult:
     rid, pf, exp = "standard.chairman", standard_field(ctx, "chairman"), ctx.std.chairman
+    item = Item.standard("受託機構負責人")
     if not pf.ok:
-        return doc_review(rid, "chairman", pf, exp)
+        return doc_review(rid, "chairman", pf, exp, item=item)
     ok = pf.value == exp
     msg = "" if ok else f"須逐字（含字碼）相等：預期 {_codepoints(exp)}；說明書 {_codepoints(pf.value)}"
     return result(
@@ -150,6 +162,7 @@ def _chairman(ctx: Context) -> CheckResult:
         pf=pf,
         reason="" if ok else "value_mismatch",
         message=msg,
+        item=item,
     )
 
 
@@ -173,11 +186,12 @@ def _fixed_warning(ctx: Context) -> CheckResult:
         tolerance="忽略空白與換行後逐字相等",
         message=f"固定風險警語逐字相符 {len(hits)} 次，應為 {expected} 次"
         + ("" if ok else "（可能被改字、缺漏或多出）"),
+        item=Item.standard("固定風險警語"),
     )
 
 
 def _risk_level(ctx: Context) -> CheckResult:
-    rid = "standard.risk_level"
+    rid, item = "standard.risk_level", Item.standard("風險等級")
     ti = ctx.ts.full_text
     found = [(m.group(1), m) for m in re.finditer(r"【(RR\d)】", ti.text)]
     if not found:
@@ -188,6 +202,7 @@ def _risk_level(ctx: Context) -> CheckResult:
             expected=ctx.std.risk_level,
             reason="document_missing",
             message="說明書找不到【RRn】風險等級",
+            item=item,
         )
     bad = [(lv, m) for lv, m in found if lv != ctx.std.risk_level]
     shown = bad or found[:1]
@@ -202,6 +217,7 @@ def _risk_level(ctx: Context) -> CheckResult:
         evidence=evidence,
         reason="" if ok else "value_mismatch",
         message=f"全文共 {len(found)} 處【RRn】",
+        item=item,
     )
 
 
@@ -226,13 +242,15 @@ def _forbidden_wording(ctx: Context) -> CheckResult:
         message=""
         if ok
         else f"允許片語以外出現「{'、'.join(ctx.std.forbidden)}」{len(hits)} 處（SOP：須改為「受託買賣」）",
+        item=Item.standard("禁用語「受託投資」"),
     )
 
 
-def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str) -> CheckResult:
+def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str, name: str) -> CheckResult:
     """說明書文字（已去空白）與審查標準固定值比對；忽略空白與換行，其餘逐字相等。"""
+    item = Item.standard(name)
     if not pf.ok:
-        return doc_review(rid, field, pf, expected)
+        return doc_review(rid, field, pf, expected, item=item)
     ok = squash(pf.value) == squash(expected)
     return result(
         rid,
@@ -244,6 +262,7 @@ def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str)
         reason="" if ok else "value_mismatch",
         tolerance="忽略空白與換行後逐字相等",
         message="" if ok else f"{what}與審查標準不同",
+        item=item,
     )
 
 
@@ -251,7 +270,10 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
     """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。"""
     rid, issuer = "standard.issuer_name", ctx.issuer
     expected = ctx.issuer_std.issuer_name
-    fields = (("issuer_name_cover", "封面「發行機構」"), ("issuer_name_ch2", "第二章「發行機構」事業名稱"))
+    fields = (
+        ("issuer_name_cover", "封面「發行機構」", "封面發行機構名稱"),
+        ("issuer_name_ch2", "第二章「發行機構」事業名稱", "第二章發行機構名稱"),
+    )
     if expected is None:
         return [
             result(
@@ -261,24 +283,30 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
                 pf=standard_field(ctx, name),
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的發行機構全名（issuer_name.{issuer.lower()}）",
+                item=Item.standard(zh),
             )
-            for name, _ in fields
+            for name, _, zh in fields
         ]
-    return [_fixed_text(rid, name, standard_field(ctx, name), expected, what) for name, what in fields]
+    return [_fixed_text(rid, name, standard_field(ctx, name), expected, what, zh) for name, what, zh in fields]
 
 
 def _distributor_info(ctx: Context) -> list[CheckResult]:
     """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準；電話另接受審查標準列出的等價寫法。"""
     rid, std = "standard.distributor", ctx.issuer_std
-    checks = (
-        ("distributor_name_cover", std.distributor_name, "封面受託或銷售機構名稱"),
-        ("distributor_phone_cover", std.distributor_phone, "封面受託或銷售機構電話"),
-        ("distributor_address_cover", std.distributor_address, "封面受託或銷售機構地址"),
-        ("distributor_name_ch2", std.distributor_name, "第二章受託或銷售機構事業名稱"),
-        ("distributor_address_ch2", std.distributor_address, "第二章受託或銷售機構營業所在地"),
+    checks = (  # 標準欄位、審查標準值、說明的開頭、項目名稱
+        ("distributor_name_cover", std.distributor_name, "封面受託或銷售機構名稱", "封面受託或銷售機構名稱"),
+        ("distributor_phone_cover", std.distributor_phone, "封面受託或銷售機構電話", "封面受託或銷售機構電話"),
+        ("distributor_address_cover", std.distributor_address, "封面受託或銷售機構地址", "封面受託或銷售機構地址"),
+        ("distributor_name_ch2", std.distributor_name, "第二章受託或銷售機構事業名稱", "第二章受託或銷售機構名稱"),
+        (
+            "distributor_address_ch2",
+            std.distributor_address,
+            "第二章受託或銷售機構營業所在地",
+            "第二章受託或銷售機構地址",
+        ),
     )
     out = []
-    for name, exp, what in checks:
+    for name, exp, what, zh in checks:
         pf = standard_field(ctx, name)
         equivalents = {squash(p) for p in std.distributor_phone_equivalents}
         if name == "distributor_phone_cover" and pf.ok and squash(pf.value) in equivalents:
@@ -291,10 +319,11 @@ def _distributor_info(ctx: Context) -> list[CheckResult]:
                     actual=pf.value,
                     pf=pf,
                     tolerance="審查標準列出的電話等價寫法（distributor.phone_equivalents）",
+                    item=Item.standard(zh),
                 )
             )
             continue
-        out.append(_fixed_text(rid, name, pf, exp, what))
+        out.append(_fixed_text(rid, name, pf, exp, what, zh))
     return out
 
 
@@ -302,7 +331,7 @@ def _fees(ctx: Context) -> list[CheckResult]:
     """第四章費用表：審查標準列出的各費用項目費率區間逐字相等。"""
     rid = "standard.fees"
     return [
-        _fixed_text(rid, label, standard_field(ctx, fee_field(label)), exp, f"「{label}」費率")
+        _fixed_text(rid, label, standard_field(ctx, fee_field(label)), exp, f"「{label}」費率", label)
         for label, exp in ctx.std.fees.items()
     ]
 
@@ -310,8 +339,9 @@ def _fees(ctx: Context) -> list[CheckResult]:
 def _issue_price(ctx: Context) -> CheckResult:
     """發行價格 = 商品面額之 N%（審查標準）；不同時轉人工覆核（可能為特殊條件），不判為錯誤。"""
     rid, pf, exp = "standard.issue_price", standard_field(ctx, "issue_price_pct"), ctx.std.issue_price_pct
+    item = Item.standard("發行價格")
     if not pf.ok:
-        return doc_review(rid, "issue_price_pct", pf, exp)
+        return doc_review(rid, "issue_price_pct", pf, exp, item=item)
     ok = pf.value == exp
     return result(
         rid,
@@ -322,6 +352,7 @@ def _issue_price(ctx: Context) -> CheckResult:
         pf=pf,
         reason="" if ok else "issue_price_non_standard",
         message="" if ok else f"發行價格不是商品面額之 {exp}%，請人工確認",
+        item=item,
     )
 
 
@@ -349,6 +380,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
     名稱樣板依上手讀取審查標準 `product_name.<上手代號小寫>`；沒有樣板時轉人工覆核。中文名稱括號全半形不計。
     """
     rid, issuer = "standard.product_name", ctx.issuer
+    items = {"name_zh": Item.standard("中文商品名稱"), "name_en": Item.standard("英文商品名稱")}
     tpl = ctx.issuer_std.product_name
     if tpl is None:
         names = {field: standard_field(ctx, field) for field in ("name_zh", "name_en")}
@@ -361,6 +393,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 pf=pf,
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的商品名稱樣板（product_name.{issuer.lower()}）",
+                item=items[field],
             )
             for field, pf in names.items()
         ]
@@ -372,9 +405,10 @@ def _product_name(ctx: Context) -> list[CheckResult]:
     out = []
     for field in ("name_zh", "name_en"):
         pf = standard_field(ctx, field)
+        item = items[field]
         bad = next((p for p in (pf, tenor, cz, mem) if not p.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, field, bad))
+            out.append(doc_review(rid, field, bad, item=item))
             continue
         iso = ctx.std.currency_zh_to_iso.get(cz.value)
         if iso is None:
@@ -387,13 +421,14 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                     pf=pf,
                     reason="currency_unknown",
                     message="幣別不在審查標準的對照表，無法組出預期名稱",
+                    item=item,
                 )
             )
             continue
         lang = "zh" if field == "name_zh" else "en"
         flags, bad = _name_flags(ctx, tpl.placeholders(lang))
         if bad is not None:
-            out.append(doc_review(rid, field, bad))
+            out.append(doc_review(rid, field, bad, item=item))
             continue
         flags["memory"] = bool(mem.value)
         values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": iso}
@@ -422,6 +457,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 reason="" if ok else "value_mismatch",
                 tolerance=tol,
                 message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式組出",
+                item=item,
             )
         )
     return out

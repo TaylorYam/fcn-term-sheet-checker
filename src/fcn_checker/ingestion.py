@@ -10,7 +10,7 @@ from typing import Any
 
 import fitz  # PyMuPDF
 
-from .schema import CheckResult, CheckStatus
+from .schema import CheckResult, CheckStatus, Item
 
 
 class IngestionError(Exception):
@@ -22,9 +22,14 @@ class IngestionError(Exception):
 
 
 def error_result(rule_id: str, field: str, e: IngestionError) -> CheckResult:
-    """輸入檔問題轉成 ERROR 結果。"""
+    """輸入檔問題轉成 ERROR 結果；`field` 是哪個檔案的中文名稱（例：說明書），也是結果的項目名稱。"""
     return CheckResult(
-        rule_id=rule_id, field=field, status=CheckStatus.ERROR, reason_code=e.reason_code, message=str(e)
+        rule_id=rule_id,
+        field=field,
+        status=CheckStatus.ERROR,
+        reason_code=e.reason_code,
+        message=str(e),
+        item=Item.note(field),
     )
 
 

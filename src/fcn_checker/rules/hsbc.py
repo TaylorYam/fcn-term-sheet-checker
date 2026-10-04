@@ -1,6 +1,7 @@
 """HSBC 專屬規則：說明書內部的條件、表格、日期、文件內重複出處與審查標準。
 
 參考條件表欄位、Non-Call、ISIN 與比價日由各上手共用的 rules/reference.py 核對。
+每筆結果的項目名稱寫在規則旁（與 BARC 同一件事用同一個名稱）；預期值來自說明書其他位置或推算。
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..schema import CheckStatus as S
-from ..schema import FieldStatus
+from ..schema import FieldStatus, Item
 from ..text import squash
 from . import hsbc_scenario, kit
 from .kit import IssuerContext
@@ -29,10 +30,21 @@ NOT_COVERED = [
 # 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 HsbcTermSheet
 
 
-def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
+PRICE_ITEM = {"strike": "執行價", "ko": "KO價", "ki": "下限價"}  # 項目名稱 UL_n <名稱>，同參考條件表欄名
+HEADER_PCT_ITEM = {
+    "strike": "價格表執行價格欄頭百分比",
+    "ko": "價格表 KO 價格欄頭百分比",
+    "ki": "價格表 KI 價格欄頭百分比",
+}
+PRICE_TABLE = Item.expected("價格表")
+
+
+def check(rid, field, name, deps, expected, actual, ok=None, reason="value_mismatch"):
+    """`name` 為項目名稱。"""
+    item = Item.expected(name)
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
-        return kit.doc_review(rid, field, bad, expected)
+        return kit.doc_review(rid, field, bad, expected, item=item)
     good = expected == actual if ok is None else ok
     return kit.result(
         rid,
@@ -42,6 +54,7 @@ def check(rid, field, deps, expected, actual, ok=None, reason="value_mismatch"):
         actual=actual,
         evidence=[e for p in deps for e in p.evidence],
         reason="" if good else reason,
+        item=item,
     )
 
 
@@ -52,7 +65,7 @@ def schedules(ctx):
     if any(not p.ok for p in deps):
         bad = next(p for p in deps if not p.ok)
         return [
-            kit.doc_review(rid, "schedule", bad)
+            kit.doc_review(rid, "schedule", bad, item=Item.expected("配息表與提前出場表"))
             for rid in [
                 "schedule.coupon_dates",
                 "schedule.autocall_dates",
@@ -70,6 +83,7 @@ def schedules(ctx):
         check(
             "doc.coupon_periods",
             "coupon_periods",
+            "配息期數",
             [c, tenor, n],
             tenor.value,
             [n.value, len(rows)],
@@ -80,6 +94,7 @@ def schedules(ctx):
         check(
             "schedule.coupon_dates",
             "payment",
+            "配息支付日",
             [c, maturity],
             maturity.value,
             payments[-1],
@@ -105,6 +120,7 @@ def schedules(ctx):
             check(
                 "schedule.autocall_dates",
                 "daily",
+                "期間每日觀察的提前出場表",
                 [c, first, final],
                 final.value,
                 rows[-1]["end"],
@@ -128,6 +144,7 @@ def schedules(ctx):
             check(
                 "schedule.autocall_dates",
                 "periodic",
+                "定期觀察的提前出場表",
                 [c, ko, first, final],
                 final.value,
                 ko.value[-1]["decision"],
@@ -142,7 +159,8 @@ def prices(ctx):
     scenario = ctx.ts.f("scenario_table")
     if not pf.ok:
         return [
-            kit.doc_review(rid, "prices", pf) for rid in ["derive.prices", "doc.price_header_pct", "doc.scenario_table"]
+            kit.doc_review(rid, "prices", pf, item=PRICE_TABLE)
+            for rid in ["derive.prices", "doc.price_header_pct", "doc.scenario_table"]
         ]
     rows = pf.value["rows"]
     out = []
@@ -153,7 +171,8 @@ def prices(ctx):
                 continue
             pct = ctx.ts.f(col + "_pct")
             exp = (row["prices"]["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP) if pct.ok else None
-            out.append(check("derive.prices", f"underlying_{i}_{col}_price", [pf, pct], exp, actual))
+            name = f"UL_{i} {PRICE_ITEM[col]}"
+            out.append(check("derive.prices", f"underlying_{i}_{col}_price", name, [pf, pct], exp, actual))
     headers = pf.value["headers"]
     for col in ["strike", "ko", "ki"]:
         pct = ctx.ts.f(col + "_pct")
@@ -166,21 +185,24 @@ def prices(ctx):
                     expected=None,
                     actual=headers.get(col),
                     pf=pf,
+                    item=Item.expected(HEADER_PCT_ITEM[col]),
                 )
             )
             continue
-        out.append(check("doc.price_header_pct", col, [pf, pct], pct.value, headers.get(col)))
+        out.append(check("doc.price_header_pct", col, HEADER_PCT_ITEM[col], [pf, pct], pct.value, headers.get(col)))
     if not scenario.ok:
-        out.append(kit.doc_review("doc.scenario_table", "prices", scenario))
+        out.append(kit.doc_review("doc.scenario_table", "prices", scenario, item=Item.expected("情境試算價格表")))
     else:
         # Chinese label is deliberately excluded; currency and exchange are internal consistency only.
         def normalized(table):
             return [{k: v for k, v in row.items() if k != "label"} for row in table["rows"]]
 
+        table, header = normalized(pf.value), normalized(scenario.value)
+        out.append(check("doc.scenario_table", "prices", "情境試算價格表", [pf, scenario], table, header))
+        scenario_headers = scenario.value["headers"]
         out.append(
-            check("doc.scenario_table", "prices", [pf, scenario], normalized(pf.value), normalized(scenario.value))
+            check("doc.scenario_header_pct", "headers", "情境試算價格表欄頭", [pf, scenario], headers, scenario_headers)
         )
-        out.append(check("doc.scenario_header_pct", "headers", [pf, scenario], headers, scenario.value["headers"]))
     return out
 
 
@@ -191,6 +213,7 @@ def document_info(ctx):
         check(
             "doc.currency_consistency",
             "currency",
+            "第一章第 5 條計價幣別",
             [f("currency_zh"), f("currency_art5")],
             f("currency_zh").value,
             f("currency_art5").value,
@@ -203,13 +226,14 @@ def document_info(ctx):
     zh = f("name_zh")
     en = f("name_en")
     short = re.sub(r"（以下簡稱「本商品」）$", "", norm(zh.value)) if zh.ok else ""
-    for key, expected in [
-        ("name_title", short),
-        ("name_en_title", norm(en.value) if en.ok else ""),
-        ("name_art1", short + (norm(en.value) if en.ok else "")),
+    for key, name, expected in [
+        ("name_title", "封面標題商品名稱", short),
+        ("name_en_title", "封面標題英文商品名稱", norm(en.value) if en.ok else ""),
+        ("name_art1", "第一章第 1 條商品名稱", short + (norm(en.value) if en.ok else "")),
     ]:
         pf = f(key)
-        out.append(check("doc.name_consistency", key, [zh, en, pf], expected, norm(pf.value) if pf.ok else None))
+        actual = norm(pf.value) if pf.ok else None
+        out.append(check("doc.name_consistency", key, name, [zh, en, pf], expected, actual))
     return out
 
 

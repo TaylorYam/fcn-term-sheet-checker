@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -130,7 +131,61 @@ class OrderValue:
 
     value: Any
     source: str  # 例：詢價表格!J5
-    column: str = ""  # 來源 Excel 欄名（例：UL_2_進場價）；錯訊用
+    column: str = ""  # 來源 Excel 欄名（例：UL_2_進場價）；核對結果的項目用
+
+
+class ItemSource(StrEnum):
+    """核對結果的預期值從哪裡來；錯訊依此決定句型。"""
+
+    REFERENCE = "reference"  # 參考條件表（項目的 columns 為 Excel 欄名）
+    STANDARD = "standard"  # 審查標準
+    EXPECTED = "expected"  # 說明書其他位置或由說明書推算（錯訊寫「預期」）
+    NONE = "none"  # 不比對值：配對、範本、讀檔、寫檔、參考條件表表頭
+
+
+def column_label(column: str) -> str:
+    """Excel 欄名的顯示：`UL_2_進場價` → `UL_2 進場價`，其他照原欄名。"""
+    return re.sub(r"^(UL_\d+)_", r"\1 ", column)
+
+
+@dataclass(frozen=True)
+class Item:
+    """一條核對結果在講哪一項：作業人員看得懂的中文名稱與預期值出處，由規則建立結果時給（Issue #91）。"""
+
+    name: str  # 例：UL_2 KO價、情境 3 損益金額、受託機構負責人
+    source: ItemSource
+    columns: tuple[str, ...] = ()  # 參考條件表的 Excel 欄名（出處為參考條件表時）
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("核對結果的項目名稱不可空白")
+
+    @classmethod
+    def sheet(cls, name: str, ovs: list[OrderValue | None] | None = None) -> Item:
+        """參考條件表欄位：名稱固定（例：比價日），欄名取自讀到的參考條件表值。"""
+        columns = tuple(dict.fromkeys(o.column for o in ovs or [] if o is not None and o.column))
+        return cls(name, ItemSource.REFERENCE, columns)
+
+    @classmethod
+    def column(cls, fallback: str, ovs: list[OrderValue | None] | None = None) -> Item:
+        """參考條件表欄位：只讀到一欄時以 Excel 欄名為名稱（UL_2_進場價 → UL_2 進場價），否則用 fallback。"""
+        item = cls.sheet(fallback, ovs)
+        if len(item.columns) == 1:
+            return cls(column_label(item.columns[0]), ItemSource.REFERENCE, item.columns)
+        return item
+
+    @classmethod
+    def standard(cls, name: str) -> Item:
+        return cls(name, ItemSource.STANDARD)
+
+    @classmethod
+    def expected(cls, name: str) -> Item:
+        return cls(name, ItemSource.EXPECTED)
+
+    @classmethod
+    def note(cls, name: str) -> Item:
+        """不比對值的項目（配對、範本、讀檔、寫檔、參考條件表表頭）：錯訊只寫說明。"""
+        return cls(name, ItemSource.NONE)
 
 
 @dataclass
@@ -146,7 +201,7 @@ class CheckResult:
     document_evidence: list[Evidence] = field(default_factory=list)
     order_source: list[str] = field(default_factory=list)
     rule_version: str = "1"
-    column: str = ""  # 參考條件表欄名（參考條件表欄位與回填規則才有）；錯訊用
+    item: Item = field(kw_only=True)  # 必填：沒給項目就建立不了結果
 
 
 @dataclass

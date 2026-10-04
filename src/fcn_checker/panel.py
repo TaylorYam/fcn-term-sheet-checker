@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
 from .ingestion import IngestionError, SourceSnapshot
-from .messages import STATUS_ZH, problem_message, subject
+from .messages import STATUS_ZH, problem_message
 from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
 from .schema import CheckResult, CheckStatus
 
@@ -35,7 +35,7 @@ def result_detail(row: CheckResult) -> str:
         "\n".join(f"第 {e.page} 頁：{e.text}" for e in row.document_evidence) or "無法定位：沒有可用的 PDF 原文證據。"
     )
     return (
-        f"{subject(row)}｜{STATUS_ZH[row.status]}\n"
+        f"{row.item.name}｜{STATUS_ZH[row.status]}\n"
         f"原因：{reason}\n"
         f"參考條件表／標準值：{display_value(row.expected)}\nPDF 值：{display_value(row.actual)}\n"
         f"參考條件表來源：{'、'.join(row.order_source) or '非參考條件表欄位，依審查標準或文件內部規則核對。'}\n"
@@ -223,7 +223,7 @@ class ResultPane(ttk.Frame):
                 "end",
                 values=(
                     STATUS_ZH[row.status],
-                    subject(row),
+                    row.item.name,
                     display_value(row.expected),
                     display_value(row.actual),
                     pages,

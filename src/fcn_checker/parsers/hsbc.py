@@ -259,23 +259,28 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_trade", "第一章第 7 條最低交易金額", fields["minimum_trade"]),
-            occ("minimum_subscription", "第四章最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "第四章最低加購金額", fields["minimum_additional"]),
+            occ("minimum_trade", "最低交易金額", "第一章第 7 條最低交易金額", fields["minimum_trade"]),
+            occ("minimum_subscription", "最低申購金額", "第四章最低申購金額", fields["minimum_subscription"]),
+            occ("minimum_additional", "最低加購金額", "第四章最低加購金額", fields["minimum_additional"]),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
         "subscription_dates",
         [
-            occ("subscription_start", "第四章商品開始受理申購日", fields["subscription_start"]),
-            occ("subscription_end", "第四章商品申購結束受理日", fields["subscription_end"]),
+            occ("subscription_start", "開始受理申購日", "第四章商品開始受理申購日", fields["subscription_start"]),
+            occ("subscription_end", "申購結束受理日", "第四章商品申購結束受理日", fields["subscription_end"]),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
         "print_dates",
         [
-            occ("print_date_review", "封面刊印日期（參考性審閱版）", fields["print_date_review"]),
-            occ("print_date_final", "封面刊印日期（最終版）", fields["print_date_final"]),
+            occ(
+                "print_date_review",
+                "刊印日期（參考性審閱版）",
+                "封面刊印日期（參考性審閱版）",
+                fields["print_date_review"],
+            ),
+            occ("print_date_final", "刊印日期（最終版）", "封面刊印日期（最終版）", fields["print_date_final"]),
         ],
     )
     scenarios = article(18)

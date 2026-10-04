@@ -27,7 +27,7 @@
 
 ## 規則結果與例外報告
 
-每筆 `CheckResult` 至少含 rule_id、rule_version、field_path、status、expected、actual、tolerance、reason_code、document_evidence、order_evidence。數值及日期先驗證語意再比較；缺值、歧義、未知單位或不支援條款產生覆核例外。
+每筆 `CheckResult` 至少含 rule_id、rule_version、field_path、status、expected、actual、tolerance、reason_code、document_evidence、order_evidence，以及項目（中文名稱與預期值出處：參考條件表〔附 Excel 欄名〕、審查標準、說明書其他位置或不比對值；錯訊依此組句）。數值及日期先驗證語意再比較；缺值、歧義、未知單位或不支援條款產生覆核例外。
 
 報告包括 scope（實際支援的範本與欄位）、coverage（已核對／缺漏／未支援）、整體狀態、所有逐欄結果、執行版本與來源 hash。不能把未核對欄位隱藏後顯示「整份通過」。
 

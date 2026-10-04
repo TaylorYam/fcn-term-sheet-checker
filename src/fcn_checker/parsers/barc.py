@@ -804,16 +804,23 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("min_subscription", "第四章最低申購金額", flds["min_subscription"]),
-            occ("min_redemption", "第四章最低贖回商品面額", flds["min_redemption"]),
+            occ("min_subscription", "最低申購金額", "第四章最低申購金額", flds["min_subscription"]),
+            occ("min_redemption", "最低贖回商品面額", "第四章最低贖回商品面額", flds["min_redemption"]),
         ],
     )
     flds["subscription_dates"] = standard_fields.occurrences(
         "subscription_dates",
-        [occ("subscription_start_date", "第四章商品開始受理申購日期", flds["subscription_start_date"])],
+        [
+            occ(
+                "subscription_start_date",
+                "開始受理申購日",
+                "第四章商品開始受理申購日期",
+                flds["subscription_start_date"],
+            )
+        ],
     )
     flds["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "封面刊印日期", flds["print_date"])]
+        "print_dates", [occ("print_date", "刊印日期", "封面刊印日期", flds["print_date"])]
     )
 
     mentions = {

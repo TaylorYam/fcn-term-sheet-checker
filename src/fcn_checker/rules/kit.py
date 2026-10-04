@@ -3,6 +3,7 @@
 規則只接收標準化後的說明書欄位、參考條件表欄位與審查標準；不讀檔、不改來源值。
 說明書欄位一律經 `read_standard` 以標準欄位名稱讀取（例如 `trade_date`、`strike_pct`）。
 抓不到、歧義、未知值一律轉人工覆核，不猜值。
+每筆結果都要帶項目（`Item`：中文名稱與預期值出處），名稱寫在規則旁；錯訊只依項目組句（Issue #91）。
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any, Protocol
 
 from ..config import IssuerStandard, ReferenceFormat, ReviewStandard
 from ..orders.reference import OrderRecord
-from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
+from ..schema import CheckResult, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import Occurrence, TermSheet, is_standard, not_provided
 
@@ -104,6 +105,7 @@ def result(
     field: str,
     status: S,
     *,
+    item: Item,
     expected: Any = None,
     actual: Any = None,
     pf: ParsedField | None = None,
@@ -112,11 +114,8 @@ def result(
     message: str = "",
     tolerance: str | None = None,
     evidence: list[Evidence] | None = None,
-    column: str | None = None,
 ) -> CheckResult:
-    """`column` 為錯訊用的參考條件表欄名；未指定時取自 `ov` 的來源欄名。"""
-    if column is None:
-        column = "、".join(dict.fromkeys(o.column for o in ov or [] if o is not None and o.column))
+    """`item` 必填：這筆結果在講哪一項、預期值從哪裡來。"""
     return CheckResult(
         rule_id=rule_id,
         field=field,
@@ -128,7 +127,7 @@ def result(
         message=message,
         document_evidence=list(evidence if evidence is not None else (pf.evidence if pf else [])),
         order_source=[o.source for o in (ov or []) if o is not None],
-        column=column,
+        item=item,
     )
 
 
@@ -140,7 +139,13 @@ DOC_REASON = {
 
 
 def doc_review(
-    rule_id: str, field: str, pf: ParsedField, expected: Any = None, ov: list[OrderValue | None] | None = None
+    rule_id: str,
+    field: str,
+    pf: ParsedField,
+    expected: Any = None,
+    ov: list[OrderValue | None] | None = None,
+    *,
+    item: Item,
 ) -> CheckResult:
     reason, msg = DOC_REASON.get(pf.status, ("document_not_applicable", "說明書判定此欄位不適用"))
     detail = f"：{pf.note}" if pf.note else ""
@@ -155,12 +160,14 @@ def doc_review(
         ov=ov,
         reason=reason,
         message=msg + detail,
+        item=item,
     )
 
 
 def order_review(
-    rule_id: str, field: str, ov: OrderValue | None, pf: ParsedField | None, reason: str, message: str
+    rule_id: str, field: str, ov: OrderValue | None, pf: ParsedField | None, reason: str, message: str, *, name: str
 ) -> CheckResult:
+    """參考條件表的值有問題：項目是那一欄（以 Excel 欄名為名稱；沒有這欄時用 `name`）。"""
     return result(
         rule_id,
         field,
@@ -171,6 +178,7 @@ def order_review(
         ov=[ov],
         reason=reason,
         message=message,
+        item=Item.column(name, [ov]),
     )
 
 
@@ -204,18 +212,21 @@ def order_value(
     pf: ParsedField | None,
     convert: Callable[[Any], Any],
     what: str,
+    *,
+    name: str,
 ) -> tuple[Any, OrderValue | None, CheckResult | None]:
-    """取得並轉換參考條件表欄位；缺漏或格式錯誤時回傳 REVIEW 結果。"""
+    """取得並轉換參考條件表欄位；缺漏或格式錯誤時回傳 REVIEW 結果（項目見 `order_review`）。"""
     ov = ctx.sheet_field(key)
     if ov is None or ov.value is None:
         return (
             None,
             ov,
-            order_review(rule_id, field, ov, pf, "order_missing", f"{ctx.sheet_source}沒有此欄位或值為空白"),
+            order_review(rule_id, field, ov, pf, "order_missing", f"{ctx.sheet_source}沒有此欄位或值為空白", name=name),
         )
     v = convert(ov.value)
     if v is None:
-        return None, ov, order_review(rule_id, field, ov, pf, "order_invalid", f"{ctx.sheet_source}的值不是{what}")
+        problem = order_review(rule_id, field, ov, pf, "order_invalid", f"{ctx.sheet_source}的值不是{what}", name=name)
+        return None, ov, problem
     return v, ov, None
 
 
@@ -236,9 +247,11 @@ def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
     return q == doc_v, q
 
 
-def occurrences_of(ctx: RuleContext, rid: str, name: str) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
-    """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果。"""
+def occurrences_of(
+    ctx: RuleContext, rid: str, name: str, item: Item
+) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
+    """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果（項目為 `item`）。"""
     container = standard_field(ctx, name)
     if not container.ok:
-        return (), doc_review(rid, name, container)
+        return (), doc_review(rid, name, container, item=item)
     return container.value, None
