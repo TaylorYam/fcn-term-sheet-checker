@@ -19,7 +19,7 @@ from ..orders.reference import OrderRecord
 from ..parsers.layout import squash
 from ..schema import CheckResult, Evidence, FieldStatus, OrderValue, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import STANDARD_FIELDS, Occurrence, TermSheet
+from ..standard_fields import Occurrence, TermSheet, fee_field, is_standard, not_provided
 
 
 @dataclass
@@ -39,12 +39,13 @@ class Context:
 
 
 def read_standard(ts: TermSheet, name: str) -> ParsedField:
-    """讀說明書標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
-    assert name in STANDARD_FIELDS, f"{name} 不是標準欄位"
+    """共用規則讀說明書欄位的唯一方式：只能讀標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
+    if not is_standard(name):
+        raise ValueError(f"{name} 不是標準欄位；共用規則需要的欄位要先加進 standard_fields.STANDARD_FIELDS")
     try:
         return ts.f(name)
-    except KeyError:
-        return ParsedField.missing(name, f"上手未提供標準欄位「{name}」")
+    except KeyError:  # adapter 未照契約實作 f 時也不讓整份說明書變成執行錯誤
+        return not_provided(name)
 
 
 def standard_field(ctx: Context, name: str) -> ParsedField:
@@ -229,7 +230,7 @@ def column_checks(order: OrderRecord) -> list[CheckResult]:
 
 
 def approval_date(ctx: Context) -> CheckResult:
-    rid, pf = "standard.approval_date", ctx.ts.f("approval_date")
+    rid, pf = "standard.approval_date", standard_field(ctx, "approval_date")
     if not pf.ok:
         return doc_review(rid, "approval_date", pf, ctx.std.approval_date)
     ok = pf.value == ctx.std.approval_date
@@ -352,7 +353,7 @@ def _codepoints(s: str) -> str:
 
 
 def chairman(ctx: Context) -> CheckResult:
-    rid, pf, exp = "standard.chairman", ctx.ts.f("chairman"), ctx.std.chairman
+    rid, pf, exp = "standard.chairman", standard_field(ctx, "chairman"), ctx.std.chairman
     if not pf.ok:
         return doc_review(rid, "chairman", pf, exp)
     ok = pf.value == exp
@@ -445,13 +446,6 @@ def forbidden_wording(ctx: Context) -> CheckResult:
     )
 
 
-def _field(ctx: Context, name: str, note: str) -> ParsedField:
-    try:
-        return ctx.ts.f(name)
-    except KeyError:
-        return ParsedField.missing(name, note)
-
-
 def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str) -> CheckResult:
     """說明書文字（已去空白）與審查標準固定值比對；忽略空白與換行，其餘逐字相等。"""
     if not pf.ok:
@@ -481,13 +475,13 @@ def issuer_name(ctx: Context) -> list[CheckResult]:
                 rid,
                 name,
                 S.REVIEW_REQUIRED,
-                pf=ctx.ts.f(name),
+                pf=standard_field(ctx, name),
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的發行機構全名（issuer_name.{issuer.lower()}）",
             )
             for name, _ in fields
         ]
-    return [_fixed_text(rid, name, ctx.ts.f(name), expected, what) for name, what in fields]
+    return [_fixed_text(rid, name, standard_field(ctx, name), expected, what) for name, what in fields]
 
 
 def distributor_info(ctx: Context) -> list[CheckResult]:
@@ -502,7 +496,7 @@ def distributor_info(ctx: Context) -> list[CheckResult]:
     )
     out = []
     for name, exp, what in checks:
-        pf = ctx.ts.f(name)
+        pf = standard_field(ctx, name)
         equivalents = {squash(p) for p in std.distributor_phone_equivalents}
         if name == "distributor_phone_cover" and pf.ok and squash(pf.value) in equivalents:
             out.append(
@@ -525,14 +519,14 @@ def fees(ctx: Context) -> list[CheckResult]:
     """第四章費用表：審查標準列出的各費用項目費率區間逐字相等。"""
     rid = "standard.fees"
     return [
-        _fixed_text(rid, label, _field(ctx, f"fee_{label}", f"費用表找不到「{label}」"), exp, f"「{label}」費率")
+        _fixed_text(rid, label, standard_field(ctx, fee_field(label)), exp, f"「{label}」費率")
         for label, exp in ctx.std.fees.items()
     ]
 
 
 def issue_price(ctx: Context) -> CheckResult:
     """發行價格 = 商品面額之 N%（審查標準）；不同時轉人工覆核（可能為特殊條件），不判為錯誤。"""
-    rid, pf, exp = "standard.issue_price", ctx.ts.f("issue_price_pct"), ctx.std.issue_price_pct
+    rid, pf, exp = "standard.issue_price", standard_field(ctx, "issue_price_pct"), ctx.std.issue_price_pct
     if not pf.ok:
         return doc_review(rid, "issue_price_pct", pf, exp)
     ok = pf.value == exp
@@ -559,7 +553,7 @@ def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], Pa
         ("daily", "ko_observation", lambda v: v == "D"),
     ):
         if used & {f"{flag}_zh", f"{flag}_en"}:
-            pf = ctx.ts.f(field)
+            pf = standard_field(ctx, field)
             if not pf.ok:
                 return flags, pf
             flags[flag] = test(pf.value)
@@ -574,22 +568,27 @@ def product_name(ctx: Context) -> list[CheckResult]:
     rid, issuer = "standard.product_name", ctx.issuer
     tpl = ctx.issuer_std.product_name
     if tpl is None:
+        names = {field: standard_field(ctx, field) for field in ("name_zh", "name_en")}
         return [
             result(
                 rid,
                 field,
                 S.REVIEW_REQUIRED,
-                actual=ctx.ts.f(field).value,
-                pf=ctx.ts.f(field),
+                actual=pf.value,
+                pf=pf,
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的商品名稱樣板（product_name.{issuer.lower()}）",
             )
-            for field in ("name_zh", "name_en")
+            for field, pf in names.items()
         ]
-    tenor, cz, mem = ctx.ts.f("tenor_months"), ctx.ts.f("currency_zh"), ctx.ts.f("ko_memory")
+    tenor, cz, mem = (
+        standard_field(ctx, "tenor_months"),
+        standard_field(ctx, "currency_zh"),
+        standard_field(ctx, "ko_memory"),
+    )
     out = []
     for field in ("name_zh", "name_en"):
-        pf = ctx.ts.f(field)
+        pf = standard_field(ctx, field)
         bad = next((p for p in (pf, tenor, cz, mem) if not p.ok), None)
         if bad is not None:
             out.append(doc_review(rid, field, bad))

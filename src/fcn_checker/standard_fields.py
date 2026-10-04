@@ -1,13 +1,14 @@
 """說明書標準欄位：上手 adapter 與共用規則之間的 seam（CONTEXT.md「標準欄位」）。
 
-各上手 parser 以 `ts.f(name)` 交出下列欄位（`ParsedField`，含狀態與證據）；共用的參考條件表欄位規則
-（rules/reference.py）只讀這些欄位，不碰上手專屬的擷取結果。adapter 沒交出的欄位視為缺漏，
-相關規則轉人工覆核並寫出欄位名稱。
+各上手 parser 以 `ts.f(name)` 交出下列欄位（`ParsedField`，含狀態與證據）；各上手共用的規則
+（參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填）只讀這些欄位與全文索引，不碰上手專屬的擷取結果。
+adapter 沒交出的欄位視為缺漏（`not_provided`），相關規則轉人工覆核並寫出欄位名稱。
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
@@ -19,12 +20,25 @@ from .schema import Evidence, FieldStatus, ParsedField
 class TermSheet(Protocol):
     """上手 adapter 讀出的說明書：`f(name)` 交出標準欄位（及上手專屬欄位），`full_text` 為全文索引。
 
+    `f` 不丟例外：沒有交出的欄位回傳 `not_provided(name)`（實作可直接用 `lookup`）。
     各上手的實作可另外帶該上手規則需要的專屬資料（例：BARC 價格表原文列、HSBC 情境文字索引）。
     """
 
     full_text: TextIndex
 
     def f(self, name: str) -> ParsedField: ...
+
+
+def not_provided(name: str) -> ParsedField:
+    """上手 adapter 沒有交出的欄位：缺漏，說明寫出欄位名稱。"""
+    kind = "標準欄位" if is_standard(name) else "欄位"
+    return ParsedField.missing(name, f"上手未提供{kind}「{name}」")
+
+
+def lookup(fields: Mapping[str, ParsedField], name: str) -> ParsedField:
+    """`TermSheet.f` 的共用實作：有交出就回傳該欄位，沒有就是 `not_provided`。"""
+    pf = fields.get(name)
+    return not_provided(name) if pf is None else pf
 
 
 @dataclass(frozen=True)
@@ -84,4 +98,31 @@ STANDARD_FIELDS: dict[str, str] = {
     "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額的各最低金額出處（最低交易／申購／加購／贖回金額）",
     "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",
     "print_dates": "tuple[Occurrence, ...]：須在交易日當天至允許天數內的刊印日期出處",
+    # 審查標準規則（docs/rules/review-standard.md）
+    "name_zh": "str：商品中文名稱",
+    "name_en": "str：商品英文名稱",
+    "approval_date": "date：受託或銷售機構審查通過之日期",
+    "chairman": "str：受託或銷售機構負責人姓名，保留原字碼（不做異體字轉換）",
+    "issue_price_pct": "Decimal：發行價格為商品面額之 N%",
+    "issuer_name_cover": "str：封面「發行機構」中英文法人全名",
+    "issuer_name_ch2": "str：第二章「發行機構」事業名稱",
+    "distributor_name_cover": "str：封面受託或銷售機構名稱",
+    "distributor_phone_cover": "str：封面受託或銷售機構電話",
+    "distributor_address_cover": "str：封面受託或銷售機構地址",
+    "distributor_name_ch2": "str：第二章受託或銷售機構事業名稱",
+    "distributor_address_ch2": "str：第二章受託或銷售機構營業所在地",
 }
+
+# 另有一組費用欄位：每個費用項目一個，名稱由 fee_field 產生
+FEE_FIELD_SHAPE = "str：第四章費用表該費用項目的費率區間（例：0%~5%）；費用項目名稱同審查標準 [fees] 的鍵"
+_FEE_PREFIX = "fee_"
+
+
+def fee_field(label: str) -> str:
+    """費用項目（例：申購費用）的標準欄位名稱。"""
+    return _FEE_PREFIX + label
+
+
+def is_standard(name: str) -> bool:
+    """是否為標準欄位：STANDARD_FIELDS 的名稱，或某個費用項目的費用欄位。"""
+    return name in STANDARD_FIELDS or (name.startswith(_FEE_PREFIX) and len(name) > len(_FEE_PREFIX))

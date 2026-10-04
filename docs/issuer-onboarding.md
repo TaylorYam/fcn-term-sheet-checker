@@ -123,7 +123,7 @@
 |---|---|
 | 識別資料 | 上手代號、範本 ID、名稱、parser 版本、未涵蓋清單 |
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
-| `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好 |
+| `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作 |
 | `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構）；只用讀出結果與審查標準 |
 
 自動沿用（不必再寫）：
@@ -133,7 +133,12 @@
 - 回填（`backfill.py`）：ISIN、發行日、比價日的核對、回填決策與寫入。
 - 單份核對順序（`single_check.py`）與批量入口、CLI、PANEL。
 
-adapter 少交某個標準欄位時，相關規則轉人工覆核並寫出欄位名稱；兩家上手語意不同時以 BARC 為準。
+標準欄位清單（`standard_fields.STANDARD_FIELDS`）就是共用規則會讀的全部說明書欄位，分兩組：
+
+- 參考條件表欄位與回填用：商品代號 `product_code`、`isin`、中文幣別 `currency_zh`、標的 `underlyings`、各標的價格列 `underlying_prices`、百分比 `strike_pct`／`ko_pct`／`ki_pct`／`coupon_pa_pct`、天期 `tenor_months`、日期 `trade_date`／`issue_date`／`final_valuation_date`／`maturity_date`、面額 `denomination`、KO 觀察方式 `ko_observation`、記憶式 `ko_memory`、KI 型態 `ki_type`、提前出場排程 `autocall_schedule`、出處清單 `min_amounts`／`subscription_dates`／`print_dates`。
+- 審查標準規則用：商品中英文名稱 `name_zh`／`name_en`、審查通過日期 `approval_date`、負責人姓名 `chairman`、發行價格 `issue_price_pct`、發行機構名稱 `issuer_name_cover`／`issuer_name_ch2`、受託或銷售機構 `distributor_name_cover`／`distributor_phone_cover`／`distributor_address_cover`／`distributor_name_ch2`／`distributor_address_ch2`，以及費用表各項費率（名稱由 `standard_fields.fee_field(<費用項目>)` 產生，費用項目同 `config/review_standard.toml` 的 `[fees]`）。
+
+各欄位值的形狀見 `STANDARD_FIELDS` 與 `FEE_FIELD_SHAPE`。共用規則只透過 `rules/common.py` 的 `read_standard` 讀欄位，讀不在清單上的名稱會直接失敗；新增共用規則需要的欄位時，同步更新 `STANDARD_FIELDS`、本節與各上手的 `read`。adapter 少交某個標準欄位時，相關規則轉人工覆核並寫出欄位名稱，不會整份變成執行錯誤；兩家上手語意不同時以 BARC 為準。
 
 ### 6.2 實作原則
 

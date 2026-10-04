@@ -92,7 +92,7 @@ class BarcTermSheet:
     header_pcts: list[HeaderPct] = field(default_factory=list)
 
     def f(self, name: str) -> ParsedField:
-        return self.fields[name]
+        return standard_fields.lookup(self.fields, name)
 
 
 # ---------------------------------------------------------------- 共用
@@ -594,19 +594,23 @@ FEE_LABELS = ("申購費用", "提前贖回費用", "管理費用", "分銷費�
 _FEE_RANGE = re.compile(r"([\d.]+%~[\d.]+%)")
 
 
+def _fee_missing(label: str, note: str) -> ParsedField:
+    return ParsedField.missing(standard_fields.fee_field(label), note)
+
+
 def _fees(ch4: list[Line]) -> dict[str, ParsedField]:
     """第四章「投資人應負擔的各項費用」表：各費用項目的費率區間（費率欄，位於費用項目欄與收取時點欄之間）。"""
     out: dict[str, ParsedField] = {}
     start = next((i for i, ln in enumerate(ch4) if ln.text.startswith("投資人應負擔的各項費用")), None)
     if start is None:
-        return {f"fee_{lab}": ParsedField.missing(f"fee_{lab}", "第四章找不到費用表") for lab in FEE_LABELS}
+        return {(pf := _fee_missing(lab, "第四章找不到費用表")).name: pf for lab in FEE_LABELS}
     seg = ch4[start:]
     end = next((i for i, ln in enumerate(seg) if ln.text.startswith("附註")), len(seg))
     seg = seg[:end]
     item_hdr = next((ln for ln in seg if ln.text == "費用項目"), None)
     when_hdr = next((ln for ln in seg if ln.text == "收取時點"), None)
     if item_hdr is None or when_hdr is None:
-        return {f"fee_{lab}": ParsedField.missing(f"fee_{lab}", "費用表表頭不完整") for lab in FEE_LABELS}
+        return {(pf := _fee_missing(lab, "費用表表頭不完整")).name: pf for lab in FEE_LABELS}
     rows = [ln for ln in seg if ln.x1 <= item_hdr.x1 + 80 and ln.x0 < item_hdr.x0 and ln.text.startswith(FEE_LABELS)]
     for k, row in enumerate(rows):
         label = next(lab for lab in FEE_LABELS if row.text.startswith(lab))
@@ -620,13 +624,13 @@ def _fees(ch4: list[Line]) -> dict[str, ParsedField]:
             and (nxt is None or nxt.page != row.page or ln.y0 < nxt.y0 - 3)
         ]
         ranges = _FEE_RANGE.findall(squash(join_text(cells)))
-        name = f"fee_{label}"
+        name = standard_fields.fee_field(label)
         if not ranges:
             out[name] = ParsedField.missing(name, f"「{label}」沒有費率區間")
         else:
             out[name] = _distinct(name, [(r, [row, *cells]) for r in ranges])
     for lab in FEE_LABELS:
-        out.setdefault(f"fee_{lab}", ParsedField.missing(f"fee_{lab}", f"費用表找不到「{lab}」"))
+        out.setdefault(standard_fields.fee_field(lab), _fee_missing(lab, f"費用表找不到「{lab}」"))
     return out
 
 
