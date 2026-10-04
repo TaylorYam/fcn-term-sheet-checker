@@ -24,6 +24,7 @@ import datetime as dt
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -56,6 +57,30 @@ DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
 DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
 
 
+class Category(StrEnum):
+    """每份說明書在整批中的類別（PANEL 標題份數、狀態標籤、儲存時回填或列入錯誤清單都依它）。"""
+
+    PASSED = "通過"
+    RELEASED = "人工放行"
+    MISMATCH = "不一致"
+    REVIEW = "需人工覆核"
+    UNSUPPORTED = "未支援上手"
+    ERROR = "執行錯誤"
+
+    @property
+    def fillable(self) -> bool:
+        """整份通過或人工放行才回填，其餘列入錯誤清單。"""
+        return self in (Category.PASSED, Category.RELEASED)
+
+
+_BY_STATUS = {
+    CheckStatus.PASS: Category.PASSED,
+    CheckStatus.MISMATCH: Category.MISMATCH,
+    CheckStatus.REVIEW_REQUIRED: Category.REVIEW,
+    CheckStatus.ERROR: Category.ERROR,
+}
+
+
 @dataclass
 class BatchItem:
     term_sheet: Path
@@ -64,11 +89,24 @@ class BatchItem:
     product_code: str | None = None
     reference_row: int | None = None  # 對到的參考條件表列號
     filled: bool = False
-    released: bool = False  # 人工放行（只有 PANEL 會設定）；原判定仍在 report
+    _released: bool = field(default=False, repr=False)  # 只能經 BatchOutcome.release／cancel_release 改變
+
+    @property
+    def released(self) -> bool:
+        """人工放行（PANEL）；原判定仍在 report。"""
+        return self._released
 
     @property
     def unsupported(self) -> bool:
         return any(r.reason_code == UNSUPPORTED for r in self.report.results)
+
+    @property
+    def category(self) -> Category:
+        if self.unsupported:
+            return Category.UNSUPPORTED
+        if self.released:
+            return Category.RELEASED
+        return _BY_STATUS[self.report.status]
 
     @property
     def status(self) -> CheckStatus:
@@ -77,16 +115,21 @@ class BatchItem:
 
     @property
     def fillable(self) -> bool:
-        """整份通過或人工放行才回填。"""
-        return self.released or backfill.fillable(self.report)
+        return self.category.fillable
 
     @property
     def status_label(self) -> str:
-        if self.unsupported:
-            return "未支援上手"
-        if self.released:
-            return f"人工放行（原：{STATUS_ZH[self.report.status]}）"
-        return f"{self.report.status.value}（{STATUS_ZH[self.report.status]}）"
+        category, original = self.category, STATUS_ZH[self.report.status]
+        if category == Category.UNSUPPORTED:
+            return category.value
+        if category == Category.RELEASED:
+            return f"{category.value}（原：{original}）"
+        return f"{self.report.status.value}（{original}）"
+
+    @property
+    def problem_messages(self) -> tuple[str, ...]:
+        """這份說明書的錯訊，同一句只列一次（錯誤清單與 PANEL 放行確認共用）。"""
+        return tuple(dict.fromkeys(problem_message(r) for r in self.report.results if r.status.is_problem))
 
     @property
     def release_problem(self) -> str:
@@ -102,25 +145,57 @@ class BatchItem:
             return "同一批有多份說明書對到同一列，不能人工放行"
         if self.reference_row is None:
             return "沒有對到參考條件表的列，沒有地方可以回填"
-        return backfill.release_problem(report)
+        if backfill.conflicts_with_sheet(report):
+            return "參考條件表回填欄位已有不同的值，請先修正參考條件表再核對"
+        if not backfill.values_certain(report):
+            return "回填值無法確定，請人工處理"
+        return ""
 
 
 @dataclass
 class BatchOutcome:
-    status: CheckStatus
     items: list[BatchItem]
     reference_sheet: Path
     reference_format: ReferenceFormat | None = None
     output: Path | None = None  # 核對結果檔；尚未儲存或儲存失敗時為 None
     errors: list[CheckResult] = field(default_factory=list)  # 整批錯誤（設定檔、參考條件表、寫檔）
-    saved: bool = False
     reference_sha256: str | None = None  # 核對時參考條件表的 hash；儲存前據此確認檔案未變更
     metadata: dict[str, Any] = field(default_factory=dict)  # 整批執行 metadata（程式版本、設定檔與參考條件表 hash）
     record: Path | None = None  # 核對紀錄；尚未儲存或寫入失敗時為 None
 
-    def refresh_status(self) -> None:
-        statuses = [i.status for i in self.items] + [e.status for e in self.errors]
-        self.status = overall_status(statuses) if self.items else CheckStatus.ERROR
+    @property
+    def status(self) -> CheckStatus:
+        """整批狀態：每份的有效狀態（人工放行視同 PASS）與整批錯誤。"""
+        if not self.items:
+            return CheckStatus.ERROR
+        return overall_status([i.status for i in self.items] + [e.status for e in self.errors])
+
+    def release(self, item: BatchItem) -> None:
+        """人工放行：視同通過，儲存時回填、不列入錯誤清單；不能放行時丟出 IngestionError（原因見 release_problem）。"""
+        self._own(item)
+        if item.release_problem:
+            raise IngestionError("release_refused", item.release_problem)
+        self._set_released(item, True)
+
+    def cancel_release(self, item: BatchItem) -> None:
+        self._own(item)
+        self._set_released(item, False)
+
+    def _own(self, item: BatchItem) -> None:
+        if not any(i is item for i in self.items):
+            raise IngestionError("result_required", "這份說明書不在這次核對結果中，請重新核對後再人工放行。")
+
+    def _set_released(self, item: BatchItem, released: bool) -> None:
+        if item.released != released:
+            item._released = released
+            self.clear_saved()  # 上一次儲存的核對結果檔不再是目前的結果，要再儲存一次
+
+    def clear_saved(self) -> None:
+        """清掉上一次儲存的狀態（核對結果檔、核對紀錄、已回填、寫檔錯誤）。"""
+        self.output = self.record = None
+        self.errors = [e for e in self.errors if not e.rule_id.startswith("output.")]
+        for item in self.items:
+            item.filled = False
 
 
 @dataclass(frozen=True)
@@ -425,7 +500,7 @@ def check_batch(
         prefixes = load_issuer_prefixes(Path(issuer_prefixes))
         sheet = load_reference_sheet(reference_sheet, rfmt)
     except IngestionError as e:
-        return BatchOutcome(CheckStatus.ERROR, [], reference_sheet, errors=[error_result("input.batch", "批量輸入", e)])
+        return BatchOutcome([], reference_sheet, errors=[error_result("input.batch", "批量輸入", e)])
 
     meta = {
         "program_version": __version__,
@@ -444,16 +519,13 @@ def check_batch(
             pdf = found.pdf
             item = BatchItem(pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta)))
         items.append(item)
-    outcome = BatchOutcome(
-        CheckStatus.ERROR,
+    return BatchOutcome(
         items,
         reference_sheet,
         rfmt,
         reference_sha256=meta["inputs"]["reference_sheet"]["sha256"],
         metadata=meta,
     )
-    outcome.refresh_status()
-    return outcome
 
 
 # ---------------------------------------------------------------- 儲存
@@ -463,9 +535,7 @@ def _error_row(item: BatchItem) -> result_file.ErrorRow:
     """錯誤清單的一列。TDCC Code 取說明書封面商品代號；取不到時用檔名前 12 碼（12 位數字才算），否則留白。"""
     head = item.term_sheet.name[:12]
     code = item.product_code or (head if re.fullmatch(r"[0-9]{12}", head) else None)
-    problems = [r for r in item.report.results if r.status.is_problem]
-    messages = dict.fromkeys(problem_message(r) for r in problems)  # 同一句錯訊只列一次
-    return result_file.ErrorRow(code, item.term_sheet.name, "\n".join(messages))
+    return result_file.ErrorRow(code, item.term_sheet.name, "\n".join(item.problem_messages))
 
 
 def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.datetime | None = None) -> BatchOutcome:
@@ -477,11 +547,7 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
     if outcome.reference_format is None or not outcome.items:
         return outcome
     now = now or dt.datetime.now()
-    outcome.output = outcome.record = None  # 同一份結果可以再儲存一次：清掉上一次的儲存狀態
-    outcome.errors = [e for e in outcome.errors if not e.rule_id.startswith("output.")]
-    for item in outcome.items:
-        item.filled = False
-    outcome.saved = True
+    outcome.clear_saved()  # 同一份結果可以再儲存一次
     rfmt, items = outcome.reference_format, outcome.items
     wb = _attempt(
         outcome,
@@ -502,11 +568,9 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
         if outcome.output is not None:
             for item, ok in zip(items, filled, strict=True):
                 item.filled = ok
-        outcome.refresh_status()
         outcome.record = _attempt(
             outcome, "output.record", "核對紀錄", lambda: reporting.save_record(outcome, Path(root), now)
         )
-    outcome.refresh_status()
     return outcome
 
 

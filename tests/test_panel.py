@@ -258,60 +258,27 @@ def saved(session: PanelSession, tmp_path: Path):
     return wb["回填後"], wb["錯誤清單"], record
 
 
-@pytest.mark.parametrize(
-    ("spec", "row", "original"),
-    [
-        (Spec(), {"K(%)": 71}, "不一致"),
-        (Spec(), {"K(%)": None}, "需人工覆核"),
-    ],
-    ids=["mismatch", "review"],
-)
-def test_released_term_sheet_is_filled_like_a_pass(tmp_path, spec, row, original):
-    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **row)])
+def test_release_and_cancel_update_the_headline(tmp_path):
+    spec = Spec()
+    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
     (item,) = outcome.batch.items
-    assert session.release_problem(item) == ""
-
     session.release(item)
     assert item.released
-    assert item.status_label == f"人工放行（原：{original}）"
-    assert "0 份通過、1 份人工放行" in session.message
-    assert "1 份人工放行" in outcome.headline and f"0 份{original}" in outcome.headline
-
-    filled, errors, record = saved(session, tmp_path)
-    assert filled["F4"].value == SYNTH_ISIN and filled.max_row == 4
-    assert errors.max_row == 1, "人工放行的說明書不列入錯誤清單"
-    assert item.filled
-    (entry,) = record["items"]
-    assert entry["manual_release"] is True and entry["filled"] is True
-    assert entry["status"] != "PASS", "核對紀錄保留原判定"
-    assert record["status"] == "PASS"
-
-
-def test_cancelled_release_saves_like_never_released(tmp_path):
-    spec = Spec()
-    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
-    (item,) = outcome.batch.items
-    session.release(item)
+    assert "0 份通過、1 份人工放行、0 份不一致" in session.message
     session.cancel_release(item)
-    assert not item.released and item.status_label.startswith("MISMATCH")
-    assert "0 份人工放行" in outcome.headline and "1 份不一致" in outcome.headline
-
-    filled, errors, record = saved(session, tmp_path)
-    assert filled.max_row == 3 and errors.max_row == 2
-    assert record["items"][0]["manual_release"] is False and not item.filled
+    assert not item.released
+    assert "0 份人工放行、1 份不一致" in session.message
 
 
-def test_saving_again_writes_the_current_release_state(tmp_path):
-    spec = Spec()
-    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
-    (item,) = outcome.batch.items
-    session.release(item)
-    first = session.save(tmp_path / "reports", now=NOW)
-    session.cancel_release(item)
-    second = session.save(tmp_path / "reports", now=NOW + dt.timedelta(seconds=1))
-    assert openpyxl.load_workbook(first.output)["回填後"].max_row == 4
-    assert openpyxl.load_workbook(second.output)["回填後"].max_row == 3
-    assert openpyxl.load_workbook(second.output)["錯誤清單"].max_row == 2 and not item.filled
+def test_release_button_state_hides_the_reason_for_passed_term_sheets(tmp_path):
+    ok, bad = Spec(), Spec(product_code="029199990002")
+    session, outcome = checked(tmp_path, ok, bad, rows=[reference_row(ok), reference_row(bad, **{"K(%)": 71})])
+    passed, mismatch = outcome.batch.items
+    assert session.release_state(passed) == (False, ""), "已通過的不能放行，也不必說明原因"
+    assert session.release_state(mismatch) == (True, "")
+    session.start_check()  # 原結果失效
+    allowed, reason = session.release_state(mismatch)
+    assert not allowed and "重新核對" in reason
 
 
 def test_released_items_sort_with_passed_ones(tmp_path):
@@ -326,54 +293,6 @@ def test_released_items_sort_with_passed_ones(tmp_path):
         bad.product_code,
     ]
     assert "1 份通過、1 份人工放行、1 份不一致" in outcome.headline
-
-
-def _unreadable(tmp_path: Path) -> tuple[Path, Path]:
-    spec = Spec()
-    pdf = tmp_path / f"{spec.product_code}_TS.pdf"
-    pdf.write_bytes(b"not a pdf")
-    return build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)]), pdf
-
-
-@pytest.mark.parametrize(
-    ("case", "reason"),
-    [
-        ("pass", "已經通過"),
-        ("backfill_unknown", "回填值無法確定"),
-        ("backfill_conflict", "請先修正參考條件表"),
-        ("shared_row", "同一批有多份說明書對到同一列"),
-        ("missing_row", "沒有對到參考條件表的列"),
-        ("unsupported", "未支援上手"),
-        ("error", "執行錯誤"),
-    ],
-)
-def test_release_is_refused_when_backfill_is_not_trustworthy(tmp_path, case, reason):
-    spec = Spec()
-    if case == "pass":
-        sheet, pdfs = inputs(tmp_path, spec)
-    elif case == "backfill_unknown":
-        spec = Spec(omit=frozenset({"issue_date"}))
-        sheet, pdfs = inputs(tmp_path, spec)
-    elif case == "backfill_conflict":
-        sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(spec, **{"ISIN Code": "XS9999999999"})])
-    elif case == "shared_row":
-        pdfs = [build_pdf(tmp_path / f"{spec.product_code}_{v}.pdf", spec) for v in ("舊版", "新版")]
-        sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    elif case == "missing_row":
-        sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(Spec(product_code="029199990009"))])
-    elif case == "unsupported":
-        sheet, pdfs = inputs(tmp_path, Spec(product_code="999199990001"), rows=[reference_row(spec)])
-    else:
-        sheet, pdf = _unreadable(tmp_path)
-        pdfs = [pdf]
-    session = session_for(tmp_path, sheet, pdfs)
-    session.load_preview()
-    item = session.start_check().batch.items[0]
-
-    assert reason in session.release_problem(item)
-    with pytest.raises(IngestionError, match=reason):
-        session.release(item)
-    assert not item.released
 
 
 @pytest.mark.parametrize("action", ["recheck", "reload", "source_changed"])

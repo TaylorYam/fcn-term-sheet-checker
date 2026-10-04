@@ -10,11 +10,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .batch import BatchItem, BatchOutcome, BatchPreview, check_batch, preview_batch, save_batch
+from .batch import BatchItem, BatchOutcome, BatchPreview, Category, check_batch, preview_batch, save_batch
 from .config import resolve_config
 from .ingestion import IngestionError, sha256_of
 from .issuers import REGISTRY, Issuer
-from .schema import CheckResult, CheckStatus
+from .schema import CheckResult
 
 
 @dataclass(frozen=True)
@@ -35,16 +35,7 @@ class PanelOutcome:
         if self.batch.errors:
             return "核對未完成：" + "；".join(e.message for e in self.batch.errors)
         items = self.batch.items
-        unsupported = sum(i.unsupported for i in items)
-        counts = {s: sum(i.status == s and not i.unsupported and not i.released for i in items) for s in CheckStatus}
-        parts = [
-            f"{counts[CheckStatus.PASS]} 份通過",
-            f"{sum(i.released for i in items)} 份人工放行",
-            f"{counts[CheckStatus.MISMATCH]} 份不一致",
-            f"{counts[CheckStatus.REVIEW_REQUIRED]} 份需人工覆核",
-            f"{unsupported} 份未支援上手",
-            f"{counts[CheckStatus.ERROR]} 份執行錯誤",
-        ]
+        parts = [f"{sum(i.category == c for i in items)} 份{c.value}" for c in Category]
         tail = "按「儲存核對結果」後才會寫出核對結果檔（通過與人工放行的說明書回填在「回填後」）。"
         return f"共 {len(items)} 份：" + "、".join(parts) + "。" + tail
 
@@ -202,21 +193,21 @@ class PanelSession:
             return str(e)
         return item.release_problem
 
+    def release_state(self, item: BatchItem) -> tuple[bool, str]:
+        """PANEL 放行按鈕：能否按下，以及要顯示的不能放行原因（已通過的不必說明）。"""
+        problem = self.release_problem(item)
+        shown = "" if item.category == Category.PASSED else problem
+        return not problem, shown
+
     def release(self, item: BatchItem) -> None:
         """人工放行：視同通過，儲存時回填、不列入錯誤清單；重新載入或重新核對即清除。"""
         outcome = self._current(item)
-        if item.release_problem:
-            raise IngestionError("release_refused", item.release_problem)
-        item.released = True
-        self._refresh_after_release(outcome)
+        outcome.batch.release(item)
+        self.message = outcome.headline
 
     def cancel_release(self, item: BatchItem) -> None:
         outcome = self._current(item)
-        item.released = False
-        self._refresh_after_release(outcome)
-
-    def _refresh_after_release(self, outcome: PanelOutcome) -> None:
-        outcome.batch.refresh_status()
+        outcome.batch.cancel_release(item)
         self.message = outcome.headline
 
     def save(self, out_dir: Path | None, *, now: dt.datetime | None = None) -> SaveReceipt:
