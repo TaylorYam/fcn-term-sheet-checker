@@ -97,7 +97,7 @@ class HsbcTermSheet:
     scenario_index: ScenarioIndex  # 第 18 條情境文字（保留相鄰數字行的邊界）
 
     def f(self, name: str) -> ParsedField:
-        return self.fields.get(name, ParsedField.missing(name))
+        return self.fields.get(name) or standard_fields.not_provided(name)
 
 
 def _standard_prices(table: ParsedField) -> ParsedField:

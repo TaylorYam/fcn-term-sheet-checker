@@ -92,7 +92,7 @@ class BarcTermSheet:
     header_pcts: list[HeaderPct] = field(default_factory=list)
 
     def f(self, name: str) -> ParsedField:
-        return self.fields[name]
+        return self.fields.get(name) or standard_fields.not_provided(name)
 
 
 # ---------------------------------------------------------------- 共用
