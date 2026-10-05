@@ -78,11 +78,37 @@ def set_windows_app_id() -> None:
 
 
 def apply_window_icon(root: tk.Misc) -> None:
-    """標題列、Alt-Tab 與之後開啟的對話框都使用 PANEL 圖示；找不到或無法載入時沿用 Tk 預設圖示。"""
+    """標題列、Alt-Tab、工作列與之後開啟的對話框都使用 PANEL 圖示；找不到或無法載入時沿用 Tk 預設圖示。"""
     try:
         root.iconbitmap(default=str(PANEL_ICON))
     except tk.TclError:
-        pass
+        return
+    if sys.platform == "win32":
+        root.update_idletasks()  # 建立外框視窗後 wm_frame 才是實際的視窗代碼
+        _set_window_icons(int(root.wm_frame(), 16))
+
+
+def _set_window_icons(hwnd: int) -> None:
+    """Tk 只把圖示設在視窗類別上，Windows 11 工作列會改拿小圖示放大而變糊（#111）。
+
+    依目前縮放從 .ico 載入剛好的大、小圖示尺寸，直接設給視窗。
+    """
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.LoadImageW.restype = ctypes.c_void_p
+    user32.LoadImageW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    for kind, metric in ((1, 11), (0, 49)):  # (ICON_BIG, SM_CXICON)、(ICON_SMALL, SM_CXSMICON)
+        size = user32.GetSystemMetrics(metric)
+        icon = user32.LoadImageW(None, str(PANEL_ICON), 1, size, size, 0x10)  # IMAGE_ICON、LR_LOADFROMFILE
+        if icon:
+            user32.SendMessageW(hwnd, 0x80, kind, icon)  # WM_SETICON
 
 
 def _table(parent, columns: tuple[tuple[str, str, int], ...], pixels, height: int = 6) -> ttk.Treeview:
@@ -633,9 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     enable_windows_dpi_awareness()
     set_windows_app_id()
     root = tk.Tk()
-    apply_window_icon(root)
     session = session_from_args(args)
     PanelWindow(root, session)
+    apply_window_icon(root)
     root.mainloop()
     return 0
 

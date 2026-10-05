@@ -515,7 +515,10 @@ def test_double_click_launch_runs_from_the_root_and_ignores_old_update_pointer(t
 
 
 def test_panel_icon_ships_every_windows_size():
-    """圖示放在套件內（pip install 後也找得到），且含桌面、工作列、標題列會用到的 16～256 各尺寸。"""
+    """圖示放在套件內（pip install 後也找得到），且含 100%～250% 縮放下標題列、工作列、桌面會用到的尺寸。
+
+    Windows 小圖示要 16 × 縮放、大圖示要 32 × 縮放；缺尺寸時 Tk 會把小圖放大，工作列就變糊（#111）。
+    """
     import struct
 
     from fcn_checker.panel import PANEL_ICON
@@ -524,7 +527,8 @@ def test_panel_icon_ships_every_windows_size():
     reserved, kind, count = struct.unpack_from("<HHH", data)
     assert (reserved, kind) == (0, 1), "必須是 Windows .ico"
     sizes = {data[6 + 16 * i] or 256 for i in range(count)}  # 寬度 0 代表 256
-    assert sizes >= {16, 24, 32, 48, 64, 128, 256}
+    scales = (1, 1.25, 1.5, 1.75, 2, 2.25, 2.5)
+    assert sizes >= {round(16 * s) for s in scales} | {round(32 * s) for s in scales} | {48, 96, 128, 256}
 
 
 def test_window_icon_failure_keeps_the_default_icon():
@@ -555,3 +559,19 @@ def test_app_id_is_windows_only(monkeypatch):
     monkeypatch.setattr(panel, "ctypes", NoCtypes())
     panel.set_windows_app_id()
     assert touched == []
+
+
+def test_window_icon_on_non_windows_only_uses_tk(monkeypatch):
+    """非 Windows 平台只交給 Tk 設圖示，不碰 Windows 專屬 API。"""
+    import fcn_checker.panel as panel
+
+    calls = []
+
+    class Root:
+        def iconbitmap(self, default=None):
+            calls.append(default)
+
+    monkeypatch.setattr(panel.sys, "platform", "linux")
+    monkeypatch.setattr(panel, "_set_window_icons", lambda hwnd: calls.append("win32"))
+    panel.apply_window_icon(Root())
+    assert calls == [str(panel.PANEL_ICON)]
