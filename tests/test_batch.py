@@ -213,6 +213,7 @@ def test_issue_date_missing_from_term_sheet_requires_review_and_is_not_back_fill
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
     item = outcome.items[0]
     assert only(item, "backfill.issue_date").status == REVIEW
+    assert item.status_label == "需人工覆核", "不是配對問題時只顯示中文狀態"
     assert not [d for d in item.report.backfill if d.column == "發行日"]
     assert not receipt.filled(item)
     assert spec.product_code not in sheet_rows(receipt.output)
@@ -260,7 +261,7 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
     item = outcome.items[0]
     r = only(item, "batch.issuer_prefix")
     assert (r.status, r.reason_code) == (REVIEW, "issuer_unsupported")
-    assert item.unsupported and item.report.status == REVIEW
+    assert item.unsupported and item.report.status == REVIEW and item.status_label == "未支援上手"
     assert not any(x.rule_id.startswith("field.") for x in item.report.results)
     [error] = error_rows(receipt.output)
     assert error["TDCC Code"] == spec.product_code, "取不到封面商品代號時用檔名前 12 碼"
@@ -291,6 +292,7 @@ def test_term_sheet_content_of_another_issuer_requires_review(tmp_path):
     )
     r = only(outcome.items[0], "batch.issuer_prefix")
     assert (r.status, r.reason_code, r.actual) == (REVIEW, "issuer_prefix_mismatch", "BARC")
+    assert outcome.items[0].status_label == "檔名上手編號不符"
 
 
 def test_file_name_only_needs_the_same_issuer_prefix_as_the_product_code(tmp_path):
@@ -304,6 +306,7 @@ def test_product_code_prefix_differs_from_file_name_requires_review(tmp_path):
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec, name="029199990001_TS.pdf")], [reference_row(spec)])
     r = only(outcome.items[0], "batch.issuer_prefix")
     assert (r.status, r.reason_code, r.actual) == (REVIEW, "issuer_prefix_mismatch", "028199990001")
+    assert outcome.items[0].status_label == "檔名上手編號不符"
 
 
 def test_missing_or_duplicate_reference_row_requires_review(tmp_path):
@@ -311,12 +314,14 @@ def test_missing_or_duplicate_reference_row_requires_review(tmp_path):
     pdf = pdf_for(tmp_path, spec)
     outcome, receipt, _ = batch(tmp_path, [pdf], [reference_row(Spec(product_code="029199990002"))])
     assert only(outcome.items[0], "batch.pairing").reason_code == "reference_row_missing"
+    assert outcome.items[0].status_label == "條件表找不到這筆", "狀態欄直接寫原因，不顯示英文代碼"
 
     (tmp_path / "dup").mkdir()
     outcome, receipt, _ = batch(tmp_path / "dup", [pdf], [reference_row(spec), reference_row(spec)])
     r = only(outcome.items[0], "batch.pairing")
     assert (r.status, r.reason_code) == (REVIEW, "reference_row_duplicate")
     assert len(r.order_source) == 2
+    assert outcome.items[0].status_label == "條件表有重複列"
 
 
 def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back_fill(tmp_path):
@@ -333,8 +338,9 @@ def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back
         assert "同一批有多份說明書對到同一個 TDCC Code" in r.message and another.name in r.message
         assert item.term_sheet.name not in r.message
         assert item.report.status == REVIEW and not receipt.filled(item)
+        assert item.status_label == "多份對到同一列"
         assert not any(x.rule_id.startswith(("field.", "backfill.")) for x in item.report.results)
-    assert second.report.status == PASS and receipt.filled(second)
+    assert second.report.status == PASS and receipt.filled(second) and second.status_label == "通過"
     assert list(sheet_rows(receipt.output)) == [other.product_code]
     assert row_of(receipt.output, other.product_code)["ISIN Code"] == SYNTH_ISIN
     errors = error_rows(receipt.output)
@@ -362,6 +368,7 @@ def test_reference_row_of_another_issuer_requires_review(tmp_path):
     r = only(outcome.items[0], "batch.pairing")
     assert (r.status, r.reason_code, r.expected, r.actual) == (REVIEW, "reference_issuer_mismatch", "Barclays", "HSBC")
     assert not any(x.rule_id.startswith("field.") for x in outcome.items[0].report.results)
+    assert outcome.items[0].status_label == "條件表發行機構不符"
 
 
 def test_rows_without_selected_pdf_are_left_out_of_the_result_file(tmp_path):
@@ -575,7 +582,7 @@ def test_unreadable_pdf_does_not_stop_the_batch(tmp_path):
     broken = tmp_path / "029199990009_TS.pdf"
     broken.write_bytes(b"not a pdf")
     outcome, receipt, _ = batch(tmp_path, [broken, pdf_for(tmp_path, spec)], [reference_row(spec)])
-    assert outcome.items[0].report.status == ERROR
+    assert outcome.items[0].report.status == ERROR and outcome.items[0].status_label == "執行錯誤"
     assert outcome.items[1].report.status == PASS and receipt.filled(outcome.items[1])
     assert receipt.status == ERROR
     assert [e["PDF 檔名"] for e in error_rows(receipt.output)] == [broken.name]
@@ -823,7 +830,7 @@ def test_cancelled_release_returns_to_the_original_result(tmp_path):
     (item,) = outcome.items
     outcome.release(item)
     outcome.cancel_release(item)
-    assert not item.released and item.status_label.startswith("MISMATCH") and outcome.status == MISMATCH
+    assert not item.released and item.status_label == "不一致" and outcome.status == MISMATCH
 
     receipt, record = saved(outcome, tmp_path)
     result = receipt.output

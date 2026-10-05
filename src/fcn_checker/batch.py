@@ -48,6 +48,10 @@ from .standard_fields import TermSheet
 
 UNSUPPORTED = "issuer_unsupported"
 SHARED_ROW = "reference_row_shared"
+ROW_MISSING = "reference_row_missing"
+ROW_DUPLICATE = "reference_row_duplicate"
+ISSUER_MISMATCH = "reference_issuer_mismatch"
+PREFIX_MISMATCH = "issuer_prefix_mismatch"
 
 
 class Category(StrEnum):
@@ -71,6 +75,16 @@ _BY_STATUS = {
     CheckStatus.MISMATCH: Category.MISMATCH,
     CheckStatus.REVIEW_REQUIRED: Category.REVIEW,
     CheckStatus.ERROR: Category.ERROR,
+}
+
+# 配對有問題時，狀態標籤直接寫原因，不必點進明細才知道要補參考條件表還是檢查檔案。
+# 「條件表」是參考條件表的簡稱（狀態欄寬有限，見 CONTEXT.md）；要用本模組的原因碼常數，所以不放 messages.py。
+_PAIRING_LABELS = {
+    ROW_MISSING: "條件表找不到這筆",
+    ROW_DUPLICATE: "條件表有重複列",
+    SHARED_ROW: "多份對到同一列",
+    ISSUER_MISMATCH: "條件表發行機構不符",
+    PREFIX_MISMATCH: "檔名上手編號不符",
 }
 
 
@@ -111,12 +125,17 @@ class BatchItem:
 
     @property
     def status_label(self) -> str:
+        """PANEL 清單與 CLI 顯示的白話狀態：配對問題直接寫原因，其餘只寫中文狀態。"""
         category, original = self.category, STATUS_ZH[self.report.status]
         if category == Category.UNSUPPORTED:
             return category.value
         if category == Category.RELEASED:
             return f"{category.value}（原：{original}）"
-        return f"{self.report.status.value}（{original}）"
+        if self.report.status == CheckStatus.REVIEW_REQUIRED:  # 執行錯誤等其他狀態不被配對原因蓋掉
+            for r in self.report.results:
+                if r.status.is_problem and r.reason_code in _PAIRING_LABELS:
+                    return _PAIRING_LABELS[r.reason_code]
+        return original
 
     @property
     def problem_messages(self) -> tuple[str, ...]:
@@ -302,7 +321,7 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
                 "batch.issuer_prefix",
                 "issuer",
                 ISSUER_ITEM,
-                "issuer_prefix_mismatch",
+                PREFIX_MISMATCH,
                 f"檔名上手編號 {prefix} 對應 {issuer.code}，但說明書內容是 {detected.code} 範本，可能檔名取錯或檔案放錯",
                 actual=detected.code,
             )
@@ -322,20 +341,18 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
     if not str(pc.value).startswith(prefix):
         msg = f"說明書商品代號 {pc.value} 的前三碼與檔名上手編號 {prefix} 不同"
         results.append(
-            _review(
-                "batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, "issuer_prefix_mismatch", msg, actual=pc.value
-            )
+            _review("batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, PREFIX_MISMATCH, msg, actual=pc.value)
         )
         return out
 
     rows = sheet.find(pc.value)
     if not rows:
         msg = f"參考條件表找不到 TDCC Code {pc.value} 的列"
-        results.append(_review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, "reference_row_missing", msg))
+        results.append(_review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, ROW_MISSING, msg))
         return out
     if len(rows) > 1:
         msg = f"參考條件表有 {len(rows)} 列 TDCC Code 為 {pc.value}"
-        r = _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, "reference_row_duplicate", msg)
+        r = _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, ROW_DUPLICATE, msg)
         r.order_source = [x.product_code.source for x in rows]
         results.append(r)
         return out
@@ -346,7 +363,7 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
             "batch.pairing",
             "issuer",
             ISSUER_ITEM,
-            "reference_issuer_mismatch",
+            ISSUER_MISMATCH,
             f"參考條件表該列發行機構是「{row.issuer.value}」，{issuer.code} 應為「{expected_issuer}」",
             actual=row.issuer.value,
         )
