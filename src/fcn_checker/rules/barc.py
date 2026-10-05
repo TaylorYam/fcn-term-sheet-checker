@@ -3,6 +3,7 @@
 參考條件表欄位的比對見 rules/reference.py（各上手共用）；共用工具見 rules/kit.py。
 規則只接收標準化後的說明書欄位與審查標準；不讀檔、不改來源值。
 每條規則產生一或多筆 CheckResult；抓不到、歧義、未知值一律轉人工覆核，不猜值。
+每筆結果的項目名稱寫在規則旁；預期值來自說明書其他位置或推算（錯訊寫「預期」）。
 """
 
 from __future__ import annotations
@@ -11,14 +12,16 @@ import datetime as dt
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
-from ..schema import CheckResult, Evidence, ParsedField
+from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
 from .kit import (
+    HEADER_PCT_ITEM,
     IssuerContext,
     doc_ki,
     doc_review,
     order_value,
+    price_item,
     result,
     to_decimal,
     to_int,
@@ -60,15 +63,16 @@ def monthly_coupon(ctx: IssuerContext) -> CheckResult:
     """月配息率 = 年利率 × 天期 ÷ 12 ÷ 期數（期數 = 說明書配息表列數）；與說明書差 ≤ 0.0001 視為一致。"""
     rid, field = "derive.monthly_coupon", "monthly_coupon_pct"
     pf, table = ctx.ts.f(field), ctx.ts.f("coupon_table")
-    annual, ov_a, p1 = order_value(ctx, "coupon_pa_pct", rid, field, pf, to_decimal, "數字")
-    tenor, ov_t, p2 = order_value(ctx, "tenor_months", rid, field, pf, to_int, "整數")
+    annual, ov_a, p1 = order_value(ctx, "coupon_pa_pct", rid, field, pf, to_decimal, "數字", name="年利率 %")
+    tenor, ov_t, p2 = order_value(ctx, "tenor_months", rid, field, pf, to_int, "整數", name="天期（月）")
     for p in (p1, p2):
         if p:
             return p
+    item = Item.derived("月配息率 %", [ov_a, ov_t])  # 預期值由表上年利率與天期推算
     if not pf.ok:
-        return doc_review(rid, field, pf, None, [ov_a, ov_t])
+        return doc_review(rid, field, pf, None, [ov_a, ov_t], item=item)
     if not table.ok:
-        return doc_review(rid, field, table, None, [ov_a, ov_t])
+        return doc_review(rid, field, table, None, [ov_a, ov_t], item=item)
     periods = len(table.value.rows)
     expected = (annual * tenor / 12 / periods).quantize(Q4, ROUND_HALF_UP)
     ok = abs(expected - pf.value) <= MONTHLY_TOLERANCE
@@ -83,6 +87,7 @@ def monthly_coupon(ctx: IssuerContext) -> CheckResult:
         reason="" if ok else "value_mismatch",
         tolerance="≤ 0.0001",
         message=f"推算：{annual}% × {tenor} ÷ 12 ÷ {periods} 期（說明書配息表列數），四捨五入到 4 位",
+        item=item,
     )
 
 
@@ -90,7 +95,8 @@ def coupon_consistency(ctx: IssuerContext) -> list[CheckResult]:
     """月配息率在 §9(1)、§14、§15(2)、§17(1) 相同；年利率在 §9(1)、§14、§17(1) 相同。"""
     rid = "doc.coupon_consistency"
     out = []
-    for kind, field in (("monthly", "monthly_coupon_pct"), ("annual", "coupon_pa_pct")):
+    for kind, field, name in (("monthly", "monthly_coupon_pct", "月配息率 %"), ("annual", "coupon_pa_pct", "年利率 %")):
+        item = Item.expected(name)
         mentions = ctx.ts.coupon_mentions[kind]
         evidence = [Evidence.of(ln) for m in mentions for ln in m.lines]
         missing = [m.article for m in mentions if m.value.is_nan()]
@@ -103,6 +109,7 @@ def coupon_consistency(ctx: IssuerContext) -> list[CheckResult]:
                     evidence=evidence,
                     reason="document_missing",
                     message=f"以下條文找不到{'月配息率' if kind == 'monthly' else '年利率'}：{'、'.join(missing)}",
+                    item=item,
                 )
             )
             continue
@@ -119,6 +126,7 @@ def coupon_consistency(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=evidence,
                 reason="" if ok else "document_inconsistent",
                 message="" if ok else "說明書不同條文的值不一致",
+                item=item,
             )
         )
     return out
@@ -126,10 +134,10 @@ def coupon_consistency(ctx: IssuerContext) -> list[CheckResult]:
 
 def prices(ctx: IssuerContext) -> list[CheckResult]:
     """各標的執行／KO／下限價 = 最初價格 × 對應百分比，四捨五入（half-up）到 4 位。"""
-    rid = "derive.prices"
+    rid, item = "derive.prices", Item.expected("價格表")
     table, uls = ctx.ts.f("price_table"), ctx.ts.f("underlyings")
     if not table.ok:
-        return [doc_review(rid, "price_table", table)]
+        return [doc_review(rid, "price_table", table, item=item)]
     rows = ctx.ts.price_rows
     if uls.ok and len(uls.value) != len(rows):
         return [
@@ -142,13 +150,14 @@ def prices(ctx: IssuerContext) -> list[CheckResult]:
                 pf=table,
                 reason="price_table_row_count",
                 message="價格表列數與標的數不同",
+                item=item,
             )
         ]
     has_ki_col = all("ki" in r.values for r in rows)
     kt = ctx.ts.f("ki_type")
     doc_ki_ = doc_ki(kt)
     if doc_ki_ is None:
-        return [doc_review(rid, "price_table", kt)]
+        return [doc_review(rid, "price_table", kt, item=item)]
     if (doc_ki_ != "none") != has_ki_col:
         return [
             result(
@@ -158,6 +167,7 @@ def prices(ctx: IssuerContext) -> list[CheckResult]:
                 pf=table,
                 reason="price_table_ki_column",
                 message="價格表有無觸及生效價格欄與 §15 定義不一致",
+                item=item,
             )
         ]
     out = []
@@ -167,10 +177,10 @@ def prices(ctx: IssuerContext) -> list[CheckResult]:
         for col in ("strike", "ko", "ki"):
             if col not in row.values:
                 continue
-            field = f"{label} {PRICE_LABEL[col]}"
+            field, price = f"{label} {PRICE_LABEL[col]}", Item.expected(price_item(i + 1, col))
             pct = ctx.ts.f(PRICE_PCT_FIELD[col])
             if not pct.ok:
-                out.append(doc_review(rid, field, pct))
+                out.append(doc_review(rid, field, pct, item=price))
                 continue
             expected = (row.values["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP)
             ok = expected == row.values[col]
@@ -185,6 +195,7 @@ def prices(ctx: IssuerContext) -> list[CheckResult]:
                     reason="" if ok else "value_mismatch",
                     tolerance="四捨五入（half-up）到 4 位",
                     message=f"最初價格 {row.values['initial']} × {pct.value}%",
+                    item=price,
                 )
             )
     return out
@@ -220,12 +231,13 @@ def coupon_dates(ctx: IssuerContext) -> list[CheckResult]:
     """B1、B2：期數 = 天期；評價日、支付日逐期遞增；每期評價日 < 支付日。"""
     rid = "schedule.coupon_dates"
     table, tenor = ctx.ts.f("coupon_table"), ctx.ts.f("tenor_months")
+    periods_item = Item.expected("配息期數")
     if not table.ok:
-        return [doc_review(rid, "coupon_table", table)]
+        return [doc_review(rid, "coupon_table", table, item=Item.expected("配息表"))]
     rows = table.value.rows
     out = []
     if not tenor.ok:
-        out.append(doc_review(rid, "coupon_periods", tenor))
+        out.append(doc_review(rid, "coupon_periods", tenor, item=periods_item))
     else:
         ok = len(rows) == tenor.value
         out.append(
@@ -238,6 +250,7 @@ def coupon_dates(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=tenor.evidence + _header_ev(table.value),
                 reason="" if ok else "value_mismatch",
                 message="配息表列數須等於天期（每月一期）",
+                item=periods_item,
             )
         )
     bad = []
@@ -258,6 +271,7 @@ def coupon_dates(ctx: IssuerContext) -> list[CheckResult]:
             evidence=_row_ev(bad) or _header_ev(table.value),
             reason="date_order" if bad else "",
             message="每期評價日 < 支付日，且評價日、支付日逐期遞增",
+            item=Item.expected("配息表日期順序"),
         )
     )
     return out
@@ -268,14 +282,14 @@ def final_period(ctx: IssuerContext) -> list[CheckResult]:
     rid = "schedule.final_period"
     table = ctx.ts.f("coupon_table")
     out = []
-    for field, key, label in (
-        ("final_valuation_date", "valuation", "末期評價日須等於最終評價日"),
-        ("maturity_date", "payment", "末期支付日須等於到期日"),
+    for field, key, label, name in (
+        ("final_valuation_date", "valuation", "末期評價日須等於最終評價日", "末期評價日"),
+        ("maturity_date", "payment", "末期支付日須等於到期日", "末期支付日"),
     ):
-        pf = ctx.ts.f(field)
+        pf, item = ctx.ts.f(field), Item.expected(name)
         bad = next((x for x in (table, pf) if not x.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, f"last_{key}", bad))
+            out.append(doc_review(rid, f"last_{key}", bad, item=item))
             continue
         last = table.value.rows[-1]
         ok = last.get(key) == pf.value
@@ -289,6 +303,7 @@ def final_period(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=pf.evidence + _row_ev([last]),
                 reason="" if ok else "value_mismatch",
                 message=label,
+                item=item,
             )
         )
     return out
@@ -296,19 +311,19 @@ def final_period(ctx: IssuerContext) -> list[CheckResult]:
 
 def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
     """C1–C4：自動提前出場表與配息表的日期關係。"""
-    rid = "schedule.autocall_dates"
+    rid, table_item = "schedule.autocall_dates", Item.expected("提前出場表")
     coupon, ko = ctx.ts.f("coupon_table"), ctx.ts.f("ko_table")
     for x in (coupon, ko):
         if not x.ok:
-            return [doc_review(rid, "ko_table", x)]
+            return [doc_review(rid, "ko_table", x, item=table_item)]
     ct, kt = coupon.value, ko.value
     if kt.kind == "ko_fixed":
         pairs = (
-            ("ko_valuation", "valuation", "C1 自動提前出場評價日 = 同期配息評價日"),
-            ("early_redemption", "payment", "C2 指定提前現金贖回日 = 同期配息支付日"),
+            ("ko_valuation", "valuation", "C1 自動提前出場評價日 = 同期配息評價日", "自動提前出場評價日"),
+            ("early_redemption", "payment", "C2 指定提前現金贖回日 = 同期配息支付日", "指定提前現金贖回日"),
         )
     elif kt.kind == "ko_period":
-        pairs = (("end", "valuation", "C3 期末日 = 同期配息評價日"),)
+        pairs = (("end", "valuation", "C3 期末日 = 同期配息評價日", "提前出場期末日"),)
     elif kt.kind == "coupon":
         return [
             result(
@@ -317,12 +332,14 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
                 S.NOT_APPLICABLE,
                 evidence=_header_ev(kt),
                 message="評價日表兼作自動提前出場評價日，沒有另一張提前出場表可比對",
+                item=table_item,
             )
         ]
     else:
         pairs = ()  # 觀察期合併表：期末日即配息評價日，只需檢查期始日（C4）
     out = []
-    for ko_key, c_key, label in pairs:
+    for ko_key, c_key, label, name in pairs:
+        item = Item.expected(name)
         if len(kt.rows) != len(ct.rows):
             out.append(
                 result(
@@ -334,6 +351,7 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
                     evidence=_header_ev(kt),
                     reason="period_count",
                     message=f"{label}：提前出場表與配息表期數不同",
+                    item=item,
                 )
             )
             continue
@@ -347,6 +365,7 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=_row_ev(bad) or _header_ev(kt),
                 reason="value_mismatch" if bad else "",
                 message=label,
+                item=item,
             )
         )
     if kt.kind in ("ko_period", "combined"):
@@ -359,9 +378,9 @@ def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
 
     前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。
     """
-    issue = ctx.ts.f("issue_date")
+    issue, item = ctx.ts.f("issue_date"), Item.expected("提前出場期始日")
     if not issue.ok:
-        return doc_review(rid, "start", issue)
+        return doc_review(rid, "start", issue, item=item)
     bad = []
     for k, r in enumerate(kt.rows):
         start = r.get("start")
@@ -380,14 +399,16 @@ def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
         reason="value_mismatch" if bad else "",
         tolerance="平日只排除週末（無假日曆）",
         message="C4 期始日 = 前一期期末日後 1 個平日；第 1 期為 N/A 或發行日後 1 個平日",
+        item=item,
     )
 
 
 def trigger_per_period(ctx: IssuerContext) -> CheckResult:
     """§13(7) 每期觸發百分比 = §15 觸發百分比定義句。"""
     rid, ko, pct = "doc.autocall_trigger_per_period", ctx.ts.f("ko_table"), ctx.ts.f("ko_pct")
+    item = Item.expected("提前出場觸發價格百分比")
     if not ko.ok:
-        return doc_review(rid, "trigger", ko)
+        return doc_review(rid, "trigger", ko, item=item)
     if "trigger" not in ko.value.columns:
         return result(
             rid,
@@ -395,9 +416,10 @@ def trigger_per_period(ctx: IssuerContext) -> CheckResult:
             S.NOT_APPLICABLE,
             evidence=_header_ev(ko.value),
             message="此型態的提前出場表沒有每期觸發百分比欄",
+            item=item,
         )
     if not pct.ok:
-        return doc_review(rid, "trigger", pct)
+        return doc_review(rid, "trigger", pct, item=item)
 
     def callable_(r: ScheduleRow) -> bool:
         return any(isinstance(r.get(k), dt.date) for k in ("end", "ko_valuation"))
@@ -413,15 +435,17 @@ def trigger_per_period(ctx: IssuerContext) -> CheckResult:
         evidence=pct.evidence + _row_ev(bad),
         reason="value_mismatch" if bad else "",
         message="每期觸發百分比須等於 §15 定義句" + (f"；不符：{_periods(bad)}" if bad else ""),
+        item=item,
     )
 
 
 def scenario_price_table(ctx: IssuerContext) -> CheckResult:
     """§16(3) 情境分析重印價格表逐格 = §15 價格表。"""
     rid, s15, s16 = "doc.scenario_price_table", ctx.ts.f("price_table"), ctx.ts.f("scenario_price_table")
+    item = Item.expected("情境試算價格表")
     for x in (s15, s16):
         if not x.ok:
-            return doc_review(rid, "scenario_price_table", x)
+            return doc_review(rid, "scenario_price_table", x, item=item)
     a, b = ctx.ts.price_rows, ctx.ts.scenario_rows
     diffs = [] if len(a) == len(b) else [f"列數 {len(a)} ≠ {len(b)}"]
     for k, (r15, r16) in enumerate(zip(a, b, strict=False), 1):
@@ -438,6 +462,7 @@ def scenario_price_table(ctx: IssuerContext) -> CheckResult:
         evidence=s16.evidence[:6],
         reason="value_mismatch" if diffs else "",
         message="§16(3) 重印價格表須與 §15 價格表逐格相同",
+        item=item,
     )
 
 
@@ -452,11 +477,14 @@ def _same_text(a: str, b: str) -> bool:
     return squash(a).translate(_BRACKETS) == squash(b).translate(_BRACKETS)
 
 
-def _equal(rid: str, field: str, pf: ParsedField, ref: ParsedField, expected: object, message: str) -> CheckResult:
-    """說明書某處（pf）的值須等於另一處（ref）推得的值（expected）。"""
+def _equal(
+    rid: str, field: str, name: str, pf: ParsedField, ref: ParsedField, expected: object, message: str
+) -> CheckResult:
+    """說明書某處（pf）的值須等於另一處（ref）推得的值（expected）；項目名稱為 `name`。"""
+    item = Item.expected(name)
     for x in (pf, ref):
         if not x.ok:
-            return doc_review(rid, field, x)
+            return doc_review(rid, field, x, item=item)
     ok = _same_text(str(pf.value), str(expected)) if isinstance(expected, str) else pf.value == expected
     return result(
         rid,
@@ -467,6 +495,7 @@ def _equal(rid: str, field: str, pf: ParsedField, ref: ParsedField, expected: ob
         evidence=pf.evidence + ref.evidence,
         reason="" if ok else "document_inconsistent",
         message=message,
+        item=item,
     )
 
 
@@ -476,6 +505,7 @@ def name_consistency(ctx: IssuerContext) -> list[CheckResult]:
     title = _equal(
         rid,
         "title_name",
+        "封面標題商品名稱",
         ctx.ts.f("title_name"),
         cover,
         # 括號先統一為全形，半形的「(下稱「本商品」)」也要去掉
@@ -483,7 +513,13 @@ def name_consistency(ctx: IssuerContext) -> list[CheckResult]:
         "封面標題須等於封面「商品中文名稱」（去掉「（下稱「本商品」）」）",
     )
     art1 = _equal(
-        rid, "art1_name", ctx.ts.f("art1_name"), cover, cover.value, "第一章第 1 條商品名稱須等於封面「商品中文名稱」"
+        rid,
+        "art1_name",
+        "第一章第 1 條商品名稱",
+        ctx.ts.f("art1_name"),
+        cover,
+        cover.value,
+        "第一章第 1 條商品名稱須等於封面「商品中文名稱」",
     )
     return [title, art1]
 
@@ -493,6 +529,7 @@ def distributor_product_code(ctx: IssuerContext) -> CheckResult:
     return _equal(
         "doc.distributor_product_code",
         "distributor_product_code",
+        "受託或銷售機構商品代號",
         ctx.ts.f("distributor_product_code"),
         code,
         code.value,
@@ -505,6 +542,7 @@ def currency_consistency(ctx: IssuerContext) -> CheckResult:
     return _equal(
         "doc.currency_consistency",
         "art5_currency",
+        "第一章第 5 條計價幣別",
         ctx.ts.f("art5_currency"),
         cz,
         cz.value,
@@ -517,6 +555,7 @@ def scenario_notional(ctx: IssuerContext) -> CheckResult:
     return _equal(
         "doc.scenario_notional",
         "scenario_notional",
+        "情境假設每單位面額",
         ctx.ts.f("scenario_notional"),
         denom,
         denom.value,
@@ -529,6 +568,7 @@ def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
     rid = "doc.price_header_pct"
     out = []
     for field in ("strike_pct", "ko_pct", "ki_pct"):
+        item = Item.expected(HEADER_PCT_ITEM[field.removesuffix("_pct")])
         mentions = [h.mention for h in ctx.ts.header_pcts if h.field == field]
         if field == "strike_pct" and not any(m.article == "第15條" for m in mentions):
             out.append(
@@ -538,13 +578,14 @@ def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
                     S.REVIEW_REQUIRED,
                     reason="document_missing",
                     message="第 15 條價格表找不到「執行價格（為最初價格的N%）」欄頭",
+                    item=item,
                 )
             )
         if not mentions:
             continue
         pf = ctx.ts.f(field)
         if not pf.ok:
-            out.append(doc_review(rid, field, pf))
+            out.append(doc_review(rid, field, pf, item=item))
             continue
         bad = [m for m in mentions if m.value != pf.value]
         out.append(
@@ -557,6 +598,7 @@ def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=pf.evidence + [Evidence.of(ln) for m in (bad or mentions) for ln in m.lines],
                 reason="document_inconsistent" if bad else "",
                 message=f"價格表欄頭共 {len(mentions)} 處，須等於第 15 條定義句",
+                item=item,
             )
         )
     return out
@@ -578,10 +620,11 @@ def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=obs.evidence,
                 reason="document_missing",
                 message="期間每日觀察型態的第9條(3)找不到「相關配息率為…%」",
+                item=Item.expected("第9條(3)"),
             )
         )
     for article in dict.fromkeys(m.article for m in mentions):
-        group = [m for m in mentions if m.article == article]
+        group, item = [m for m in mentions if m.article == article], Item.expected(article)
         if any(m.value.is_nan() for m in group):
             out.append(
                 result(
@@ -591,11 +634,12 @@ def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
                     reason="document_missing",
                     evidence=[Evidence.of(ln) for m in group if m.value.is_nan() for ln in m.lines],
                     message=f"{article}有月配息率讀不到數值（寫法與範本不同），請人工確認",
+                    item=item,
                 )
             )
             continue
         if not pf.ok:
-            out.append(doc_review(rid, article, pf))
+            out.append(doc_review(rid, article, pf, item=item))
             continue
         bad = [m for m in group if m.value != pf.value]
         out.append(
@@ -608,6 +652,7 @@ def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=pf.evidence + [Evidence.of(ln) for m in (bad or group) for ln in m.lines],
                 reason="document_inconsistent" if bad else "",
                 message=f"{article}共 {len(group)} 處月配息率，須等於第 14 條「配息率」",
+                item=item,
             )
         )
     return out
@@ -626,15 +671,15 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
     monthly, annual, table = ctx.ts.f("monthly_coupon_pct"), ctx.ts.f("coupon_pa_pct"), ctx.ts.f("coupon_table")
     out = []
     for name, label in (("scenario_favourable", "有利情況"), ("scenario_general", "一般情況")):
-        pf = ctx.ts.f(name)
+        pf, total_item = ctx.ts.f(name), Item.expected(f"{label}總報酬率")
         if not pf.ok:
-            out.append(doc_review(rid, f"{name}_total", pf))
+            out.append(doc_review(rid, f"{name}_total", pf, item=total_item))
             continue
         if name == "scenario_general" and not table.ok:
-            out.append(doc_review(rid, f"{name}_total", table))
+            out.append(doc_review(rid, f"{name}_total", table, item=total_item))
             continue
         if not monthly.ok:
-            out.append(doc_review(rid, f"{name}_total", monthly))
+            out.append(doc_review(rid, f"{name}_total", monthly, item=total_item))
             continue
         periods = pf.value["periods"] if name == "scenario_favourable" else len(table.value.rows)
         total = pf.value["total"]
@@ -651,11 +696,13 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
                 reason="" if ok else "value_mismatch",
                 tolerance="依說明書顯示位數四捨五入",
                 message=f"{label}總報酬率 = 月配息率 {monthly.value}% × {periods} 期",
+                item=total_item,
             )
         )
         if name == "scenario_general":
+            annualized_item = Item.expected(f"{label}平均年化報酬率")
             if not annual.ok:
-                out.append(doc_review(rid, f"{name}_annualized", annual))
+                out.append(doc_review(rid, f"{name}_annualized", annual, item=annualized_item))
                 continue
             ann = pf.value["annualized"]
             ok = _shown(annual.value, ann) == ann
@@ -669,6 +716,7 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
                     evidence=pf.evidence + annual.evidence,
                     reason="" if ok else "value_mismatch",
                     message="一般情況（持有至到期、全部配息）平均年化報酬率須等於第 14 條年利率",
+                    item=annualized_item,
                 )
             )
     return out
@@ -677,11 +725,11 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
 def observation_t_range(ctx: IssuerContext) -> CheckResult:
     """§13(7) 自動提前出場觀察期定義句（Daily Memory）各段 t 的起訖：
     保證配息期 G ≥ 1 → (G, G) 與 (G+1, 總期數)；G = 0 → (1, 總期數)。總期數 = 配息表列數。"""
-    rid, field = "doc.observation_t_range", "observation_t_ranges"
+    rid, field, item = "doc.observation_t_range", "observation_t_ranges", Item.expected("自動提前出場觀察期")
     obs, mem = ctx.ts.f("ko_observation"), ctx.ts.f("ko_memory")
     for x in (obs, mem):
         if not x.ok:
-            return doc_review(rid, field, x)
+            return doc_review(rid, field, x, item=item)
     if not (obs.value == "D" and mem.value):
         return result(
             rid,
@@ -689,11 +737,12 @@ def observation_t_range(ctx: IssuerContext) -> CheckResult:
             S.NOT_APPLICABLE,
             evidence=obs.evidence,
             message="只有期間每日觀察的記憶式商品有「自動提前出場觀察期」t 範圍定義句",
+            item=item,
         )
     pf, g, table = ctx.ts.f(field), ctx.ts.f("guaranteed_periods"), ctx.ts.f("coupon_table")
     for x in (pf, g, table):
         if not x.ok:
-            return doc_review(rid, field, x)
+            return doc_review(rid, field, x, item=item)
     n = len(table.value.rows)
     expected = [(g.value, g.value), (g.value + 1, n)] if g.value >= 1 else [(1, n)]
     ok = pf.value == expected
@@ -710,6 +759,7 @@ def observation_t_range(ctx: IssuerContext) -> CheckResult:
         evidence=pf.evidence + g.evidence,
         reason="" if ok else "value_mismatch",
         message=f"依提前出場表推得保證配息期 {g.value}、配息表 {n} 期",
+        item=item,
     )
 
 

@@ -225,11 +225,13 @@ def _check_with_issuer_rules(tmp_path, rules, **overrides):
 def _reads_annual_coupon(ctx):
     """上手規則讀參考條件表「年利率」（ADR 0005 唯一例外的寫法）。"""
     from fcn_checker.rules.kit import order_value, result, to_decimal
+    from fcn_checker.schema import Item
 
     annual, ov, problem = order_value(
-        ctx, "coupon_pa_pct", "fake.sheet_read", "coupon_pa_pct", None, to_decimal, "數字"
+        ctx, "coupon_pa_pct", "fake.sheet_read", "coupon_pa_pct", None, to_decimal, "數字", name="年利率 %"
     )
-    return [problem or result("fake.sheet_read", "coupon_pa_pct", PASS, expected=annual, ov=[ov])]
+    item = Item.column("年利率 %", [ov])
+    return [problem or result("fake.sheet_read", "coupon_pa_pct", PASS, expected=annual, ov=[ov], item=item)]
 
 
 def test_issuer_rules_read_only_the_reference_sheet_fields_they_declare(tmp_path):

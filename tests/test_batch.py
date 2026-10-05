@@ -825,6 +825,14 @@ def test_save_writes_one_audit_record_named_like_the_result_file(tmp_path):
     [strike] = [r for r in second["results"] if r["rule_id"] == "field.strike_pct"]
     assert strike["status"] == "MISMATCH" and strike["document_evidence"][0]["page"] >= 1
     assert strike["document_evidence"][0]["text"] and strike["order_source"][0].startswith("樣本清單!")
+    assert strike["item"] == {"name": "K(%)", "source": "reference", "columns": ["K(%)"]}, "核對紀錄含項目名稱與出處"
+    columns = {r["rule_id"]: r["column"] for r in first["results"]}
+    assert (columns["field.strike_pct"], columns["field.underlyings"], columns["backfill.compare_dates"]) == (
+        "K(%)",
+        "標的",
+        "比價日",
+    ), "既有的 column 欄位值不變：多欄合起來核對時寫項目名稱"
+    assert columns["derive.monthly_coupon"] == "Coupon p.a. (%)、天期(月)"
 
 
 def test_existing_record_is_never_overwritten_and_the_result_file_is_still_written(tmp_path):

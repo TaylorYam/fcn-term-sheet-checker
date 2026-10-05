@@ -15,7 +15,7 @@ from .parsers import hsbc as hsbc_parser
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
 from .rules.kit import IssuerContext
-from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Line
+from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Item, Line
 from .standard_fields import TermSheet
 
 
@@ -67,6 +67,9 @@ def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:
     return next((i for i in registry if i.code == code), None)
 
 
+TEMPLATE = Item.note("範本")
+
+
 def detect(lines: Sequence[Line], registry: Sequence[Issuer] = REGISTRY) -> tuple[Issuer | None, CheckResult]:
     """以每家已註冊上手辨識範本；恰好一個命中才回傳該上手，零個或多個命中轉人工覆核。"""
     detections: list[tuple[Issuer, DetectionResult]] = [(i, i.detect(lines)) for i in registry]
@@ -81,6 +84,7 @@ def detect(lines: Sequence[Line], registry: Sequence[Issuer] = REGISTRY) -> tupl
             actual=issuer.template_id,
             document_evidence=det.evidence,
             message=f"符合 {issuer.label} 範本",
+            item=TEMPLATE,
         )
     if hits:
         return None, CheckResult(
@@ -91,6 +95,7 @@ def detect(lines: Sequence[Line], registry: Sequence[Issuer] = REGISTRY) -> tupl
             reason_code="template_ambiguous",
             document_evidence=[e for _, d in hits for e in d.evidence],
             message="同時符合多個範本，無法確定上手，請人工處理：" + "、".join(i.label for i, _ in hits),
+            item=TEMPLATE,
         )
     evidence: list[Evidence] = [e for _, d in detections for e in d.evidence]
     reasons = "；".join(f"{i.code}：" + "；".join(d.failed) for i, d in detections)
@@ -101,4 +106,5 @@ def detect(lines: Sequence[Line], registry: Sequence[Issuer] = REGISTRY) -> tupl
         reason_code="template_unknown",
         document_evidence=evidence,
         message="不是已支援的說明書範本，請人工處理：" + reasons,
+        item=TEMPLATE,
     )

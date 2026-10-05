@@ -5,6 +5,7 @@ BARC 與 HSBC 都經公開批量入口 check_batch 產生結果，再用同一�
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import re
 from decimal import Decimal
@@ -14,11 +15,14 @@ import pytest
 
 import hsbc_synth
 from fcn_checker.batch import check_batch
+from fcn_checker.issuers import by_code
 from fcn_checker.messages import problem_message
 from fcn_checker.panel import result_detail
-from fcn_checker.schema import CheckResult, CheckStatus
+from fcn_checker.rules import kit
+from fcn_checker.schema import CheckResult, CheckStatus, Item, ItemSource
+from fcn_checker.standard_fields import not_provided
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD, check_rows
-from reference_synth import REFERENCE_FORMAT
+from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
 from synth import DEFAULT_ULS, Spec, build_pdf, check, reference_row
 
 # 程式代碼：小寫英文以 . 或 _ 串接（例：doc.scenario_calculations、s1.profit.17、value_mismatch）
@@ -273,5 +277,217 @@ def test_panel_detail_uses_the_shared_message_without_rule_id(tmp_path):
     ],
 )
 def test_rule_without_message_gets_a_chinese_default(rule_id, status, expected):
-    r = CheckResult(rule_id, "brand_new_field", status, Decimal(1), Decimal(2), reason_code="new_reason")
+    name, source = {
+        "field": ("參考條件表欄位", ItemSource.REFERENCE),
+        "standard": ("審查標準", ItemSource.STANDARD),
+        "doc": ("說明書內部一致性", ItemSource.EXPECTED),
+    }[rule_id.split(".")[0]]
+    r = CheckResult(
+        rule_id, "brand_new_field", status, Decimal(1), Decimal(2), reason_code="new_reason", item=Item(name, source)
+    )
     assert problem_message(r) == expected
+
+
+# ---------------------------------------------------------------- 每條錯訊都寫出具體項目（Issue #91）
+
+
+def test_result_without_an_item_fails():
+    with pytest.raises(TypeError):
+        CheckResult("doc.new_rule", "brand_new_field", CheckStatus.MISMATCH)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        kit.result("doc.new_rule", "brand_new_field", CheckStatus.MISMATCH)  # type: ignore[call-arg]
+    with pytest.raises(ValueError):
+        Item("", ItemSource.EXPECTED)
+
+
+# 項目名稱不認得時舊版會退回的規則類別名稱
+CATEGORY_HEAD = re.compile(
+    "(?:參考條件表欄位|回填欄位|參考條件表欄名|審查標準|說明書內部一致性|核對項目)(?:：|對不起來)"
+)
+
+
+def assert_every_problem_names_its_item(report, *, codes_allowed: bool = False) -> None:
+    assert issues(report), "應該有問題項目"
+    for r in issues(report):
+        msg = problem_message(r)
+        assert not CATEGORY_HEAD.match(msg), msg
+        if not codes_allowed:
+            assert not CODE.search(msg.replace("Coupon p.a. (%)", "")), msg  # Excel 欄名照原樣寫出
+
+
+class _Withheld:
+    """讀出結果照常，但每個欄位都不交出：所有規則都走「說明書抓不到」的路徑。"""
+
+    def __init__(self, ts):
+        self._ts = ts
+        self.full_text = ts.full_text
+
+    def f(self, name):
+        return not_provided(name)
+
+    def __getattr__(self, attr):  # 上手專屬資料照常交給該上手規則
+        return getattr(self._ts, attr)
+
+
+def _barc_sheet(tmp_path, spec, overrides):
+    return build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
+
+
+def _run(pdf, sheet, registry=None):
+    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
+    if registry:
+        kw["registry"] = registry
+    return check_batch([pdf], sheet, REVIEW_STANDARD, **kw).items[0].report
+
+
+BROKEN_VALUES = ["壞", 1, None]
+# HSBC 合成參考條件表的標準欄位（商品代號用來配對，不改）
+HSBC_KEYS = [
+    "isin",
+    "currency",
+    "denomination",
+    "trade_date",
+    "issue_date",
+    "final_valuation_date",
+    "maturity_date",
+    "ko_pct",
+    "strike_pct",
+    "ki_pct",
+    "ki_type",
+    "ko_observation",
+    "ko_memory",
+    "coupon_pa_pct",
+    "tenor_months",
+    "first_callable_period",
+    *[f"autocall_date_{i}" for i in range(1, 13)],
+    *[f"underlying_{i}" for i in range(1, 6)],
+    *[f"underlying_{i}_{k}_price" for i in range(1, 6) for k in ("initial", "strike", "ko", "ki")],
+]
+
+
+@pytest.mark.parametrize("value", BROKEN_VALUES)
+def test_barc_broken_reference_sheet_messages_name_their_items(tmp_path, value):
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    kept = ("TDCC Code", "發行機構", "Product")  # 配對用，改壞就核對不到其他欄位
+    columns = [h for h in REFERENCE_HEADERS if h not in kept]
+    report = _run(pdf, _barc_sheet(tmp_path, spec, dict.fromkeys(columns, value)))
+    assert_every_problem_names_its_item(report)
+
+
+@pytest.mark.parametrize("value", BROKEN_VALUES)
+def test_hsbc_broken_reference_sheet_messages_name_their_items(tmp_path, value):
+    assert_every_problem_names_its_item(hsbc_check(tmp_path, overrides=dict.fromkeys(HSBC_KEYS, value)))
+
+
+def test_reference_sheet_header_problems_name_their_items(tmp_path):
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    headers = [h for h in REFERENCE_HEADERS if h != "KO(memo)"] + ["新欄位", "K(%)"]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers)
+    assert_every_problem_names_its_item(_run(pdf, sheet))
+
+
+@pytest.mark.parametrize("issuer", ["BARC", "HSBC"])
+def test_term_sheet_missing_every_field_messages_name_their_items(tmp_path, issuer):
+    base = by_code(issuer)
+    adapter = dataclasses.replace(base, read=lambda lines: _Withheld(base.read(lines)))
+    if issuer == "BARC":
+        spec = Spec()
+        pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+        sheet = _barc_sheet(tmp_path, spec, {})
+    else:
+        s = hsbc_synth.Spec()
+        pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
+        sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
+    report = _run(pdf, sheet, registry=(adapter,))
+    assert report.status == CheckStatus.REVIEW_REQUIRED, "缺欄位轉人工覆核，不是執行錯誤"
+    # 上手沒交出欄位是 adapter 的問題，說明刻意寫出標準欄位名稱供維護人員追查；這裡只看項目名稱
+    assert_every_problem_names_its_item(report, codes_allowed=True)
+
+
+BARC_BROKEN_DOCUMENTS = {
+    "many": Spec(
+        chairman="林晉輝",
+        rr="RR5",
+        price_overrides={(1, "strike"): "99.9999", (2, "ko"): "1.0000"},
+        mention_overrides={"§9": "0.9999%"},
+        print_date=dt.date(2030, 3, 1),
+        subscription_date=dt.date(2030, 1, 8),
+        approval_date=dt.date(2020, 1, 1),
+        issue_price="99",
+        title_name="錯的標題",
+        art1_name="錯的名稱",
+        art5_currency="日圓",
+        distributor_code="029199990002",
+        fees={"申購費用": "0%~6%"},
+        scenario_notional=1,
+        general_total="9.99",
+        general_annualized="9.99",
+        favourable_total="9.99",
+        t_range_end=5,
+        min_subscription=1,
+        min_redemption=1,
+        distributor_cover=("錯的銀行", "(02)0000-0000", "錯的地址"),
+        issuer_ch2="錯的發行機構",
+        ko_overrides={(6, "end"): "2030 年7 月9 日", (3, "start"): "2030 年1 月1 日"},
+        coupon_overrides={(2, "payment"): "2030 年1 月1 日"},
+        scenario_overrides={(1, "strike"): "1.0000"},
+        strike_headers={"§15": "71.00"},
+        repeat_overrides={"§9(3)": "0.9999"},
+        extra_text="受託投資",
+    ),
+    "omitted": Spec(omit=frozenset({"trade_date", "issue_date"}), extra_strike_def="71.00"),
+    "periodic": Spec(ko_obs="P", memory=False, ki="AM", ko_overrides={(3, "trigger"): "99.00%"}),
+}
+
+
+@pytest.mark.parametrize("spec", BARC_BROKEN_DOCUMENTS.values(), ids=BARC_BROKEN_DOCUMENTS.keys())
+def test_barc_broken_term_sheet_messages_name_their_items(tmp_path, spec):
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    report = _run(pdf, _barc_sheet(tmp_path, Spec(), {}))
+    assert_every_problem_names_its_item(report)
+
+
+@pytest.mark.parametrize("obs", ["D", "P"])
+def test_hsbc_broken_term_sheet_messages_name_their_items(tmp_path, obs):
+    replacements = {
+        "固定配息金額=美元10,000×1.0000%=美元100.00": "固定配息金額=美元10,000×1.0000%=美元101.00",
+        "6個計息期間配息金額共為美元600.00": "5個計息期間配息金額共為美元600.00",
+        "到期贖回金額為美元10,000×100%=美元10,000.00": "到期贖回金額為美元10,000×100%=美元10,001.00",
+        "自動提前到期價格為期初股價×100%": "自動提前到期價格為期初股價×101%",
+        "70.0000": "71.0000",
+        "配息期數=6": "配息期數=5",
+        "發行價格：100%": "發行價格：99%",
+        "0%~5%": "0%~6%",
+    }
+    report = hsbc_check(tmp_path, hsbc_synth.Spec(obs=obs, replacements=replacements))
+    assert_every_problem_names_its_item(report)
+
+
+def test_each_minimum_amount_names_itself(tmp_path):
+    report = check(tmp_path, Spec(min_subscription=1, min_redemption=1))
+
+    msgs = [problem_message(r) for r in issues(report) if r.rule_id == "field.min_amounts"]
+    assert msgs == [
+        "最低申購金額對不起來：參考條件表 10000／說明書 1",
+        "最低贖回商品面額對不起來：參考條件表 10000／說明書 1",
+    ]
+
+
+def test_monthly_coupon_derived_from_the_sheet_shows_the_sheet_side(tmp_path):
+    report = check(tmp_path, overrides={"Coupon p.a. (%)": 13})
+
+    [r] = [r for r in issues(report) if r.rule_id == "derive.monthly_coupon"]
+    msg = problem_message(r)
+    assert msg.startswith("月配息率 %：推算：13") and msg.endswith("（參考條件表 1.0833／說明書 1.0000）"), msg
+
+
+def test_price_derivation_names_the_underlying_the_same_way_for_both_issuers(tmp_path):
+    (tmp_path / "barc").mkdir()
+    (tmp_path / "hsbc").mkdir()
+    barc = check(tmp_path / "barc", Spec(price_overrides={(2, "ko"): "1.0000"}))
+    hsbc = hsbc_check(tmp_path / "hsbc", hsbc_synth.Spec(replacements={"70.0000": "71.0000"}))
+
+    assert any(problem_message(r).startswith("UL_2 KO價：") for r in issues(barc) if r.rule_id == "derive.prices")
+    assert any(problem_message(r).startswith("UL_1 執行價：") for r in issues(hsbc) if r.rule_id == "derive.prices")

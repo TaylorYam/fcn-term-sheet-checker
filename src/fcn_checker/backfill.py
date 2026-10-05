@@ -33,14 +33,14 @@ from .ingestion import IngestionError
 from .orders.reference import ReferenceRow
 from .rules.kit import Context, doc_review, result
 from .rules.reference import standard_field
-from .schema import CheckReport, CheckResult, OrderValue, ParsedField
+from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
 from .schema import CheckStatus as S
 from .standard_fields import AutocallSchedule
 
 SLOTS = 12
 FALLBACK_DATE_FORMAT = "yyyy/m/d"
 COLUMN_MISSING = "backfill_column_missing"
-COMPARE_DATES = "比價日"  # 比價日_1～12 合起來核對，錯訊用這個名稱
+COMPARE_DATES = "比價日"  # 比價日_1～12 合起來核對，項目用這個名稱
 
 
 class BackfillAction(StrEnum):
@@ -89,8 +89,9 @@ def _missing_columns(fmt: ReferenceFormat, row: ReferenceRow, stds: Sequence[str
     return out
 
 
-def _column_missing(rid: str, key: str, missing: list[str], ovs: list[OrderValue | None]) -> CheckResult:
-    return result(rid, key, S.REVIEW_REQUIRED, ov=ovs, reason=COLUMN_MISSING, message="無法回填：" + "；".join(missing))
+def _column_missing(rid: str, key: str, missing: list[str], ovs: list[OrderValue | None], item: Item) -> CheckResult:
+    message = "無法回填：" + "；".join(missing)
+    return result(rid, key, S.REVIEW_REQUIRED, ov=ovs, reason=COLUMN_MISSING, message=message, item=item)
 
 
 def _decide(fmt: ReferenceFormat, row: ReferenceRow, std: str, expected: Any) -> CellDecision:
@@ -133,15 +134,16 @@ def expected_slots(sched: AutocallSchedule, tenor: int | None, empty: str) -> li
 
 
 def _single(
-    rid: str, key: str, what: str, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
+    rid: str, key: str, what: str, name: str, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
 ) -> tuple[CheckResult, list[CellDecision]]:
-    """只有一格的回填欄位：表上值與說明書值比對並決定這一格的處理。"""
+    """只有一格的回填欄位：表上值與說明書值比對並決定這一格的處理。項目為該欄（沒有這欄時用 `name`）。"""
     ov: OrderValue | None = row.fields.get(key)
+    item = Item.column(name, [ov])
     missing = _missing_columns(fmt, row, [key])
     if missing:
-        return _column_missing(rid, key, missing, [ov]), []
+        return _column_missing(rid, key, missing, [ov], item), []
     if not pf.ok:
-        return doc_review(rid, key, pf, ov.value if ov else None, [ov]), []
+        return doc_review(rid, key, pf, ov.value if ov else None, [ov], item=item), []
     d = _decide(fmt, row, key, pf.value)
     ok = d.action != BackfillAction.MISMATCH
     return (
@@ -155,30 +157,32 @@ def _single(
             ov=[ov],
             reason="" if ok else "value_mismatch",
             message=_fill_message([d]) or ("" if ok else f"表上{what}與說明書不同，保留原值"),
+            item=item,
         ),
         [d],
     )
 
 
 def isin(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
-    return _single("backfill.isin", "isin", " ISIN ", fmt, row, standard_field(ctx, "isin"))
+    return _single("backfill.isin", "isin", " ISIN ", "ISIN Code", fmt, row, standard_field(ctx, "isin"))
 
 
 def issue_date(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
     """說明書發行日取自標準欄位 `issue_date`（BARC 第一章 §13(3)、HSBC 第一章 §15(2)）。"""
     key = "issue_date"
-    return _single("backfill.issue_date", key, "發行日", fmt, row, standard_field(ctx, key))
+    return _single("backfill.issue_date", key, "發行日", "發行日", fmt, row, standard_field(ctx, key))
 
 
 def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
     rid, key, sched = "backfill.compare_dates", "compare_dates", standard_field(ctx, "autocall_schedule")
     stds = [f"autocall_date_{n}" for n in range(1, SLOTS + 1)]
     ovs = [row.fields.get(s) for s in stds]
+    item = Item.group(COMPARE_DATES, ovs)
     missing = _missing_columns(fmt, row, stds)
-    if missing or not sched.ok:
-        problem = _column_missing(rid, key, missing, ovs) if missing else doc_review(rid, key, sched, None, ovs)
-        problem.column = COMPARE_DATES
-        return problem, []
+    if missing:
+        return _column_missing(rid, key, missing, ovs, item), []
+    if not sched.ok:
+        return doc_review(rid, key, sched, None, ovs, item=item), []
     tenor = standard_field(ctx, "tenor_months")
     slots = expected_slots(sched.value, tenor.value if tenor.ok else None, fmt.empty_value)
     if isinstance(slots, str):
@@ -191,16 +195,14 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
                 ov=ovs,
                 reason="compare_dates_unmapped",
                 message=slots,
-                column=COMPARE_DATES,
+                item=item,
             ),
             [],
         )
     decisions = [_decide(fmt, row, s, e) for s, e in zip(stds, slots, strict=True)]
     final = standard_field(ctx, "final_valuation_date")
     if not final.ok:
-        problem = doc_review(rid, key, final, None, ovs)
-        problem.column = COMPARE_DATES
-        return problem, decisions
+        return doc_review(rid, key, final, None, ovs, item=item), decisions
     latest = max(d for d in slots if isinstance(d, dt.date))
     if latest != final.value:
         return (
@@ -214,7 +216,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
                 ov=ovs,
                 reason="compare_dates_max_mismatch",
                 message=f"說明書最晚的比價日 {latest.isoformat()} 不等於最終比價日 {final.value.isoformat()}，不回填",
-                column=COMPARE_DATES,
+                item=item,
             ),
             decisions,
         )
@@ -232,7 +234,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
             reason="value_mismatch" if bad else "",
             message="；".join(x for x in (rule, _fill_message(decisions)) if x)
             + ("；表上值與說明書不同的格子保留原值" if bad else ""),
-            column=COMPARE_DATES,
+            item=item,
         ),
         decisions,
     )

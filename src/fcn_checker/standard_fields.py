@@ -65,6 +65,7 @@ class Occurrence:
     """審查標準規則涵蓋的一處出處；每處各自產生一筆結果。"""
 
     field: str  # 結果的欄位名稱（例：print_date_final）
+    name: str  # 結果的項目名稱，由上手隨出處交出；各上手同一件事用同一個名稱（例：刊印日期（最終版）、最低申購金額）
     where: str  # 說明書上的位置，用在結果訊息（例：第四章商品開始受理申購日期）
     value: ParsedField
 
