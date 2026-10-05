@@ -559,3 +559,19 @@ def test_app_id_is_windows_only(monkeypatch):
     monkeypatch.setattr(panel, "ctypes", NoCtypes())
     panel.set_windows_app_id()
     assert touched == []
+
+
+def test_window_icon_on_non_windows_only_uses_tk(monkeypatch):
+    """非 Windows 平台只交給 Tk 設圖示，不碰 Windows 專屬 API。"""
+    import fcn_checker.panel as panel
+
+    calls = []
+
+    class Root:
+        def iconbitmap(self, default=None):
+            calls.append(default)
+
+    monkeypatch.setattr(panel.sys, "platform", "linux")
+    monkeypatch.setattr(panel, "_set_window_icons", lambda hwnd: calls.append("win32"))
+    panel.apply_window_icon(Root())
+    assert calls == [str(panel.PANEL_ICON)]
