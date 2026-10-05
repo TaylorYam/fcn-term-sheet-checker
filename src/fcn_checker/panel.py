@@ -112,8 +112,11 @@ def _set_window_icons(hwnd: int) -> None:
             user32.SendMessageW(hwnd, 0x80, kind, icon)  # WM_SETICON
 
 
+FOLDERS_RECORD = Path(".local") / "panel_folders.json"  # 兩個選檔按鈕各自記住的上次資料夾（根目錄下）
+
+
 class LastFolders:
-    """選檔按鈕各自記住上一次選檔的資料夾（存在根目錄 .local/panel_folders.json）；讀寫失敗時當作沒有記錄。"""
+    """選檔按鈕各自記住上一次選檔的資料夾；讀寫失敗時當作沒有記錄。"""
 
     def __init__(self, path: Path):
         self.path = path
@@ -131,6 +134,7 @@ class LastFolders:
         return folder if isinstance(folder, str) and Path(folder).is_dir() else None
 
     def remember(self, kind: str, selected: Path) -> None:
+        """記下選取檔案所在的資料夾；寫不進去時略過，下次照舊由 Windows 決定。"""
         data = self._read()
         data[kind] = str(selected.parent)
         try:
@@ -344,7 +348,7 @@ class PanelWindow:
         self.shown: BatchPreview | None = None
         self.sheet_path: Path | None = None
         self.pdf_paths: tuple[Path, ...] = ()
-        self.folders = LastFolders(session.install_root / ".local" / "panel_folders.json")
+        self.folders = LastFolders(session.install_root / FOLDERS_RECORD)
         root.title("FCN Term Sheet 核對")
         scale = root.winfo_fpixels("1i") / 96
 
@@ -480,11 +484,11 @@ class PanelWindow:
                 parent=self.root,
                 title="選取參考條件表",
                 filetypes=[("Excel 參考條件表", "*.xlsx *.xlsm")],
-                initialdir=self.folders.initial("sheet"),
+                initialdir=self.folders.initial(kind),
             )
             if selected:
                 self.sheet_path = Path(selected)
-                self.folders.remember("sheet", self.sheet_path)
+                self.folders.remember(kind, self.sheet_path)
                 self.sheet_text.set(selected)
                 self._selection_changed()
             return
@@ -492,11 +496,11 @@ class PanelWindow:
             parent=self.root,
             title="選取說明書 PDF（可多選）",
             filetypes=[("PDF 說明書", "*.pdf")],
-            initialdir=self.folders.initial("pdf"),
+            initialdir=self.folders.initial(kind),
         )
         if selected:
             self.pdf_paths = tuple(Path(p) for p in selected)
-            self.folders.remember("pdf", self.pdf_paths[0])
+            self.folders.remember(kind, self.pdf_paths[0])
             names = "、".join(p.name for p in self.pdf_paths[:3])
             more = f" 等 {len(self.pdf_paths)} 份" if len(self.pdf_paths) > 3 else ""
             self.pdf_text.set(f"已選 {len(self.pdf_paths)} 份：{names}{more}")
