@@ -509,3 +509,41 @@ def test_double_click_launch_runs_from_the_root_and_ignores_old_update_pointer(t
     session = session_from_args(args)
     assert session.install_root == root.resolve(), "核對紀錄寫到根目錄的 runtime/"
     assert session.reference_format == (root / "config" / REFERENCE_FORMAT.name).resolve()
+
+
+# ---------------------------------------------------------------- 圖示
+
+
+def test_panel_icon_ships_every_windows_size():
+    """圖示放在套件內（pip install 後也找得到），且含桌面、工作列、標題列會用到的 16～256 各尺寸。"""
+    import struct
+
+    from fcn_checker.panel import PANEL_ICON
+
+    data = PANEL_ICON.read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", data)
+    assert (reserved, kind) == (0, 1), "必須是 Windows .ico"
+    sizes = {data[6 + 16 * i] or 256 for i in range(count)}  # 寬度 0 代表 256
+    assert sizes >= {16, 24, 32, 48, 256}
+
+
+def test_window_icon_failure_keeps_the_default_icon():
+    """圖示無法載入時不跳錯誤，PANEL 照常開啟。"""
+    import tkinter as tk
+
+    from fcn_checker.panel import apply_window_icon
+
+    class Root:
+        def iconbitmap(self, default=None):
+            raise tk.TclError(f'bitmap "{default}" not defined')
+
+    apply_window_icon(Root())
+
+
+def test_app_id_is_windows_only(monkeypatch):
+    """非 Windows 平台不碰 Windows 專屬 API。"""
+    import fcn_checker.panel as panel
+
+    monkeypatch.setattr(panel.sys, "platform", "linux")
+    monkeypatch.setattr(panel, "ctypes", None)  # 若被呼叫會 AttributeError
+    panel.set_windows_app_id()

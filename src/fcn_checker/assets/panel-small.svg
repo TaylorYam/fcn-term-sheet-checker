@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- PANEL 圖示簡化版：拿掉文字線與格線、加粗色塊與打勾，給 16、24px 使用。 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B4A5E"/><stop offset="1" stop-color="#161E2B"/></linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="48" fill="url(#bg)"/>
+  <g transform="rotate(-8 96 116)">
+    <rect x="28" y="36" width="120" height="152" rx="14" fill="#F1F3F7"/>
+    <path d="M28 50 a14 14 0 0 1 14 -14 H134 a14 14 0 0 1 14 14 V84 H28Z" fill="#E5484D"/>
+  </g>
+  <rect x="96" y="68" width="132" height="164" rx="14" fill="#FFFFFF"/>
+  <path d="M96 82 a14 14 0 0 1 14 -14 H214 a14 14 0 0 1 14 14 V114 H96Z" fill="#1F9D63"/>
+  <circle cx="190" cy="194" r="50" fill="#FFFFFF" stroke="#161E2B" stroke-width="12"/>
+  <path d="M164 196 l18 18 l32 -36" fill="none" stroke="#1F9D63" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
