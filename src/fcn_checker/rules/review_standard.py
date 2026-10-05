@@ -22,23 +22,47 @@ __all__ = ["review_standard_rules"]
 
 
 def _approval_date(ctx: Context) -> CheckResult:
-    rid, pf, item = (
-        "standard.approval_date",
-        standard_field(ctx, "approval_date"),
-        Item.standard("受託機構審查通過日期"),
-    )
+    """審查通過日期 = 審查標準中交易日當天或之前最近一次的日期（Issue #120）。"""
+    rid, pf, trade = "standard.approval_date", standard_field(ctx, "approval_date"), standard_field(ctx, "trade_date")
+    item = Item.standard("受託機構審查通過日期")
     if not pf.ok:
-        return doc_review(rid, "approval_date", pf, ctx.std.approval_date, item=item)
-    ok = pf.value == ctx.std.approval_date
+        return doc_review(rid, "approval_date", pf, item=item)
+    if not trade.ok:
+        return result(
+            rid,
+            "approval_date",
+            S.REVIEW_REQUIRED,
+            actual=pf.value,
+            pf=pf,
+            reason="trade_date_unavailable",
+            message="讀不到交易日，無法決定適用的審查通過日期",
+            item=item,
+        )
+    expected = ctx.std.approval_date_on(trade.value)
+    evidence = pf.evidence + trade.evidence
+    if expected is None:
+        first = ctx.std.approval_dates[0]
+        return result(
+            rid,
+            "approval_date",
+            S.REVIEW_REQUIRED,
+            actual=pf.value,
+            evidence=evidence,
+            reason="approval_date_not_configured",
+            message=f"交易日 {trade.value} 早於審查標準最早的審查通過日期 {first}，沒有適用的日期",
+            item=item,
+        )
+    ok = pf.value == expected
     return result(
         rid,
         "approval_date",
         S.PASS if ok else S.MISMATCH,
-        expected=ctx.std.approval_date,
+        expected=expected,
         actual=pf.value,
-        pf=pf,
+        evidence=evidence,
         reason="" if ok else "value_mismatch",
-        message="" if ok else "受託機構審查通過日期與審查標準不同（可能沿用舊審查日期）",
+        message=f"依交易日 {trade.value} 應為當天或之前最近一次的審查通過日期"
+        + ("" if ok else "（可能沿用舊審查日期）"),
         item=item,
     )
 

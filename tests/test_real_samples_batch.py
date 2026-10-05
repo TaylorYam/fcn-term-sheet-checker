@@ -67,7 +67,6 @@ def test_barc_rows_match_every_prefilled_field(outcome):
     ]
     assert len(paired) == 8, "參考條件表有 8 列 BARC"
     allowed = {
-        ("standard.approval_date", "value_mismatch"),  # 舊系列沿用前一次審查日期
         ("standard.product_name", "value_mismatch"),  # 較早的中文名稱沒有「（不保本）」
     }
     for item in paired:

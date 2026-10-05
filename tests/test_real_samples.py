@@ -55,13 +55,8 @@ def test_document_rules_only_flag_old_format_documents(reports):
                 CheckStatus.NOT_APPLICABLE,
             ):
                 flagged[(x.rule_id, x.field)] += 1
-    # 探勘結論：舊系列 6 份沿用前一次審查日期；較早 7 份中文名稱尚未加「（不保本）」；其餘全部成立
-    assert flagged == Counter(
-        {
-            ("standard.approval_date", "approval_date"): 6,
-            ("standard.product_name", "name_zh"): 7,
-        }
-    )
+    # 探勘結論：較早 7 份中文名稱尚未加「（不保本）」；舊系列 6 份寫的是交易日當時的審查通過日期，依交易日核對成立（#120）
+    assert flagged == Counter({("standard.product_name", "name_zh"): 7})
 
 
 def test_every_barc_sample_yields_isin_and_compare_dates_or_explicit_review(reports):
