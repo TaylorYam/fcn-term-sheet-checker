@@ -25,7 +25,7 @@ def _invalid(message: str) -> IngestionError:
     return IngestionError("approval_date_invalid", message)
 
 
-def parse_date(text: str) -> dt.date:
+def parse_input_date(text: str) -> dt.date:
     """PANEL 輸入的日期：YYYY-MM-DD 或 YYYY/MM/DD。"""
     try:
         return dt.date.fromisoformat(text.strip().replace("/", "-"))
@@ -42,6 +42,8 @@ def add(dates: tuple[dt.date, ...], new: dt.date) -> tuple[dt.date, ...]:
 
 def change_latest(dates: tuple[dt.date, ...], new: dt.date) -> tuple[dt.date, ...]:
     """修改最新一筆（修正打錯）；仍須晚於前一筆。"""
+    if dates and new == dates[-1]:
+        raise _invalid(f"最新一筆已經是 {new}，沒有變更。")
     if len(dates) >= 2 and new <= dates[-2]:
         raise _invalid(f"修改後的日期 {new} 必須晚於前一次的 {dates[-2]}；較早的日期不能修改。")
     return (*dates[:-1], new)
@@ -56,13 +58,14 @@ def remove_latest(dates: tuple[dt.date, ...]) -> tuple[dt.date, ...]:
 
 def _replace_once(pattern: re.Pattern[str], text: str, new: str, what: str) -> str:
     if len(pattern.findall(text)) != 1:
-        raise _invalid(f"審查標準設定檔的 {what} 寫法和預期不同，無法自動修改；請找維護者直接修改設定檔。")
+        raise IngestionError(
+            "config_invalid", f"審查標準設定檔的 {what} 寫法和預期不同，無法自動修改；請找維護者直接修改設定檔。"
+        )
     return pattern.sub(lambda _: new, text)
 
 
 def write(path: Path, dates: tuple[dt.date, ...], *, today: dt.date) -> int:
     """把日期清單寫回審查標準設定檔，version 加 1、effective_date 改為 today；回傳新的 version。"""
-    path = Path(path)
     current = load_review_standard(path)  # 原檔有問題時先在這裡回報，不覆寫
     with path.open(encoding="utf-8", newline="") as f:
         text = f.read()
@@ -89,5 +92,8 @@ def write(path: Path, dates: tuple[dt.date, ...], *, today: dt.date) -> int:
             if os.path.exists(tmp):
                 os.remove(tmp)
     except OSError as e:
-        raise _invalid(f"無法寫入審查標準設定檔 {path}：{e.strerror or e}。請確認檔案沒有被其他程式鎖住後再試。") from e
+        raise IngestionError(
+            "output_unwritable",
+            f"無法寫入審查標準設定檔 {path}：{e.strerror or e}。請確認檔案沒有被其他程式鎖住後再試。",
+        ) from e
     return version

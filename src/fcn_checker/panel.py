@@ -12,7 +12,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .approval_dates import parse_date
+from .approval_dates import parse_input_date
 from .batch import BatchItem, BatchPreview
 from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
@@ -394,7 +394,7 @@ class ApprovalDatesDialog(tk.Toplevel):
         messagebox.showinfo("審查通過日期", message, parent=self)
 
     def _date(self):
-        return parse_date(self.entry.get())
+        return parse_input_date(self.entry.get())
 
     def _add(self) -> None:
         self._run(lambda: self.session.add_approval_date(self._date()))

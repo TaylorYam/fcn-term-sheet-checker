@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from fcn_checker.approval_dates import parse_date
+from fcn_checker.approval_dates import parse_input_date
 from fcn_checker.config import load_review_standard
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel_workflow import PanelSession
@@ -155,6 +155,10 @@ def test_only_the_latest_date_can_be_changed(tmp_path):
     session.change_latest_approval_date(D(2026, 12, 10), today=TODAY)
     assert session.approval_dates() == (D(2025, 12, 18), D(2026, 6, 11), D(2026, 12, 10))
 
+    before = session.review_standard.read_bytes()
+    with pytest.raises(IngestionError, match="沒有變更"):
+        session.change_latest_approval_date(D(2026, 12, 10), today=TODAY)
+    assert session.review_standard.read_bytes() == before, "改成同一天不寫檔、不升版"
     with pytest.raises(IngestionError, match="必須晚於前一次的 2026-06-11"):
         session.change_latest_approval_date(D(2026, 6, 1), today=TODAY)
     assert session.approval_dates() == (D(2025, 12, 18), D(2026, 6, 11), D(2026, 12, 10))
@@ -201,12 +205,12 @@ def test_unexpected_file_layout_is_refused_without_writing(tmp_path):
 
 @pytest.mark.parametrize("text,date", [("2026-12-10", D(2026, 12, 10)), (" 2026/12/10 ", D(2026, 12, 10))])
 def test_panel_date_input_accepts_dashes_or_slashes(text, date):
-    assert parse_date(text) == date
+    assert parse_input_date(text) == date
 
 
 def test_panel_date_input_rejects_other_text():
     with pytest.raises(IngestionError, match="YYYY-MM-DD"):
-        parse_date("12/10")
+        parse_input_date("12/10")
 
 
 def test_write_failure_is_reported_and_the_file_is_kept(tmp_path, monkeypatch):
@@ -219,6 +223,6 @@ def test_write_failure_is_reported_and_the_file_is_kept(tmp_path, monkeypatch):
     monkeypatch.setattr("fcn_checker.approval_dates.os.replace", locked)
     with pytest.raises(IngestionError, match="無法寫入審查標準設定檔") as raised:
         session.add_approval_date(D(2026, 12, 10), today=TODAY)
-    assert raised.value.reason_code == "approval_date_invalid"
+    assert raised.value.reason_code == "output_unwritable"
     assert session.review_standard.read_bytes() == before
     assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]

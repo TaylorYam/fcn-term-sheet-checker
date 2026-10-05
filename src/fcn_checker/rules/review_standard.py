@@ -62,7 +62,7 @@ def _approval_date(ctx: Context) -> CheckResult:
         evidence=evidence,
         reason="" if ok else "value_mismatch",
         message=f"依交易日 {trade.value} 應為當天或之前最近一次的審查通過日期"
-        + ("" if ok else "（可能沿用舊審查日期）"),
+        + ("" if ok else "（可能沿用舊的審查通過日期）"),
         item=item,
     )
 
