@@ -261,7 +261,7 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
     item = outcome.items[0]
     r = only(item, "batch.issuer_prefix")
     assert (r.status, r.reason_code) == (REVIEW, "issuer_unsupported")
-    assert item.unsupported and item.report.status == REVIEW
+    assert item.unsupported and item.report.status == REVIEW and item.status_label == "未支援上手"
     assert not any(x.rule_id.startswith("field.") for x in item.report.results)
     [error] = error_rows(receipt.output)
     assert error["TDCC Code"] == spec.product_code, "取不到封面商品代號時用檔名前 12 碼"
@@ -582,7 +582,7 @@ def test_unreadable_pdf_does_not_stop_the_batch(tmp_path):
     broken = tmp_path / "029199990009_TS.pdf"
     broken.write_bytes(b"not a pdf")
     outcome, receipt, _ = batch(tmp_path, [broken, pdf_for(tmp_path, spec)], [reference_row(spec)])
-    assert outcome.items[0].report.status == ERROR
+    assert outcome.items[0].report.status == ERROR and outcome.items[0].status_label == "執行錯誤"
     assert outcome.items[1].report.status == PASS and receipt.filled(outcome.items[1])
     assert receipt.status == ERROR
     assert [e["PDF 檔名"] for e in error_rows(receipt.output)] == [broken.name]
