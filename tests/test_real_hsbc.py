@@ -27,7 +27,6 @@ def test_real_hsbc_samples_match_exploration():
     )
     assert bad == Counter(
         {
-            ("standard.approval_date", "value_mismatch"): 2,
             ("batch.pairing", "reference_row_missing"): 1,
         }
     )

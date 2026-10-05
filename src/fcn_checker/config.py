@@ -57,7 +57,7 @@ class IssuerStandard:
 class ReviewStandard:
     version: int
     effective_date: dt.date
-    approval_date: dt.date
+    approval_dates: tuple[dt.date, ...]  # 歷次審查通過日期，由舊到新
     chairman: str
     distributor_name: str
     distributor_phone: str
@@ -76,6 +76,10 @@ class ReviewStandard:
     print_date_max_days_after_trade: int
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
     distributor_phone_equivalents: tuple[str, ...] = ()
+
+    def approval_date_on(self, trade_date: dt.date) -> dt.date | None:
+        """交易日當天或之前最近一次的審查通過日期；交易日早於最早的日期時為 None。"""
+        return next((d for d in reversed(self.approval_dates) if d <= trade_date), None)
 
     def for_issuer(self, issuer: str) -> IssuerStandard:
         key = issuer.lower()
@@ -148,6 +152,20 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
     return tpl
 
 
+def _approval_dates(value: Any) -> tuple[dt.date, ...]:
+    """distributor.approval_dates：至少一筆、都是日期、不重複；回傳由舊到新。"""
+    where = "審查標準 distributor.approval_dates"
+    if not isinstance(value, list) or not value:
+        raise IngestionError("config_invalid", f"{where} 須列出至少一個審查通過日期，例如 [2025-12-18, 2026-06-11]")
+    bad = [v for v in value if type(v) is not dt.date]
+    if bad:
+        raise IngestionError("config_invalid", f"{where} 只能放日期（YYYY-MM-DD），不能是：{bad[0]!r}")
+    dup = sorted({d for d in value if value.count(d) > 1})
+    if dup:
+        raise IngestionError("config_invalid", f"{where} 有重複的日期：" + "、".join(d.isoformat() for d in dup))
+    return tuple(sorted(value))
+
+
 def load_review_standard(path: Path) -> ReviewStandard:
     d = _load(path, "審查標準")
     try:
@@ -155,7 +173,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
         return ReviewStandard(
             version=int(d["version"]),
             effective_date=d["effective_date"],
-            approval_date=d["distributor"]["approval_date"],
+            approval_dates=_approval_dates(d["distributor"]["approval_dates"]),
             chairman=d["distributor"]["chairman"],
             distributor_name=d["distributor"]["name"],
             distributor_phone=d["distributor"]["phone"],

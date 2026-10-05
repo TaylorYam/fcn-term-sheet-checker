@@ -123,6 +123,8 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
 
 設定檔：PANEL 讀專案根目錄 `config/` 的 `review_standard.toml`、`reference_sheet.toml` 與 `issuer_prefixes.toml`。畫面上方會顯示實際使用的設定檔路徑。
 
+**審查通過日期**：受託或銷售機構重新審查後，按設定檔路徑旁的「審查通過日期…」，輸入新的日期（YYYY-MM-DD）按「新增」；新日期須晚於目前最新的一筆，可以先輸入未來的日期。打錯時只能修改或刪除最新一筆，較早的日期不能改。每份說明書依交易日核對「當天或之前最近一次」的審查通過日期，所以舊說明書重新核對時仍以當時的日期為準。存檔時自動把 `review_standard.toml` 的 `version` 加 1、`effective_date` 改為當天，其餘內容與註解不動，並清除已載入的預覽與結果。改完請把設定提交到 main（例如請 Claude 開 PR），避免之後 `git pull` 時衝突。固定風險警語、商品名稱樣板等其他審查標準不在 PANEL 修改，改版時直接修改設定檔。
+
 ## 更新程式
 
 PANEL 只有維護者本人使用。更新方式：在專案資料夾執行 `git pull`，再重新雙擊 `setup_panel.cmd`。安裝會把程式複製進 `.venv`，只 `git pull` 不會生效。根目錄的 PDF、Excel、核對紀錄（`runtime/`）及 `config` 不受影響；新版的內建設定若有變更，需自行比較後導入根目錄 `config`。

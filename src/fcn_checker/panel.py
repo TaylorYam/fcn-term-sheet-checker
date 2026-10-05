@@ -12,6 +12,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .approval_dates import parse_input_date
 from .batch import BatchItem, BatchPreview
 from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
@@ -333,6 +334,78 @@ class ResultPane(ttk.Frame):
         _write(self.detail, result_detail(self.rows[selection[0]]))
 
 
+class ApprovalDatesDialog(tk.Toplevel):
+    """審查通過日期：列出歷次日期，新增晚於最新一筆的日期，或修改／刪除最新一筆（Issue #120）。"""
+
+    def __init__(self, parent: tk.Misc, session: PanelSession, pixels, changed: Callable[[], None]):
+        dates = session.approval_dates()  # 設定檔有問題時由呼叫端顯示原因，不開視窗
+        super().__init__(parent)
+        self.session, self.changed = session, changed
+        self.title("審查通過日期")
+        self.transient(parent)
+        self.resizable(False, False)
+        frame = ttk.Frame(self, padding=pixels(16))
+        frame.pack(fill="both", expand=True)
+        ttk.Label(
+            frame,
+            text="每份說明書依交易日，核對當天或之前最近一次的審查通過日期。\n"
+            "重新審查後新增新的日期；較早的日期不能修改，只能修改或刪除最新一筆。",
+            wraplength=pixels(520),
+        ).grid(row=0, column=0, columnspan=4, sticky="w")
+        self.listbox = tk.Listbox(frame, height=8, font=("Microsoft JhengHei UI", 11), activestyle="none")
+        self.listbox.grid(row=1, column=0, columnspan=4, sticky="ew", pady=pixels(10))
+        ttk.Label(frame, text="日期（YYYY-MM-DD）").grid(row=2, column=0, sticky="w")
+        self.entry = ttk.Entry(frame, width=14, font=("Microsoft JhengHei UI", 11))
+        self.entry.grid(row=2, column=1, sticky="w", padx=(pixels(8), 0))
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=3, column=0, columnspan=4, sticky="w", pady=(pixels(12), 0))
+        for text, command in (
+            ("新增", self._add),
+            ("把最新一筆改成這個日期", self._change),
+            ("刪除最新一筆", self._remove),
+            ("關閉", self.destroy),
+        ):
+            ttk.Button(buttons, text=text, command=command).pack(side="left", padx=(0, pixels(8)))
+        self._show(dates)
+        self.update_idletasks()  # 置中在主視窗上
+        x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.entry.focus_set()
+        self.grab_set()
+
+    def _show(self, dates: tuple) -> None:
+        self.dates = dates
+        self.listbox.delete(0, "end")
+        for i, d in enumerate(dates):
+            self.listbox.insert("end", f"{d}{'（最新）' if i == len(dates) - 1 else ''}")
+
+    def _run(self, action: Callable[[], str], confirm: str | None = None) -> None:
+        if confirm and not messagebox.askyesno("審查通過日期", confirm, parent=self):
+            return
+        try:
+            message = action()
+        except IngestionError as e:
+            messagebox.showerror("審查通過日期", str(e), parent=self)
+            return
+        self.entry.delete(0, "end")
+        self._show(self.session.approval_dates())
+        self.changed()
+        messagebox.showinfo("審查通過日期", message, parent=self)
+
+    def _date(self):
+        return parse_input_date(self.entry.get())
+
+    def _add(self) -> None:
+        self._run(lambda: self.session.add_approval_date(self._date()))
+
+    def _change(self) -> None:
+        self._run(lambda: self.session.change_latest_approval_date(self._date()))
+
+    def _remove(self) -> None:
+        self._run(self.session.remove_latest_approval_date, f"確定刪除最新一筆審查通過日期 {self.dates[-1]}？")
+
+
 class PanelWindow:
     def __init__(self, root: tk.Tk, session: PanelSession):
         self.root, self.session = root, session
@@ -407,9 +480,13 @@ class PanelWindow:
         self.save_button.pack(side="left", padx=(12, 0))
         self.controls += [self.reload]
         configs = "；".join(f"{label}：{path}" for label, path in session.config_paths)
-        ttk.Label(frame, text="使用的設定檔：" + configs, style="Small.TLabel", wraplength=pixels(1100)).grid(
-            row=5, column=0, columnspan=3, sticky="w", pady=(0, 8)
+        ttk.Label(frame, text="使用的設定檔：" + configs, style="Small.TLabel", wraplength=pixels(1000)).grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
+        self.pixels = pixels
+        approval_button = ttk.Button(frame, text="審查通過日期…", command=self.edit_approval_dates)
+        approval_button.grid(row=5, column=2, sticky="e", pady=(0, 8))
+        self.controls.append(approval_button)
         ttk.Label(frame, text="預覽與核對結果", style="Section.TLabel").grid(row=6, column=0, columnspan=3, sticky="w")
         self.tabs = ttk.Notebook(frame)
         self.tabs.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(6, 10))
@@ -634,6 +711,20 @@ class PanelWindow:
         if self.session.outcome is None:
             self._clear()
         self.status.set(receipt.summary)
+
+    def edit_approval_dates(self):
+        if self._busy_any():
+            return
+        try:
+            ApprovalDatesDialog(self.root, self.session, self.pixels, self._approval_dates_changed)
+        except IngestionError as e:
+            messagebox.showerror("審查通過日期", str(e), parent=self.root)
+
+    def _approval_dates_changed(self):
+        """設定檔已改寫：工作階段已清除預覽與結果，畫面跟著清空。"""
+        self._clear()
+        self.status.set(self.session.message)
+        self._busy(False)
 
     def _watch_sources(self):
         if self.closed:

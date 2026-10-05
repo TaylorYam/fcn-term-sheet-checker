@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from . import approval_dates as approvals
 from .batch import (
     BatchItem,
     BatchOutcome,
@@ -21,6 +22,7 @@ from .batch import (
     preview_batch,
 )
 from .check_config import CONFIG_DIR, DEFAULTS, ConfigPaths
+from .config import load_review_standard
 from .ingestion import IngestionError, SourceSnapshot
 from .issuers import REGISTRY, Issuer
 from .saving import SaveReceipt, save_batch
@@ -126,6 +128,32 @@ class PanelSession:
     @property
     def config_paths(self) -> tuple[tuple[str, Path], ...]:
         return self.paths.labelled
+
+    def approval_dates(self) -> tuple[dt.date, ...]:
+        """目前審查標準的歷次審查通過日期（由舊到新）；設定檔有問題時丟出 IngestionError。"""
+        return load_review_standard(self.review_standard).approval_dates
+
+    def add_approval_date(self, new: dt.date, *, today: dt.date | None = None) -> str:
+        """新增審查通過日期（須晚於最新一筆），寫回設定檔。"""
+        return self._write_approval_dates(approvals.add(self.approval_dates(), new), today)
+
+    def change_latest_approval_date(self, new: dt.date, *, today: dt.date | None = None) -> str:
+        """修改最新一筆審查通過日期（修正打錯）；較早的日期不能改。"""
+        return self._write_approval_dates(approvals.change_latest(self.approval_dates(), new), today)
+
+    def remove_latest_approval_date(self, *, today: dt.date | None = None) -> str:
+        """刪除最新一筆審查通過日期；至少保留一筆。"""
+        return self._write_approval_dates(approvals.remove_latest(self.approval_dates()), today)
+
+    def _write_approval_dates(self, dates: tuple[dt.date, ...], today: dt.date | None) -> str:
+        """寫回設定檔後清除預覽與結果（設定檔已變更），回傳 PANEL 要顯示的訊息。"""
+        version = approvals.write(self.review_standard, dates, today=today or dt.date.today())
+        self._clear()
+        self.message = (
+            f"審查通過日期已更新，最新為 {dates[-1]}（審查標準 version {version}），請重新載入預覽。"
+            "記得請 Claude 把設定提交到 main。"
+        )
+        return self.message
 
     def select(self, reference_sheet: Path | None, term_sheets: Sequence[Path]) -> None:
         self.reference_sheet = Path(reference_sheet).resolve() if reference_sheet is not None else None
