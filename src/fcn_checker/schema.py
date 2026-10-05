@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -119,6 +120,27 @@ class ParsedField:
     @classmethod
     def invalid(cls, name: str, lines: list[Line], note: str = "") -> ParsedField:
         return cls(name, FieldStatus.INVALID, None, [Evidence.of(x) for x in lines], note=note)
+
+    @classmethod
+    def from_hits(
+        cls,
+        name: str,
+        hits: Sequence[tuple[Any, Sequence[Line]]],
+        *,
+        missing_note: str = "",
+        ambiguous_note: str = "",
+    ) -> ParsedField:
+        """說明書多處取到的值（值, 原文行）合併：沒有 → 缺漏；不同的值 → 歧義（依出現順序列出）；都相同 → 存在。"""
+        if not hits:
+            return cls.missing(name, missing_note)
+        values: list[Any] = []
+        for v, _ in hits:
+            if v not in values:
+                values.append(v)
+        lines = [ln for _, lns in hits for ln in lns]
+        if len(values) > 1:
+            return cls.ambiguous(name, values, lines, ambiguous_note)
+        return cls.present(name, values[0], lines)
 
     @property
     def ok(self) -> bool:

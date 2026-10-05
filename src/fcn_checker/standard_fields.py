@@ -48,6 +48,7 @@ class PriceRow:
     ticker: str | None  # 價格列上的彭博代號；表上沒有代號時為 None，以 `underlyings` 同順序的代號為準
     prices: dict[str, Decimal]  # initial／strike／ko／ki；說明書無 KI 時沒有 ki
     evidence: tuple[Evidence, ...]
+    name: str | None = None  # 價格列上的標的名稱；只在讀不到標的代號時用來指出是哪一檔
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "isin": "str：ISIN",
     "currency_zh": "str：中文幣別（例：美元），由審查標準對照 ISO 代碼",
     "underlyings": "list[str]：標的彭博代號，依說明書順序",
-    "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據）",
+    "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據、標的名稱）",
     "strike_pct": "Decimal：執行價為最初價格的 N%，保留說明書顯示位數",
     "ko_pct": "Decimal：KO 價為最初價格的 N%，保留說明書顯示位數",
     "ki_pct": "Decimal：下限價為最初價格的 N%，保留說明書顯示位數；無 KI 時不讀",

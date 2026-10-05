@@ -420,6 +420,39 @@ def test_release_only_applies_to_the_current_result(tmp_path):
         session.release(stale)
 
 
+# ---------------------------------------------------------------- 待處理
+
+
+def test_not_covered_is_grouped_by_issuer_without_overwriting(tmp_path):
+    import hsbc_synth
+    from fcn_checker.issuers import BARC, HSBC
+
+    barc, hsbc = Spec(), hsbc_synth.Spec()
+    pdfs = [
+        build_pdf(tmp_path / f"{barc.product_code}_TS.pdf", barc),
+        hsbc_synth.build_pdf(tmp_path / f"{hsbc.code}_TS.pdf", hsbc),
+        build_pdf(tmp_path / "029199990002_TS.pdf", Spec(product_code="029199990002")),
+    ]
+    inquiry = openpyxl.load_workbook(hsbc_synth.build_inquiry(tmp_path / "hsbc.xlsx", hsbc))["樣本清單"]
+    hsbc_row = {c.value: inquiry.cell(4, c.column).value for c in inquiry[3]}
+    rows = [reference_row(barc), hsbc_row, reference_row(Spec(product_code="029199990002"))]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
+    session = session_for(tmp_path, sheet, pdfs)
+    session.load_preview()
+    outcome = session.start_check()
+
+    groups = {g.issuer: g.descriptions for g in outcome.not_covered}
+    assert list(groups) == ["BARC", "HSBC"]
+    for issuer in (BARC, HSBC):
+        assert groups[issuer.code] == tuple(n["description"] for n in issuer.not_covered), "同一家只列一次"
+    shared = {"doc.underlying_names", "field.monthly_ki"}
+    for rule_id in shared:  # 兩家都有、說明不同的 rule_id 各自保留
+        for issuer in (BARC, HSBC):
+            (desc,) = [n["description"] for n in issuer.not_covered if n["rule_id"] == rule_id]
+            assert desc in groups[issuer.code]
+    assert outcome.not_covered_count == len(BARC.not_covered) + len(HSBC.not_covered)
+
+
 # ---------------------------------------------------------------- 設定檔與啟動參數
 
 

@@ -214,6 +214,31 @@ def _reads_annual_coupon(ctx):
     return [problem or result("fake.sheet_read", "coupon_pa_pct", PASS, expected=annual, ov=[ov], item=item)]
 
 
+class _StandardOnly:
+    """只交標準欄位的讀出結果：上手專屬欄位一律沒有。"""
+
+    def __init__(self, ts):
+        self._ts, self.full_text = ts, ts.full_text
+
+    def f(self, name):
+        from fcn_checker.standard_fields import is_standard, not_provided
+
+        return self._ts.f(name) if is_standard(name) else not_provided(name)
+
+
+def test_price_derivation_applies_to_an_issuer_that_only_provides_standard_fields(tmp_path):
+    from fcn_checker.parsers import barc as parser
+
+    adapter = barc_adapter(read=lambda lines: _StandardOnly(parser.read(lines)), rules=lambda ctx: [])
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    report = check_all(sheet, [pdf], CONFIG.with_registry((adapter,))).items[0].report
+    prices = [r for r in report.results if r.rule_id == "derive.prices"]
+    assert prices and {r.status for r in prices} == {PASS}, "價格推算只讀標準欄位，所有上手沿用"
+    assert {r.item.name for r in prices} >= {"UL_1 執行價", "UL_1 KO價", "UL_2 執行價"}
+
+
 def test_issuer_rules_read_only_the_reference_sheet_fields_they_declare(tmp_path):
     report = _check_with_issuer_rules(tmp_path / "declared", _reads_annual_coupon, reference_fields=("coupon_pa_pct",))
     r = only(report, "fake.sheet_read")

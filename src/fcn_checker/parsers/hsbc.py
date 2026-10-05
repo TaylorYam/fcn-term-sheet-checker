@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..text import squash
+from ..text import full_brackets, squash
 from . import hsbc_tables as tables
 from .layout import Document, LayoutSpec, TextIndex, parse_date
 
@@ -27,11 +27,8 @@ def document(lines: Sequence[Line]) -> Document:
 
 def capture(name: str, lines: list[Line], pattern: str, convert: Callable = lambda x: x) -> ParsedField:
     ti = TextIndex(lines)
-    matches = list(ti.finditer(pattern))
-    if not matches:
-        return ParsedField.missing(name, "找不到欄位標籤或已知寫法")
-    values, evidence = [], []
-    for m in matches:
+    hits = []
+    for m in ti.finditer(pattern):
         lns = ti.lines_for(m.start(), m.end())
         try:
             value = convert(m[1])
@@ -39,12 +36,8 @@ def capture(name: str, lines: list[Line], pattern: str, convert: Callable = lamb
             return ParsedField.invalid(name, lns)
         if value is None:
             return ParsedField.invalid(name, lns)
-        if value not in values:
-            values.append(value)
-        evidence.extend(lns)
-    if len(values) != 1:
-        return ParsedField.ambiguous(name, values, evidence)
-    return ParsedField.present(name, values[0], evidence)
+        hits.append((value, lns))
+    return ParsedField.from_hits(name, hits, missing_note="找不到欄位標籤或已知寫法")
 
 
 def product_code(lines: Sequence[Line]) -> ParsedField:
@@ -107,7 +100,7 @@ def _standard_prices(table: ParsedField) -> ParsedField:
     if not table.ok:
         return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
     value = tuple(
-        standard_fields.PriceRow(r["ticker"], dict(r["prices"]), tuple(Evidence.of(ln) for ln in lns))
+        standard_fields.PriceRow(r["ticker"], dict(r["prices"]), tuple(Evidence.of(ln) for ln in lns), r.get("label"))
         for r, lns in zip(table.value["rows"], table.value["row_lines"], strict=True)
     )
     return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
@@ -133,7 +126,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         return Decimal(x.replace(",", ""))
 
     def legal_name(x):
-        s = squash(x).translate(str.maketrans({"(": "（", ")": "）"}))
+        s = full_brackets(squash(x))
         if "THE" in s and "（" not in s:
             s = s.replace("THE", "（THE", 1) + "）"
         return s

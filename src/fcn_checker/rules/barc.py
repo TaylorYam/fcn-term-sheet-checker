@@ -14,23 +14,22 @@ from decimal import ROUND_HALF_UP, Decimal
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
-from ..text import squash
+from ..text import full_brackets, squash
 from .kit import (
     HEADER_PCT_ITEM,
+    Q4,
     IssuerContext,
-    doc_ki,
     doc_review,
+    next_weekday,
     order_value,
-    price_item,
     result,
+    shown,
     to_decimal,
     to_int,
 )
 
-Q4 = Decimal("0.0001")
 MONTHLY_TOLERANCE = Decimal("0.0001")
 PRICE_LABEL = {"strike": "執行價", "ko": "KO 價", "ki": "下限價（觸及生效價）"}
-PRICE_PCT_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}
 
 # 第二階段或暫不核對的規則：列入報告「未涵蓋」區，不影響也不假裝通過
 NOT_COVERED: list[dict[str, str]] = [
@@ -132,87 +131,10 @@ def coupon_consistency(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-def prices(ctx: IssuerContext) -> list[CheckResult]:
-    """各標的執行／KO／下限價 = 最初價格 × 對應百分比，四捨五入（half-up）到 4 位。"""
-    rid, item = "derive.prices", Item.expected("價格表")
-    table, uls = ctx.ts.f("price_table"), ctx.ts.f("underlyings")
-    if not table.ok:
-        return [doc_review(rid, "price_table", table, item=item)]
-    rows = ctx.ts.price_rows
-    if uls.ok and len(uls.value) != len(rows):
-        return [
-            result(
-                rid,
-                "price_table",
-                S.REVIEW_REQUIRED,
-                expected=len(uls.value),
-                actual=len(rows),
-                pf=table,
-                reason="price_table_row_count",
-                message="價格表列數與標的數不同",
-                item=item,
-            )
-        ]
-    has_ki_col = all("ki" in r.values for r in rows)
-    kt = ctx.ts.f("ki_type")
-    doc_ki_ = doc_ki(kt)
-    if doc_ki_ is None:
-        return [doc_review(rid, "price_table", kt, item=item)]
-    if (doc_ki_ != "none") != has_ki_col:
-        return [
-            result(
-                rid,
-                "price_table",
-                S.REVIEW_REQUIRED,
-                pf=table,
-                reason="price_table_ki_column",
-                message="價格表有無觸及生效價格欄與 §15 定義不一致",
-                item=item,
-            )
-        ]
-    out = []
-    for i, row in enumerate(rows):
-        label = uls.value[i] if uls.ok else (row.name or f"第 {i + 1} 檔標的")
-        ev = [Evidence.of(ln) for ln in row.lines]
-        for col in ("strike", "ko", "ki"):
-            if col not in row.values:
-                continue
-            field, price = f"{label} {PRICE_LABEL[col]}", Item.expected(price_item(i + 1, col))
-            pct = ctx.ts.f(PRICE_PCT_FIELD[col])
-            if not pct.ok:
-                out.append(doc_review(rid, field, pct, item=price))
-                continue
-            expected = (row.values["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP)
-            ok = expected == row.values[col]
-            out.append(
-                result(
-                    rid,
-                    field,
-                    S.PASS if ok else S.MISMATCH,
-                    expected=expected,
-                    actual=row.values[col],
-                    evidence=ev + pct.evidence,
-                    reason="" if ok else "value_mismatch",
-                    tolerance="四捨五入（half-up）到 4 位",
-                    message=f"最初價格 {row.values['initial']} × {pct.value}%",
-                    item=price,
-                )
-            )
-    return out
-
-
 # ---------------------------------------------------------------- 說明書內部規則
 
 
 # ---------------------------------------------------------------- 配息表與提前出場表（第二階段）
-
-
-def _next_weekday(d: dt.date) -> dt.date:
-    """後 1 個平日（只排除週末；沒有假日曆，核對規則 §3.8）。"""
-    d += dt.timedelta(days=1)
-    while d.weekday() >= 5:
-        d += dt.timedelta(days=1)
-    return d
 
 
 def _row_ev(rows: list[ScheduleRow]) -> list[Evidence]:
@@ -388,7 +310,7 @@ def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
         if start == NA:
             if k and prev_end != NA:
                 bad.append(r)
-        elif not isinstance(prev_end, dt.date) or start != _next_weekday(prev_end):
+        elif not isinstance(prev_end, dt.date) or start != next_weekday(prev_end):
             bad.append(r)
     return result(
         rid,
@@ -469,12 +391,11 @@ def scenario_price_table(ctx: IssuerContext) -> CheckResult:
 # ---------------------------------------------------------------- 文件內重複出現處（Issue #38）
 
 _NAME_SUFFIX = "（下稱「本商品」）"
-_BRACKETS = str.maketrans({"(": "（", ")": "）"})
 
 
 def _same_text(a: str, b: str) -> bool:
     """去空白、括號全半形不計（同審查標準商品名稱的寬鬆度）。"""
-    return squash(a).translate(_BRACKETS) == squash(b).translate(_BRACKETS)
+    return full_brackets(squash(a)) == full_brackets(squash(b))
 
 
 def _equal(
@@ -509,7 +430,7 @@ def name_consistency(ctx: IssuerContext) -> list[CheckResult]:
         ctx.ts.f("title_name"),
         cover,
         # 括號先統一為全形，半形的「(下稱「本商品」)」也要去掉
-        squash(cover.value).translate(_BRACKETS).replace(_NAME_SUFFIX, "") if cover.ok else None,
+        full_brackets(squash(cover.value)).replace(_NAME_SUFFIX, "") if cover.ok else None,
         "封面標題須等於封面「商品中文名稱」（去掉「（下稱「本商品」）」）",
     )
     art1 = _equal(
@@ -658,12 +579,6 @@ def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-def _shown(value: Decimal, like: Decimal) -> Decimal:
-    """依說明書顯示位數四捨五入（half-up）。"""
-    exp = like.as_tuple().exponent
-    return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
-
-
 def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
     """§16(3) 有利情況：總報酬率 = 月配息率 × 配息期數；一般情況：總報酬率 = 月配息率 × 總期數、
     平均年化報酬率 = 正式年利率。有利情況的年化率取決於持有期間，不核對（列未涵蓋）。"""
@@ -683,7 +598,7 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
             continue
         periods = pf.value["periods"] if name == "scenario_favourable" else len(table.value.rows)
         total = pf.value["total"]
-        expected = _shown(monthly.value * periods, total)
+        expected = shown(monthly.value * periods, total)
         ok = expected == total
         out.append(
             result(
@@ -705,7 +620,7 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
                 out.append(doc_review(rid, f"{name}_annualized", annual, item=annualized_item))
                 continue
             ann = pf.value["annualized"]
-            ok = _shown(annual.value, ann) == ann
+            ok = shown(annual.value, ann) == ann
             out.append(
                 result(
                     rid,
@@ -767,7 +682,7 @@ def observation_t_range(ctx: IssuerContext) -> CheckResult:
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
-    """參考條件表欄位規則（rules/reference.py）之後執行：月配息率推算，再加上說明書內部規則與審查標準。"""
+    """月配息率推算，再加上說明書內部規則（價格推算是各上手共用規則，見 rules/derivation.py）。"""
     return [monthly_coupon(ctx), *document_rules(ctx)]
 
 
@@ -775,7 +690,6 @@ def document_rules(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：不使用參考條件表的值。"""
     return [
         *coupon_consistency(ctx),
-        *prices(ctx),
         *coupon_dates(ctx),
         *final_period(ctx),
         *autocall_dates(ctx),

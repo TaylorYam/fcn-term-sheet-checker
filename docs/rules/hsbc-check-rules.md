@@ -170,7 +170,8 @@
 | `field.product_code`、`backfill.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | 參考條件表核心條件（共用 `rules/reference.py`，§3.2） |
 | `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`backfill.compare_dates` | 型態、首可 KO 期與比價日（共用） |
 | `field.underlyings`、`field.underlying_prices` | 標的順序／尾碼與各標的四位價格（共用） |
-| `derive.prices`、`doc.price_header_pct` | 價格 = 期初股價 × 百分比；表頭百分比 = 定義句（HSBC 說明書內部） |
+| `derive.prices` | 價格 = 期初股價 × 百分比（half-up 4 位）；價格表列數須等於標的數、有無下限價欄須與 KI 型態一致，否則轉人工覆核（各上手共用 `rules/derivation.py`，BARC 語意，Issue #94；兩項表格檢查為此新增，項目名稱為「UL_n 執行價／KO價／下限價」） |
+| `doc.price_header_pct` | 表頭百分比 = 定義句（HSBC 說明書內部；價格表讀不到時與情境表一起轉人工覆核） |
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
 | `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 = 交易日、兩個刊印日期在允許天數內（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
 | `doc.currency_consistency`、`doc.name_consistency` | 文件重複欄位 |

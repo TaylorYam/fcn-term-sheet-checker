@@ -100,6 +100,22 @@ def price_item(n: int, col: str) -> str:
 
 # ---------------------------------------------------------------- 共用
 
+Q4 = Decimal("0.0001")  # 價格與月配息率四捨五入到 4 位
+
+
+def next_weekday(d: dt.date) -> dt.date:
+    """後 1 個平日（只排除週末；沒有假日曆）。"""
+    d += dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+
+def shown(value: Decimal, like: Decimal) -> Decimal:
+    """依說明書顯示位數（`like` 的小數位數）四捨五入（half-up）。"""
+    exp = like.as_tuple().exponent
+    return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
+
 
 def read_standard(ts: TermSheet, name: str) -> ParsedField:
     """共用規則讀說明書欄位的唯一方式：只能讀標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
@@ -257,8 +273,7 @@ def doc_ki(pf: ParsedField) -> str | None:
 
 def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
     """百分比：下單值依說明書顯示位數四捨五入（half-up）後比對。"""
-    exp = doc_v.as_tuple().exponent
-    q = order_v.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else order_v
+    q = shown(order_v, doc_v)
     return q == doc_v, q
 
 

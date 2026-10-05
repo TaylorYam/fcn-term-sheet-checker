@@ -6,18 +6,15 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import re
-from decimal import ROUND_HALF_UP, Decimal
 
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
-from ..text import squash
+from ..text import full_brackets, squash
 from . import hsbc_scenario, kit
 from .kit import IssuerContext
 
 ISSUER = "HSBC"
-Q4 = Decimal("0.0001")
 NOT_COVERED = [
     {"rule_id": "doc.underlying_names", "description": "標的中文名稱與外部交易所對照表不核對；以彭博代號為準"},
     {"rule_id": "doc.scenario_complex", "description": "情境股數、零股及最差情境完整贖回重算不核對"},
@@ -105,10 +102,7 @@ def schedules(ctx):
             if row["period"] <= k:
                 valid &= row["start"] is None and row["nt"] is None
             else:
-                prev = rows[i - 1]["end"] + dt.timedelta(days=1)
-                while prev.weekday() >= 5:
-                    prev += dt.timedelta(days=1)
-                valid &= row["start"] == prev and row["nt"] is not None
+                valid &= row["start"] == kit.next_weekday(rows[i - 1]["end"]) and row["nt"] is not None
                 valid &= row["start"] is not None and row["start"] <= row["end"]
         out.append(
             check(
@@ -148,25 +142,16 @@ def schedules(ctx):
     return out
 
 
-def prices(ctx):
+def price_headers(ctx):
+    """價格表欄頭百分比與情境試算價格表（價格推算是各上手共用規則，見 rules/derivation.py）。"""
     pf = ctx.ts.f("price_table")
     scenario = ctx.ts.f("scenario_table")
     if not pf.ok:
         return [
             kit.doc_review(rid, "prices", pf, item=PRICE_TABLE)
-            for rid in ["derive.prices", "doc.price_header_pct", "doc.scenario_table"]
+            for rid in ["doc.price_header_pct", "doc.scenario_table"]
         ]
-    rows = pf.value["rows"]
     out = []
-    for i, row in enumerate(rows, start=1):
-        for col in ["strike", "ko", "ki"]:
-            actual = row["prices"].get(col)
-            if actual is None:
-                continue
-            pct = ctx.ts.f(col + "_pct")
-            exp = (row["prices"]["initial"] * pct.value / 100).quantize(Q4, ROUND_HALF_UP) if pct.ok else None
-            name = kit.price_item(i, col)
-            out.append(check("derive.prices", f"underlying_{i}_{col}_price", name, [pf, pct], exp, actual))
     headers = pf.value["headers"]
     for col in ["strike", "ko", "ki"]:
         pct = ctx.ts.f(col + "_pct")
@@ -215,7 +200,7 @@ def document_info(ctx):
     )
 
     def norm(s):
-        return squash(s).translate(str.maketrans({"(": "（", ")": "）"}))
+        return full_brackets(squash(s))
 
     zh = f("name_zh")
     en = f("name_en")
@@ -233,7 +218,7 @@ def document_info(ctx):
 
 def run_all(ctx: IssuerContext) -> list:
     """說明書內部規則：只用讀出結果與審查標準，不碰參考條件表。"""
-    out = prices(ctx)
+    out = price_headers(ctx)
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
     out.extend(hsbc_scenario.run(ctx))
