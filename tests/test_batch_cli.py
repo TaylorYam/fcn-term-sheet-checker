@@ -20,7 +20,7 @@ def test_all_pass_exit_code_zero_and_prints_each_pdf_and_result_file(tmp_path, m
     spec = Spec()
     code, out, pdfs = run(tmp_path, monkeypatch, capsys, [spec], [reference_row(spec)])
     assert code == 0
-    assert f"PASS（通過）  {pdfs[0].name}" in out.out
+    assert f"通過  {pdfs[0].name}" in out.out
     assert "已回填" in out.out
     new = list((tmp_path / "reports").glob("FCN參考條件_核對結果_*.xlsx"))
     assert len(new) == 1 and f"核對結果檔：{new[0]}" in out.out
@@ -42,7 +42,7 @@ def test_mismatch_or_unsupported_issuer_exit_code_one(tmp_path, monkeypatch, cap
     spec, other = Spec(), Spec(product_code="999199990001")
     code, out, _ = run(tmp_path, monkeypatch, capsys, [spec, other], [reference_row(spec, **{"K(%)": 71})])
     assert code == 1
-    assert "MISMATCH（不一致）" in out.out and "未支援上手" in out.out
+    assert "不一致  " in out.out and "MISMATCH" not in out.out and "未支援上手" in out.out
 
 
 def test_batch_error_exit_code_two_and_no_result_file(tmp_path, monkeypatch, capsys):

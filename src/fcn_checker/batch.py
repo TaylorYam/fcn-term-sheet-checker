@@ -73,6 +73,15 @@ _BY_STATUS = {
     CheckStatus.ERROR: Category.ERROR,
 }
 
+# 配對有問題時，狀態標籤直接寫原因，不必點進明細才知道要補參考條件表還是檢查檔案
+_PAIRING_LABELS = {
+    "reference_row_missing": "條件表找不到這筆",
+    "reference_row_duplicate": "條件表有重複列",
+    SHARED_ROW: "多份對到同一列",
+    "reference_issuer_mismatch": "條件表發行機構不符",
+    "issuer_prefix_mismatch": "檔名上手編號不符",
+}
+
 
 @dataclass
 class BatchItem:
@@ -111,12 +120,16 @@ class BatchItem:
 
     @property
     def status_label(self) -> str:
+        """PANEL 清單與 CLI 顯示的白話狀態：配對問題直接寫原因，其餘只寫中文狀態。"""
         category, original = self.category, STATUS_ZH[self.report.status]
         if category == Category.UNSUPPORTED:
             return category.value
         if category == Category.RELEASED:
             return f"{category.value}（原：{original}）"
-        return f"{self.report.status.value}（{original}）"
+        for r in self.report.results:
+            if r.status.is_problem and r.reason_code in _PAIRING_LABELS:
+                return _PAIRING_LABELS[r.reason_code]
+        return original
 
     @property
     def problem_messages(self) -> tuple[str, ...]:
