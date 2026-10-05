@@ -575,3 +575,43 @@ def test_window_icon_on_non_windows_only_uses_tk(monkeypatch):
     monkeypatch.setattr(panel, "_set_window_icons", lambda hwnd: calls.append("win32"))
     panel.apply_window_icon(Root())
     assert calls == [str(panel.PANEL_ICON)]
+
+
+# ---------------------------------------------------------------- 選檔起始資料夾
+
+
+def test_file_dialogs_remember_each_kind_across_restarts(tmp_path):
+    """參考條件表與說明書各自記住上一次選檔的資料夾；重新建立（重開 PANEL）後仍讀得到。"""
+    from fcn_checker.panel import LastFolders
+
+    sheets, pdfs = tmp_path / "條件表", tmp_path / "說明書"
+    sheets.mkdir()
+    pdfs.mkdir()
+    record = tmp_path / ".local" / "panel_folders.json"
+    folders = LastFolders(record)
+    assert folders.initial("sheet") is None, "還沒選過時交給 Windows 決定"
+
+    folders.remember("sheet", sheets / "FCN參考條件.xlsx")
+    folders.remember("pdf", pdfs / "029_TS.pdf")
+
+    reopened = LastFolders(record)
+    assert reopened.initial("sheet") == str(sheets)
+    assert reopened.initial("pdf") == str(pdfs)
+
+
+def test_file_dialogs_fall_back_when_folder_or_record_is_unusable(tmp_path):
+    """記住的資料夾已刪除、或記錄檔損壞時，不跳錯誤，改由 Windows 決定起始位置。"""
+    from fcn_checker.panel import LastFolders
+
+    gone = tmp_path / "已刪除"
+    gone.mkdir()
+    record = tmp_path / ".local" / "panel_folders.json"
+    folders = LastFolders(record)
+    folders.remember("sheet", gone / "FCN參考條件.xlsx")
+    gone.rmdir()
+    assert folders.initial("sheet") is None
+
+    record.write_text("{損壞", encoding="utf-8")
+    assert folders.initial("sheet") is None
+    folders.remember("pdf", tmp_path / "029_TS.pdf")
+    assert folders.initial("pdf") == str(tmp_path), "損壞的記錄檔會被新記錄取代"
