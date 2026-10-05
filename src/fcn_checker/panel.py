@@ -15,7 +15,8 @@ from .batch import BatchItem, BatchPreview
 from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
 from .messages import STATUS_ZH, problem_message
-from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
+from .panel_workflow import PanelOutcome, PanelSession, ReleaseState
+from .saving import SaveReceipt
 from .schema import CheckResult, CheckStatus
 
 
@@ -542,8 +543,6 @@ class PanelWindow:
     def _show_receipt(self, receipt: SaveReceipt):
         if self.session.outcome is None:
             self._clear()
-        elif self.results.outcome is not None:
-            self.results.show(self.results.outcome, select=self.results.selected_item())  # 更新「已回填」狀態
         self.status.set(receipt.summary)
 
     def _watch_sources(self):

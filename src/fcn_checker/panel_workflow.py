@@ -19,11 +19,11 @@ from .batch import (
     Category,
     check_batch,
     preview_batch,
-    save_batch,
 )
 from .check_config import CONFIG_DIR, DEFAULTS, ConfigPaths
 from .ingestion import IngestionError, SourceSnapshot
 from .issuers import REGISTRY, Issuer
+from .saving import SaveReceipt, save_batch
 from .schema import CheckResult
 
 
@@ -61,25 +61,6 @@ class ReleaseState(NamedTuple):
     reason: str
 
 
-@dataclass(frozen=True)
-class SaveReceipt:
-    cancelled: bool = False
-    output: Path | None = None
-    errors: tuple[str, ...] = ()
-
-    @property
-    def complete(self) -> bool:
-        return not self.cancelled and self.output is not None and not self.errors
-
-    @property
-    def summary(self) -> str:
-        if self.cancelled:
-            return "已取消儲存，核對結果仍保留。"
-        lines = [f"核對結果檔：{self.output}" if self.output else "核對結果檔：未儲存"]
-        lines.extend(self.errors)
-        return "\n".join(lines)
-
-
 class PanelSession:
     """UI 與測試共用的工作階段；任何來源或設定檔變更都使預覽與結果失效。
 
@@ -108,6 +89,7 @@ class PanelSession:
         self.message = "請選取參考條件表與說明書 PDF。"
         self._preview: BatchPreview | None = None  # 帶著核對設定、讀出結果與來源快照
         self._outcome: PanelOutcome | None = None
+        self._receipt: SaveReceipt | None = None  # 目前結果最近一次儲存的收據；放行改變後即不再是目前的結果
 
     @property
     def review_standard(self) -> Path:
@@ -132,7 +114,7 @@ class PanelSession:
         self.message = "來源已更新，請重新載入預覽。"
 
     def _clear(self) -> None:
-        self._preview, self._outcome = None, None
+        self._preview, self._outcome, self._receipt = None, None, None
 
     @property
     def preview(self) -> BatchPreview | None:
@@ -141,6 +123,11 @@ class PanelSession:
     @property
     def outcome(self) -> PanelOutcome | None:
         return self._outcome
+
+    @property
+    def receipt(self) -> SaveReceipt | None:
+        """目前結果最近一次儲存的收據（含已回填的說明書）；還沒存過或存過後又改了放行時為 None。"""
+        return self._receipt
 
     @property
     def snapshot(self) -> SourceSnapshot | None:
@@ -194,7 +181,7 @@ class PanelSession:
         preview = self.preview
         if preview is None:
             raise IngestionError("preview_required", "請先載入並確認當次預覽，來源變更後須重新載入。")
-        self._outcome = None
+        self._outcome, self._receipt = None, None
         try:
             batch = check_batch(preview)  # 先以預覽的來源快照確認來源未變更
         except IngestionError as e:
@@ -234,17 +221,17 @@ class PanelSession:
     def release(self, item: BatchItem) -> None:
         """人工放行：視同通過，儲存時回填、不列入錯誤清單；重新載入或重新核對即清除。"""
         outcome = self._current_checked(item)
-        was_saved = outcome.batch.output is not None
         outcome.batch.release(item)
-        self._after_release_change(outcome, was_saved)
+        self._after_release_change(outcome)
 
     def cancel_release(self, item: BatchItem) -> None:
         outcome = self._current_checked(item)
-        was_saved = outcome.batch.output is not None
         outcome.batch.cancel_release(item)
-        self._after_release_change(outcome, was_saved)
+        self._after_release_change(outcome)
 
-    def _after_release_change(self, outcome: PanelOutcome, was_saved: bool) -> None:
+    def _after_release_change(self, outcome: PanelOutcome) -> None:
+        was_saved = self._receipt is not None and self._receipt.output is not None
+        self._receipt = None  # 上一次儲存的核對結果檔不再是目前的結果
         stale = "上一次儲存的核對結果檔已不是目前的結果，請再儲存一次。" if was_saved else ""
         self.message = stale + outcome.headline
 
@@ -255,8 +242,9 @@ class PanelSession:
         outcome = self.outcome
         if outcome is None:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
-        batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)  # 儲存前確認整份來源快照
-        if any(e.reason_code == "source_changed" for e in batch.errors):
-            self.invalidate(batch.snapshot)
+        receipt = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)  # 儲存前確認整份來源快照
+        if receipt.source_changed:
+            self.invalidate(outcome.batch.snapshot)
             raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
-        return SaveReceipt(output=batch.output, errors=tuple(e.message for e in batch.errors))
+        self._receipt = receipt
+        return receipt

@@ -5,8 +5,7 @@
 - `preview_batch(核對設定, 參考條件表, 說明書)`：讀取前取來源快照，唯讀辨識並讀出每份說明書（上手、商品代號、
   對到的參考條件表列），不核對、不寫檔。
 - `check_batch(預覽)`：確認來源快照仍有效後，沿用預覽的辨識與讀出逐份核對（不重新讀 PDF），不寫任何檔案。
-- `save_batch`：寫核對結果檔（result_file.py）與根目錄的核對紀錄（reporting.py）。
-- `run_batch` = 預覽 ＋ 核對 ＋ 儲存（CLI 使用）。
+- 儲存（核對結果檔與核對紀錄）在 saving.py：`save_batch` 回傳儲存收據，不改寫批量核對結果；`run_batch` = 預覽 ＋ 核對 ＋ 儲存。
 
 設定（審查標準、參考條件表格式、上手編號對照、上手註冊表）由呼叫端載入成一個核對設定（check_config.py）傳入。
 
@@ -17,26 +16,24 @@
 4. 同一批有多份說明書對到同一列時，這幾份全部轉人工覆核，不核對也不回填。
 
 範本辨識與讀出每份說明書各只做一次（在預覽）；配對成功後由單份核對（single_check.py）依序執行所有規則。
-批量入口只負責載入參考條件表、逐份呼叫、組裝記錄資料、單份錯誤隔離與儲存。
+批量入口只負責載入參考條件表、逐份呼叫、組裝記錄資料與單份錯誤隔離。
 
-只有整份核對 PASS 或人工放行（PANEL）的說明書才回填；回填結果只寫進核對結果檔（原檔不動、不覆蓋既有檔案）。回填流程見 backfill.py。
+只有整份核對 PASS 或人工放行（PANEL）的說明書才回填（`BatchItem.fillable`）；回填流程見 backfill.py。
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 import fitz
 import openpyxl
-from openpyxl.workbook.workbook import Workbook
 
-from . import __version__, backfill, reporting, result_file
+from . import __version__, backfill
 from .check_config import CheckConfig
 from .config import ReferenceFormat
 from .extraction import extract_lines
@@ -51,7 +48,6 @@ from .standard_fields import TermSheet
 
 UNSUPPORTED = "issuer_unsupported"
 SHARED_ROW = "reference_row_shared"
-T = TypeVar("T")
 
 
 class Category(StrEnum):
@@ -85,7 +81,6 @@ class BatchItem:
     issuer: str | None = None
     product_code: str | None = None
     reference_row: int | None = None  # 對到的參考條件表列號
-    filled: bool = False
     _released: bool = field(default=False, init=False, repr=False)  # 只能經 BatchOutcome.release／cancel_release 改變
 
     @property
@@ -154,11 +149,9 @@ class BatchOutcome:
     items: list[BatchItem]
     reference_sheet: Path
     reference_format: ReferenceFormat | None = None
-    output: Path | None = None  # 核對結果檔；尚未儲存或儲存失敗時為 None
-    errors: list[CheckResult] = field(default_factory=list)  # 整批錯誤（設定檔、參考條件表、寫檔）
+    errors: list[CheckResult] = field(default_factory=list)  # 整批錯誤（設定檔、參考條件表）；寫檔錯誤在儲存收據
     snapshot: SourceSnapshot | None = None  # 核對前取的來源快照；核對紀錄的 hash 取自它，儲存前據此確認來源未變更
     metadata: dict[str, Any] = field(default_factory=dict)  # 整批執行 metadata（程式版本、設定檔與參考條件表 hash）
-    record: Path | None = None  # 核對紀錄；尚未儲存或寫入失敗時為 None
 
     @property
     def status(self) -> CheckStatus:
@@ -183,16 +176,7 @@ class BatchOutcome:
             raise IngestionError("result_required", "這份說明書不在這次核對結果中，請重新核對後再人工放行。")
 
     def _set_released(self, item: BatchItem, released: bool) -> None:
-        if item.released != released:
-            item._released = released
-            self.clear_saved()  # 上一次儲存的核對結果檔不再是目前的結果，要再儲存一次
-
-    def clear_saved(self) -> None:
-        """清掉上一次儲存的狀態（核對結果檔、核對紀錄、已回填、寫檔錯誤）。"""
-        self.output = self.record = None
-        self.errors = [e for e in self.errors if not e.rule_id.startswith("output.")]
-        for item in self.items:
-            item.filled = False
+        item._released = released
 
 
 @dataclass(frozen=True)
@@ -516,84 +500,3 @@ def check_batch(preview: BatchPreview) -> BatchOutcome:
 def failed_batch(reference_sheet: Path, e: IngestionError) -> BatchOutcome:
     """設定檔或參考條件表本身有問題、沒有核對任何說明書的整批錯誤（CLI 用）。"""
     return BatchOutcome([], Path(reference_sheet), errors=[error_result("input.batch", "批量輸入", e)])
-
-
-# ---------------------------------------------------------------- 儲存
-
-
-def _error_row(item: BatchItem) -> result_file.ErrorRow:
-    """錯誤清單的一列。TDCC Code 取說明書封面商品代號；取不到時用檔名前 12 碼（12 位數字才算），否則留白。"""
-    head = item.term_sheet.name[:12]
-    code = item.product_code or (head if re.fullmatch(r"[0-9]{12}", head) else None)
-    return result_file.ErrorRow(code, item.term_sheet.name, "\n".join(item.problem_messages))
-
-
-def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.datetime | None = None) -> BatchOutcome:
-    """確認來源（參考條件表、說明書、設定檔）都與核對時相同後，寫核對結果檔到 out_dir、核對紀錄到 root/runtime/核對紀錄（都不覆蓋）。
-
-    root 是根目錄（CLI 為執行目錄、PANEL 為安裝根目錄）。核對紀錄寫入失敗只記成整批錯誤，不影響核對結果檔；
-    寫檔失敗不清除核對結果，可以再儲存一次。
-    """
-    if outcome.reference_format is None or not outcome.items:
-        return outcome
-    now = now or dt.datetime.now()
-    outcome.clear_saved()  # 同一份結果可以再儲存一次
-    rfmt, items = outcome.reference_format, outcome.items
-    wb = _attempt(
-        outcome,
-        "output.result_file",
-        "核對結果檔",
-        lambda: _open_unchanged_reference(outcome),
-    )
-    if wb is not None:  # 來源核對後被改過（或讀不到）時，核對結果檔與核對紀錄都不寫
-        filled = [i.fillable for i in items]
-        to_fill = [i for i, ok in zip(items, filled, strict=True) if ok]
-        backfill.apply(wb, rfmt, [i.report for i in to_fill])
-        keep = [i.reference_row for i in to_fill if i.reference_row]
-        errors = [_error_row(i) for i, ok in zip(items, filled, strict=True) if not ok]
-        out = result_file.output_path(Path(out_dir), outcome.reference_sheet, now)
-        outcome.output = _attempt(
-            outcome, "output.result_file", "核對結果檔", lambda: result_file.save(wb, rfmt, keep, errors, out)
-        )
-        if outcome.output is not None:
-            for item, ok in zip(items, filled, strict=True):
-                item.filled = ok
-        outcome.record = _attempt(
-            outcome, "output.record", "核對紀錄", lambda: reporting.save_record(outcome, Path(root), now)
-        )
-    return outcome
-
-
-def _open_unchanged_reference(outcome: BatchOutcome) -> Workbook:
-    """確認整份來源快照仍一致後，開啟參考條件表準備回填；任何來源變更或讀不到時丟出 IngestionError。"""
-    if outcome.snapshot is None or not outcome.snapshot.still_valid():
-        raise IngestionError("source_changed", "參考條件表、說明書或設定檔在核對後已變更或無法讀取，請重新核對後再儲存")
-    return backfill.open_reference(outcome.reference_sheet)
-
-
-def _attempt(outcome: BatchOutcome, rule_id: str, what: str, step: Callable[[], T]) -> T | None:
-    """儲存的一步；失敗（IngestionError）時記成整批錯誤並回傳 None，不中斷其他輸出。"""
-    try:
-        return step()
-    except IngestionError as e:
-        outcome.errors.append(error_result(rule_id, what, e))
-        return None
-
-
-def run_batch(
-    config: CheckConfig,
-    reference_sheet: Path,
-    term_sheets: Sequence[Path],
-    out_dir: Path,
-    *,
-    root: Path,
-    now: dt.datetime | None = None,
-) -> BatchOutcome:
-    """預覽、核對後立即儲存（CLI 使用）。參考條件表本身有問題、或讀取期間來源被改過時回傳整批錯誤、不核對任何說明書。"""
-    try:
-        outcome = check_batch(preview_batch(config, reference_sheet, term_sheets))
-    except IngestionError as e:
-        if e.reason_code == "source_changed":  # CLI 沒有預覽可重新載入
-            e = IngestionError(e.reason_code, "參考條件表、說明書或設定檔在核對期間已變更或無法讀取，請重新核對")
-        return failed_batch(reference_sheet, e)
-    return save_batch(outcome, out_dir, root=root, now=now)

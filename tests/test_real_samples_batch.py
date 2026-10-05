@@ -13,7 +13,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from fcn_checker.batch import run_batch
+from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
 from harness import CONFIG
 
@@ -36,7 +36,8 @@ pytestmark = [
 
 
 @pytest.fixture(scope="module")
-def outcome(tmp_path_factory):
+def saved(tmp_path_factory):
+    """整批核對並儲存一次：(批量核對結果, 儲存收據)。"""
     tmp = tmp_path_factory.mktemp("real_batch")
     sheet = shutil.copy(REFERENCE, tmp / REFERENCE.name)  # 不在 data/ 產生檔案
     return run_batch(CONFIG, Path(sheet), PDFS, tmp / "reports", root=tmp)
@@ -46,9 +47,15 @@ def problems(item) -> Counter[tuple[str, str]]:
     return Counter((r.rule_id, r.reason_code) for r in item.report.results if r.status in PROBLEMS)
 
 
-def test_other_issuers_are_unsupported(outcome):
+@pytest.fixture(scope="module")
+def outcome(saved):
+    return saved[0]
+
+
+def test_other_issuers_are_unsupported(saved):
+    outcome, receipt = saved
     others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325"))]
-    assert others and all(i.unsupported and not i.filled for i in others)
+    assert others and all(i.unsupported and not receipt.filled(i) for i in others)
 
 
 def test_barc_rows_match_every_prefilled_field(outcome):
@@ -74,10 +81,11 @@ def test_every_compare_date_on_the_sheet_matches_the_fill_rule(outcome):
     ]
 
 
-def test_passing_barc_rows_are_marked_filled(outcome):
+def test_passing_barc_rows_are_marked_filled(saved):
+    outcome, receipt = saved
     passed = [i for i in outcome.items if i.issuer == "BARC" and i.report.status == CheckStatus.PASS]
     assert len(passed) == 5, "3 列 P 型＋2 列審查日期與名稱樣板都是新版的 D 型"
-    assert all(i.filled for i in passed)
+    assert all(receipt.filled(i) for i in passed)
     assert all(d.action == "match" for i in passed for d in i.report.backfill)
 
 
@@ -91,10 +99,10 @@ def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
 @pytest.mark.skipif(not TO_FILL.is_file(), reason="本機沒有待回補的參考條件表")
 def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     sheet = shutil.copy(TO_FILL, tmp_path / TO_FILL.name)
-    filled = run_batch(CONFIG, Path(sheet), PDFS, tmp_path / "reports", root=tmp_path)
-    codes = [i.product_code for i in filled.items if i.filled]
+    filled, receipt = run_batch(CONFIG, Path(sheet), PDFS, tmp_path / "reports", root=tmp_path)
+    codes = [i.product_code for i in filled.items if receipt.filled(i)]
     assert len(codes) >= 9, "BARC 5 份＋HSBC 至少 4 份通過並回填"
-    got, want = rows_by_code(filled.output, "回填後"), rows_by_code(REFERENCE)
+    got, want = rows_by_code(receipt.output, "回填後"), rows_by_code(REFERENCE)
     assert set(got) == set(codes), "「回填後」只有通過且回填的列"
     for code in codes:
         assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code

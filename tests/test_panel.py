@@ -140,7 +140,7 @@ def test_check_requires_preview_and_writes_nothing(tmp_path):
     assert "按「儲存核對結果」" in outcome.headline and "新檔" not in outcome.headline
     first = outcome.ordered_results(outcome.ordered_items[0])
     assert first[0].status.value == "MISMATCH"
-    assert not outcome.batch.output and not any(i.filled for i in outcome.batch.items)
+    assert session.receipt is None, "還沒儲存，沒有收據"
 
 
 @pytest.mark.parametrize("changed", ["selection", "pdf", "sheet", "standard", "config"])
@@ -258,6 +258,21 @@ def test_save_writes_result_file_and_record_only_when_asked(tmp_path):
 
     again = session.save(tmp_path / "reports", now=NOW + dt.timedelta(seconds=1))
     assert again.complete and again.output != receipt.output
+
+
+def test_session_keeps_the_latest_receipt_for_the_current_result(tmp_path):
+    spec = Spec()
+    sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
+    session = session_for(tmp_path, sheet, pdfs)
+    session.load_preview()
+    (item,) = session.start_check().batch.items
+    session.release(item)
+    receipt = session.save(tmp_path / "reports", now=NOW)
+    assert session.receipt is receipt and receipt.filled(item), "「已回填」來自最近一次儲存的收據"
+
+    session.cancel_release(item)
+    assert session.receipt is None, "放行改了，上一次的收據不再是目前的結果"
+    assert receipt.filled(item), "收據本身不變"
 
 
 def test_save_failure_is_reported_and_result_is_kept(tmp_path):

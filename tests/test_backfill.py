@@ -9,9 +9,9 @@ import datetime as dt
 from pathlib import Path
 
 from fcn_checker.backfill import BackfillAction
-from fcn_checker.batch import save_batch
 from fcn_checker.ingestion import sha256_of
 from fcn_checker.panel import ResultPane
+from fcn_checker.saving import save_batch
 from harness import CONFIG, PASS, REVIEW, check_all, load_config, results
 from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
 from synth import Spec, build_pdf, reference_row
@@ -34,8 +34,8 @@ def assert_column_missing(outcome, rule_id: str, name: str, tmp_path: Path) -> N
     assert (r.status, r.reason_code) == (REVIEW, "backfill_column_missing")
     assert name in r.message
     assert all(d.cell != "?" for d in report.backfill)
-    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
-    assert not outcome.items[0].filled
+    receipt = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
+    assert not receipt.filled(outcome.items[0])
 
 
 # ---------------------------------------------------------------- 缺欄
@@ -98,5 +98,5 @@ def test_save_checks_the_reference_sheet_hash_recorded_on_the_batch(tmp_path):
     assert outcome.snapshot.sha256(outcome.reference_sheet) == sha256_of(outcome.reference_sheet)
     # 每份說明書 metadata 裡的檔案資訊只是記錄，不作為儲存前的檢查依據
     outcome.items[0].report.metadata["inputs"]["reference_sheet"]["sha256"] = "0" * 64
-    save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
-    assert outcome.output is not None and outcome.items[0].filled
+    receipt = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
+    assert receipt.output is not None and receipt.filled(outcome.items[0])
