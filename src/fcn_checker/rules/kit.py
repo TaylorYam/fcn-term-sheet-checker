@@ -86,6 +86,7 @@ class IssuerContext(_IssuerStandardOf):
 # ---------------------------------------------------------------- 兩家上手共用的項目名稱
 
 PRICE_ITEM = {"initial": "進場價", "strike": "執行價", "ko": "KO價", "ki": "下限價"}  # 同 Excel 欄名 UL_n_<名稱>
+PRICE_LABEL = {"strike": "執行價", "ko": "KO 價", "ki": "下限價（觸及生效價）"}  # 價格推算結果的欄位與說明書內部規則用
 HEADER_PCT_ITEM = {
     "strike": "價格表執行價格欄頭百分比",
     "ko": "價格表 KO 價格欄頭百分比",
@@ -99,6 +100,22 @@ def price_item(n: int, col: str) -> str:
 
 
 # ---------------------------------------------------------------- 共用
+
+Q4 = Decimal("0.0001")  # 價格與月配息率四捨五入到 4 位
+
+
+def next_weekday(d: dt.date) -> dt.date:
+    """後 1 個平日（只排除週末；沒有假日曆）。"""
+    d += dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+
+def shown(value: Decimal, like: Decimal) -> Decimal:
+    """依說明書顯示位數（`like` 的小數位數）四捨五入（half-up）。"""
+    exp = like.as_tuple().exponent
+    return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
 
 
 def read_standard(ts: TermSheet, name: str) -> ParsedField:
@@ -257,8 +274,7 @@ def doc_ki(pf: ParsedField) -> str | None:
 
 def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
     """百分比：下單值依說明書顯示位數四捨五入（half-up）後比對。"""
-    exp = doc_v.as_tuple().exponent
-    q = order_v.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else order_v
+    q = shown(order_v, doc_v)
     return q == doc_v, q
 
 

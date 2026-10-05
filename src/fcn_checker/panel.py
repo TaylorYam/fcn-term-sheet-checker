@@ -484,9 +484,9 @@ class PanelWindow:
     def _show_outcome(self, outcome: PanelOutcome):
         self.results.show(outcome)
         self.has_result = True
-        not_covered = {n["rule_id"]: n["description"] for i in outcome.batch.items for n in i.report.not_covered}
-        _write(self.pending_text, "\n\n".join(not_covered.values()))
-        self.tabs.tab(self.not_covered, text=f"待處理（{len(not_covered)}）")
+        groups = outcome.not_covered
+        _write(self.pending_text, "\n\n".join(f"【{g.issuer}】\n" + "\n".join(g.descriptions) for g in groups))
+        self.tabs.tab(self.not_covered, text=f"待處理（{outcome.not_covered_count}）")
         self.status.set(outcome.headline)
 
     def toggle_release(self, item: BatchItem):

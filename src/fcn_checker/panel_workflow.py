@@ -27,6 +27,13 @@ from .saving import SaveReceipt, save_batch
 from .schema import CheckResult
 
 
+class NotCoveredGroup(NamedTuple):
+    """待處理分頁的一組：某家上手的未涵蓋事項說明（同一 rule_id 只列一次）。"""
+
+    issuer: str
+    descriptions: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class PanelOutcome:
     batch: BatchOutcome
@@ -43,6 +50,19 @@ class PanelOutcome:
     @staticmethod
     def ordered_results(item: BatchItem) -> tuple[CheckResult, ...]:
         return tuple(sorted(item.report.results, key=lambda r: r.status.display_rank))
+
+    @property
+    def not_covered(self) -> tuple[NotCoveredGroup, ...]:
+        """待處理：依上手分組（依說明書順序），組內同一 rule_id 只列一次；不同上手的同一 rule_id 各自保留說明。"""
+        groups: dict[str, dict[str, str]] = {}
+        for item in self.batch.items:
+            for n in item.report.not_covered:
+                groups.setdefault(item.issuer or "", {}).setdefault(n["rule_id"], n["description"])
+        return tuple(NotCoveredGroup(issuer, tuple(d.values())) for issuer, d in groups.items())
+
+    @property
+    def not_covered_count(self) -> int:
+        return sum(len(g.descriptions) for g in self.not_covered)
 
     @property
     def headline(self) -> str:

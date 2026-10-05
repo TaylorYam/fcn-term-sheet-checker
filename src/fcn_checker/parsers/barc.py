@@ -100,16 +100,8 @@ class BarcTermSheet:
 
 
 def _distinct(name: str, hits: list[tuple[Any, list[Line]]], note: str = "") -> ParsedField:
-    if not hits:
-        return ParsedField.missing(name, note)
-    values: list[Any] = []
-    for v, _ in hits:
-        if v not in values:
-            values.append(v)
-    lines = [ln for _, lns in hits for ln in lns]
-    if len(values) > 1:
-        return ParsedField.ambiguous(name, values, lines, note or "說明書中出現多個不同的值")
-    return ParsedField.present(name, values[0], lines)
+    """BARC 的多處取值：缺漏與歧義都寫 note（歧義沒有 note 時寫預設說明）。"""
+    return ParsedField.from_hits(name, hits, missing_note=note, ambiguous_note=note or "說明書中出現多個不同的值")
 
 
 def _first_date_field(name: str, lines: list[Line], text: str) -> ParsedField:
@@ -415,7 +407,8 @@ def _standard_prices(table: ParsedField, rows: list[PriceRow]) -> ParsedField:
     if not table.ok:
         return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
     value = tuple(
-        standard_fields.PriceRow(None, dict(r.values), tuple(Evidence.of(ln) for ln in r.lines)) for r in rows
+        standard_fields.PriceRow(None, dict(r.values), tuple(Evidence.of(ln) for ln in r.lines), r.name or None)
+        for r in rows
     )
     return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
 

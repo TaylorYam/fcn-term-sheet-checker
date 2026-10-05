@@ -13,7 +13,7 @@ from ..config import NAME_FLAGS
 from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import fee_field
-from ..text import squash
+from ..text import full_brackets, squash
 from .kit import Context, doc_review, occurrences_of, result, standard_field
 
 __all__ = ["review_standard_rules"]
@@ -356,9 +356,6 @@ def _issue_price(ctx: Context) -> CheckResult:
     )
 
 
-_BRACKETS = str.maketrans({"(": "（", ")": "）"})
-
-
 def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
     """名稱樣板的 maxi（標的數 ≥ 2）、daily（KO 每日觀察）旗標；只讀樣板用到的說明書欄位。不依上手分支。"""
     flags: dict[str, bool] = {}
@@ -437,7 +434,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 values[f"{flag}_{code}"] = tpl.flag_text(flag, code) if flags.get(flag) else ""
         expected = getattr(tpl, lang).format(**values)
         if lang == "zh":
-            norm = (lambda s: squash(s).translate(_BRACKETS)) if tpl.normalize_brackets else squash
+            norm = (lambda s: full_brackets(squash(s))) if tpl.normalize_brackets else squash
             tol = "忽略空白；全形／半形括號不計" if tpl.normalize_brackets else "忽略空白"
         else:
             norm = lambda s: re.sub(r"\s+", " ", s).strip()  # noqa: E731

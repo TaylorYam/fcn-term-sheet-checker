@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP
 from typing import Any
 
 from ..orders.reference import OrderRecord
@@ -17,6 +17,7 @@ from ..schema import CheckStatus as S
 from ..standard_fields import AutocallSchedule
 from .kit import (
     KI_LABEL,
+    Q4,
     Context,
     cmp_pct,
     doc_ki,
@@ -34,7 +35,6 @@ from .kit import (
 
 __all__ = ["AutocallSchedule", "column_checks", "field_rules", "first_callable_period"]
 
-Q4 = Decimal("0.0001")
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
 OBS_LABEL = {"D": "期間每日觀察", "P": "期末定日觀察"}
 UNDERLYINGS = "標的"  # UL_1～UL_5 合起來核對，項目用這個名稱

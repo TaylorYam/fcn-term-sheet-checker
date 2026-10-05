@@ -607,3 +607,50 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
         assert {c.value: ws.cell(4, c.column).value for c in ws[3]}["發行日"] == kept
     else:
         assert ws.max_row == 3, "沒通過的列不出現在「回填後」"
+
+
+# ---------------------------------------------------------------- 價格推算（各上手共用規則，語意同 BARC）
+
+
+class _Replaced:
+    """HSBC 讀出結果，但把部分標準欄位換掉（模擬價格表讀出與標的數或 KI 型態不一致）。"""
+
+    def __init__(self, ts, **fields):
+        self._ts, self._fields = ts, fields
+        self.full_text = ts.full_text
+
+    def f(self, name):
+        return self._fields[name](self._ts.f(name)) if name in self._fields else self._ts.f(name)
+
+    def __getattr__(self, attr):
+        return getattr(self._ts, attr)
+
+
+def _check_replaced(tmp_path, **fields):
+    import dataclasses
+
+    adapter = dataclasses.replace(HSBC, read=lambda lines: _Replaced(HSBC.read(lines), **fields))
+    s = Spec()
+    return run_check(build_pdf(tmp_path / f"{s.code}_TS.pdf", s), build_inquiry(tmp_path / "order.xlsx", s), (adapter,))
+
+
+def test_hsbc_price_rows_fewer_than_underlyings_require_review(tmp_path):
+    import dataclasses
+
+    r = _check_replaced(tmp_path, underlying_prices=lambda pf: dataclasses.replace(pf, value=pf.value[:1]))
+    x = only(r, "derive.prices")
+    assert (x.status, x.reason_code, x.expected, x.actual) == (S.REVIEW_REQUIRED, "price_table_row_count", 2, 1)
+
+
+def test_hsbc_price_table_without_ki_column_for_a_ki_product_requires_review(tmp_path):
+    import dataclasses
+
+    from fcn_checker.standard_fields import PriceRow
+
+    def drop_ki(pf):
+        rows = tuple(PriceRow(r.ticker, {k: v for k, v in r.prices.items() if k != "ki"}, r.evidence) for r in pf.value)
+        return dataclasses.replace(pf, value=rows)
+
+    r = _check_replaced(tmp_path, underlying_prices=drop_ki)
+    x = only(r, "derive.prices")
+    assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "price_table_ki_column")
