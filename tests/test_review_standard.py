@@ -1,6 +1,6 @@
 """審查標準依上手解析：固定警語、商品名稱樣板、發行機構名稱、受託機構電話等價寫法。
 
-測試切點是批量核對入口 check_batch；BARC 與 HSBC 都用合成說明書。
+測試切點是批量核對入口（預覽＋核對）；設定檔問題在載入核對設定時回報；BARC 與 HSBC 都用合成說明書。
 """
 
 from __future__ import annotations
@@ -8,10 +8,12 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
+
 import hsbc_synth
-from fcn_checker.batch import check_batch
-from harness import ISSUER_PREFIXES, MISMATCH, PASS, REVIEW, REVIEW_STANDARD, check_sheet, results
-from reference_synth import REFERENCE_FORMAT, build_reference_sheet
+from fcn_checker.ingestion import IngestionError
+from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, check_sheet, load_config, results
+from reference_synth import build_reference_sheet
 from synth import Spec, build_pdf, check, reference_row
 
 STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
@@ -36,12 +38,13 @@ def standard_with(tmp_path: Path, old: str, new: str) -> Path:
 def check_hsbc(tmp_path: Path, spec: hsbc_synth.Spec | None = None, standard: Path = REVIEW_STANDARD):
     s = spec or hsbc_synth.Spec()
     pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    return check_sheet(pdf, hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s), standard)
+    return check_sheet(pdf, hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s), load_config(review_standard=standard))
 
 
 def check_barc(tmp_path: Path, spec: Spec, standard: Path):
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
-    return check_sheet(pdf, build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)]), standard)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    return check_sheet(pdf, sheet, load_config(review_standard=standard))
 
 
 # ---------------------------------------------------------------- 固定警語
@@ -72,14 +75,11 @@ def test_unknown_product_name_placeholder_is_a_batch_config_error(tmp_path):
         'en = "{maxi_en}{daily_en}{memory_en}Autocallable',
         'en = "{maxi_en}{daily_en}{memory_en}{quanto_en}Autocallable',
     )
-    spec = Spec()
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
-    xlsx = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    outcome = check_batch([pdf], xlsx, standard, reference_format=REFERENCE_FORMAT, issuer_prefixes=ISSUER_PREFIXES)
-    assert outcome.items == []
-    (err,) = outcome.errors
+    with pytest.raises(IngestionError) as raised:
+        load_config(review_standard=standard)
+    err = raised.value
     assert err.reason_code == "config_invalid"
-    assert "quanto_en" in err.message and "product_name.hsbc" in err.message
+    assert "quanto_en" in str(err) and "product_name.hsbc" in str(err)
 
 
 def test_product_name_placeholders_are_filled_from_the_document_for_any_issuer(tmp_path):

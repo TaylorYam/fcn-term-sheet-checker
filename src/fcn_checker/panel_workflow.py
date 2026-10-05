@@ -1,6 +1,7 @@
 """PANEL 公開工作流程：參考條件表＋多份說明書的唯讀預覽、核對、失效檢查與手動儲存。
 
 核對與儲存都呼叫批量入口（batch.py），PANEL 不另做規則；按「儲存」之前不寫任何檔案。
+每次載入預覽時載入一次核對設定；核對沿用預覽的辨識與讀出，同一份說明書只讀一次。
 """
 
 from __future__ import annotations
@@ -19,9 +20,8 @@ from .batch import (
     check_batch,
     preview_batch,
     save_batch,
-    source_paths,
 )
-from .config import resolve_config
+from .check_config import CONFIG_DIR, DEFAULTS, ConfigPaths
 from .ingestion import IngestionError, SourceSnapshot
 from .issuers import REGISTRY, Issuer
 from .schema import CheckResult
@@ -89,8 +89,8 @@ class PanelSession:
 
     def __init__(
         self,
-        review_standard: Path = Path("config/review_standard.toml"),
-        config_dir: Path | None = Path("config"),
+        review_standard: Path = DEFAULTS.review_standard,
+        config_dir: Path | None = CONFIG_DIR,
         *,
         builtin_config_dir: Path | None = None,
         registry: Sequence[Issuer] = REGISTRY,
@@ -101,24 +101,29 @@ class PanelSession:
         install_root 是根目錄（雙擊入口給的安裝根目錄；沒有時為執行目錄），核對紀錄寫到它的 runtime/核對紀錄。
         """
         self.install_root = Path(install_root or ".").resolve()
-        self.review_standard = Path(review_standard).resolve()
-        self.reference_format = resolve_config("reference_sheet.toml", config_dir, builtin_config_dir)
-        self.issuer_prefixes = resolve_config("issuer_prefixes.toml", config_dir, builtin_config_dir)
+        self.paths = ConfigPaths.with_fallback(review_standard, config_dir, builtin_config_dir)
         self.registry = tuple(registry)
         self.reference_sheet: Path | None = None
         self.term_sheets: tuple[Path, ...] = ()
         self.message = "請選取參考條件表與說明書 PDF。"
-        self._preview: BatchPreview | None = None
-        self._snapshot: SourceSnapshot | None = None  # 載入預覽前取的來源快照
+        self._preview: BatchPreview | None = None  # 帶著核對設定、讀出結果與來源快照
         self._outcome: PanelOutcome | None = None
 
     @property
+    def review_standard(self) -> Path:
+        return self.paths.review_standard
+
+    @property
+    def reference_format(self) -> Path:
+        return self.paths.reference_format
+
+    @property
+    def issuer_prefixes(self) -> Path:
+        return self.paths.issuer_prefixes
+
+    @property
     def config_paths(self) -> tuple[tuple[str, Path], ...]:
-        return (
-            ("審查標準", self.review_standard),
-            ("參考條件表格式", self.reference_format),
-            ("上手編號對照", self.issuer_prefixes),
-        )
+        return self.paths.labelled
 
     def select(self, reference_sheet: Path | None, term_sheets: Sequence[Path]) -> None:
         self.reference_sheet = Path(reference_sheet).resolve() if reference_sheet is not None else None
@@ -127,15 +132,7 @@ class PanelSession:
         self.message = "來源已更新，請重新載入預覽。"
 
     def _clear(self) -> None:
-        self._preview, self._snapshot, self._outcome = None, None, None
-
-    def _take_snapshot(self) -> SourceSnapshot:
-        if self.reference_sheet is None or not self.term_sheets:
-            raise IngestionError("selection_missing", "請先選取參考條件表與至少一份說明書 PDF。")
-        paths = source_paths(
-            self.term_sheets, self.reference_sheet, self.review_standard, self.reference_format, self.issuer_prefixes
-        )
-        return SourceSnapshot.take(paths)
+        self._preview, self._outcome = None, None
 
     @property
     def preview(self) -> BatchPreview | None:
@@ -148,11 +145,11 @@ class PanelSession:
     @property
     def snapshot(self) -> SourceSnapshot | None:
         """目前預覽與結果所依據的來源快照；沒有預覽時為 None。"""
-        return self._snapshot
+        return self._preview.snapshot if self._preview is not None else None
 
     def invalidate(self, snapshot: SourceSnapshot) -> None:
         """snapshot 已確認失效：它仍是目前的快照時清除預覽與結果（背景檢查回來時已重新載入就不動）。"""
-        if snapshot is not self._snapshot:
+        if snapshot is not self.snapshot:
             return
         if self._preview is not None:
             self._clear()
@@ -160,7 +157,7 @@ class PanelSession:
 
     def check_sources(self) -> bool:
         """明確檢查來源：預覽仍依據相同的來源時為 True；變更或讀不到時清除預覽與結果並回傳 False。"""
-        snapshot = self._snapshot
+        snapshot = self.snapshot
         if snapshot is None:
             return False
         if snapshot.still_valid():
@@ -175,15 +172,11 @@ class PanelSession:
     def load_preview(self) -> BatchPreview:
         self._clear()
         try:
-            before = self._take_snapshot()
-            preview = preview_batch(
-                self.term_sheets,
-                self.reference_sheet,
-                reference_format=self.reference_format,
-                issuer_prefixes=self.issuer_prefixes,
-                registry=self.registry,
-            )
-            if not before.still_valid():
+            if self.reference_sheet is None or not self.term_sheets:
+                raise IngestionError("selection_missing", "請先選取參考條件表與至少一份說明書 PDF。")
+            config = self.paths.load(self.registry)  # 設定檔有問題時在這裡回報
+            preview = preview_batch(config, self.reference_sheet, self.term_sheets)
+            if not preview.snapshot.still_valid():
                 raise IngestionError("source_changed", "讀取期間來源已變更，請重新載入預覽。")
         except OSError as e:
             self.message = "來源檔案或設定無法讀取，請確認檔案存在且有讀取權限。"
@@ -191,33 +184,21 @@ class PanelSession:
         except IngestionError as e:
             self.message = str(e)
             raise
-        self._preview, self._snapshot = preview, before
+        self._preview = preview
         ready = sum(not r.problem for r in preview.rows)
         self.message = f"預覽已載入：{ready}／{len(preview.rows)} 份可以核對。請確認商品代號與對到的列，再開始核對。"
         return preview
 
     def start_check(self) -> PanelOutcome:
-        if self.preview is None:
+        """沿用預覽的辨識與讀出核對，不重讀 PDF；預覽後來源或設定檔變更時清除預覽，要求重新載入。"""
+        preview = self.preview
+        if preview is None:
             raise IngestionError("preview_required", "請先載入並確認當次預覽，來源變更後須重新載入。")
         self._outcome = None
-        snapshot = self._snapshot
         try:
-            batch = check_batch(
-                self.term_sheets,
-                self.reference_sheet,
-                self.review_standard,
-                reference_format=self.reference_format,
-                issuer_prefixes=self.issuer_prefixes,
-                registry=self.registry,
-            )
-            if batch.snapshot != snapshot or not snapshot.still_valid():  # 預覽後、核對期間都不能變
-                self._clear()
-                raise IngestionError("source_changed", "核對期間來源或設定檔已變更，請重新載入預覽。")
-        except OSError as e:
-            self._clear()
-            self.message = "核對已停止：來源或設定檔無法讀取，請確認檔案與權限後重新載入。"
-            raise IngestionError("source_unreadable", self.message) from e
+            batch = check_batch(preview)  # 先以預覽的來源快照確認來源未變更
         except IngestionError as e:
+            self._clear()
             self.message = str(e)
             raise
         self._outcome = PanelOutcome(batch)
@@ -276,6 +257,6 @@ class PanelSession:
             raise IngestionError("result_required", "請先核對當次來源；來源變更後須重新載入與核對。")
         batch = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)  # 儲存前確認整份來源快照
         if any(e.reason_code == "source_changed" for e in batch.errors):
-            self.invalidate(self._snapshot)
+            self.invalidate(batch.snapshot)
             raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
         return SaveReceipt(output=batch.output, errors=tuple(e.message for e in batch.errors))

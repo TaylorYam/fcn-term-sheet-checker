@@ -1,6 +1,6 @@
 """錯訊（Issue #71）：作業人員看到的每條問題都是看得懂的中文，只寫哪裡對不起來、兩邊各是多少，不含 rule_id／reason_code。
 
-BARC 與 HSBC 都經公開批量入口 check_batch 產生結果，再用同一個錯訊產生器 `problem_message` 取錯訊。
+BARC 與 HSBC 都經公開批量入口（預覽＋核對）產生結果，再用同一個錯訊產生器 `problem_message` 取錯訊。
 """
 
 from __future__ import annotations
@@ -14,15 +14,14 @@ import fitz
 import pytest
 
 import hsbc_synth
-from fcn_checker.batch import check_batch
 from fcn_checker.issuers import by_code
 from fcn_checker.messages import problem_message
 from fcn_checker.panel import result_detail
 from fcn_checker.rules import kit
 from fcn_checker.schema import CheckResult, CheckStatus, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
-from harness import ISSUER_PREFIXES, REVIEW_STANDARD, check_rows
-from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
+from harness import CONFIG, check_all, check_rows
+from reference_synth import REFERENCE_HEADERS, build_reference_sheet
 from synth import DEFAULT_ULS, Spec, build_pdf, check, reference_row
 
 # 程式代碼：小寫英文以 . 或 _ 串接（例：doc.scenario_calculations、s1.profit.17、value_mismatch）
@@ -47,14 +46,7 @@ def hsbc_check(tmp_path, spec=None, overrides=None):
     s = spec or hsbc_synth.Spec()
     pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s, overrides)
-    outcome = check_batch(
-        [pdf],
-        sheet,
-        REVIEW_STANDARD,
-        reference_format=hsbc_synth.ORDER_FORMAT,
-        issuer_prefixes=ISSUER_PREFIXES,
-    )
-    return outcome.items[0].report
+    return check_all(sheet, [pdf]).items[0].report
 
 
 # ---------------------------------------------------------------- 參考條件表欄位：欄名＋雙方值
@@ -131,13 +123,7 @@ def test_pdfs_sharing_one_reference_row_get_a_plain_chinese_message(tmp_path):
     pdfs = [build_pdf(tmp_path / f"{spec.product_code}_{v}.pdf", spec) for v in ("舊版", "新版")]
     sheet = check_rows(tmp_path, pdfs[0], [reference_row(spec)])  # 建好參考條件表
     assert sheet.status == CheckStatus.PASS
-    outcome = check_batch(
-        pdfs,
-        tmp_path / "FCN參考條件.xlsx",
-        REVIEW_STANDARD,
-        reference_format=REFERENCE_FORMAT,
-        issuer_prefixes=ISSUER_PREFIXES,
-    )
+    outcome = check_all(tmp_path / "FCN參考條件.xlsx", pdfs)
 
     for item in outcome.items:
         assert_plain_chinese(item.report)
@@ -222,13 +208,7 @@ def test_pairing_unsupported_and_unreadable_pdf_are_plain_chinese(tmp_path):
     broken = tmp_path / "029199990001_broken.pdf"
     broken.write_bytes(b"not a pdf")
     sheet_report = check_rows(tmp_path, missing_row, [reference_row(spec)])
-    outcome = check_batch(
-        [unsupported, broken],
-        tmp_path / "FCN參考條件.xlsx",
-        REVIEW_STANDARD,
-        reference_format=REFERENCE_FORMAT,
-        issuer_prefixes=ISSUER_PREFIXES,
-    )
+    outcome = check_all(tmp_path / "FCN參考條件.xlsx", [unsupported, broken])
 
     for report in (sheet_report, outcome.items[0].report):
         assert_plain_chinese(report)
@@ -334,10 +314,8 @@ def _barc_sheet(tmp_path, spec, overrides):
 
 
 def _run(pdf, sheet, registry=None):
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    if registry:
-        kw["registry"] = registry
-    return check_batch([pdf], sheet, REVIEW_STANDARD, **kw).items[0].report
+    config = CONFIG.with_registry(registry) if registry else CONFIG
+    return check_all(sheet, [pdf], config).items[0].report
 
 
 BROKEN_VALUES = ["壞", 1, None]

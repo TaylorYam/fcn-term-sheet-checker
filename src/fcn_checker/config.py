@@ -111,17 +111,6 @@ class ReferenceFormat:
     ki_type_values: dict[str, str]
 
 
-# 開發環境（editable 安裝）的 repo config；PANEL 安裝是非 editable，內建設定由雙擊入口另外指定（專案的 config）
-BUILTIN_CONFIG = Path(__file__).resolve().parents[2] / "config"
-
-
-def resolve_config(name: str, config_dir: Path | None, builtin_dir: Path | None = None) -> Path:
-    """config_dir 有該設定檔就用它；沒有就用程式內建的同名設定（舊安裝的根目錄 config 沒有新增的設定檔）。"""
-    if config_dir is not None and (Path(config_dir) / name).is_file():
-        return (Path(config_dir) / name).resolve()
-    return (Path(builtin_dir or BUILTIN_CONFIG) / name).resolve()
-
-
 def _load(path: Path, what: str) -> dict[str, Any]:
     if not path.is_file():
         raise IngestionError("config_not_found", f"找不到{what}設定檔：{path}")

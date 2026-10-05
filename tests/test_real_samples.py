@@ -12,10 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from fcn_checker.batch import check_batch
 from fcn_checker.schema import CheckStatus
-from harness import ISSUER_PREFIXES, REVIEW_STANDARD
-from reference_synth import REFERENCE_FORMAT, build_reference_sheet
+from harness import check_all
+from reference_synth import build_reference_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 TS_DIR = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts"
@@ -35,9 +34,7 @@ def reports(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("real_doc_rules")
     rows = [{"TDCC Code": p.name[:12], "發行機構": "Barclays"} for p in PDFS if p.name.startswith("029")]
     sheet = build_reference_sheet(tmp / "codes_only.xlsx", rows)
-    outcome = check_batch(
-        PDFS, sheet, REVIEW_STANDARD, reference_format=REFERENCE_FORMAT, issuer_prefixes=ISSUER_PREFIXES
-    )
+    outcome = check_all(sheet, PDFS)
     return {i.term_sheet.name: i for i in outcome.items}
 
 

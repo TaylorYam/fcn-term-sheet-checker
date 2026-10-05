@@ -1,4 +1,7 @@
-"""單份核對 harness（不分上手）：一份說明書＋參考條件表跑公開批量入口 check_batch，再依 rule_id 取結果。
+"""單份核對 harness（不分上手）：一份說明書＋參考條件表跑公開批量入口（預覽＋核對），再依 rule_id 取結果。
+
+`CONFIG` 是以 repo config 載入一次的核對設定 fixture；要換某個設定檔或上手註冊表時用 `load_config`／
+`CheckConfig.with_registry`。
 
 說明書與參考條件表列由各上手的合成器產生；這裡不引用任何上手的版面或預設值。
 """
@@ -7,16 +10,33 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from fcn_checker.batch import check_batch
+from fcn_checker.batch import BatchOutcome, check_batch, preview_batch
+from fcn_checker.check_config import CheckConfig, ConfigPaths
+from fcn_checker.issuers import REGISTRY, Issuer
 from fcn_checker.schema import CheckReport, CheckStatus
 from reference_synth import REFERENCE_FORMAT, build_reference_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_STANDARD = ROOT / "config" / "review_standard.toml"
 ISSUER_PREFIXES = ROOT / "config" / "issuer_prefixes.toml"
+
+
+def load_config(
+    *,
+    review_standard: Path = REVIEW_STANDARD,
+    reference_format: Path = REFERENCE_FORMAT,
+    issuer_prefixes: Path = ISSUER_PREFIXES,
+    registry: Sequence[Issuer] = REGISTRY,
+) -> CheckConfig:
+    """載入核對設定；預設全部用 repo config。"""
+    return ConfigPaths(review_standard, reference_format, issuer_prefixes).load(registry)
+
+
+CONFIG = load_config()  # 核對設定 fixture：repo config 只載入一次
 
 PASS, MISMATCH, REVIEW, NA, ERROR = (
     CheckStatus.PASS,
@@ -40,12 +60,14 @@ def load_record(root: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def check_sheet(pdf: Path, sheet: Path, review_standard: Path = REVIEW_STANDARD) -> CheckReport:
+def check_all(sheet: Path, pdfs: Sequence[Path], config: CheckConfig = CONFIG) -> BatchOutcome:
+    """預覽＋核對（不儲存），回傳批量核對結果。"""
+    return check_batch(preview_batch(config, sheet, pdfs))
+
+
+def check_sheet(pdf: Path, sheet: Path, config: CheckConfig = CONFIG) -> CheckReport:
     """以既有的參考條件表核對一份說明書，回傳該份的 CheckReport。"""
-    outcome = check_batch(
-        [pdf], sheet, review_standard, reference_format=REFERENCE_FORMAT, issuer_prefixes=ISSUER_PREFIXES
-    )
-    return outcome.items[0].report
+    return check_all(sheet, [pdf], config).items[0].report
 
 
 def check_rows(

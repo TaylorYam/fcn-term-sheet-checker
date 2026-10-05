@@ -1,4 +1,5 @@
-"""測試切點：批量核對入口 run_batch(說明書們, 參考條件表, 審查標準, 輸出資料夾) → 結果、核對結果檔與核對紀錄。
+"""測試切點：批量核對入口 run_batch(核對設定, 參考條件表, 說明書們, 輸出資料夾) → 結果、核對結果檔與核對紀錄；
+PANEL 的用法是 preview_batch → check_batch → save_batch。
 
 只用合成資料（tests/synth.py）；以 openpyxl 讀回產出的 Excel 觀察回填結果。
 """
@@ -15,11 +16,11 @@ from openpyxl.formatting.rule import CellIsRule
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from fcn_checker import __version__
-from fcn_checker.batch import check_batch, run_batch, save_batch
+from fcn_checker.batch import check_batch, preview_batch, run_batch, save_batch
 from fcn_checker.ingestion import IngestionError, sha256_of
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus, DetectionResult
-from harness import ISSUER_PREFIXES, REVIEW_STANDARD
+from harness import CONFIG, ISSUER_PREFIXES, REVIEW_STANDARD, check_all, load_config
 from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
 from synth import SYNTH_ISIN, Spec, barc_adapter, build_pdf, reference_row, schedule_rows
 
@@ -36,10 +37,9 @@ def pdf_for(tmp_path: Path, spec: Spec, name: str | None = None) -> Path:
     return build_pdf(tmp_path / (name or f"{spec.product_code}_TS.pdf"), spec)
 
 
-def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], **kw):
-    sheet = kw.pop("sheet", None) or build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES, "now": NOW, **kw}
-    outcome = run_batch(pdfs, sheet, REVIEW_STANDARD, tmp_path / "reports", root=tmp_path, **kw)
+def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], *, sheet: Path | None = None, config=CONFIG):
+    sheet = sheet or build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
+    outcome = run_batch(config, sheet, pdfs, tmp_path / "reports", root=tmp_path, now=NOW)
     return outcome, sheet
 
 
@@ -266,7 +266,12 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
 
 def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
     spec = Spec(product_code="325199990001")  # 325 = HSBC：對照表有，本測試 registry 刻意不註冊 HSBC
-    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="HSBC")], registry=(BARC,))
+    outcome, _ = batch(
+        tmp_path,
+        [pdf_for(tmp_path, spec)],
+        [reference_row(spec, 發行機構="HSBC")],
+        config=CONFIG.with_registry((BARC,)),
+    )
     item = outcome.items[0]
     assert item.unsupported and item.issuer == "HSBC"
     assert "HSBC" in only(item, "batch.issuer_prefix").message
@@ -279,8 +284,7 @@ def test_term_sheet_content_of_another_issuer_requires_review(tmp_path):
         tmp_path,
         [pdf_for(tmp_path, spec)],
         [reference_row(spec)],
-        issuer_prefixes=prefixes_file(tmp_path, '"777" = "FAKE"\n'),
-        registry=(BARC, other),
+        config=load_config(issuer_prefixes=prefixes_file(tmp_path, '"777" = "FAKE"\n'), registry=(BARC, other)),
     )
     r = only(outcome.items[0], "batch.issuer_prefix")
     assert (r.status, r.reason_code, r.actual) == (REVIEW, "issuer_prefix_mismatch", "BARC")
@@ -544,12 +548,20 @@ def test_existing_result_file_is_never_overwritten(tmp_path):
     assert not outcome.items[0].filled
 
 
-def test_batch_error_writes_no_result_file(tmp_path):
+def test_config_problem_is_reported_when_loading_the_config_and_nothing_is_written(tmp_path):
+    with pytest.raises(IngestionError) as raised:
+        load_config(reference_format=tmp_path / "missing.toml")
+    assert raised.value.reason_code == "config_not_found" and "missing.toml" in str(raised.value)
+    assert not (tmp_path / "reports").exists() and not (tmp_path / "runtime").exists()
+
+
+def test_broken_reference_sheet_is_a_batch_error_and_writes_no_result_file(tmp_path):
     spec = Spec()
-    outcome, _ = batch(
-        tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], reference_format=tmp_path / "missing.toml"
-    )
+    broken = tmp_path / "FCN參考條件.xlsx"
+    broken.write_bytes(b"not an Excel")
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=broken)
     assert outcome.status == ERROR and outcome.items == [] and outcome.output is None
+    assert outcome.errors[0].rule_id == "input.batch"
     assert not (tmp_path / "reports").exists() and not (tmp_path / "runtime").exists()
 
 
@@ -570,7 +582,9 @@ def test_unexpected_error_in_one_pdf_is_reported_and_the_batch_continues(tmp_pat
 
     broken = barc_adapter(read=broken_read)
     spec = Spec()
-    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], registry=(broken,))
+    outcome, _ = batch(
+        tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], config=CONFIG.with_registry((broken,))
+    )
     item = outcome.items[0]
     assert item.report.status == ERROR
     assert only(item, "batch.unexpected").message == "IndexError: synthetic parser failure"
@@ -582,8 +596,7 @@ def test_check_writes_nothing_until_saved(tmp_path):
     pdf = pdf_for(tmp_path, spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     before = set(tmp_path.rglob("*"))
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    outcome = check_batch([pdf], sheet, REVIEW_STANDARD, **kw)
+    outcome = check_all(sheet, [pdf])
     assert outcome.status == PASS and outcome.output is None and not outcome.items[0].filled
     assert set(tmp_path.rglob("*")) == before
 
@@ -599,7 +612,7 @@ def test_any_source_changed_after_check_writes_nothing(tmp_path, changed):
     standard, prefixes = tmp_path / "standard.toml", tmp_path / "prefixes.toml"
     standard.write_bytes(REVIEW_STANDARD.read_bytes())
     prefixes.write_bytes(ISSUER_PREFIXES.read_bytes())
-    outcome = check_batch([pdf], sheet, standard, reference_format=REFERENCE_FORMAT, issuer_prefixes=prefixes)
+    outcome = check_all(sheet, [pdf], load_config(review_standard=standard, issuer_prefixes=prefixes))
     if changed == "sheet":
         build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 71})])
     elif changed == "pdf":
@@ -638,6 +651,97 @@ def test_record_hashes_come_from_the_snapshot_taken_before_reading(tmp_path):
     assert record["metadata"]["review_standard"]["sha256"] == snapshot.sha256(REVIEW_STANDARD)
 
 
+# ---------------------------------------------------------------- 預覽沿用到核對
+
+
+def test_check_reuses_the_preview_when_its_snapshot_is_still_valid(tmp_path):
+    ok, missing = Spec(), Spec(product_code="029199990002")
+    pdfs = [pdf_for(tmp_path, ok), pdf_for(tmp_path, missing)]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(ok)])
+    preview = preview_batch(CONFIG, sheet, pdfs)
+
+    outcome = check_batch(preview)
+    assert outcome.snapshot is preview.snapshot
+    for row, item in zip(preview.rows, outcome.items, strict=True):
+        assert (item.term_sheet, item.issuer, item.product_code, item.reference_row) == (
+            row.term_sheet,
+            row.issuer,
+            row.product_code,
+            row.reference_row,
+        ), "核對結果與預覽的辨識一致"
+    assert [i.report.status for i in outcome.items] == [PASS, REVIEW]
+
+
+def test_term_sheet_replaced_after_preview_requires_a_new_preview(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    preview = preview_batch(CONFIG, sheet, [pdf])
+    build_pdf(pdf, Spec(tenor=7))  # 同名、內容不同
+
+    with pytest.raises(IngestionError, match="重新載入預覽") as raised:
+        check_batch(preview)
+    assert raised.value.reason_code == "source_changed"
+
+
+def test_config_file_changed_after_loading_the_config_requires_a_new_preview(tmp_path):
+    spec = Spec()
+    pdf = pdf_for(tmp_path, spec)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
+    standard = tmp_path / "standard.toml"
+    standard.write_bytes(REVIEW_STANDARD.read_bytes())
+    config = load_config(review_standard=standard)
+    standard.write_text(standard.read_text(encoding="utf-8") + "\n# 載入後被改過\n", encoding="utf-8")
+
+    preview = preview_batch(config, sheet, [pdf])  # 快照的設定檔 hash 取自核對設定（載入前取）
+    with pytest.raises(IngestionError, match="重新載入預覽"):
+        check_batch(preview)
+
+
+def test_cli_run_with_a_config_file_changed_after_loading_asks_to_check_again(tmp_path):
+    spec = Spec()
+    standard = tmp_path / "standard.toml"
+    standard.write_bytes(REVIEW_STANDARD.read_bytes())
+    config = load_config(review_standard=standard)
+    standard.write_text(standard.read_text(encoding="utf-8") + "\n# 載入後被改過\n", encoding="utf-8")
+
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], config=config)
+    assert outcome.status == ERROR and outcome.items == [] and outcome.output is None
+    (error,) = outcome.errors
+    assert error.reason_code == "source_changed"
+    assert "重新核對" in error.message and "預覽" not in error.message, "CLI 沒有預覽可重新載入"
+
+
+def test_each_term_sheet_is_read_once_across_preview_and_check(tmp_path):
+    from fcn_checker.parsers import barc as parser
+
+    reads: list[str] = []
+
+    def counted_read(lines):
+        reads.append("read")
+        return parser.read(lines)
+
+    config = CONFIG.with_registry((barc_adapter(read=counted_read),))
+    specs = [Spec(), Spec(product_code="029199990002")]
+    pdfs = [pdf_for(tmp_path, s) for s in specs]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(s) for s in specs])
+
+    preview = preview_batch(config, sheet, pdfs)
+    assert len(reads) == 2
+    outcome = check_batch(preview)
+    assert [i.report.status for i in outcome.items] == [PASS, PASS]
+    assert len(reads) == 2, "核對沿用預覽的讀出，不再讀一次"
+
+
+def test_record_config_info_comes_from_the_check_config(tmp_path):
+    spec = Spec()
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+    metadata = json.loads(outcome.record.read_text(encoding="utf-8"))["metadata"]
+    for name, info in CONFIG.record().items():
+        assert metadata[name] == info
+    assert metadata["review_standard"]["version"] == CONFIG.review_standard.version
+
+
 # ---------------------------------------------------------------- 人工放行
 
 
@@ -645,8 +749,7 @@ def checked(tmp_path: Path, pdfs: list[Path], rows: list[dict]):
     """只核對不儲存（PANEL 的用法）：之後可放行再 save_batch。"""
     tmp_path.mkdir(exist_ok=True)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    return check_batch(pdfs, sheet, REVIEW_STANDARD, **kw)
+    return check_all(sheet, pdfs)
 
 
 def saved(outcome, tmp_path: Path, now: dt.datetime = NOW):

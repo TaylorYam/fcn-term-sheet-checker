@@ -12,6 +12,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .batch import BatchItem, BatchPreview
+from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
 from .messages import STATUS_ZH, problem_message
 from .panel_workflow import PanelOutcome, PanelSession, ReleaseState, SaveReceipt
@@ -588,13 +589,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--builtin-config-dir", type=Path, default=None, help="程式內建設定資料夾（雙擊入口傳入專案的 config）"
     )
     parser.add_argument("--order-formats-dir", type=Path, help=argparse.SUPPRESS)  # 舊版啟動器仍會傳入
-    parser.add_argument(
-        "--review-standard", type=Path, default=Path("config/review_standard.toml"), help="審查標準設定檔"
-    )
+    parser.add_argument("--review-standard", type=Path, default=DEFAULTS.review_standard, help="審查標準設定檔")
     parser.add_argument("--install-root", type=Path, help="雙擊入口提供的安裝目錄")
     args = parser.parse_args(argv)
     if args.config_dir is None:
-        args.config_dir = args.order_formats_dir.parent if args.order_formats_dir else Path("config")
+        args.config_dir = args.order_formats_dir.parent if args.order_formats_dir else CONFIG_DIR
     return args
 
 

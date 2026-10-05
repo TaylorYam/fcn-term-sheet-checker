@@ -15,8 +15,7 @@ import pytest
 
 from fcn_checker.batch import run_batch
 from fcn_checker.schema import CheckStatus
-from harness import ISSUER_PREFIXES, REVIEW_STANDARD
-from reference_synth import REFERENCE_FORMAT
+from harness import CONFIG
 
 ROOT = Path(__file__).resolve().parents[1]
 PDFS = (
@@ -40,15 +39,7 @@ pytestmark = [
 def outcome(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("real_batch")
     sheet = shutil.copy(REFERENCE, tmp / REFERENCE.name)  # 不在 data/ 產生檔案
-    return run_batch(
-        PDFS,
-        Path(sheet),
-        REVIEW_STANDARD,
-        tmp / "reports",
-        root=tmp,
-        reference_format=REFERENCE_FORMAT,
-        issuer_prefixes=ISSUER_PREFIXES,
-    )
+    return run_batch(CONFIG, Path(sheet), PDFS, tmp / "reports", root=tmp)
 
 
 def problems(item) -> Counter[tuple[str, str]]:
@@ -100,15 +91,7 @@ def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
 @pytest.mark.skipif(not TO_FILL.is_file(), reason="本機沒有待回補的參考條件表")
 def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     sheet = shutil.copy(TO_FILL, tmp_path / TO_FILL.name)
-    filled = run_batch(
-        PDFS,
-        Path(sheet),
-        REVIEW_STANDARD,
-        tmp_path / "reports",
-        root=tmp_path,
-        reference_format=REFERENCE_FORMAT,
-        issuer_prefixes=ISSUER_PREFIXES,
-    )
+    filled = run_batch(CONFIG, Path(sheet), PDFS, tmp_path / "reports", root=tmp_path)
     codes = [i.product_code for i in filled.items if i.filled]
     assert len(codes) >= 9, "BARC 5 份＋HSBC 至少 4 份通過並回填"
     got, want = rows_by_code(filled.output, "回填後"), rows_by_code(REFERENCE)

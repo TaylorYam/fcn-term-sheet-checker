@@ -5,16 +5,19 @@ from pathlib import Path
 
 def run(script: str) -> None:
     root = Path(script).resolve().parent
+    from fcn_checker.check_config import CONFIG_DIR, DEFAULTS
     from fcn_checker.panel import main
+
+    config = root / CONFIG_DIR
 
     main(
         [
             "--config-dir",
-            str(root / "config"),
+            str(config),
             "--builtin-config-dir",
-            str(root / "config"),
+            str(config),
             "--review-standard",
-            str(root / "config/review_standard.toml"),
+            str(root / DEFAULTS.review_standard),
             "--install-root",
             str(root),
         ]

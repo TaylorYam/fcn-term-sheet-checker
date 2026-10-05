@@ -42,7 +42,8 @@ def _sha256_or_none(path: Path) -> str | None:
 
 @dataclass(frozen=True)
 class SourceSnapshot:
-    """一次核對的來源快照：參考條件表、各份說明書與設定檔的路徑和 sha256，在讀取任何來源之前取一次。
+    """一次核對的來源快照：參考條件表、各份說明書與設定檔的路徑和 sha256，各在讀取之前取一次
+    （設定檔在載入核對設定前，參考條件表與說明書在預覽讀取前）。
 
     核對紀錄的 hash 取自這裡；之後要確認「來源還是不是同一份」時明確呼叫 `still_valid`（重新計算 hash）。
     讀不到的檔案 sha256 為 None。
@@ -51,8 +52,10 @@ class SourceSnapshot:
     files: tuple[tuple[Path, str | None], ...]
 
     @classmethod
-    def take(cls, paths: Sequence[Path]) -> SourceSnapshot:
-        return cls(tuple((Path(p), _sha256_or_none(Path(p))) for p in paths))
+    def take(cls, paths: Sequence[Path], *, taken: SourceSnapshot | None = None) -> SourceSnapshot:
+        """取 paths 的 hash；taken 是更早已取過 hash 的檔案（核對設定載入前取的設定檔），原樣併入。"""
+        files = tuple((Path(p), _sha256_or_none(Path(p))) for p in paths)
+        return cls(files + (taken.files if taken is not None else ()))
 
     def sha256(self, path: Path) -> str | None:
         path = Path(path)

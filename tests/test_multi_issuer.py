@@ -12,7 +12,7 @@ import pytest
 from fcn_checker.cli import main
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus
-from harness import REVIEW_STANDARD, cli_root, load_record
+from harness import CONFIG, REVIEW_STANDARD, check_all, cli_root, load_config, load_record
 from reference_synth import build_reference_sheet
 from synth import Spec, barc_adapter, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
 
@@ -45,22 +45,11 @@ def test_no_issuer_detected_requires_review_and_runs_no_rules(tmp_path):
 
 
 def test_two_issuers_detected_requires_review(tmp_path):
-    from fcn_checker.batch import check_batch
-    from harness import ISSUER_PREFIXES
-    from reference_synth import REFERENCE_FORMAT
-
     fake = barc_adapter(code="FAKE", template_id="fake-zh-pd", label="FAKE 測試範本")
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
-    outcome = check_batch(
-        [pdf],
-        sheet,
-        REVIEW_STANDARD,
-        reference_format=REFERENCE_FORMAT,
-        issuer_prefixes=ISSUER_PREFIXES,
-        registry=(BARC, fake),
-    )
+    outcome = check_all(sheet, [pdf], CONFIG.with_registry((BARC, fake)))
     report = outcome.items[0].report
     r = only(report, "template.detect")
     assert (r.status, r.reason_code) == (REVIEW, "template_ambiguous")
@@ -105,10 +94,7 @@ def _check_withholding(tmp_path, names, *, raises=False, issuer="BARC", issuer_r
     import dataclasses
 
     import hsbc_synth
-    from fcn_checker.batch import check_batch
     from fcn_checker.issuers import by_code
-    from harness import ISSUER_PREFIXES
-    from reference_synth import REFERENCE_FORMAT
 
     base = by_code(issuer)
     adapter = dataclasses.replace(
@@ -125,8 +111,7 @@ def _check_withholding(tmp_path, names, *, raises=False, issuer="BARC", issuer_r
         s = hsbc_synth.Spec()
         pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
         sheet = hsbc_synth.build_inquiry(tmp_path / "ref.xlsx", s)
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    return check_batch([pdf], sheet, REVIEW_STANDARD, registry=(adapter,), **kw).items[0].report
+    return check_all(sheet, [pdf], CONFIG.with_registry((adapter,))).items[0].report
 
 
 @pytest.mark.parametrize("issuer", ["BARC", "HSBC"])
@@ -209,17 +194,12 @@ def test_shared_rules_can_only_read_standard_fields():
 
 
 def _check_with_issuer_rules(tmp_path, rules, **overrides):
-    from fcn_checker.batch import check_batch
-    from harness import ISSUER_PREFIXES
-    from reference_synth import REFERENCE_FORMAT
-
     adapter = barc_adapter(rules=rules, **overrides)
     tmp_path.mkdir(exist_ok=True)
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    return check_batch([pdf], sheet, REVIEW_STANDARD, registry=(adapter,), **kw).items[0].report
+    return check_all(sheet, [pdf], CONFIG.with_registry((adapter,))).items[0].report
 
 
 def _reads_annual_coupon(ctx):
@@ -255,10 +235,7 @@ def test_issuer_rules_get_no_reference_row_or_format(tmp_path):
 
 
 def test_each_term_sheet_is_detected_and_read_once_per_check(tmp_path):
-    from fcn_checker.batch import check_batch
     from fcn_checker.parsers import barc as parser
-    from harness import ISSUER_PREFIXES
-    from reference_synth import REFERENCE_FORMAT
 
     calls: Counter[str] = Counter()
 
@@ -276,24 +253,18 @@ def test_each_term_sheet_is_detected_and_read_once_per_check(tmp_path):
     specs = [Spec(), Spec(product_code="029199990002")]
     pdfs = [build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s) for s in specs]
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(s) for s in specs])
-    kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-    outcome = check_batch(pdfs, sheet, REVIEW_STANDARD, registry=(adapter,), **kw)
+    outcome = check_all(sheet, pdfs, CONFIG.with_registry((adapter,)))
     assert [i.report.status for i in outcome.items] == [PASS, PASS]
     assert calls == {"detect": 2, "read": 2}, "每份說明書辨識與讀出各只做一次"
 
 
 def test_review_standard_reads_product_name_per_issuer(tmp_path):
-    from fcn_checker.batch import check_batch
-    from harness import ISSUER_PREFIXES
-    from reference_synth import REFERENCE_FORMAT
-
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
 
     def run(standard):
-        kw = {"reference_format": REFERENCE_FORMAT, "issuer_prefixes": ISSUER_PREFIXES}
-        return check_batch([pdf], sheet, standard, **kw).items[0].report
+        return check_all(sheet, [pdf], load_config(review_standard=standard)).items[0].report
 
     text = REVIEW_STANDARD.read_text(encoding="utf-8")
     extra = tmp_path / "with_other.toml"

@@ -6,10 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from fcn_checker.batch import check_batch
 from fcn_checker.schema import CheckStatus as S
-from harness import REVIEW_STANDARD, ROOT
-from hsbc_synth import ORDER_FORMAT
+from harness import ROOT, check_all
 
 DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
 PDFS = sorted((DATA / "ts").glob("325*.pdf"))
@@ -21,13 +19,7 @@ pytestmark = [
 
 
 def test_real_hsbc_samples_match_exploration():
-    items = check_batch(
-        PDFS,
-        ORDER,
-        REVIEW_STANDARD,
-        reference_format=ORDER_FORMAT,
-        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
-    ).items
+    items = check_all(ORDER, PDFS).items
     reports = [i.report for i in items]
     assert len(reports) == 8 and all(r.template == "hsbc-zh-pd" for r in reports)
     bad = Counter(
