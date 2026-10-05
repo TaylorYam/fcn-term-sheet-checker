@@ -366,6 +366,18 @@ def test_released_items_sort_with_passed_ones(tmp_path):
     assert "1 份通過、1 份人工放行、1 份不一致" in outcome.headline
 
 
+def test_release_selects_the_top_item_and_cancel_keeps_the_same_one(tmp_path):
+    ok, bad, other = Spec(), Spec(product_code="029199990002"), Spec(product_code="029199990003")
+    rows = [reference_row(ok), reference_row(bad, **{"K(%)": 71}), reference_row(other, **{"K(%)": 71})]
+    session, outcome = checked(tmp_path, ok, bad, other, rows=rows)
+    item = outcome.ordered_items[1]
+    session.release(item)
+    assert outcome.selection_after_release_change(item) is outcome.ordered_items[0], "放行後改選下一份待處理的"
+    assert outcome.ordered_items[0] is not item
+    session.cancel_release(item)
+    assert outcome.selection_after_release_change(item) is item, "取消放行後仍選那份"
+
+
 @pytest.mark.parametrize("action", ["recheck", "reload", "source_changed"])
 def test_release_is_cleared_when_the_result_is_replaced(tmp_path, action):
     spec = Spec()
