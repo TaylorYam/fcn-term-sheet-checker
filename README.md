@@ -109,7 +109,7 @@ fcn-batch data/FCN參考條件_1001.xlsx data/ts/029*.pdf --out runtime/reports
 
 ## 本機 PANEL：預覽、核對與保存
 
-Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），將專案放到自己有寫入權限的資料夾，雙擊 `setup_panel.cmd`。安裝會建立專案自己的 `.venv`，依 `constraints.txt` 安裝套件；需要可存取公司允許的 Python 套件來源。看到「安裝完成」後，雙擊桌面的「Term Sheet 核對」捷徑開啟程式（安裝時自動建立；捷徑建立失敗時改雙擊 `launch_panel.cmd`）。日常操作不需輸入命令，不需要伺服器。搬移資料夾或更新程式後請重新執行安裝；公司若禁止 PowerShell 腳本，請由 IT 依公司政策協助安裝。
+Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），將專案放到自己有寫入權限的資料夾，雙擊 `setup_panel.cmd`。安裝會建立專案自己的 `.venv`，依 `constraints.txt` 安裝套件；需要可存取公司允許的 Python 套件來源。看到「安裝完成」後，雙擊桌面或專案資料夾裡的「Term Sheet 核對」捷徑開啟程式（安裝時自動建立；捷徑建立失敗時改雙擊 `launch_panel.cmd`）。日常操作不需輸入命令，不需要伺服器。搬移資料夾或更新程式後請重新執行安裝；公司若禁止 PowerShell 腳本，請由 IT 依公司政策協助安裝。
 
 PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對與回填流程。`launch_panel.pyw` 與 `fcn-panel` 入口仍可使用。
 
