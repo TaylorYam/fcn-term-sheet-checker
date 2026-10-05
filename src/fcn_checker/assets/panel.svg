@@ -1,23 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- PANEL 圖示「雙頁比對」：紅頭 PDF 疊在綠頭條件表上，右下角打勾。48px 以上使用。
+  <!-- PANEL 圖示「雙頁比對」（去背）：紅頭 PDF 疊在綠頭條件表上，右下角打勾。48px 以上使用。
+       頁面加灰色外框、打勾用綠底白邊，淺色與深色桌布都看得清楚。
        更新圖示：以瀏覽器把兩份 SVG 直接畫成各尺寸 PNG（不從大圖縮小），再用 Pillow 組成 panel.ico：
        panel.svg → 256/128/64/48，panel-small.svg → 32/24/16。 -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B4A5E"/><stop offset="1" stop-color="#161E2B"/></linearGradient>
-  </defs>
-  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
-  <g transform="rotate(-8 100 120)">
-    <rect x="40" y="48" width="112" height="144" rx="12" fill="#F1F3F7"/>
-    <path d="M40 60 a12 12 0 0 1 12 -12 H140 a12 12 0 0 1 12 12 V74 H40Z" fill="#E5484D"/>
-    <rect x="56" y="94" width="72" height="11" rx="5.5" fill="#B8C0CE"/>
-    <rect x="56" y="118" width="52" height="11" rx="5.5" fill="#B8C0CE"/>
+  <g transform="rotate(-8 92 108)">
+    <rect x="24" y="20" width="136" height="176" rx="14" fill="#F3F5F8"/>
+    <path d="M24 34 a14 14 0 0 1 14 -14 H146 a14 14 0 0 1 14 14 V56 H24Z" fill="#E5484D"/>
+    <rect x="44" y="80" width="88" height="12" rx="6" fill="#B8C0CE"/>
+    <rect x="44" y="106" width="64" height="12" rx="6" fill="#B8C0CE"/>
+    <rect x="24" y="20" width="136" height="176" rx="14" fill="none" stroke="#7D8796" stroke-width="5"/>
   </g>
-  <rect x="100" y="76" width="116" height="148" rx="12" fill="#FFFFFF"/>
-  <path d="M100 88 a12 12 0 0 1 12 -12 H204 a12 12 0 0 1 12 12 V104 H100Z" fill="#1F9D63"/>
+  <rect x="92" y="60" width="144" height="184" rx="14" fill="#FFFFFF"/>
+  <path d="M92 74 a14 14 0 0 1 14 -14 H222 a14 14 0 0 1 14 14 V98 H92Z" fill="#1F9D63"/>
   <g stroke="#C9D3CF" stroke-width="5">
-    <line x1="100" y1="136" x2="216" y2="136"/><line x1="100" y1="168" x2="216" y2="168"/>
-    <line x1="146" y1="104" x2="146" y2="224"/>
+    <line x1="92" y1="142" x2="236" y2="142"/><line x1="92" y1="186" x2="236" y2="186"/>
+    <line x1="150" y1="98" x2="150" y2="244"/>
   </g>
-  <circle cx="196" cy="200" r="36" fill="#FFFFFF" stroke="#161E2B" stroke-width="8"/>
-  <path d="M179 201 l12 12 l22 -24" fill="none" stroke="#1F9D63" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="92" y="60" width="144" height="184" rx="14" fill="none" stroke="#7D8796" stroke-width="5"/>
+  <circle cx="196" cy="204" r="44" fill="#1F9D63" stroke="#FFFFFF" stroke-width="10"/>
+  <path d="M175 205 l14 14 l27 -30" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
