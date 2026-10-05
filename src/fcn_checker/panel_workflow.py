@@ -36,6 +36,10 @@ class PanelOutcome:
         """有問題的說明書排前面（ERROR、不一致、需人工覆核／未支援上手），再列通過與人工放行。"""
         return tuple(sorted(self.batch.items, key=lambda i: i.status.display_rank))
 
+    def selection_after_release_change(self, item: BatchItem) -> BatchItem:
+        """放行後選清單第一份（下一份要處理的說明書），不跟著放行的那份排到下方；取消放行後仍選那份。"""
+        return self.ordered_items[0] if item.released else item
+
     @staticmethod
     def ordered_results(item: BatchItem) -> tuple[CheckResult, ...]:
         return tuple(sorted(item.report.results, key=lambda r: r.status.display_rank))

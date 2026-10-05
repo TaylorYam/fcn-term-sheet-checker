@@ -521,7 +521,8 @@ class PanelWindow:
                 self._clear()
             self.status.set(str(error))
             return
-        self.results.show(self.session.outcome, select=item)
+        outcome = self.session.outcome
+        self.results.show(outcome, select=outcome.selection_after_release_change(item))
         self.status.set(self.session.message)
 
     def save(self):
