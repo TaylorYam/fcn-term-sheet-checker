@@ -12,9 +12,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -24,11 +24,13 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "src" / "fcn_checker" / "assets"
 LARGE = (256, 128, 96, 80, 72, 64, 56, 48, 40, 36)  # panel.svg
 SMALL = (32, 28, 24, 20, 16)  # panel-small.svg
+GAP = 8  # 同一頁排版時各尺寸之間的間距，避免裁切時沾到鄰圖
 BROWSERS = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
 )
 
 
@@ -45,32 +47,38 @@ def find_browser() -> str:
 def render(assets: Path, browser: str, work: Path) -> dict[int, Image.Image]:
     """把所有尺寸排在同一頁、透明背景截一次圖，再逐一裁切。"""
     plan = [("panel.svg", s) for s in LARGE] + [("panel-small.svg", s) for s in SMALL]
-    tags, boxes, left = [], [], 0
+    tags, offsets, x = [], {}, 0  # offsets：尺寸 → 在截圖中的 x 位置
     for name, size in plan:
         uri = (assets / name).as_uri()
-        tags.append(f'<img src="{uri}" width="{size}" height="{size}" style="position:absolute;left:{left}px;top:0">')
-        boxes.append((size, left))
-        left += size + 8
+        tags.append(f'<img src="{uri}" width="{size}" height="{size}" style="position:absolute;left:{x}px;top:0">')
+        offsets[size] = x
+        x += size + GAP
     page = work / "sheet.html"
     page.write_text(f'<html><body style="margin:0;background:transparent">{"".join(tags)}</body></html>', "utf-8")
     shot = work / "sheet.png"
-    subprocess.run(
-        [
-            browser,
-            "--headless",
-            "--disable-gpu",
-            "--hide-scrollbars",
-            "--force-device-scale-factor=1",
-            "--default-background-color=00000000",
-            f"--window-size={left},{max(LARGE)}",
-            f"--screenshot={shot}",
-            page.as_uri(),
-        ],
-        check=True,
-        capture_output=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                browser,
+                "--headless",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--force-device-scale-factor=1",
+                "--default-background-color=00000000",
+                f"--user-data-dir={work / 'profile'}",  # 瀏覽器設定檔也放暫存資料夾，結束後一起清掉
+                f"--window-size={x},{max(LARGE)}",
+                f"--screenshot={shot}",
+                page.as_uri(),
+            ],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        raise SystemExit(f"無法執行瀏覽器 {browser}：{error}") from error
+    if not shot.is_file():
+        raise SystemExit(f"瀏覽器沒有產生截圖（結束碼 {result.returncode}）：\n{result.stderr.strip()}")
     sheet = Image.open(shot).convert("RGBA")
-    return {size: sheet.crop((x, 0, x + size, size)) for size, x in boxes}
+    return {size: sheet.crop((left, 0, left + size, size)) for size, left in offsets.items()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,4 +101,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

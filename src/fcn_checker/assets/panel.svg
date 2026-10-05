@@ -1,9 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <!-- PANEL 圖示「雙頁比對」（去背）：紅頭 PDF 疊在綠頭條件表上，右下角打勾。36px 以上使用。
        頁面加灰色外框、打勾用綠底白邊，淺色與深色桌布都看得清楚。
-       更新圖示：改完 SVG 後執行 python scripts/build_panel_icon.py，以瀏覽器把兩份 SVG 直接畫成各尺寸 PNG（不從大圖縮小），再用 Pillow 組成 panel.ico：
-       panel.svg → 256/128/96/80/72/64/56/48/40/36，panel-small.svg → 32/28/24/20/16。
-       要涵蓋 100%～250% 縮放的小圖示（16 × 縮放）與大圖示（32 × 縮放），缺尺寸時 Tk 會放大小圖而變糊。 -->
+       更新圖示：改完 SVG 後執行 python scripts/build_panel_icon.py 重新產生 panel.ico（尺寸清單見該腳本）。 -->
   <g transform="rotate(-8 92 108)">
     <rect x="24" y="20" width="136" height="176" rx="14" fill="#F3F5F8"/>
     <path d="M24 34 a14 14 0 0 1 14 -14 H146 a14 14 0 0 1 14 14 V56 H24Z" fill="#E5484D"/>

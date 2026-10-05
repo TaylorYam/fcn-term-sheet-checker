@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- PANEL 圖示簡化版（去背）：拿掉文字線與格線、加粗外框與打勾，給 16、20、24、28、32px 使用。 -->
+  <!-- PANEL 圖示簡化版（去背）：拿掉文字線與格線、加粗外框與打勾，給 32px 以下使用。改完執行 python scripts/build_panel_icon.py 重新產生 panel.ico。 -->
   <g transform="rotate(-8 88 104)">
     <rect x="18" y="18" width="136" height="172" rx="16" fill="#F3F5F8"/>
     <path d="M18 34 a16 16 0 0 1 16 -16 H138 a16 16 0 0 1 16 16 V68 H18Z" fill="#E5484D"/>
