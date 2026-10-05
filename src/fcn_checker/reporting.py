@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,10 +23,33 @@ from .version import program_commit
 
 if TYPE_CHECKING:
     from .backfill import CellDecision
-    from .batch import BatchOutcome
 
 RECORD_DIR = Path("runtime") / "核對紀錄"
 RECORD_VERSION = 2
+
+
+@dataclass(frozen=True)
+class RecordItem:
+    """核對紀錄的一份說明書（由儲存流程交來）。"""
+
+    pdf: str  # PDF 檔名
+    issuer: str | None
+    product_code: str | None
+    reference_row: int | None
+    filled: bool
+    manual_release: bool
+    report: CheckReport
+
+
+@dataclass(frozen=True)
+class BatchRecord:
+    """核對紀錄的整批內容（由儲存流程在核對結果檔處理完後交來）。"""
+
+    status: CheckStatus
+    result_file: Path | None
+    metadata: dict[str, Any]
+    errors: Sequence[CheckResult]  # 整批錯誤與這次儲存到目前為止的寫檔錯誤
+    items: Sequence[RecordItem]
 
 
 def _plain(v: Any) -> Any:
@@ -83,35 +108,35 @@ def to_json(report: CheckReport) -> dict[str, Any]:
     return out
 
 
-def save_record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> Path:
-    """寫出這次儲存的核對紀錄並回傳路徑；核對結果檔處理完後呼叫，才記得到核對結果檔路徑與是否回填。
+def save_record(batch: BatchRecord, root: Path, now: dt.datetime) -> Path:
+    """寫出這次儲存的核對紀錄並回傳路徑。
 
     檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。
     """
     path = root / RECORD_DIR / f"{now:%Y%m%d-%H%M%S}.json"
-    text = json.dumps(_record(outcome, root, now), ensure_ascii=False, indent=2, default=str) + "\n"
+    text = json.dumps(_record(batch, root, now), ensure_ascii=False, indent=2, default=str) + "\n"
     write_new(path, text.encode("utf-8"), "核對紀錄")
     return path
 
 
-def _record(outcome: BatchOutcome, root: Path, now: dt.datetime) -> dict[str, Any]:
+def _record(batch: BatchRecord, root: Path, now: dt.datetime) -> dict[str, Any]:
     return {
         "record_version": RECORD_VERSION,
         "saved_at": now.astimezone().isoformat(timespec="seconds"),
-        "status": outcome.status.value,
-        "result_file": str(outcome.output) if outcome.output else None,
-        "metadata": _plain({**outcome.metadata, "program_commit": program_commit(root)}),
-        "errors": [_result_dict(e) for e in outcome.errors],
+        "status": batch.status.value,
+        "result_file": str(batch.result_file) if batch.result_file else None,
+        "metadata": _plain({**batch.metadata, "program_commit": program_commit(root)}),
+        "errors": [_result_dict(e) for e in batch.errors],
         "items": [
             {
-                "pdf": i.term_sheet.name,
+                "pdf": i.pdf,
                 "issuer": i.issuer,
                 "product_code": i.product_code,
                 "reference_row": i.reference_row,
                 "filled": i.filled,
-                "manual_release": i.released,
+                "manual_release": i.manual_release,
                 **to_json(i.report),
             }
-            for i in outcome.items
+            for i in batch.items
         ],
     }

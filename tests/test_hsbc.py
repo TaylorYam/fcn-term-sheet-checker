@@ -539,7 +539,7 @@ def test_profit_total_allows_rounding_difference_only(tmp_path, items, total, st
 
 @pytest.mark.parametrize("obs", ["D", "P"])
 def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
-    from fcn_checker.batch import run_batch
+    from fcn_checker.saving import run_batch
 
     s = Spec(obs=obs, ki="none")
     pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
@@ -551,14 +551,14 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
             ws.cell(4, c.column).value = None
     wb.save(excel)
     wb.close()
-    r = run_batch(CONFIG, excel, [pdf], tmp_path / "reports", root=tmp_path)
-    assert r.status == S.PASS, [
+    r, receipt = run_batch(CONFIG, excel, [pdf], tmp_path / "reports", root=tmp_path)
+    assert receipt.status == S.PASS, [
         (x.rule_id, x.field, x.status, x.reason_code)
         for x in r.items[0].report.results
         if x.status not in (S.PASS, S.NOT_APPLICABLE)
     ]
-    assert r.items[0].filled
-    wb = openpyxl.load_workbook(r.output)
+    assert receipt.filled(r.items[0])
+    wb = openpyxl.load_workbook(receipt.output)
     ws = wb["回填後"]
     vals = {c.value: ws.cell(4, c.column).value for c in ws[3]}
     assert vals["ISIN Code"] == "XS1999900001"
@@ -587,10 +587,10 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     ],
 )
 def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, status, kept):
-    from fcn_checker.batch import run_batch
+    from fcn_checker.saving import run_batch
 
     s = Spec()
-    r = run_batch(
+    r, receipt = run_batch(
         CONFIG,
         build_inquiry(tmp_path / "order.xlsx", s, {"issue_date": sheet_value}),
         [build_pdf(tmp_path / f"{s.code}_TS.pdf", s)],
@@ -602,7 +602,7 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
     assert [d.action for d in report.backfill if d.column == "發行日"] == [action]
     assert report.status == status
     assert not any(x.rule_id == "field.issue_date" for x in report.results)
-    ws = openpyxl.load_workbook(r.output)["回填後"]
+    ws = openpyxl.load_workbook(receipt.output)["回填後"]
     if status == S.PASS:
         assert {c.value: ws.cell(4, c.column).value for c in ws[3]}["發行日"] == kept
     else:

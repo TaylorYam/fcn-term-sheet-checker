@@ -9,10 +9,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from .batch import BatchOutcome, failed_batch, run_batch
+from .batch import BatchOutcome, failed_batch
 from .check_config import DEFAULTS, ConfigPaths
 from .ingestion import IngestionError
 from .messages import STATUS_ZH
+from .saving import SaveReceipt, run_batch, save_batch
 from .schema import CheckStatus
 
 EXIT = {CheckStatus.PASS: 0, CheckStatus.MISMATCH: 1, CheckStatus.REVIEW_REQUIRED: 1, CheckStatus.ERROR: 2}
@@ -62,11 +63,12 @@ def _utf8_console() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
-def _run(args: argparse.Namespace) -> BatchOutcome:
+def _run(args: argparse.Namespace) -> tuple[BatchOutcome, SaveReceipt]:
     try:
         config = ConfigPaths(args.review_standard, args.reference_format, args.issuer_prefixes).load()
     except IngestionError as e:  # 設定檔有問題：整批錯誤，不核對任何說明書
-        return failed_batch(args.reference_sheet, e)
+        outcome = failed_batch(args.reference_sheet, e)
+        return outcome, save_batch(outcome, args.out, root=Path.cwd())
     return run_batch(config, args.reference_sheet, args.term_sheets, args.out, root=Path.cwd())
 
 
@@ -74,20 +76,20 @@ def main(argv: list[str] | None = None) -> int:
     _utf8_console()
     args = _parser().parse_args(argv)
     try:
-        outcome = _run(args)
+        outcome, receipt = _run(args)
     except Exception as e:  # 非預期錯誤：回報後以 ERROR 結束
         print(f"執行錯誤：{type(e).__name__}: {e}", file=sys.stderr)
         return EXIT[CheckStatus.ERROR]
     for item in outcome.items:
-        print(f"{item.status_label}  {item.term_sheet.name}{'  已回填' if item.filled else ''}")
-    for e in outcome.errors:
+        print(f"{item.status_label}  {item.term_sheet.name}{'  已回填' if receipt.filled(item) else ''}")
+    for e in (*outcome.errors, *receipt.errors):
         print(f"  [ERROR] {e.field}：{e.message}", file=sys.stderr)
-    print(f"整體狀態：{outcome.status.value}（{STATUS_ZH[outcome.status]}）")
-    if outcome.output is not None:
-        print(f"核對結果檔：{outcome.output}")
-    if outcome.record is not None:
-        print(f"核對紀錄：{outcome.record}")
-    return EXIT[outcome.status]
+    print(f"整體狀態：{receipt.status.value}（{STATUS_ZH[receipt.status]}）")
+    if receipt.output is not None:
+        print(f"核對結果檔：{receipt.output}")
+    if receipt.record is not None:
+        print(f"核對紀錄：{receipt.record}")
+    return EXIT[receipt.status]
 
 
 if __name__ == "__main__":
