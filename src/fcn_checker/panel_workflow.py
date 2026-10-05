@@ -37,7 +37,7 @@ class PanelOutcome:
         return tuple(sorted(self.batch.items, key=lambda i: i.status.display_rank))
 
     def selection_after_release_change(self, item: BatchItem) -> BatchItem:
-        """放行後選清單第一份（下一份待處理），不跟著放行的那份排到下方；取消放行後仍選那份。"""
+        """放行後選清單第一份（下一份要處理的說明書），不跟著放行的那份排到下方；取消放行後仍選那份。"""
         return self.ordered_items[0] if item.released else item
 
     @staticmethod

@@ -372,8 +372,8 @@ def test_release_selects_the_top_item_and_cancel_keeps_the_same_one(tmp_path):
     session, outcome = checked(tmp_path, ok, bad, other, rows=rows)
     item = outcome.ordered_items[1]
     session.release(item)
-    assert outcome.selection_after_release_change(item) is outcome.ordered_items[0], "放行後改選下一份待處理的"
-    assert outcome.ordered_items[0] is not item
+    assert outcome.ordered_items[0] is not item, "前提：放行那份已排到下方"
+    assert outcome.selection_after_release_change(item) is outcome.ordered_items[0], "放行後改選清單第一份"
     session.cancel_release(item)
     assert outcome.selection_after_release_change(item) is item, "取消放行後仍選那份"
 
