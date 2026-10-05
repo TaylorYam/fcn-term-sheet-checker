@@ -1,4 +1,4 @@
-"""HSBC 黑箱回歸：合成資料經 check_batch、CLI、PANEL；不直接測 parser。"""
+"""HSBC 黑箱回歸：合成資料經批量入口（預覽＋核對）、CLI、PANEL；不直接測 parser。"""
 
 from __future__ import annotations
 
@@ -10,26 +10,23 @@ import openpyxl
 import pytest
 
 from fcn_checker.backfill import BackfillAction
-from fcn_checker.batch import check_batch
+from fcn_checker.batch import failed_batch
 from fcn_checker.cli import main
+from fcn_checker.ingestion import IngestionError
 from fcn_checker.issuers import HSBC, REGISTRY
 from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
-from harness import REVIEW_STANDARD, ROOT, cli_root, load_record
-from hsbc_synth import ORDER_FORMAT, Spec, build_inquiry, build_pdf
+from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, load_record
+from hsbc_synth import Spec, build_inquiry, build_pdf
 
 
-def run_check(pdf, excel, standard, fmt, registry=REGISTRY):
-    """單份測試仍經公開批量入口，不直接呼叫 parser／規則。"""
-    out = check_batch(
-        [pdf],
-        excel,
-        standard,
-        reference_format=fmt,
-        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
-        registry=registry,
-    )
+def run_check(pdf, excel, registry=REGISTRY):
+    """單份測試仍經公開批量入口，不直接呼叫 parser／規則；參考條件表本身有問題時同 CLI 記成整批錯誤。"""
+    try:
+        out = check_all(excel, [pdf], CONFIG.with_registry(registry))
+    except IngestionError as e:
+        out = failed_batch(excel, e)
     return out.items[0].report if out.items else CheckReport(out.status, None, list(out.errors), [])
 
 
@@ -44,8 +41,6 @@ def check(tmp_path, spec=None, overrides=None):
     return run_check(
         build_pdf(tmp_path / f"{s.code}_TS.pdf", s),
         build_inquiry(tmp_path / "order.xlsx", s, overrides),
-        REVIEW_STANDARD,
-        ORDER_FORMAT,
     )
 
 
@@ -191,7 +186,7 @@ def test_table_pairing_failures_stop_rules(tmp_path, change, reason):
         ws.cell(3, 1, "不存在的欄位")
     wb.save(excel)
     wb.close()
-    r = run_check(pdf, excel, REVIEW_STANDARD, ORDER_FORMAT)
+    r = run_check(pdf, excel)
     assert any(x.reason_code == reason for x in r.results), [(x.reason_code, x.message) for x in r.results]
     assert not any(x.rule_id.startswith("field.") for x in r.results)
 
@@ -250,10 +245,10 @@ def test_ambiguous_registry_and_damaged_pdf(tmp_path):
         read=parser.read,
         rules=lambda ctx: [],
     )
-    r = run_check(pdf, excel, REVIEW_STANDARD, ORDER_FORMAT, registry=(HSBC, fake))
+    r = run_check(pdf, excel, registry=(HSBC, fake))
     assert any(x.reason_code == "template_ambiguous" for x in r.results)
     pdf.write_bytes(b"broken pdf")
-    assert run_check(pdf, excel, REVIEW_STANDARD, ORDER_FORMAT).status == S.ERROR
+    assert run_check(pdf, excel).status == S.ERROR
 
 
 def test_encrypted_pdf_is_not_checked(tmp_path):
@@ -263,7 +258,7 @@ def test_encrypted_pdf_is_not_checked(tmp_path):
     encrypted = tmp_path / f"{s.code}_encrypted.pdf"
     with fitz.open(plain) as d:
         d.save(encrypted, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="fake-owner", user_pw="fake-user")
-    assert run_check(encrypted, excel, REVIEW_STANDARD, ORDER_FORMAT).status == S.ERROR
+    assert run_check(encrypted, excel).status == S.ERROR
 
 
 @pytest.mark.parametrize(
@@ -364,7 +359,7 @@ def test_header_validation(tmp_path, mode, rule):
         ws.cell(4, col, "額外資料")
     wb.save(excel)
     wb.close()
-    r = run_check(pdf, excel, REVIEW_STANDARD, ORDER_FORMAT)
+    r = run_check(pdf, excel)
     if rule:
         assert any(x.rule_id == rule and x.status == S.REVIEW_REQUIRED for x in r.results)
     else:
@@ -556,15 +551,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
             ws.cell(4, c.column).value = None
     wb.save(excel)
     wb.close()
-    r = run_batch(
-        [pdf],
-        excel,
-        REVIEW_STANDARD,
-        tmp_path / "reports",
-        root=tmp_path,
-        reference_format=ROOT / "config/reference_sheet.toml",
-        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
-    )
+    r = run_batch(CONFIG, excel, [pdf], tmp_path / "reports", root=tmp_path)
     assert r.status == S.PASS, [
         (x.rule_id, x.field, x.status, x.reason_code)
         for x in r.items[0].report.results
@@ -604,13 +591,11 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
 
     s = Spec()
     r = run_batch(
-        [build_pdf(tmp_path / f"{s.code}_TS.pdf", s)],
+        CONFIG,
         build_inquiry(tmp_path / "order.xlsx", s, {"issue_date": sheet_value}),
-        REVIEW_STANDARD,
+        [build_pdf(tmp_path / f"{s.code}_TS.pdf", s)],
         tmp_path / "reports",
         root=tmp_path,
-        reference_format=ROOT / "config/reference_sheet.toml",
-        issuer_prefixes=ROOT / "config/issuer_prefixes.toml",
     )
     report = r.items[0].report
     assert only(report, "backfill.issue_date").status == status

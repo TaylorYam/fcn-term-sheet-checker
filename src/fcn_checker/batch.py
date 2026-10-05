@@ -2,9 +2,13 @@
 
 分三段，CLI 與 PANEL 共用：
 
-- `preview_batch`：唯讀辨識每份說明書（上手、商品代號、對到的參考條件表列），不核對、不寫檔。
-- `check_batch`：逐份核對，回傳結果與回填決策，不寫任何檔案。
-- `save_batch`：寫核對結果檔（result_file.py）與根目錄的核對紀錄（reporting.py）。`run_batch` = 核對 ＋ 儲存（CLI 使用）。
+- `preview_batch(核對設定, 參考條件表, 說明書)`：讀取前取來源快照，唯讀辨識並讀出每份說明書（上手、商品代號、
+  對到的參考條件表列），不核對、不寫檔。
+- `check_batch(預覽)`：確認來源快照仍有效後，沿用預覽的辨識與讀出逐份核對（不重新讀 PDF），不寫任何檔案。
+- `save_batch`：寫核對結果檔（result_file.py）與根目錄的核對紀錄（reporting.py）。
+- `run_batch` = 預覽 ＋ 核對 ＋ 儲存（CLI 使用）。
+
+設定（審查標準、參考條件表格式、上手編號對照、上手註冊表）由呼叫端載入成一個核對設定（check_config.py）傳入。
 
 辨識流程（每份說明書）：
 1. 檔名前三碼（上手編號）查上手編號對照 → 上手；不在對照表或上手沒有範本 → 未支援上手。
@@ -12,8 +16,8 @@
 3. 以商品代號找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
 4. 同一批有多份說明書對到同一列時，這幾份全部轉人工覆核，不核對也不回填。
 
-範本辨識與讀出每份說明書各只做一次；配對成功後由單份核對（single_check.py）依序執行所有規則。
-批量入口只負責載入設定與參考條件表、逐份呼叫、單份錯誤隔離與儲存。
+範本辨識與讀出每份說明書各只做一次（在預覽）；配對成功後由單份核對（single_check.py）依序執行所有規則。
+批量入口只負責載入參考條件表、逐份呼叫、組裝記錄資料、單份錯誤隔離與儲存。
 
 只有整份核對 PASS 或人工放行（PANEL）的說明書才回填；回填結果只寫進核對結果檔（原檔不動、不覆蓋既有檔案）。回填流程見 backfill.py。
 """
@@ -33,16 +37,11 @@ import openpyxl
 from openpyxl.workbook.workbook import Workbook
 
 from . import __version__, backfill, reporting, result_file
-from .config import (
-    ReferenceFormat,
-    ReviewStandard,
-    load_issuer_prefixes,
-    load_reference_format,
-    load_review_standard,
-)
+from .check_config import CheckConfig
+from .config import ReferenceFormat
 from .extraction import extract_lines
 from .ingestion import IngestionError, SourceSnapshot, error_result, open_pdf
-from .issuers import REGISTRY, Issuer, by_code, detect
+from .issuers import Issuer, by_code, detect
 from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
 from .rules.kit import doc_review, read_standard
@@ -53,8 +52,6 @@ from .standard_fields import TermSheet
 UNSUPPORTED = "issuer_unsupported"
 SHARED_ROW = "reference_row_shared"
 T = TypeVar("T")
-DEFAULT_REFERENCE_FORMAT = Path("config/reference_sheet.toml")
-DEFAULT_ISSUER_PREFIXES = Path("config/issuer_prefixes.toml")
 
 
 class Category(StrEnum):
@@ -211,8 +208,15 @@ class PreviewRow:
 
 @dataclass(frozen=True)
 class BatchPreview:
+    """預覽：每份說明書的辨識結果；另帶核對要沿用的核對設定、參考條件表、讀出結果與來源快照。"""
+
     rows: tuple[PreviewRow, ...]
     warnings: tuple[str, ...]  # 參考條件表欄名問題
+    reference_sheet: Path
+    snapshot: SourceSnapshot  # 讀取前取的來源快照（設定檔的 hash 取自核對設定）
+    config: CheckConfig = field(compare=False, repr=False)
+    _sheet: ReferenceSheet = field(compare=False, repr=False)
+    _identified: tuple[_Identified, ...] = field(compare=False, repr=False)  # 辨識與讀出結果，核對直接沿用
 
 
 # ---------------------------------------------------------------- 辨識（預覽與核對共用）
@@ -234,11 +238,10 @@ class _Identified:
     def row_no(self) -> int | None:
         return self.row.row if self.row is not None else None
 
-    @property
-    def paired(self) -> Paired | None:
+    def paired(self, sheet: ReferenceSheet) -> Paired | None:
         if self.issuer is None or self.ts is None or self.row is None or self.shared:
             return None
-        return Paired(self.issuer, self.ts, self.row)
+        return Paired(self.issuer, self.ts, self.row, sheet.record(self.row))
 
     def mark_shared(self, row_no: int, others: str) -> None:
         """同一批有其他說明書對到同一列：配對改為人工覆核，不核對也不回填。"""
@@ -277,9 +280,8 @@ def _review(rule_id: str, field_: str, item: Item, reason: str, message: str, ac
     )
 
 
-def _identify(
-    pdf: Path, sheet: ReferenceSheet, rfmt: ReferenceFormat, prefixes: dict[str, str], registry: Sequence[Issuer]
-) -> _Identified:
+def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identified:
+    registry = config.registry
     out = _Identified(pdf, [])
     results = out.results
     try:
@@ -294,7 +296,7 @@ def _identify(
         return out
 
     prefix = pdf.name[:3]
-    out.issuer_code = prefixes.get(prefix)
+    out.issuer_code = config.issuer_prefixes.get(prefix)
     if out.issuer_code is None:
         msg = f"檔名上手編號「{prefix}」不在上手編號對照表，未支援上手"
         results.append(_review("batch.issuer_prefix", "issuer", ISSUER_ITEM, UNSUPPORTED, msg))
@@ -354,7 +356,7 @@ def _identify(
         results.append(r)
         return out
     row = rows[0]
-    expected_issuer = rfmt.issuer_values.get(issuer.code)
+    expected_issuer = config.reference_format.issuer_values.get(issuer.code)
     if expected_issuer is None or row.issuer.value != expected_issuer:
         r = _review(
             "batch.pairing",
@@ -398,18 +400,12 @@ def _other_names(found: _Identified, group: Sequence[_Identified]) -> str:
     return "、".join(labels)
 
 
-def _identify_all(
-    term_sheets: Sequence[Path],
-    sheet: ReferenceSheet,
-    rfmt: ReferenceFormat,
-    prefixes: dict[str, str],
-    registry: Sequence[Issuer],
-) -> list[_Identified]:
+def _identify_all(term_sheets: Sequence[Path], sheet: ReferenceSheet, config: CheckConfig) -> list[_Identified]:
     """先辨識全部說明書，同一批有多份對到參考條件表同一列時全部轉人工覆核；單份非預期錯誤不中斷整批。"""
     identified = []
     for pdf in map(Path, term_sheets):
         try:
-            found = _identify(pdf, sheet, rfmt, prefixes, registry)
+            found = _identify(pdf, sheet, config)
         except Exception as e:
             found = _Identified(pdf, [_unexpected(e)])
         identified.append(found)
@@ -432,20 +428,14 @@ def _sheet_warnings(sheet: ReferenceSheet) -> tuple[str, ...]:
     )
 
 
-def preview_batch(
-    term_sheets: Sequence[Path],
-    reference_sheet: Path,
-    *,
-    reference_format: Path = DEFAULT_REFERENCE_FORMAT,
-    issuer_prefixes: Path = DEFAULT_ISSUER_PREFIXES,
-    registry: Sequence[Issuer] = REGISTRY,
-) -> BatchPreview:
-    """唯讀預覽；設定檔或參考條件表本身有問題時丟出 IngestionError。"""
-    rfmt = load_reference_format(Path(reference_format))
-    prefixes = load_issuer_prefixes(Path(issuer_prefixes))
-    sheet = load_reference_sheet(Path(reference_sheet), rfmt)
+def preview_batch(config: CheckConfig, reference_sheet: Path, term_sheets: Sequence[Path]) -> BatchPreview:
+    """唯讀預覽：讀取前先取來源快照，再辨識並讀出每份說明書（核對直接沿用）；參考條件表本身有問題時丟出 IngestionError。"""
+    reference_sheet, term_sheets = Path(reference_sheet), tuple(map(Path, term_sheets))
+    snapshot = SourceSnapshot.take((reference_sheet, *term_sheets), taken=config.files)
+    sheet = load_reference_sheet(reference_sheet, config.reference_format)
+    identified = _identify_all(term_sheets, sheet, config)
     rows = []
-    for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
+    for found in identified:
         problems = [r for r in found.results if r.status != CheckStatus.PASS]
         pc = found.product_code
         rows.append(
@@ -459,21 +449,11 @@ def preview_batch(
                 "；".join(r.message for r in problems),
             )
         )
-    return BatchPreview(tuple(rows), _sheet_warnings(sheet))
+    warnings = _sheet_warnings(sheet)
+    return BatchPreview(tuple(rows), warnings, reference_sheet, snapshot, config, sheet, tuple(identified))
 
 
 # ---------------------------------------------------------------- 核對
-
-
-def source_paths(
-    term_sheets: Sequence[Path],
-    reference_sheet: Path,
-    review_standard: Path,
-    reference_format: Path,
-    issuer_prefixes: Path,
-) -> tuple[Path, ...]:
-    """一次核對的全部來源（來源快照涵蓋的檔案）；CLI 與 PANEL 用同一份清單，快照才能直接比較。"""
-    return tuple(map(Path, (reference_sheet, *term_sheets, review_standard, reference_format, issuer_prefixes)))
 
 
 def _item_metadata(pdf: Path, meta: dict[str, Any], snapshot: SourceSnapshot) -> dict[str, Any]:
@@ -486,12 +466,7 @@ def _item_metadata(pdf: Path, meta: dict[str, Any], snapshot: SourceSnapshot) ->
 
 
 def _check_one(
-    found: _Identified,
-    sheet: ReferenceSheet,
-    rfmt: ReferenceFormat,
-    std: ReviewStandard,
-    meta: dict[str, Any],
-    snapshot: SourceSnapshot,
+    found: _Identified, sheet: ReferenceSheet, config: CheckConfig, meta: dict[str, Any], snapshot: SourceSnapshot
 ) -> BatchItem:
     pdf = found.pdf
     metadata = _item_metadata(pdf, meta, snapshot)
@@ -500,65 +475,47 @@ def _check_one(
         metadata["inputs"]["term_sheet"]["pages"] = found.pages
     if issuer is not None:
         metadata["parser"] = {"template": issuer.template_id, "version": issuer.parser_version}
-    template = issuer.template_id if issuer is not None else None
-    report = check_document(found.results, found.paired, sheet, rfmt, std, template, metadata)
+    report = check_document(found.results, found.paired(sheet), config)
+    report.template = issuer.template_id if issuer is not None else None
+    report.metadata = metadata
     item = BatchItem(pdf, report, issuer=found.issuer_code, reference_row=found.row_no)
     if found.product_code is not None and found.product_code.ok:
         item.product_code = found.product_code.value
     return item
 
 
-def check_batch(
-    term_sheets: Sequence[Path],
-    reference_sheet: Path,
-    review_standard: Path,
-    *,
-    reference_format: Path = DEFAULT_REFERENCE_FORMAT,
-    issuer_prefixes: Path = DEFAULT_ISSUER_PREFIXES,
-    registry: Sequence[Issuer] = REGISTRY,
-) -> BatchOutcome:
-    """逐份核對，不寫任何檔案。設定檔或參考條件表本身有問題時，回傳整批錯誤、不核對任何說明書。
+def check_batch(preview: BatchPreview) -> BatchOutcome:
+    """沿用預覽的辨識與讀出逐份核對（不重新讀 PDF），不寫任何檔案。
 
-    讀取任何來源之前先取來源快照（BatchOutcome.snapshot）。
+    預覽後任何來源（參考條件表、說明書、設定檔）變更或讀不到時丟出 IngestionError（source_changed），要求重新預覽。
     """
-    reference_sheet = Path(reference_sheet)
-    snapshot = SourceSnapshot.take(
-        source_paths(term_sheets, reference_sheet, review_standard, reference_format, issuer_prefixes)
-    )
-    try:
-        std = load_review_standard(Path(review_standard))
-        rfmt = load_reference_format(Path(reference_format))
-        prefixes = load_issuer_prefixes(Path(issuer_prefixes))
-        sheet = load_reference_sheet(reference_sheet, rfmt)
-    except IngestionError as e:
-        return BatchOutcome([], reference_sheet, errors=[error_result("input.batch", "批量輸入", e)], snapshot=snapshot)
-
+    snapshot = preview.snapshot
+    if not snapshot.still_valid():
+        raise IngestionError("source_changed", "參考條件表、說明書或設定檔在預覽後已變更或無法讀取，請重新載入預覽。")
+    config, sheet = preview.config, preview._sheet
     meta = {
         "program_version": __version__,
         "extractor": f"PyMuPDF {fitz.VersionBind}",
         "excel_reader": f"openpyxl {openpyxl.__version__}",
-        "inputs": {"reference_sheet": snapshot.meta(reference_sheet)},
-        "review_standard": {**snapshot.meta(review_standard), "version": std.version},
-        "reference_format": {**snapshot.meta(reference_format), "version": rfmt.version},
-        "issuer_prefixes": snapshot.meta(issuer_prefixes),
+        "inputs": {"reference_sheet": snapshot.meta(preview.reference_sheet)},
+        **config.record(),
     }
     items: list[BatchItem] = []
-    for found in _identify_all(term_sheets, sheet, rfmt, prefixes, registry):
+    for found in preview._identified:
         try:
-            item = _check_one(found, sheet, rfmt, std, meta, snapshot)
+            item = _check_one(found, sheet, config, meta, snapshot)
         except Exception as e:  # 單份非預期錯誤不中斷整批
             pdf = found.pdf
             item = BatchItem(
                 pdf, CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta, snapshot))
             )
         items.append(item)
-    return BatchOutcome(
-        items,
-        reference_sheet,
-        rfmt,
-        snapshot=snapshot,
-        metadata=meta,
-    )
+    return BatchOutcome(items, preview.reference_sheet, config.reference_format, snapshot=snapshot, metadata=meta)
+
+
+def failed_batch(reference_sheet: Path, e: IngestionError) -> BatchOutcome:
+    """設定檔或參考條件表本身有問題、沒有核對任何說明書的整批錯誤（CLI 用）。"""
+    return BatchOutcome([], Path(reference_sheet), errors=[error_result("input.batch", "批量輸入", e)])
 
 
 # ---------------------------------------------------------------- 儲存
@@ -624,24 +581,17 @@ def _attempt(outcome: BatchOutcome, rule_id: str, what: str, step: Callable[[], 
 
 
 def run_batch(
-    term_sheets: Sequence[Path],
+    config: CheckConfig,
     reference_sheet: Path,
-    review_standard: Path,
+    term_sheets: Sequence[Path],
     out_dir: Path,
     *,
     root: Path,
-    reference_format: Path = DEFAULT_REFERENCE_FORMAT,
-    issuer_prefixes: Path = DEFAULT_ISSUER_PREFIXES,
-    registry: Sequence[Issuer] = REGISTRY,
     now: dt.datetime | None = None,
 ) -> BatchOutcome:
-    """核對後立即儲存（CLI 使用）。"""
-    outcome = check_batch(
-        term_sheets,
-        reference_sheet,
-        review_standard,
-        reference_format=reference_format,
-        issuer_prefixes=issuer_prefixes,
-        registry=registry,
-    )
+    """預覽、核對後立即儲存（CLI 使用）。參考條件表本身有問題時回傳整批錯誤、不核對任何說明書。"""
+    try:
+        outcome = check_batch(preview_batch(config, reference_sheet, term_sheets))
+    except IngestionError as e:
+        return failed_batch(reference_sheet, e)
     return save_batch(outcome, out_dir, root=root, now=now)

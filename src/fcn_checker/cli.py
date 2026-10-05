@@ -9,7 +9,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from .batch import run_batch
+from .batch import BatchOutcome, failed_batch, run_batch
+from .check_config import DEFAULTS, ConfigPaths
+from .ingestion import IngestionError
 from .messages import STATUS_ZH
 from .schema import CheckStatus
 
@@ -30,20 +32,20 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--review-standard",
         type=Path,
-        default=Path("config/review_standard.toml"),
-        help="審查標準設定檔（預設 config/review_standard.toml）",
+        default=DEFAULTS.review_standard,
+        help=f"審查標準設定檔（預設 {DEFAULTS.review_standard.as_posix()}）",
     )
     p.add_argument(
         "--reference-format",
         type=Path,
-        default=Path("config/reference_sheet.toml"),
-        help="參考條件表格式設定檔（預設 config/reference_sheet.toml）",
+        default=DEFAULTS.reference_format,
+        help=f"參考條件表格式設定檔（預設 {DEFAULTS.reference_format.as_posix()}）",
     )
     p.add_argument(
         "--issuer-prefixes",
         type=Path,
-        default=Path("config/issuer_prefixes.toml"),
-        help="上手編號對照設定檔（預設 config/issuer_prefixes.toml）",
+        default=DEFAULTS.issuer_prefixes,
+        help=f"上手編號對照設定檔（預設 {DEFAULTS.issuer_prefixes.as_posix()}）",
     )
     p.add_argument(
         "--out",
@@ -60,19 +62,19 @@ def _utf8_console() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+def _run(args: argparse.Namespace) -> BatchOutcome:
+    try:
+        config = ConfigPaths(args.review_standard, args.reference_format, args.issuer_prefixes).load()
+    except IngestionError as e:  # 設定檔有問題：整批錯誤，不核對任何說明書
+        return failed_batch(args.reference_sheet, e)
+    return run_batch(config, args.reference_sheet, args.term_sheets, args.out, root=Path.cwd())
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_console()
     args = _parser().parse_args(argv)
     try:
-        outcome = run_batch(
-            args.term_sheets,
-            args.reference_sheet,
-            args.review_standard,
-            args.out,
-            root=Path.cwd(),
-            reference_format=args.reference_format,
-            issuer_prefixes=args.issuer_prefixes,
-        )
+        outcome = _run(args)
     except Exception as e:  # 非預期錯誤：回報後以 ERROR 結束
         print(f"執行錯誤：{type(e).__name__}: {e}", file=sys.stderr)
         return EXIT[CheckStatus.ERROR]

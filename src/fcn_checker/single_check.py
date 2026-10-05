@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from . import backfill
-from .config import ReferenceFormat, ReviewStandard
+from .check_config import CheckConfig
+from .config import ReviewStandard
 from .issuers import Issuer
-from .orders.reference import OrderRecord, ReferenceRow, ReferenceSheet
+from .orders.reference import OrderRecord, ReferenceRow
 from .rules import reference
 from .rules.kit import Context, IssuerContext
 from .rules.review_standard import review_standard_rules
@@ -28,37 +28,35 @@ from .standard_fields import TermSheet
 
 @dataclass(frozen=True)
 class Paired:
-    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、參考條件表的列。"""
+    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、參考條件表的列與轉成的下單資料。"""
 
     issuer: Issuer
     ts: TermSheet
     row: ReferenceRow
+    record: OrderRecord
 
 
-def _issuer_context(paired: Paired, record: OrderRecord, std: ReviewStandard) -> IssuerContext:
+def _issuer_context(paired: Paired, std: ReviewStandard) -> IssuerContext:
     """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0005）。"""
+    record = paired.record
     declared = {key: record.fields.get(key) for key in paired.issuer.reference_fields}
     return IssuerContext(paired.ts, std, paired.issuer.code, declared, record.source)
 
 
-def check_document(
-    pairing: list[CheckResult],
-    paired: Paired | None,
-    sheet: ReferenceSheet,
-    rfmt: ReferenceFormat,
-    std: ReviewStandard,
-    template: str | None,
-    metadata: dict[str, Any],
-) -> CheckReport:
-    """`pairing` 為辨識與配對的結果；配對失敗（`paired` 為 None）時不執行任何條件規則。"""
+def check_document(pairing: list[CheckResult], paired: Paired | None, config: CheckConfig) -> CheckReport:
+    """`pairing` 為辨識與配對的結果；配對失敗（`paired` 為 None）時不執行任何條件規則。
+
+    回傳的報告不含範本 ID 與記錄資料（metadata），由批量入口補上。
+    """
+    std, rfmt = config.review_standard, config.reference_format
     results = list(pairing)
-    report = CheckReport(CheckStatus.ERROR, template, results, [], metadata)
+    report = CheckReport(CheckStatus.ERROR, None, results, [])
     if paired is not None:
-        record = sheet.record(paired.row)
+        record = paired.record
         ctx = Context(paired.ts, record, std, rfmt, paired.issuer.code)
         results.extend(reference.column_checks(record))
         results.extend(reference.field_rules(ctx))
-        results.extend(paired.issuer.rules(_issuer_context(paired, record, std)))
+        results.extend(paired.issuer.rules(_issuer_context(paired, std)))
         results.extend(review_standard_rules(ctx))
         results.append(reference.first_callable_period(ctx))
         decisions = []

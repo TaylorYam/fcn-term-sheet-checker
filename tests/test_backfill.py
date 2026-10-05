@@ -1,6 +1,6 @@
 """回填欄位（ISIN Code、發行日、比價日_1～12）：缺欄時的處理、顯示標籤、儲存前的參考條件表變更檢查。
 
-測試切點是批量入口 check_batch／save_batch；回填與日期格式的一般流程見 test_batch.py。
+測試切點是批量入口（預覽＋核對）與 save_batch；回填與日期格式的一般流程見 test_batch.py。
 """
 
 from __future__ import annotations
@@ -9,10 +9,10 @@ import datetime as dt
 from pathlib import Path
 
 from fcn_checker.backfill import BackfillAction
-from fcn_checker.batch import check_batch, save_batch
+from fcn_checker.batch import save_batch
 from fcn_checker.ingestion import sha256_of
 from fcn_checker.panel import ResultPane
-from harness import ISSUER_PREFIXES, PASS, REVIEW, REVIEW_STANDARD, results
+from harness import CONFIG, PASS, REVIEW, check_all, load_config, results
 from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
 from synth import Spec, build_pdf, reference_row
 
@@ -23,9 +23,8 @@ def run(tmp_path: Path, *, headers=None, reference_format: Path = REFERENCE_FORM
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **(overrides or {}))], headers)
-    return check_batch(
-        [pdf], sheet, REVIEW_STANDARD, reference_format=reference_format, issuer_prefixes=ISSUER_PREFIXES
-    )
+    config = CONFIG if reference_format == REFERENCE_FORMAT else load_config(reference_format=reference_format)
+    return check_all(sheet, [pdf], config)
 
 
 def assert_column_missing(outcome, rule_id: str, name: str, tmp_path: Path) -> None:
