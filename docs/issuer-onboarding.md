@@ -124,12 +124,13 @@
 | 識別資料 | 上手代號、範本 ID、名稱、parser 版本、未涵蓋清單 |
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
 | `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作 |
-| `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號 |
+| `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構；價格推算已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號 |
 | `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位（ADR 0005 的例外，需經審查才加；BARC 為年利率與天期）；讀未宣告的欄位是開發期錯誤 |
 
 自動沿用（不必再寫）：
 
 - 參考條件表欄位規則（`rules/reference.py`）：商品代號、承作幣別、UL 與各標的價格、百分比、天期、日期、單位面額、最低金額、KO／KI 欄位、Non-Call。
+- 說明書推算規則（`rules/derivation.py`）：價格推算 `derive.prices`（各標的執行價／KO 價／下限價 = 最初價格 × 百分比，四捨五入到 4 位；價格表列數 = 標的數、下限價欄與 KI 型態一致），只讀 `underlyings`、`underlying_prices`、`strike_pct`／`ko_pct`／`ki_pct`、`ki_type`。
 - 審查標準規則（`rules/review_standard.py` 的 `review_standard_rules`）：面額預設值、受理申購日、刊印日期、審查日期、負責人、固定警語、風險等級、禁用語、商品名稱、發行機構全名、受託機構資訊、費率、發行價格。上手不同的基準只放在 `config/review_standard.toml`。
 - 回填（`backfill.py`）：ISIN、發行日、比價日的核對、回填決策與寫入。
 - 單份核對順序（`single_check.py`）與批量入口、CLI、PANEL。

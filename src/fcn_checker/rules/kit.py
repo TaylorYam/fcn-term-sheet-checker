@@ -86,6 +86,7 @@ class IssuerContext(_IssuerStandardOf):
 # ---------------------------------------------------------------- 兩家上手共用的項目名稱
 
 PRICE_ITEM = {"initial": "進場價", "strike": "執行價", "ko": "KO價", "ki": "下限價"}  # 同 Excel 欄名 UL_n_<名稱>
+PRICE_LABEL = {"strike": "執行價", "ko": "KO 價", "ki": "下限價（觸及生效價）"}  # 價格推算結果的欄位與說明書內部規則用
 HEADER_PCT_ITEM = {
     "strike": "價格表執行價格欄頭百分比",
     "ko": "價格表 KO 價格欄頭百分比",

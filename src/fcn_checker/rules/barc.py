@@ -17,6 +17,7 @@ from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from .kit import (
     HEADER_PCT_ITEM,
+    PRICE_LABEL,
     Q4,
     IssuerContext,
     doc_review,
@@ -29,7 +30,6 @@ from .kit import (
 )
 
 MONTHLY_TOLERANCE = Decimal("0.0001")
-PRICE_LABEL = {"strike": "執行價", "ko": "KO 價", "ki": "下限價（觸及生效價）"}
 
 # 第二階段或暫不核對的規則：列入報告「未涵蓋」區，不影響也不假裝通過
 NOT_COVERED: list[dict[str, str]] = [

@@ -9,9 +9,8 @@ from decimal import ROUND_HALF_UP
 
 from ..schema import CheckResult, Item
 from ..schema import CheckStatus as S
-from .kit import Q4, RuleContext, doc_ki, doc_review, price_item, result, standard_field
+from .kit import PRICE_LABEL, Q4, RuleContext, doc_ki, doc_review, price_item, result, standard_field
 
-PRICE_LABEL = {"strike": "執行價", "ko": "KO 價", "ki": "下限價（觸及生效價）"}
 PRICE_PCT_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}
 PRICE_TABLE = Item.expected("價格表")
 
