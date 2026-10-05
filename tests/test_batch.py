@@ -698,6 +698,20 @@ def test_config_file_changed_after_loading_the_config_requires_a_new_preview(tmp
         check_batch(preview)
 
 
+def test_cli_run_with_a_config_file_changed_after_loading_asks_to_check_again(tmp_path):
+    spec = Spec()
+    standard = tmp_path / "standard.toml"
+    standard.write_bytes(REVIEW_STANDARD.read_bytes())
+    config = load_config(review_standard=standard)
+    standard.write_text(standard.read_text(encoding="utf-8") + "\n# 載入後被改過\n", encoding="utf-8")
+
+    outcome, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)], config=config)
+    assert outcome.status == ERROR and outcome.items == [] and outcome.output is None
+    (error,) = outcome.errors
+    assert error.reason_code == "source_changed"
+    assert "重新核對" in error.message and "預覽" not in error.message, "CLI 沒有預覽可重新載入"
+
+
 def test_each_term_sheet_is_read_once_across_preview_and_check(tmp_path):
     from fcn_checker.parsers import barc as parser
 

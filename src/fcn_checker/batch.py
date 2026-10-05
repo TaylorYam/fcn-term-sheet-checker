@@ -589,9 +589,11 @@ def run_batch(
     root: Path,
     now: dt.datetime | None = None,
 ) -> BatchOutcome:
-    """預覽、核對後立即儲存（CLI 使用）。參考條件表本身有問題時回傳整批錯誤、不核對任何說明書。"""
+    """預覽、核對後立即儲存（CLI 使用）。參考條件表本身有問題、或讀取期間來源被改過時回傳整批錯誤、不核對任何說明書。"""
     try:
         outcome = check_batch(preview_batch(config, reference_sheet, term_sheets))
     except IngestionError as e:
+        if e.reason_code == "source_changed":  # CLI 沒有預覽可重新載入
+            e = IngestionError(e.reason_code, "參考條件表、說明書或設定檔在核對期間已變更或無法讀取，請重新核對")
         return failed_batch(reference_sheet, e)
     return save_batch(outcome, out_dir, root=root, now=now)
