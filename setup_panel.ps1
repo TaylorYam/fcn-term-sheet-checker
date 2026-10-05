@@ -14,6 +14,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '安裝驗證失敗。' }
     & '.\.venv\Scripts\python.exe' -m fcn_checker.version --record-installation $PSScriptRoot
     if ($LASTEXITCODE -ne 0) { throw '安裝版本紀錄失敗。' }
+    $openWith = 'launch_panel.cmd'
     try {
         $desktop = [Environment]::GetFolderPath('Desktop')
         $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop 'Term Sheet 核對.lnk'))
@@ -23,11 +24,11 @@ try {
         $shortcut.IconLocation = (Join-Path $PSScriptRoot 'src\fcn_checker\assets\panel.ico') + ',0'
         $shortcut.Description = 'FCN Term Sheet 核對'
         $shortcut.Save()
-        Write-Host '安裝完成。請雙擊桌面的「Term Sheet 核對」捷徑開啟 PANEL。'
+        $openWith = '桌面的「Term Sheet 核對」捷徑'
     } catch {
         Write-Host ('桌面捷徑建立失敗（不影響安裝）：' + $_.Exception.Message)
-        Write-Host '安裝完成。請雙擊 launch_panel.cmd 開啟 PANEL。'
     }
+    Write-Host ('安裝完成。請雙擊 ' + $openWith + ' 開啟 PANEL。')
     exit 0
 } catch {
     Write-Host ('安裝未完成：' + $_.Exception.Message)

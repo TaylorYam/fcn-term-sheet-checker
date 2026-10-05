@@ -524,7 +524,7 @@ def test_panel_icon_ships_every_windows_size():
     reserved, kind, count = struct.unpack_from("<HHH", data)
     assert (reserved, kind) == (0, 1), "必須是 Windows .ico"
     sizes = {data[6 + 16 * i] or 256 for i in range(count)}  # 寬度 0 代表 256
-    assert sizes >= {16, 24, 32, 48, 256}
+    assert sizes >= {16, 24, 32, 48, 64, 128, 256}
 
 
 def test_window_icon_failure_keeps_the_default_icon():
@@ -544,6 +544,14 @@ def test_app_id_is_windows_only(monkeypatch):
     """非 Windows 平台不碰 Windows 專屬 API。"""
     import fcn_checker.panel as panel
 
+    touched = []
+
+    class NoCtypes:
+        def __getattr__(self, name):
+            touched.append(name)
+            raise AssertionError(name)
+
     monkeypatch.setattr(panel.sys, "platform", "linux")
-    monkeypatch.setattr(panel, "ctypes", None)  # 若被呼叫會 AttributeError
+    monkeypatch.setattr(panel, "ctypes", NoCtypes())
     panel.set_windows_app_id()
+    assert touched == []

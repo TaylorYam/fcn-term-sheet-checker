@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- PANEL 圖示簡化版：拿掉文字線與格線、加粗色塊與打勾，給 16、24px 使用。 -->
+  <!-- PANEL 圖示簡化版：拿掉文字線與格線、加粗色塊與打勾，給 16、24、32px 使用。 -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B4A5E"/><stop offset="1" stop-color="#161E2B"/></linearGradient>
   </defs>

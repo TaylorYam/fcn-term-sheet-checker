@@ -72,15 +72,15 @@ def set_windows_app_id() -> None:
     if sys.platform != "win32":
         return
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        ctypes.WinDLL("shell32").SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
     except (AttributeError, OSError):
         pass
 
 
-def apply_window_icon(root: tk.Misc, icon: Path = PANEL_ICON) -> None:
+def apply_window_icon(root: tk.Misc) -> None:
     """標題列、Alt-Tab 與之後開啟的對話框都使用 PANEL 圖示；找不到或無法載入時沿用 Tk 預設圖示。"""
     try:
-        root.iconbitmap(default=str(icon))
+        root.iconbitmap(default=str(PANEL_ICON))
     except tk.TclError:
         pass
 

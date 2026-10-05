@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- PANEL 圖示「雙頁比對」：紅頭 PDF 疊在綠頭條件表上，右下角打勾。32px 以上使用。 -->
+  <!-- PANEL 圖示「雙頁比對」：紅頭 PDF 疊在綠頭條件表上，右下角打勾。48px 以上使用。
+       更新圖示：以瀏覽器把兩份 SVG 直接畫成各尺寸 PNG（不從大圖縮小），再用 Pillow 組成 panel.ico：
+       panel.svg → 256/128/64/48，panel-small.svg → 32/24/16。 -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B4A5E"/><stop offset="1" stop-color="#161E2B"/></linearGradient>
   </defs>
