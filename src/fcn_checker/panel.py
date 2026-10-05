@@ -63,6 +63,28 @@ def enable_windows_dpi_awareness() -> None:
     set_awareness(ctypes.c_void_p(-2))  # DPI_AWARENESS_CONTEXT_SYSTEM_AWARE
 
 
+PANEL_ICON = Path(__file__).parent / "assets" / "panel.ico"
+APP_USER_MODEL_ID = "TaylorYam.FcnTermSheetChecker.Panel"
+
+
+def set_windows_app_id() -> None:
+    """在建立 Tk 視窗前設定專屬 AppUserModelID，工作列才顯示 PANEL 圖示，不與其他 Python 程式合併成一組。"""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.WinDLL("shell32").SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except (AttributeError, OSError):
+        pass
+
+
+def apply_window_icon(root: tk.Misc) -> None:
+    """標題列、Alt-Tab 與之後開啟的對話框都使用 PANEL 圖示；找不到或無法載入時沿用 Tk 預設圖示。"""
+    try:
+        root.iconbitmap(default=str(PANEL_ICON))
+    except tk.TclError:
+        pass
+
+
 def _table(parent, columns: tuple[tuple[str, str, int], ...], pixels, height: int = 6) -> ttk.Treeview:
     frame = ttk.Frame(parent)
     frame.columnconfigure(0, weight=1)
@@ -609,7 +631,9 @@ def session_from_args(args: argparse.Namespace) -> PanelSession:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     enable_windows_dpi_awareness()
+    set_windows_app_id()
     root = tk.Tk()
+    apply_window_icon(root)
     session = session_from_args(args)
     PanelWindow(root, session)
     root.mainloop()

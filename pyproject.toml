@@ -25,6 +25,9 @@ fcn-panel = "fcn_checker.panel:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+fcn_checker = ["assets/*.ico"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
