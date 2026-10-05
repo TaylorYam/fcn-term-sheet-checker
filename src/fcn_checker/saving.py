@@ -33,12 +33,17 @@ T = TypeVar("T")
 class SaveReceipt:
     """一次儲存的結果：核對結果檔、核對紀錄、已回填的說明書與寫檔錯誤。"""
 
-    status: CheckStatus = CheckStatus.ERROR  # 整批狀態，含這次的寫檔錯誤（CLI 依此決定結束碼）
+    status: CheckStatus | None = None  # 整批狀態，含這次的寫檔錯誤（CLI 依此決定結束碼）；取消儲存時為 None
     output: Path | None = None  # 核對結果檔；沒寫成時為 None
     record: Path | None = None  # 核對紀錄；沒寫成時為 None
     errors: tuple[CheckResult, ...] = ()  # 寫檔錯誤（含來源已變更）
     filled_items: tuple[BatchItem, ...] = ()  # 已回填進核對結果檔的說明書
     cancelled: bool = False  # PANEL：使用者取消選資料夾，什麼都沒寫
+
+    @classmethod
+    def nothing_to_save(cls, outcome: BatchOutcome) -> SaveReceipt:
+        """整批錯誤（設定檔或參考條件表有問題）：沒有核對任何說明書，什麼都不寫。"""
+        return cls(outcome.status)
 
     def filled(self, item: BatchItem) -> bool:
         return any(i is item for i in self.filled_items)
@@ -67,7 +72,7 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
     核對紀錄寫入失敗只記在收據，不影響核對結果檔；寫檔失敗不影響核對結果，可以再儲存一次。
     """
     if outcome.reference_format is None or not outcome.items:  # 整批錯誤：沒有可以儲存的結果
-        return SaveReceipt(outcome.status)
+        return SaveReceipt.nothing_to_save(outcome)
     now = now or dt.datetime.now()
     errors: list[CheckResult] = []
     output = record = None
@@ -90,7 +95,7 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
             result_file=output,
             metadata=outcome.metadata,
             errors=(*outcome.errors, *errors),
-            items=tuple(_record_item(i, output is not None and i.fillable) for i in outcome.items),
+            items=tuple(_record_item(i, any(i is f for f in filled)) for i in outcome.items),
         )
         record = _attempt(
             errors, "output.record", "核對紀錄", lambda: reporting.save_record(batch_record, Path(root), now)
@@ -150,4 +155,5 @@ def run_batch(
         if e.reason_code == "source_changed":  # CLI 沒有預覽可重新載入
             e = IngestionError(e.reason_code, "參考條件表、說明書或設定檔在核對期間已變更或無法讀取，請重新核對")
         outcome = failed_batch(reference_sheet, e)
+        return outcome, SaveReceipt.nothing_to_save(outcome)
     return outcome, save_batch(outcome, out_dir, root=root, now=now)

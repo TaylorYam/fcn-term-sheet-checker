@@ -852,19 +852,20 @@ def test_changing_a_release_after_saving_needs_a_new_save_and_keeps_the_old_rece
 def test_saving_twice_gives_two_files_and_a_fresh_receipt_without_the_earlier_errors(tmp_path):
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
-    taken = tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
-    taken.parent.mkdir()
-    taken.write_bytes(b"keep")
+    taken = tmp_path / "runtime" / "核對紀錄" / "20300203-040506.json"
+    taken.parent.mkdir(parents=True)
+    taken.write_text("keep", encoding="utf-8")
     before = repr(outcome)
 
     first = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
-    assert first.output is None and first.errors[0].reason_code == "output_exists"
-    assert first.record is not None and not first.filled(outcome.items[0])
+    assert first.output.is_file() and first.record is None
+    assert [(e.rule_id, e.reason_code) for e in first.errors] == [("output.record", "output_exists")]
 
     later = NOW + dt.timedelta(seconds=1)
     second = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=later)
     assert second.errors == () and second.status == PASS and second.filled(outcome.items[0])
-    assert second.output.is_file() and second.record.is_file() and second.record != first.record
+    assert second.output.is_file() and second.record.is_file() and second.output != first.output
+    assert len(list((tmp_path / "reports").glob("*_核對結果_*.xlsx"))) == 2, "兩組檔案"
     assert first.errors and first.status == ERROR, "第一張收據不變"
     assert repr(outcome) == before and outcome.errors == [], "核對結果本身不被儲存改寫"
 

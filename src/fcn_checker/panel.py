@@ -543,8 +543,6 @@ class PanelWindow:
     def _show_receipt(self, receipt: SaveReceipt):
         if self.session.outcome is None:
             self._clear()
-        elif self.results.outcome is not None:
-            self.results.show(self.results.outcome, select=self.results.selected_item())
         self.status.set(receipt.summary)
 
     def _watch_sources(self):

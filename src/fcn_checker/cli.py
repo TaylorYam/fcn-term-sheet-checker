@@ -13,7 +13,7 @@ from .batch import BatchOutcome, failed_batch
 from .check_config import DEFAULTS, ConfigPaths
 from .ingestion import IngestionError
 from .messages import STATUS_ZH
-from .saving import SaveReceipt, run_batch, save_batch
+from .saving import SaveReceipt, run_batch
 from .schema import CheckStatus
 
 EXIT = {CheckStatus.PASS: 0, CheckStatus.MISMATCH: 1, CheckStatus.REVIEW_REQUIRED: 1, CheckStatus.ERROR: 2}
@@ -68,7 +68,7 @@ def _run(args: argparse.Namespace) -> tuple[BatchOutcome, SaveReceipt]:
         config = ConfigPaths(args.review_standard, args.reference_format, args.issuer_prefixes).load()
     except IngestionError as e:  # 設定檔有問題：整批錯誤，不核對任何說明書
         outcome = failed_batch(args.reference_sheet, e)
-        return outcome, save_batch(outcome, args.out, root=Path.cwd())
+        return outcome, SaveReceipt.nothing_to_save(outcome)
     return run_batch(config, args.reference_sheet, args.term_sheets, args.out, root=Path.cwd())
 
 
