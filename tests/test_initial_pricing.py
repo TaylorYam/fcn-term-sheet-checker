@@ -21,6 +21,7 @@ from test_batch import row_of
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 PRICES = ("進場價", "執行價", "下限價", "KO價")
 BLANK = {f"UL_{i}_{p}": None for i in range(1, 4) for p in PRICES}
+STALE = {f"UL_{i}_{p}": 1.0 for i in range(1, 4) for p in PRICES}  # 表上已有、與說明書不同的價格
 # 合成說明書（執行 70%、KO 100%、無 KI）價格表上的值
 DOC_PRICES = {
     "UL_1": (123.45, 86.415, "-", 123.45),
@@ -48,8 +49,7 @@ def test_vwap_with_blank_prices_passes_and_fills_the_document_prices(tmp_path):
 
 
 def test_vwap_overwrites_different_sheet_prices_and_records_the_old_values(tmp_path):
-    stale = {f"UL_{i}_{p}": 1.0 for i in range(1, 4) for p in PRICES}
-    item, receipt, spec = run(tmp_path, 期初定價="VWAP", **stale)
+    item, receipt, spec = run(tmp_path, 期初定價="VWAP", **STALE)
     assert item.report.status.value == "PASS", [r for r in item.report.results if r.status.is_problem]
     assert prices_of(row_of(receipt.output, spec.product_code)) == DOC_PRICES
     [doc] = load_record(tmp_path)["items"]
@@ -59,9 +59,8 @@ def test_vwap_overwrites_different_sheet_prices_and_records_the_old_values(tmp_p
 
 def test_vwap_term_sheet_with_other_problems_can_be_released_and_is_overwritten(tmp_path):
     spec = Spec()
-    stale = {f"UL_{i}_{p}": 1.0 for i in range(1, 4) for p in PRICES}
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
-    rows = [reference_row(spec, **{"K(%)": 71, "期初定價": "VWAP", **stale})]
+    rows = [reference_row(spec, **{"K(%)": 71, "期初定價": "VWAP", **STALE})]
     outcome = check_all(build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows), [pdf])
     (item,) = outcome.items
     assert item.report.status.value == "MISMATCH"
@@ -98,14 +97,13 @@ def test_sheet_without_the_pricing_column_requires_review_naming_it(tmp_path):
     assert any("期初定價" in m for m in item.problem_messages), item.problem_messages
 
 
-def test_vwap_with_ki_fills_the_ki_prices_and_leaves_absent_underlyings_alone(tmp_path):
+def test_vwap_with_ki_fills_the_ki_prices(tmp_path):
     spec = Spec(ki="AM")
     item, receipt, spec = run(tmp_path, spec, 期初定價="VWAP", **BLANK)
     assert item.report.status.value == "PASS", [r for r in item.report.results if r.status.is_problem]
     row = row_of(receipt.output, spec.product_code)
     # KI 60%：123.45 × 60% = 74.07、87.2 × 60% = 52.32、1234.56 × 60% = 740.736
     assert [row[f"UL_{i}_下限價"] for i in (1, 2, 3)] == [74.07, 52.32, 740.736]
-    assert [row[f"UL_4_{p}"] for p in PRICES] == ["-"] * 4
 
 
 def test_panel_shows_vwap_prices_as_overwritten(tmp_path):

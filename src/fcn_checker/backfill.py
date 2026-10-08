@@ -1,4 +1,4 @@
-"""回填欄位（ISIN Code、發行日、比價日_1～12）的整段流程，所有上手共用（ADR 0004）。
+"""回填欄位（ISIN Code、發行日、比價日_1～12；期初定價 VWAP 時另加各標的價格欄）的整段流程，所有上手共用（ADR 0004）。
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
 - 期初定價為 VWAP 的商品，各標的四個價格欄也是回填欄位，但已有不同值時改為覆寫（Issue #122）。
@@ -32,9 +32,8 @@ from openpyxl.workbook.workbook import Workbook
 from .config import ReferenceFormat
 from .ingestion import IngestionError
 from .orders.reference import ReferenceRow
-from .rules import reference
 from .rules.kit import Context, doc_review, result
-from .rules.reference import PRICE_COLUMNS, standard_field
+from .rules.reference import PRICE_COLUMNS, is_vwap, standard_field
 from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
 from .schema import CheckStatus as S
 from .standard_fields import AutocallSchedule
@@ -62,7 +61,7 @@ _LABELS = {
     BackfillAction.MISMATCH: "不一致，保留原值",
     BackfillAction.OVERWRITE: "VWAP，核對通過後以說明書覆寫",
 }
-WRITTEN = (BackfillAction.FILL, BackfillAction.OVERWRITE)  # 儲存時寫進「回填後」的決策
+WRITE_ACTIONS = (BackfillAction.FILL, BackfillAction.OVERWRITE)  # 儲存時寫進「回填後」的決策
 PRICES = "各標的價格"  # VWAP 價格欄合起來核對，項目用這個名稱
 
 
@@ -254,7 +253,7 @@ def underlying_prices(
     說明書價格表上有的標的寫說明書的值（無 KI 時下限價為空值寫法）；沒有的標的四欄都寫空值寫法。
     不是 VWAP 時沒有結果也沒有決策（價格欄由 `field.underlying_prices` 比對）。
     """
-    if not reference.is_vwap(ctx):
+    if not is_vwap(ctx):
         return None, []
     rid, key, table = "backfill.underlying_prices", "underlying_prices", standard_field(ctx, "underlying_prices")
     slots = sum(1 for std in fmt.columns.values() if std.endswith("_initial_price"))  # 表上的標的數（UL_1～UL_5）
@@ -327,7 +326,7 @@ def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -
     fmt = _date_format(ws, rfmt)
     for report in reports:
         for d in report.backfill:
-            if d.action not in WRITTEN:
+            if d.action not in WRITE_ACTIONS:
                 continue
             cell = ws[d.cell]
             cell.value = d.expected
