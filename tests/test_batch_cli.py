@@ -77,7 +77,7 @@ def test_console_script_entry_point(tmp_path, monkeypatch):
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     cli_root(tmp_path, monkeypatch)  # 執行目錄是根目錄：核對紀錄寫在 tmp_path/runtime/
     proc = subprocess.run(
-        [sys.executable, "-m", "fcn_checker.cli", str(sheet), str(pdf), "--out", str(tmp_path / "r")],
+        [sys.executable, "-m", "fcn_checker.cli", str(sheet), *map(str, with_iis([pdf])), "--out", str(tmp_path / "r")],
         capture_output=True,
         text=True,
         encoding="utf-8",
