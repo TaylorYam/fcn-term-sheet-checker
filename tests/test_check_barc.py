@@ -26,12 +26,12 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
     assert trade.expected == dt.date(2030, 1, 7) and trade.actual == dt.date(2030, 1, 7)
     assert trade.document_evidence and trade.document_evidence[0].page >= 1
     assert "交易日" in trade.document_evidence[0].text
-    assert trade.order_source == ["樣本清單!J4"]
+    assert trade.order_source == ["樣本清單!L4"]
     meta = report.metadata
     assert len(meta["inputs"]["term_sheet"]["sha256"]) == 64
     assert len(meta["inputs"]["reference_sheet"]["sha256"]) == 64
     assert meta["review_standard"]["version"] == 7
-    assert meta["reference_format"]["version"] == 2
+    assert meta["reference_format"]["version"] == 3
     assert meta["program_version"] and meta["extractor"].startswith("PyMuPDF")
     assert report.not_covered, "第二階段規則應列在未涵蓋清單"
 

@@ -328,7 +328,7 @@ class ResultPane(ttk.Frame):
     @staticmethod
     def _backfill_text(item: BatchItem) -> str:
         if item.kind == DocKind.IIS:
-            return "投資人須知不回填；同商品的說明書與投資人須知都通過或人工放行，才回填說明書的值。"
+            return "投資人須知本身沒有回填決策；同商品的說明書與投資人須知都通過或人工放行，才依說明書的回填決策回填（含 TS、IIS 打 V）。"
         if not item.report.backfill:
             return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
         head = "回填欄位（說明書與投資人須知都通過或人工放行才會回填；按「儲存核對結果」後寫入核對結果檔）："

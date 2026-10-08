@@ -22,6 +22,7 @@ from real_data import REFERENCE, TERM_SHEETS, TO_FILL, pdfs, requires
 
 PDFS = pdfs()  # 說明書與投資人須知
 BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
+CHECKED_COLUMNS = ("TS", "IIS")  # 兩份都通過或放行才打 V（Issue #127）
 PROBLEMS = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED, CheckStatus.ERROR)
 
 pytestmark = [
@@ -84,9 +85,12 @@ def test_passing_barc_rows_are_marked_filled(saved):
     passed = [i for i in term_sheets(outcome) if i.issuer == "BARC" and i.report.status == CheckStatus.PASS]
     assert len(passed) == 5, "3 列 P 型＋2 列審查日期與名稱樣板都是新版的 D 型"
     assert all(receipt.filled(i) for i in passed), "同商品投資人須知也都通過"
-    # 表上已確認的回填值都相同；期初定價 VWAP 的價格欄一律以說明書覆寫（表上有未四捨五入的值，Issue #122）
+    # 表上已確認的回填值都相同；期初定價 VWAP 的價格欄一律以說明書覆寫（表上有未四捨五入的值，Issue #122）；
+    # TS、IIS 表上空白或已是 V（Issue #127）
     assert all(
-        d.action == "match" or (d.column.startswith("UL_") and d.action == "overwrite")
+        d.action == "match"
+        or (d.column.startswith("UL_") and d.action == "overwrite")
+        or (d.column in CHECKED_COLUMNS and d.action == "fill")
         for i in passed
         for d in i.report.backfill
     )
@@ -124,6 +128,7 @@ def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     assert set(got) == set(codes), "「回填後」只有通過且回填的列"
     for code in codes:
         assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code
+        assert [got[code][c] for c in CHECKED_COLUMNS] == ["V", "V"], code
     # 期初定價 VWAP：價格欄在待回補表上空白，回填後等於已確認表上的價格（四捨五入到 4 位，Issue #122）
     vwap = vwap_codes(TO_FILL) & set(codes)
     assert len(vwap) >= 1, "BARC 的期初定價 VWAP 那列有回填"

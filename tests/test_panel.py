@@ -256,7 +256,7 @@ def test_save_writes_result_file_and_record_only_when_asked(tmp_path):
     assert [p.name for p in (tmp_path / "reports").iterdir()] == [receipt.output.name], "選的資料夾只有核對結果檔"
     assert (tmp_path / "runtime" / "核對紀錄" / "20300203-040506.json").is_file()
     ws = openpyxl.load_workbook(receipt.output)["回填後"]
-    assert ws["F4"].value == SYNTH_ISIN
+    assert (ws["A4"].value, ws["B4"].value, ws["H4"].value) == ("V", "V", SYNTH_ISIN)
     assert sheet.read_bytes() == original
     assert session.outcome is outcome
 
