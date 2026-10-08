@@ -33,7 +33,7 @@ from .kit import (
     to_int,
 )
 
-__all__ = ["AutocallSchedule", "column_checks", "field_rules", "first_callable_period"]
+__all__ = ["AutocallSchedule", "column_checks", "field_rules", "first_callable_period", "is_vwap"]
 
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
 OBS_LABEL = {"D": "期間每日觀察", "P": "期末定日觀察"}
@@ -44,6 +44,7 @@ PRICE_COLUMNS = (  # 價格列的鍵、標準欄位、核對結果欄位用的�
     ("ki", "ki_price", "下限價"),
     ("ko", "ko_price", "KO 價"),
 )
+VWAP = "vwap"  # 期初定價為 VWAP：價格欄不比對，核對通過後以說明書覆寫（Issue #122）
 
 
 # ---------------------------------------------------------------- 表上事先填好的欄位
@@ -187,7 +188,7 @@ def underlyings(ctx: Context) -> CheckResult:
 
 
 def _mapped(
-    ctx: Context, rid: str, key: str, pf: ParsedField, values: dict[str, Any], column: str, name: str
+    ctx: Context, rid: str, key: str, pf: ParsedField | None, values: dict[str, Any], column: str, name: str
 ) -> tuple[Any, OrderValue | None, CheckResult | None]:
     text = lambda x: x if isinstance(x, str) else None  # noqa: E731
     v, ov, problem = order_value(ctx, key, rid, key, pf, text, "文字", name=name)
@@ -341,8 +342,32 @@ def ki_pct(ctx: Context) -> CheckResult:
     )
 
 
+def is_vwap(ctx: Context) -> bool:
+    """參考條件表的期初定價是 VWAP（空白或不在允許值內都不算，價格欄照常比對）。"""
+    ov = ctx.order.fields.get("initial_pricing")
+    return ov is not None and ctx.fmt.initial_pricing_values.get(ov.value) == VWAP
+
+
+def initial_pricing(ctx: Context) -> CheckResult:
+    """期初定價：說明書沒有對應資料，只檢查表上是允許值（開盤價／收盤價／VWAP）。"""
+    rid, key, name = "field.initial_pricing", "initial_pricing", "期初定價"
+    mapped, ov, problem = _mapped(ctx, rid, key, None, ctx.fmt.initial_pricing_values, name, name)
+    if problem:
+        return problem
+    if mapped == VWAP:
+        message = "VWAP：期初價格以上手報的為準，表上各標的價格不比對，核對通過後以說明書覆寫"
+    else:
+        message = "表上各標的價格與說明書比對"
+    return result(rid, key, S.PASS, expected=ov.value, ov=[ov], message=message, item=Item.column(name, [ov]))
+
+
 def underlying_prices(ctx: Context) -> list[CheckResult]:
-    """各標的進場／執行／下限／KO 價：表上值四捨五入（half-up）到 4 位後與說明書價格列相等。"""
+    """各標的進場／執行／下限／KO 價：表上值四捨五入（half-up）到 4 位後與說明書價格列相等。
+
+    期初定價為 VWAP 時不比對（改由回填規則 `backfill.underlying_prices` 覆寫）。
+    """
+    if is_vwap(ctx):
+        return []
     rid = "field.underlying_prices"
     rows, uls = standard_field(ctx, "underlying_prices"), standard_field(ctx, "underlyings")
     if not rows.ok:
@@ -457,6 +482,7 @@ def field_rules(ctx: Context) -> list[CheckResult]:
         ko_memory(ctx),
         ki_type(ctx),
         ki_pct(ctx),
+        initial_pricing(ctx),
         *underlying_prices(ctx),
     ]
 
