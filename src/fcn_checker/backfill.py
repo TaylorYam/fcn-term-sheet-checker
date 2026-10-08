@@ -1,6 +1,7 @@
 """回填欄位（ISIN Code、發行日、比價日_1～12）的整段流程，所有上手共用（ADR 0004）。
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
+- 期初定價為 VWAP 的商品，各標的四個價格欄也是回填欄位，但已有不同值時改為覆寫（Issue #122）。
 - 只寫入呼叫端交來的說明書：批量入口依每份的類別決定（整份 PASS 或人工放行，`BatchItem.fillable`）。
 - 寫入：批量入口以來源快照確認來源與核對時相同後才開檔，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
   原檔不動，回填結果由核對結果檔（result_file.py）帶出。
@@ -20,7 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -31,8 +32,9 @@ from openpyxl.workbook.workbook import Workbook
 from .config import ReferenceFormat
 from .ingestion import IngestionError
 from .orders.reference import ReferenceRow
+from .rules import reference
 from .rules.kit import Context, doc_review, result
-from .rules.reference import standard_field
+from .rules.reference import PRICE_COLUMNS, standard_field
 from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
 from .schema import CheckStatus as S
 from .standard_fields import AutocallSchedule
@@ -47,6 +49,7 @@ class BackfillAction(StrEnum):
     FILL = "fill"  # 表上空白，整份核對通過後回填
     MATCH = "match"  # 已有相同值
     MISMATCH = "mismatch"  # 已有不同值，保留原值
+    OVERWRITE = "overwrite"  # 期初定價 VWAP 的價格欄已有不同值，整份核對通過後以說明書覆寫
 
     @property
     def label(self) -> str:
@@ -57,7 +60,10 @@ _LABELS = {
     BackfillAction.FILL: "空白，核對通過後回填",
     BackfillAction.MATCH: "相同",
     BackfillAction.MISMATCH: "不一致，保留原值",
+    BackfillAction.OVERWRITE: "VWAP，核對通過後以說明書覆寫",
 }
+WRITTEN = (BackfillAction.FILL, BackfillAction.OVERWRITE)  # 儲存時寫進「回填後」的決策
+PRICES = "各標的價格"  # VWAP 價格欄合起來核對，項目用這個名稱
 
 
 @dataclass(frozen=True)
@@ -240,6 +246,49 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
     )
 
 
+def underlying_prices(
+    ctx: Context, fmt: ReferenceFormat, row: ReferenceRow
+) -> tuple[CheckResult | None, list[CellDecision]]:
+    """期初定價為 VWAP：UL_1～UL_5 的四個價格欄一律以說明書價格表覆寫。
+
+    說明書價格表上有的標的寫說明書的值（無 KI 時下限價為空值寫法）；沒有的標的四欄都寫空值寫法。
+    不是 VWAP 時沒有結果也沒有決策（價格欄由 `field.underlying_prices` 比對）。
+    """
+    if not reference.is_vwap(ctx):
+        return None, []
+    rid, key, table = "backfill.underlying_prices", "underlying_prices", standard_field(ctx, "underlying_prices")
+    slots = sum(1 for std in fmt.columns.values() if std.endswith("_initial_price"))  # 表上的標的數（UL_1～UL_5）
+    n = max(slots, len(table.value) if table.ok else 0)
+    stds = [f"underlying_{i}_{std}" for i in range(1, n + 1) for _, std, _ in PRICE_COLUMNS]
+    ovs = [row.fields.get(s) for s in stds]
+    item = Item.group(PRICES, ovs)
+    missing = _missing_columns(fmt, row, stds)
+    if missing:
+        return _column_missing(rid, key, missing, ovs, item), []
+    if not table.ok:
+        return doc_review(rid, key, table, None, ovs, item=item), []
+    decisions = []
+    for i in range(1, n + 1):
+        prices = table.value[i - 1].prices if i <= len(table.value) else {}
+        for col, std, _ in PRICE_COLUMNS:
+            d = _decide(fmt, row, f"underlying_{i}_{std}", prices.get(col, fmt.empty_value))
+            if d.action == BackfillAction.MISMATCH:
+                d = replace(d, action=BackfillAction.OVERWRITE)
+            decisions.append(d)
+    overwritten = sum(d.action == BackfillAction.OVERWRITE for d in decisions)
+    message = "；".join(
+        x
+        for x in (
+            "期初定價 VWAP：表上價格不比對，以說明書價格表為準",
+            _fill_message(decisions),
+            f"表上 {overwritten} 格與說明書不同，整份核對通過後覆寫" if overwritten else "",
+        )
+        if x
+    )
+    actual = {d.column: d.expected for d in decisions}
+    return result(rid, key, S.PASS, actual=actual, pf=table, ov=ovs, message=message, item=item), decisions
+
+
 # ---------------------------------------------------------------- 寫入
 
 
@@ -278,7 +327,7 @@ def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -
     fmt = _date_format(ws, rfmt)
     for report in reports:
         for d in report.backfill:
-            if d.action != BackfillAction.FILL:
+            if d.action not in WRITTEN:
                 continue
             cell = ws[d.cell]
             cell.value = d.expected

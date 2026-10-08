@@ -48,7 +48,7 @@
 | 第一個可提前出場期 | Non-Call(月) | §4.3 | 整數相等（`field.first_callable_period`） |
 | 各期比價日 | 比價日_1～12 | §11(1)(2) | 回填欄位，見 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md) §4（`backfill.compare_dates`） |
 | 標的 | UL_1～5 | §12(1) 彭博代號 | 依順序逐字相等（含交易所尾碼），數量相同；空值寫法表示沒有這檔標的（`field.underlyings`） |
-| 各標的價格 | UL_n_進場價／執行價／下限價／KO價 | §12(1) | 表上值四捨五入（half-up）到 4 位後相等；無 KI 時下限價必須是空值寫法（`field.underlying_prices`，欄位名稱「代號 執行價」等） |
+| 各標的價格 | UL_n_進場價／執行價／下限價／KO價 | §12(1) | 表上值四捨五入（half-up）到 4 位後相等；無 KI 時下限價必須是空值寫法（`field.underlying_prices`，欄位名稱「代號 執行價」等）。期初定價為 `VWAP` 時不比對，核對通過後以 §12(1) 覆寫（`backfill.underlying_prices`，Issue #122） |
 
 ### 3.3 數值
 
@@ -170,6 +170,7 @@
 | `field.product_code`、`backfill.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | 參考條件表核心條件（共用 `rules/reference.py`，§3.2） |
 | `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`backfill.compare_dates` | 型態、首可 KO 期與比價日（共用） |
 | `field.underlyings`、`field.underlying_prices` | 標的順序／尾碼與各標的四位價格（共用） |
+| `field.initial_pricing`、`backfill.underlying_prices` | 期初定價必填且為允許值；`VWAP` 時價格欄不比對、通過後以說明書覆寫（共用，Issue #122） |
 | `derive.prices` | 價格 = 期初股價 × 百分比（half-up 4 位）；價格表列數須等於標的數、有無下限價欄須與 KI 型態一致，否則轉人工覆核（各上手共用 `rules/derivation.py`，BARC 語意，Issue #94；兩項表格檢查為此新增，項目名稱為「UL_n 執行價／KO價／下限價」；HSBC 的標的清單取自價格表各列，列數檢查在現行範本上不會觸發，保留給讀出不一致時） |
 | `doc.price_header_pct` | 表頭百分比 = 定義句（HSBC 說明書內部；價格表讀不到時與情境表一起轉人工覆核） |
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |

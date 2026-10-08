@@ -18,7 +18,8 @@ from reference_synth import build_reference_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 TS_DIR = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts"
-PDFS = sorted(TS_DIR.glob("*.pdf")) if TS_DIR.is_dir() else []
+# 投資人須知（_IIS）不是說明書
+PDFS = sorted(p for p in TS_DIR.glob("*.pdf") if "_IIS" not in p.name) if TS_DIR.is_dir() else []
 
 pytestmark = [
     pytest.mark.real_samples,

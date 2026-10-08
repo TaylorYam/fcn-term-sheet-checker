@@ -33,6 +33,7 @@ REFERENCE_HEADERS = [
     *[f"比價日_{i}" for i in range(1, 13)],
     "最終比價日",
     "到期日",
+    "期初定價",
     "KO(%)",
     "KO(Freq)",
     "KO(memo)",
@@ -65,6 +66,7 @@ def make_row(issuer: str, fields: dict[str, Any], **overrides: Any) -> dict[str,
         "發行機構": issuer_value(issuer),
         "私銀註記": "-",
         "UF": 1.5900000000000034,
+        "期初定價": "收盤價",
         **{f"UL_{i}_Memo": "-" for i in range(1, 6)},
     }
     row.update({h: fields[f] for h, f in REFERENCE_COLUMNS.items() if f in fields})
