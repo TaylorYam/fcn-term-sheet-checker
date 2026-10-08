@@ -79,7 +79,7 @@ python -m pip install -c constraints.txt -e ".[dev]"
 在專案根目錄執行（設定檔預設讀 `config/`）：
 
 ```bash
-fcn-batch data/FCN參考條件_1001.xlsx data/ts/029*.pdf --out runtime/reports
+fcn-batch data/orders/FCN參考條件.xlsx data/term-sheets/029*.pdf --out runtime/reports
 ```
 
 | 參數 | 說明 |
@@ -142,7 +142,7 @@ pytest -q
 ruff check src tests
 ```
 
-測試只透過公開切點驗證：批量入口 `fcn_checker.batch`（`preview_batch`／`check_batch`）與儲存 `fcn_checker.saving`（`save_batch`／`run_batch`，回傳儲存收據；設定由核對設定 `fcn_checker.check_config.CheckConfig` 傳入）、`fcn-batch` CLI 與 PANEL 工作階段 `fcn_checker.panel_workflow.PanelSession`。合成說明書 PDF 由各上手的合成器（`tests/synth.py`、`tests/hsbc_synth.py`）產生，合成參考條件表與單份核對 harness（含載入一次的核對設定 fixture `CONFIG`）在 `tests/reference_synth.py`、`tests/harness.py`，數值皆虛構。`tests/test_real_samples*.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過。
+測試只透過公開切點驗證：批量入口 `fcn_checker.batch`（`preview_batch`／`check_batch`）與儲存 `fcn_checker.saving`（`save_batch`／`run_batch`，回傳儲存收據；設定由核對設定 `fcn_checker.check_config.CheckConfig` 傳入）、`fcn-batch` CLI 與 PANEL 工作階段 `fcn_checker.panel_workflow.PanelSession`。合成說明書 PDF 由各上手的合成器（`tests/synth.py`、`tests/hsbc_synth.py`）產生，合成參考條件表與單份核對 harness（含載入一次的核對設定 fixture `CONFIG`）在 `tests/reference_synth.py`、`tests/harness.py`，數值皆虛構。`tests/test_real_samples*.py`、`tests/test_real_hsbc.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過；樣本的資料夾結構與檔名只定義在 `tests/real_data.py`（見[資料管理](#資料管理)），缺檔時略過原因會寫出缺的路徑。
 
 ## 文件與開發規則
 
@@ -161,7 +161,7 @@ ruff check src tests
 
 ## 資料管理
 
-真實 PDF、下單檔、擷取文字、OCR 影像、核對結果檔與核對紀錄放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：TS 放 `data/ts/`、下單 Excel 放 `data/`、探勘輸出與暫存檔放 `data/tmp/`、CLI 核對結果檔預設輸出到 `runtime/reports/`、核對紀錄在 `runtime/核對紀錄/`。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
+真實 PDF、下單檔、擷取文字、OCR 影像、核對結果檔與核對紀錄放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：說明書與投資人須知 PDF 放 `data/term-sheets/`、參考條件表放 `data/orders/`（完整表 `FCN參考條件.xlsx`、回填欄位空白的 `FCN參考條件_待回補.xlsx`）、探勘輸出與暫存檔放 `data/tmp/`、CLI 核對結果檔預設輸出到 `runtime/reports/`、核對紀錄在 `runtime/核對紀錄/`。本機真實樣本測試照這個結構讀檔；樣本放在其他資料夾時，設定環境變數 `FCN_TEST_DATA_DIR` 指向該資料夾（底下一樣是 `orders/`、`term-sheets/`）。`data/` 不進 Git，多台電腦之間依公司規定自行同步。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
 
 ## 範本來源
 

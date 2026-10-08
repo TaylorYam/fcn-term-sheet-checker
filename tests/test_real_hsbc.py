@@ -1,25 +1,23 @@
 """本機 HSBC 真實樣本；交易資料不進 Git，CI 自動略過。"""
 
-import os
 from collections import Counter
-from pathlib import Path
 
 import pytest
 
 from fcn_checker.schema import CheckStatus as S
-from harness import ROOT, check_all
+from harness import check_all
+from real_data import REFERENCE, TERM_SHEETS, requires, term_sheets
 
-DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
-PDFS = sorted(p for p in (DATA / "ts").glob("325*.pdf") if "_IIS" not in p.name)  # 投資人須知不是說明書
-ORDER = DATA / "FCN參考條件_1001.xlsx"
+PDFS = term_sheets("325*.pdf")
 pytestmark = [
     pytest.mark.real_samples,
-    pytest.mark.skipif(not PDFS or not ORDER.is_file(), reason="本機無 HSBC 真實樣本或整理表"),
+    requires(TERM_SHEETS / "325*_TS.pdf", REFERENCE),
 ]
 
 
 def test_real_hsbc_samples_match_exploration():
-    items = [i for i in check_all(ORDER, PDFS).items if i.term_sheet.name.endswith("_TS.pdf")]  # 投資人須知另見批量測試
+    outcome = check_all(REFERENCE, PDFS)
+    items = [i for i in outcome.items if i.term_sheet.name.endswith("_TS.pdf")]  # 投資人須知另見批量測試
     reports = [i.report for i in items]
     assert len(reports) == 9 and all(r.template == "hsbc-zh-pd" for r in reports)
     bad = Counter(
