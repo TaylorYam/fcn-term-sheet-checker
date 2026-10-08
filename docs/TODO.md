@@ -3,7 +3,7 @@
 ## 0. 明天先確定範圍
 
 - [x] 選一家 issuer、一個範本版本；確認樣本為文字／掃描／混合 PDF。→ 巴克萊（BARC）中文產品說明書，14 份樣本皆為文字型 PDF。見 [BARC 範本規格](templates/barc-zh-product-description.md)。
-- [ ] 取得可合法使用且去識別的樣本，建立人工標註的 expected output；真實樣本留在 Git 外。（真實樣本已放本機 `data/ts/`；去識別 fixture 尚未建立）
+- [ ] 取得可合法使用且去識別的樣本，建立人工標註的 expected output；真實樣本留在 Git 外。（真實樣本已放本機 `data/term-sheets/`；去識別 fixture 尚未建立）
 - [x] 確認權威下單來源（CSV、Excel、系統匯出或其他）與交易配對方式。→ 2026-10-02 起所有上手共用參考條件表，以商品代號對 `TDCC Code`；見[參考條件表格式](order-formats/reference-sheet.md)、[ADR 0004](adr/0004-reference-sheet-as-check-source.md)。（BARC 詢價表已停用，PANEL 改版前保留）
 - [ ] 與作業人員確認首批必核欄位、年率／期率、門檻語意、日期與容差規則。（交易條款、文件資訊與日期規則皆已確認；標的中文名稱核對擱置，見核對規則 §6.2）
 - [x] 確認本機 Python 版本、套件授權與作業環境；鎖定依賴。→ Python ≥ 3.11；PyMuPDF（AGPL-3.0，僅公司內部本機使用）、openpyxl；版本鎖定於 `constraints.txt`（Issue #7）。

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from collections import Counter
 from decimal import ROUND_HALF_UP, Decimal
@@ -19,18 +18,15 @@ from fcn_checker.batch import DocKind
 from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
 from harness import CONFIG
+from real_data import REFERENCE, TERM_SHEETS, TO_FILL, pdfs, requires
 
-ROOT = Path(__file__).resolve().parents[1]
-DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
-PDFS = sorted((DATA / "ts").glob("*.pdf")) if (DATA / "ts").is_dir() else []  # 說明書與投資人須知
-REFERENCE = DATA / "FCN參考條件_1001.xlsx"
-TO_FILL = DATA / "FCN參考條件_待回補_v.1.xlsx"  # 同一張表，回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）
+PDFS = pdfs()  # 說明書與投資人須知
 BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
 PROBLEMS = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED, CheckStatus.ERROR)
 
 pytestmark = [
     pytest.mark.real_samples,
-    pytest.mark.skipif(not PDFS or not REFERENCE.is_file(), reason="本機沒有真實樣本（data/ 被 Git 忽略）"),
+    requires(TERM_SHEETS / "*.pdf", REFERENCE),
 ]
 
 
@@ -117,7 +113,7 @@ def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
     return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
 
 
-@pytest.mark.skipif(not TO_FILL.is_file(), reason="本機沒有待回補的參考條件表")
+@requires(TO_FILL)  # 回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）
 def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     sheet = shutil.copy(TO_FILL, tmp_path / TO_FILL.name)
     filled, receipt = run_batch(CONFIG, Path(sheet), PDFS, tmp_path / "reports", root=tmp_path)
