@@ -54,10 +54,20 @@ def output_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:
     return out_dir / f"{reference_sheet.stem}_核對結果_{now:%Y%m%d-%H%M%S}.xlsx"
 
 
-def save(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequence[ErrorRow], out: Path) -> Path:
-    """寫出核對結果檔並回傳路徑；檔案已存在（不覆蓋）、版面無法安全刪列或無法寫入時丟出 IngestionError。
+def check_layout(wb: Workbook, rfmt: ReferenceFormat) -> None:
+    """版面無法安全刪列時丟出 IngestionError。要在回填前檢查：資料列的合併儲存格連回填都寫不進去。"""
+    unsupported = _unsupported_layout(wb[rfmt.sheet], rfmt.first_data_row)
+    if unsupported:
+        raise IngestionError(
+            "result_layout_unsupported",
+            f"參考條件表「{rfmt.sheet}」有{'、'.join(unsupported)}，刪列後無法保證版面正確，未產生核對結果檔",
+        )
 
-    `wb` 是已回填的參考條件表（會被改寫）；`keep` 是要留在「回填後」的資料列號。
+
+def save(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequence[ErrorRow], out: Path) -> Path:
+    """寫出核對結果檔並回傳路徑；檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。
+
+    `wb` 是已通過 `check_layout`、已回填的參考條件表（會被改寫）；`keep` 是要留在「回填後」的資料列號。
     """
     write_new(out, _build(wb, rfmt, keep, errors), "核對結果檔")
     return out
@@ -68,12 +78,6 @@ def _build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Seq
         if name != rfmt.sheet:
             del wb[name]
     ws = wb[rfmt.sheet]
-    unsupported = _unsupported_layout(ws, rfmt.first_data_row)
-    if unsupported:
-        raise IngestionError(
-            "result_layout_unsupported",
-            f"參考條件表「{rfmt.sheet}」有{'、'.join(unsupported)}，刪列後無法保證版面正確，未產生核對結果檔",
-        )
     ws.title = FILLED_SHEET
     ws.sheet_view.tabSelected = True
     wb.active = ws
