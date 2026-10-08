@@ -12,7 +12,7 @@ import pytest
 from fcn_checker.cli import main
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus
-from harness import CONFIG, REVIEW_STANDARD, check_all, cli_root, load_config, load_record
+from harness import CONFIG, REVIEW_STANDARD, check_all, cli_root, load_config, load_record, with_iis
 from reference_synth import build_reference_sheet
 from synth import Spec, barc_adapter, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
 
@@ -279,7 +279,7 @@ def test_each_term_sheet_is_detected_and_read_once_per_check(tmp_path):
     pdfs = [build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s) for s in specs]
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(s) for s in specs])
     outcome = check_all(sheet, pdfs, CONFIG.with_registry((adapter,)))
-    assert [i.report.status for i in outcome.items] == [PASS, PASS]
+    assert [i.report.status for i in outcome.items] == [PASS, PASS, PASS, PASS]
     assert calls == {"detect": 2, "read": 2}, "每份說明書辨識與讀出各只做一次"
 
 
@@ -312,7 +312,7 @@ def test_cli_uses_default_config_files(tmp_path, monkeypatch):
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
     cli_root(tmp_path, monkeypatch)  # 預設設定檔路徑相對於工作目錄
-    assert main([str(sheet), str(pdf), "--out", str(tmp_path / "reports")]) == 0
+    assert main([str(sheet), *map(str, with_iis([pdf])), "--out", str(tmp_path / "reports")]) == 0
     data = load_record(tmp_path)["items"][0]
     assert data["status"] == "PASS"
     assert data["metadata"]["reference_format"]["file"] == "reference_sheet.toml"

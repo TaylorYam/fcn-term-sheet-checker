@@ -33,7 +33,7 @@ from .kit import (
     to_int,
 )
 
-__all__ = ["AutocallSchedule", "column_checks", "field_rules", "first_callable_period", "is_vwap"]
+__all__ = ["AutocallSchedule", "column_checks", "compare_field", "field_rules", "first_callable_period", "is_vwap"]
 
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
 OBS_LABEL = {"D": "期間每日觀察", "P": "期末定日觀察"}
@@ -50,7 +50,7 @@ VWAP = "vwap"  # 期初定價為 VWAP：價格欄不比對，核對通過後以�
 # ---------------------------------------------------------------- 表上事先填好的欄位
 
 
-def _compare(
+def compare_field(
     ctx: Context,
     rule_id: str,
     key: str,
@@ -469,14 +469,14 @@ def field_rules(ctx: Context) -> list[CheckResult]:
         product_code(ctx),
         currency(ctx),
         underlyings(ctx),
-        _compare(ctx, "field.strike_pct", "strike_pct", "執行 %", dec, "數字", cmp_pct, PCT_TOLERANCE),
-        _compare(ctx, "field.ko_pct", "ko_pct", "KO %", dec, "數字", cmp_pct, PCT_TOLERANCE),
-        _compare(ctx, "field.coupon_pa_pct", "coupon_pa_pct", "年利率 %", dec, "數字", cmp_pct, PCT_TOLERANCE),
-        _compare(ctx, "field.tenor_months", "tenor_months", "天期（月）", intg, "整數"),
-        _compare(ctx, "field.trade_date", "trade_date", "交易日", date, "日期"),
-        _compare(ctx, "field.final_valuation_date", "final_valuation_date", "最終評價日", date, "日期"),
-        _compare(ctx, "field.maturity_date", "maturity_date", "到期日", date, "日期"),
-        _compare(ctx, "field.denomination", "denomination", "面額", intg, "整數"),
+        compare_field(ctx, "field.strike_pct", "strike_pct", "執行 %", dec, "數字", cmp_pct, PCT_TOLERANCE),
+        compare_field(ctx, "field.ko_pct", "ko_pct", "KO %", dec, "數字", cmp_pct, PCT_TOLERANCE),
+        compare_field(ctx, "field.coupon_pa_pct", "coupon_pa_pct", "年利率 %", dec, "數字", cmp_pct, PCT_TOLERANCE),
+        compare_field(ctx, "field.tenor_months", "tenor_months", "天期（月）", intg, "整數"),
+        compare_field(ctx, "field.trade_date", "trade_date", "交易日", date, "日期"),
+        compare_field(ctx, "field.final_valuation_date", "final_valuation_date", "最終評價日", date, "日期"),
+        compare_field(ctx, "field.maturity_date", "maturity_date", "到期日", date, "日期"),
+        compare_field(ctx, "field.denomination", "denomination", "面額", intg, "整數"),
         *min_amounts(ctx),
         ko_observation(ctx),
         ko_memory(ctx),

@@ -14,8 +14,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
-from fcn_checker.issuers import Issuer
-from harness import REVIEW_STANDARD, check_rows
+from fcn_checker.issuers import BARC, Issuer
+from harness import REVIEW_STANDARD, check_rows, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import make_row
 
@@ -213,7 +213,10 @@ def schedule_rows(s: Spec) -> list[dict[str, Any]]:
     return rows
 
 
-def build_pdf(path: Path, s: Spec) -> Path:
+def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
+    """合成說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時，旁邊另寫一份同商品投資人須知（ADR 0007：兩份一起核對）。"""
+    if iis and path.stem.endswith("_TS"):
+        build_iis_pdf(iis_path(path), s)
     w = PdfWriter()
     warnings = s.warnings or (FIXED_WARNING,) * 3
     warnings = tuple(x.replace("RR4", s.rr) for x in warnings)
@@ -691,5 +694,156 @@ def barc_adapter(**overrides: Any) -> Issuer:
         "read": parser.read,
         "rules": rules.run_all,
         "reference_fields": rules.REFERENCE_FIELDS,
+        "iis": BARC.iis,  # 投資人須知照 BARC 範本
     }
     return Issuer(**{**fields, **overrides})
+
+
+# ---------------------------------------------------------------- 投資人須知（docs/templates/barc-zh-iis.md）
+
+IIS_PAGES = 4  # 審查標準 iis.pages
+
+
+def build_iis_pdf(path: Path, s: Spec, *, pages: int = IIS_PAGES, replace: dict[str, str] | None = None) -> Path:
+    """仿 BARC 中文投資人須知（4 頁）；值與 `s` 的說明書一致。`replace` 逐行替換文字（製造錯誤）、`pages` 改頁數。"""
+    w = PdfWriter()
+    replace = replace or {}
+    dist = DISTRIBUTOR["name"]
+    fees = {**FEES, **s.fees}
+    name_zh = (s.name_zh or s.expected_name_zh()).replace("（下稱「本商品」）", "")
+    name_en = s.name_en or s.expected_name_en()
+
+    def text(t: str) -> str:
+        for old, new in replace.items():
+            t = t.replace(old, new)
+        return t
+
+    def line(x: float, t: str) -> None:
+        w.line(x, text(t))
+
+    def para(t: str) -> None:
+        w.para(20.5, text(t), width=48)
+
+    def page1() -> None:
+        line(191.0, "中文投資人須知（專業投資人與OSU 客戶）")
+        line(41.3, name_zh)
+        line(20.6, f"({name_en})（下稱「本商品」）（商品種類：股權連結債券）")
+        w.need(13)
+        w.put(20.0, w.y, text(f"商品代號:{s.product_code}"))
+        w.put(157.9, w.y, text(f"受託或銷售機構商品代號:{s.distributor_code or s.product_code}"))
+        w.put(441.8, w.y, text(f"ISIN:{SYNTH_ISIN}"))
+        w.y += 13
+        line(20.0, "警語：")
+        para("1." + FIXED_WARNING)
+        para(
+            f"4.本商品雖經{dist}審查，並不代表證實申請事項或保證本商品之價值，且{dist}不負本商品投資盈虧之責。{dist}依法不得承諾擔保投資本金或最低收益率。"
+        )
+        para(
+            f"5.本商品持有期間如有保證配息收益和保證保本率係由英商巴克萊銀行股份有限公司（發行機構）保證，而非由{dist}保證。"
+        )
+        para(
+            f"6.本中文投資人須知之內容如有虛偽或隱匿之情事者，除受託或銷售機構另行訂定者，係由{dist}負責外，其餘內容由總代理人負責。"
+        )
+        para("7.本商品係依境外結構型商品管理規則於中華民國境內受託投資或受託買賣之投資標的。")
+        para(f"9.{dist}應提供專業投資人及OSU 客戶相關契約審閱期間。")
+        line(20.0, "相關機構事業概況：")
+        para(f"1.發行機構：{ISSUER_NAME}；營業所在地：1 Example Road, London。")
+        para(f"3.受託或銷售機構：{dist}；營業所在地：{DISTRIBUTOR['address']}。")
+        line(20.0, "商品簡介：")
+
+    def page2() -> None:
+        line(20.5, f"3.本商品風險程度：{s.rr}")
+        line(20.5, f"6.計價幣別：{s.currency_zh}。")
+        para(
+            f"7.商品面額與發行價格：每單位商品面額為{s.denom:,} {s.currency_zh}，最低申購金額為"
+            f"{s.min_subscription or s.denom:,} {s.currency_zh}。發行價格為商品面額之{s.issue_price}%。"
+        )
+        line(20.5, "10.連結標的資產：" + "、".join(f"{u.ticker} Equity" for u in s.underlyings) + ".")
+        line(20.5, f"11.商品年期：{s.tenor} 個月。")
+        line(20.5, f"12.發行日：{zh_date(s.issue_date)}。")
+        line(20.5, f"13.到期日或最終實物贖回日：{zh_date(s.maturity_date)}。")
+        line(20.0, "收益分配事項：")
+        para(
+            f"(1) 配息金額：每單位商品面額乘以每月之配息率（為{s.monthly_value}%(顯示至小數點後第4位)，"
+            f"即年利率為{s.annual}%）所計算之配息金額。"
+        )
+        # 價格表：記憶式商品 KO 欄頭不寫百分比；有 KI 時多一欄「觸及生效價格」（docs/templates/barc-zh-iis.md）
+        ko_head = (
+            [
+                "自動提前出場觸發",
+                "價格（為最初價格",
+                "乘以自動提前出場",
+                "觸發百分比）(四捨",
+                "五入至小數點後第4",
+                "位)",
+            ]
+            if s.memory
+            else ["觸發水準（為最初", f"價格的{s.ko}%）(", "四捨五入至小數點", "後第4 位)"]
+        )
+        columns = [  # 欄頭 x、數字 x、欄頭各行、百分比
+            (164.3, 165.7, ["最初價格"], None),
+            (252.6, 276.6, ["執行價格（為最初", f"價格的{s.strike}%）(四", "捨五入至小數點後", "第4 位)"], s.strike),
+            (363.5, 387.5, ko_head, s.ko),
+        ]
+        if s.ki != "none":
+            columns.append(
+                (
+                    474.5,
+                    498.5,
+                    ["觸及生效價格（為", f"最初價格的{s.ki_pct}%", "）(四捨五入至小數", "點後第4 位)"],
+                    s.ki_pct,
+                )
+            )
+        rows = max(len(h) for _, _, h, _ in columns)
+        w.need(12 * rows + 20)
+        y = w.y
+        w.put(53.3, y + 12 * (rows // 2), text("標的資產"))
+        for x, _, head, _ in columns:
+            top = y + 12 * ((rows - len(head)) // 2)
+            for k, t in enumerate(head):
+                w.put(x, top + 12 * k, text(t))
+        w.y = y + 12 * rows + 6
+        for u in s.underlyings:
+            names = _wrap_name(u.name)
+            w.need(12 * len(names) + 4)
+            for k, n in enumerate(names):
+                w.put(30.7, w.y + 12 * k, text(n))
+            for _, x, _, pct in columns:
+                w.put(x, w.y, text(fmt_price(u.initial if pct is None else price(u.initial, pct))))
+            w.y += 12 * len(names) + 4
+        line(48.4, "(3) 指定提前現金交割金額：請參閱中文產品說明書。")
+
+    def page3() -> None:
+        line(20.0, "本商品各類投資風險：")
+        para("(1) 最低收益風險：在最差的狀況下，投資人將損失所有本金及利息。")
+        line(20.0, "本商品之費用明細表：")
+        for label, rate in (
+            (["申購費用"], ["申購價金的", fees["申購費用"]]),
+            (["提前贖回費用"], ["投資人提前贖", "回價金的", fees["提前贖回費用"]]),
+            (["管理費用（信託管理費或管銷費用）"], ["無"]),
+            (
+                ["分銷費用（如屬發行機構或發行人給予", "受託或銷售機構之報酬、費用、折讓等", "各項利益應單獨列示）"],
+                ["申購價金的", fees["分銷費用"]],
+            ),
+        ):
+            h = 11 * max(len(label), len(rate)) + 6
+            w.need(h)
+            for k, t in enumerate(label):
+                w.put(20.4, w.y + 11 * k, text(t))
+            for k, t in enumerate(rate):
+                w.put(230.8, w.y + 11 * k, text(t))
+            w.y += h
+
+    def page4() -> None:
+        line(20.0, "相關機構之權利、義務及責任：")
+        para("1. 發行機構將根據本商品有關條件支付應付之相關款項。")
+
+    builders = [page1, page2, page3, page4]
+    for k, build in enumerate(builders):
+        if 0 < k < pages:
+            w.new_page()
+        build()
+    for _ in range(pages - len(builders)):
+        w.new_page()
+        line(20.0, "（續）")
+    return _finish(w, path)

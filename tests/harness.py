@@ -1,5 +1,8 @@
 """單份核對 harness（不分上手）：一份說明書＋參考條件表跑公開批量入口（預覽＋核對），再依 rule_id 取結果。
 
+說明書旁有同商品投資人須知（`<商品代號>_IIS.pdf`，合成器預設會一起寫出）時一起核對：說明書與投資人須知要
+一起選取（ADR 0007），只給說明書會因「這批缺投資人須知」轉人工覆核。
+
 `CONFIG` 是以 repo config 載入一次的核對設定 fixture；要換某個設定檔或上手註冊表時用 `load_config`／
 `CheckConfig.with_registry`。
 
@@ -60,9 +63,24 @@ def load_record(root: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def iis_path(ts: Path) -> Path:
+    """說明書 `<商品代號>_TS.pdf` 旁的同商品投資人須知 `<商品代號>_IIS.pdf`（各上手合成器共用）。"""
+    return ts.with_name(ts.stem[: -len("_TS")] + "_IIS.pdf")
+
+
+def with_iis(pdfs: Sequence[Path]) -> list[Path]:
+    """每份 `<商品代號>_TS.pdf` 旁若有同商品 `<商品代號>_IIS.pdf` 且沒選到，就加在最後（說明書的順序不變）。"""
+    out = [Path(p) for p in pdfs]
+    for p in list(out):
+        sibling = iis_path(p)
+        if p.stem.endswith("_TS") and sibling.exists() and sibling not in out:
+            out.append(sibling)
+    return out
+
+
 def check_all(sheet: Path, pdfs: Sequence[Path], config: CheckConfig = CONFIG) -> BatchOutcome:
-    """預覽＋核對（不儲存），回傳批量核對結果。"""
-    return check_batch(preview_batch(config, sheet, pdfs))
+    """預覽＋核對（不儲存），回傳批量核對結果；說明書旁的同商品投資人須知一起核對（`with_iis`）。"""
+    return check_batch(preview_batch(config, sheet, with_iis(pdfs)))
 
 
 def check_sheet(pdf: Path, sheet: Path, config: CheckConfig = CONFIG) -> CheckReport:

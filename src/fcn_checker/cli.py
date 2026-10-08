@@ -81,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"執行錯誤：{type(e).__name__}: {e}", file=sys.stderr)
         return EXIT[CheckStatus.ERROR]
     for item in outcome.items:
-        print(f"{item.status_label}  {item.term_sheet.name}{'  已回填' if receipt.filled(item) else ''}")
+        reason = f"  {item.not_filled_reason}" if item.not_filled_reason else ""
+        print(f"{item.status_label}  {item.term_sheet.name}{'  已回填' if receipt.filled(item) else ''}{reason}")
     for e in (*outcome.errors, *receipt.errors):
         print(f"  [ERROR] {e.field}：{e.message}", file=sys.stderr)
     print(f"整體狀態：{receipt.status.value}（{STATUS_ZH[receipt.status]}）")

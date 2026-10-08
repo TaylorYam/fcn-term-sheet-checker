@@ -51,6 +51,7 @@ class IssuerStandard:
     distributor_phone: str
     distributor_phone_equivalents: tuple[str, ...]  # 電話可接受的其他寫法（所有上手適用）
     distributor_address: str
+    iis_fixed_warning_occurrences: int | None  # 投資人須知的固定警語次數；None → 審查標準沒有該上手的值
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,8 @@ class ReviewStandard:
     currency_zh_to_iso: dict[str, str]
     denomination: dict[str, int]
     print_date_max_days_after_trade: int
+    iis_pages: int  # 投資人須知必須剛好的頁數
+    iis_fixed_warning_occurrences: dict[str, int]  # 上手代號（小寫）→ 固定警語在投資人須知出現的次數
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
     distributor_phone_equivalents: tuple[str, ...] = ()
 
@@ -93,6 +96,7 @@ class ReviewStandard:
             distributor_phone=self.distributor_phone,
             distributor_phone_equivalents=self.distributor_phone_equivalents,
             distributor_address=self.distributor_address,
+            iis_fixed_warning_occurrences=self.iis_fixed_warning_occurrences.get(key),
         )
 
 
@@ -193,6 +197,8 @@ def load_review_standard(path: Path) -> ReviewStandard:
             currency_zh_to_iso=dict(d["currency"]),
             denomination={k: int(v) for k, v in d["denomination"].items()},
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
+            iis_pages=int(d["iis"]["pages"]),
+            iis_fixed_warning_occurrences={k: int(v) for k, v in d["iis"]["fixed_warning_occurrences"].items()},
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"審查標準設定檔缺少或格式錯誤的項目：{e}") from e

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fcn_checker.cli import main
-from harness import cli_root, load_record
+from harness import cli_root, load_record, with_iis
 from reference_synth import build_reference_sheet
 from synth import Spec, build_pdf, reference_row
 
@@ -12,7 +12,7 @@ def run(tmp_path, monkeypatch, capsys, specs, rows, extra=()):
     pdfs = [build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s) for s in specs]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
     cli_root(tmp_path, monkeypatch)  # 預設設定檔與核對紀錄都相對於執行目錄
-    code = main([str(sheet), *map(str, pdfs), "--out", str(tmp_path / "reports"), *extra])
+    code = main([str(sheet), *map(str, with_iis(pdfs)), "--out", str(tmp_path / "reports"), *extra])
     return code, capsys.readouterr(), pdfs
 
 
@@ -77,7 +77,7 @@ def test_console_script_entry_point(tmp_path, monkeypatch):
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     cli_root(tmp_path, monkeypatch)  # 執行目錄是根目錄：核對紀錄寫在 tmp_path/runtime/
     proc = subprocess.run(
-        [sys.executable, "-m", "fcn_checker.cli", str(sheet), str(pdf), "--out", str(tmp_path / "r")],
+        [sys.executable, "-m", "fcn_checker.cli", str(sheet), *map(str, with_iis([pdf])), "--out", str(tmp_path / "r")],
         capture_output=True,
         text=True,
         encoding="utf-8",

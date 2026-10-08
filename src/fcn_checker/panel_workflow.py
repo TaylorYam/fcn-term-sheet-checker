@@ -1,4 +1,4 @@
-"""PANEL 公開工作流程：參考條件表＋多份說明書的唯讀預覽、核對、失效檢查與手動儲存。
+"""PANEL 公開工作流程：參考條件表＋多份說明書與投資人須知的唯讀預覽、核對、失效檢查與手動儲存。
 
 核對與儲存都呼叫批量入口（batch.py），PANEL 不另做規則；按「儲存」之前不寫任何檔案。
 每次載入預覽時載入一次核對設定；核對沿用預覽的辨識與讀出，同一份說明書只讀一次。
@@ -72,7 +72,7 @@ class PanelOutcome:
             return "核對未完成：" + "；".join(e.message for e in self.batch.errors)
         items = self.batch.items
         parts = [f"{sum(i.category == c for i in items)} 份{c.value}" for c in Category]
-        tail = "按「儲存核對結果」後才會寫出核對結果檔（通過與人工放行的說明書回填在「回填後」）。"
+        tail = "按「儲存核對結果」後才會寫出核對結果檔（說明書與投資人須知都通過或人工放行的商品回填在「回填後」）。"
         return f"共 {len(items)} 份：" + "、".join(parts) + "。" + tail
 
 
