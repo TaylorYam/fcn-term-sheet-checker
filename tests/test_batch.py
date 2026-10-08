@@ -551,6 +551,7 @@ def test_filter_range_shrinks_with_the_kept_rows_and_the_file_opens_on_the_fille
     "feature,change",
     [
         ("合併儲存格", lambda ws: ws.merge_cells("A4:B4")),
+        ("合併儲存格", lambda ws: ws.merge_cells("E4:F4")),  # 蓋到回填欄 ISIN Code：回填前就要擋下
         ("格式化條件", lambda ws: ws.conditional_formatting.add("H4:H9", CellIsRule(operator="equal", formula=["0"]))),
         ("資料驗證", lambda ws: ws.add_data_validation(DataValidation(type="list", formula1='"Y,N"', sqref="T4:T9"))),
         ("公式", lambda ws: ws.cell(1, 1, "=COUNTA(E4:E9)")),
@@ -566,6 +567,7 @@ def test_layout_that_cannot_be_trimmed_safely_writes_no_result_file(tmp_path, fe
     assert (e.rule_id, e.reason_code) == ("output.result_file", "result_layout_unsupported")
     assert feature in e.message
     assert list((tmp_path / "reports").glob("*_核對結果_*.xlsx")) == []
+    assert receipt.record is not None and receipt.record.exists()
 
 
 def test_existing_result_file_is_never_overwritten(tmp_path):
