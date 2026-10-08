@@ -113,6 +113,7 @@ class ReferenceFormat:
     ko_observation_values: dict[str, str]
     ko_memory_values: dict[str, bool]
     ki_type_values: dict[str, str]
+    initial_pricing_values: dict[str, str]  # 期初定價：開盤價／收盤價／VWAP → open／close／vwap
 
 
 def _load(path: Path, what: str) -> dict[str, Any]:
@@ -217,6 +218,7 @@ def load_reference_format(path: Path) -> ReferenceFormat:
             ko_observation_values=dict(d["values"]["ko_observation"]),
             ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
             ki_type_values=dict(d["values"]["ki_type"]),
+            initial_pricing_values=dict(d["values"]["initial_pricing"]),
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e

@@ -254,6 +254,7 @@ def build_inquiry(path: Path, s: Spec, overrides=None):
         "coupon_pa_pct": float(s.annual),
         "tenor_months": 6,
         "first_callable_period": 2,
+        "initial_pricing": "收盤價",
     }
     for i in range(1, 13):
         vals[f"autocall_date_{i}"] = (

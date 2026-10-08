@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections import Counter
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import openpyxl
@@ -18,14 +19,11 @@ from fcn_checker.schema import CheckStatus
 from harness import CONFIG
 
 ROOT = Path(__file__).resolve().parents[1]
-PDFS = (
-    sorted((Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts").glob("*.pdf"))
-    if (Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data")) / "ts").is_dir()
-    else []
-)
 DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
+# 投資人須知（_IIS）不是說明書
+PDFS = sorted(p for p in (DATA / "ts").glob("*.pdf") if "_IIS" not in p.name) if (DATA / "ts").is_dir() else []
 REFERENCE = DATA / "FCN參考條件_1001.xlsx"
-TO_FILL = DATA / "FCN參考條件_待回補.xlsx"  # 同一張表，回填欄位空白（Issue #69）
+TO_FILL = DATA / "FCN參考條件_待回補_v.1.xlsx"  # 同一張表，回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）
 BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
 PROBLEMS = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED, CheckStatus.ERROR)
 
@@ -85,7 +83,26 @@ def test_passing_barc_rows_are_marked_filled(saved):
     passed = [i for i in outcome.items if i.issuer == "BARC" and i.report.status == CheckStatus.PASS]
     assert len(passed) == 5, "3 列 P 型＋2 列審查日期與名稱樣板都是新版的 D 型"
     assert all(receipt.filled(i) for i in passed)
-    assert all(d.action == "match" for i in passed for d in i.report.backfill)
+    # 表上已確認的回填值都相同；期初定價 VWAP 的價格欄一律以說明書覆寫（表上有未四捨五入的值，Issue #122）
+    assert all(
+        d.action == "match" or (d.column.startswith("UL_") and d.action == "overwrite")
+        for i in passed
+        for d in i.report.backfill
+    )
+
+
+def vwap_codes(path: Path) -> set[str]:
+    return {code for code, row in rows_by_code(path).items() if row.get("期初定價") == "VWAP"}
+
+
+def test_vwap_rows_skip_price_comparison_and_take_the_document_prices(outcome):
+    vwap = [i for i in outcome.items if i.product_code in vwap_codes(REFERENCE)]
+    assert len(vwap) == 2, "表上有 2 列期初定價 VWAP（BARC、HSBC 各 1）"
+    for item in vwap:
+        assert item.report.status == CheckStatus.PASS, (item.term_sheet.name, problems(item))
+        assert not [r for r in item.report.results if r.rule_id == "field.underlying_prices"]
+        prices = [d for d in item.report.backfill if d.column.startswith("UL_")]
+        assert prices and all(d.action in ("match", "overwrite") for d in prices)
 
 
 def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
@@ -105,3 +122,16 @@ def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     assert set(got) == set(codes), "「回填後」只有通過且回填的列"
     for code in codes:
         assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code
+    # 期初定價 VWAP：價格欄在待回補表上空白，回填後等於已確認表上的價格（四捨五入到 4 位，Issue #122）
+    vwap = vwap_codes(TO_FILL)
+    assert len(vwap) == 2 and vwap <= set(codes)
+    for code in vwap:
+        for c in (f"UL_{n}_{p}" for n in range(1, 6) for p in ("進場價", "執行價", "下限價", "KO價")):
+            assert rounded(got[code][c]) == rounded(want[code][c]), (code, c)
+
+
+def rounded(v):
+    """表上價格先清掉浮點尾數（9 位）再四捨五入（half-up）到 4 位，與核對時相同。"""
+    if isinstance(v, float | int):
+        return Decimal(repr(round(v, 9))).quantize(Decimal("0.0001"), ROUND_HALF_UP)
+    return v

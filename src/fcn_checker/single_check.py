@@ -6,7 +6,7 @@
 4. 各上手共用的說明書推算規則（rules/derivation.py：價格推算）
 5. 上手說明書內部規則（Issuer.rules；只拿到讀出結果、審查標準與上手宣告的參考條件表欄位）
 6. 審查標準規則（rules/review_standard.py）
-7. Non-Call(月)、ISIN、發行日、比價日
+7. Non-Call(月)、ISIN、發行日、比價日、VWAP 商品的各標的價格
 8. 回填決策（backfill.py）
 9. 整體狀態
 """
@@ -62,9 +62,10 @@ def check_document(pairing: list[CheckResult], paired: Paired | None, config: Ch
         results.extend(review_standard_rules(ctx))
         results.append(reference.first_callable_period(ctx))
         decisions = []
-        for rule in (backfill.isin, backfill.issue_date, backfill.compare_dates):
+        for rule in (backfill.isin, backfill.issue_date, backfill.compare_dates, backfill.underlying_prices):
             r, cells = rule(ctx, rfmt, paired.row)
-            results.append(r)
+            if r is not None:  # 價格欄只有期初定價 VWAP 時才是回填欄位
+                results.append(r)
             decisions.extend(cells)
         report.backfill = decisions
         report.not_covered = [dict(n) for n in paired.issuer.not_covered]
