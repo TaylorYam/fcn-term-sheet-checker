@@ -639,7 +639,7 @@ def first_callable(s: Spec) -> int:
 
 
 def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
-    """與合成說明書一致的 BARC 參考條件表列；回填欄位（ISIN、發行日、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
+    """與合成說明書一致的 BARC 參考條件表列；回填欄位（TS、IIS、ISIN、發行日、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
     fields: dict[str, Any] = {
         "product_code": s.product_code,
         "denomination": s.denom,

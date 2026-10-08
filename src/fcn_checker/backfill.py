@@ -1,6 +1,7 @@
-"""回填欄位（ISIN Code、發行日、比價日_1～12；期初定價 VWAP 時另加各標的價格欄）的整段流程，所有上手共用（ADR 0004）。
+"""回填欄位（TS、IIS、ISIN Code、發行日、比價日_1～12；期初定價 VWAP 時另加各標的價格欄）的整段流程，所有上手共用（ADR 0004）。
 
 - 每格決策：表上空白 → 回填；已有相同值（含空值寫法）→ 相同；已有不同值 → 不一致，保留原值。
+- TS、IIS 兩欄的值不取自說明書，一律是打勾寫法（`checked_value`）：寫入就代表兩份都通過或人工放行（Issue #127）。
 - 期初定價為 VWAP 的商品，各標的四個價格欄也是回填欄位，但已有不同值時改為覆寫（Issue #122）。
 - 只寫入呼叫端交來的說明書：批量入口依每份的類別決定（整份 PASS 或人工放行，`BatchItem.fillable`）。
 - 寫入：批量入口以來源快照確認來源與核對時相同後才開檔，回填值寫進記憶體中的工作表（沿用表上既有日期格式）；
@@ -63,6 +64,7 @@ _LABELS = {
 }
 WRITE_ACTIONS = (BackfillAction.FILL, BackfillAction.OVERWRITE)  # 儲存時寫進「回填後」的決策
 PRICES = "各標的價格"  # VWAP 價格欄合起來核對，項目用這個名稱
+CHECKED_FIELDS = ("checked_term_sheet", "checked_iis")  # TS、IIS 欄
 
 
 @dataclass(frozen=True)
@@ -286,6 +288,44 @@ def underlying_prices(
     )
     actual = {d.column: d.expected for d in decisions}
     return result(rid, key, S.PASS, actual=actual, pf=table, ov=ovs, message=message, item=item), decisions
+
+
+def checked_marks(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+    """TS、IIS：說明書與投資人須知核對沒問題的打勾（打勾寫法 `checked_value`，Issue #127）。
+
+    值不取自說明書：兩格都是打勾寫法；只有兩份都通過或人工放行的商品才寫入（批量入口的 `fills_sheet`）。
+    """
+    rid, key, mark = "backfill.checked", "checked", fmt.checked_value
+    ovs = [row.fields.get(s) for s in CHECKED_FIELDS]
+    item = Item.group("、".join(_header(fmt, s) or s for s in CHECKED_FIELDS), ovs)
+    missing = _missing_columns(fmt, row, CHECKED_FIELDS)
+    if missing:
+        return _column_missing(rid, key, missing, ovs, item), []
+    decisions = [_decide(fmt, row, s, mark) for s in CHECKED_FIELDS]
+    bad = [d for d in decisions if d.action == BackfillAction.MISMATCH]
+    n = sum(d.action == BackfillAction.FILL for d in decisions)
+    message = "；".join(
+        x
+        for x in (
+            f"表上空白 {n} 格，說明書與投資人須知都通過或人工放行後填 {mark}" if n else "",
+            f"表上已有 {mark} 以外的值，保留原值" if bad else "",
+        )
+        if x
+    )
+    return (
+        result(
+            rid,
+            key,
+            S.MISMATCH if bad else S.PASS,
+            expected={d.column: d.sheet_value for d in bad} or None,
+            actual={d.column: d.expected for d in bad} or [d.expected for d in decisions],
+            ov=ovs,
+            reason="value_mismatch" if bad else "",
+            message=message,
+            item=item,
+        ),
+        decisions,
+    )
 
 
 # ---------------------------------------------------------------- 寫入

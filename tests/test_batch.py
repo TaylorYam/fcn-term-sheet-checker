@@ -154,7 +154,8 @@ def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     first = schedule_rows(spec)[0]["valuation"]
     issue = dt.datetime.combine(spec.issue_date, dt.time())
     last = dt.datetime.combine(spec.final_date, dt.time())
-    filled = {"ISIN Code": SYNTH_ISIN, "發行日": issue, "比價日_1": dt.datetime.combine(first, dt.time())}
+    filled = {"TS": "V", "IIS": "V", "ISIN Code": SYNTH_ISIN, "發行日": issue}
+    filled |= {"比價日_1": dt.datetime.combine(first, dt.time())}
     filled |= {f"比價日_{i}": "-" for i in range(2, 13)} | {"比價日_6": last}
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **filled)])
 
@@ -162,7 +163,7 @@ def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     assert item.report.status == PASS, problems(item)
     assert {d.action for d in item.report.backfill} == {"match"}
     d = row_of(receipt.output, spec.product_code)
-    assert d["ISIN Code"] == SYNTH_ISIN and d["發行日"] == issue
+    assert (d["TS"], d["IIS"], d["ISIN Code"], d["發行日"]) == ("V", "V", SYNTH_ISIN, issue)
     assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6
 
 
@@ -550,8 +551,9 @@ def test_filter_range_shrinks_with_the_kept_rows_and_the_file_opens_on_the_fille
 @pytest.mark.parametrize(
     "feature,change",
     [
-        ("合併儲存格", lambda ws: ws.merge_cells("A4:B4")),
-        ("合併儲存格", lambda ws: ws.merge_cells("E4:F4")),  # 蓋到回填欄 ISIN Code：回填前就要擋下
+        ("合併儲存格", lambda ws: ws.merge_cells("C4:D4")),  # 庫存狀態、當日比價（不回填）
+        ("合併儲存格", lambda ws: ws.merge_cells("A4:B4")),  # 蓋到回填欄 IIS：回填前就要擋下
+        ("合併儲存格", lambda ws: ws.merge_cells("G4:H4")),  # 蓋到回填欄 ISIN Code
         ("格式化條件", lambda ws: ws.conditional_formatting.add("H4:H9", CellIsRule(operator="equal", formula=["0"]))),
         ("資料驗證", lambda ws: ws.add_data_validation(DataValidation(type="list", formula1='"Y,N"', sqref="T4:T9"))),
         ("公式", lambda ws: ws.cell(1, 1, "=COUNTA(E4:E9)")),
@@ -820,7 +822,8 @@ def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
     receipt, record = saved(outcome, tmp_path)
     result = receipt.output
     assert list(sheet_rows(result)) == [spec.product_code], "回填後只有這一列"
-    assert row_of(result, spec.product_code)["ISIN Code"] == SYNTH_ISIN
+    row = row_of(result, spec.product_code)
+    assert (row["TS"], row["IIS"], row["ISIN Code"]) == ("V", "V", SYNTH_ISIN), "人工放行的也打勾"
     assert error_rows(result) == [], "人工放行的說明書不列入錯誤清單"
     assert receipt.filled(item)
     entry, iis_entry = record["items"]
@@ -1009,7 +1012,10 @@ def test_save_writes_one_audit_record_named_like_the_result_file(tmp_path):
     ]
     assert first["metadata"]["inputs"]["term_sheet"]["sha256"] == sha256_of(pdfs[0])
     assert (first["status"], first["filled"], first["reference_row"]) == ("PASS", True, 4)
-    assert {"column": "ISIN Code", "cell": "F4", "action": "fill"}.items() <= first["backfill"][0].items()
+    cells = {d["column"]: d for d in first["backfill"]}
+    assert {"cell": "H4", "action": "fill"}.items() <= cells["ISIN Code"].items()
+    for column, cell in (("TS", "A4"), ("IIS", "B4")):  # TS、IIS 的回填決策也記下（Issue #127）
+        assert {"cell": cell, "sheet_value": None, "expected": "V", "action": "fill"}.items() <= cells[column].items()
     assert (second["status"], second["filled"]) == ("MISMATCH", False)
     [strike] = [r for r in second["results"] if r["rule_id"] == "field.strike_pct"]
     assert strike["status"] == "MISMATCH" and strike["document_evidence"][0]["page"] >= 1

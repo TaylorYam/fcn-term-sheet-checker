@@ -176,14 +176,15 @@ def test_table_pairing_failures_stop_rules(tmp_path, change, reason):
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     wb = openpyxl.load_workbook(excel)
     ws = wb.active
+    key = next(c.column for c in ws[3] if c.value == "TDCC Code")
     if change == "missing_row":
-        ws.cell(4, 1, "325199990002")
+        ws.cell(4, key, "325199990002")
     elif change == "duplicate_row":
         ws.append([c.value for c in ws[4]])
     elif change == "issuer":
         ws.cell(4, ws.max_column, "BARC")
     else:
-        ws.cell(3, 1, "不存在的欄位")
+        ws.cell(3, key, "不存在的欄位")
     wb.save(excel)
     wb.close()
     r = run_check(pdf, excel)

@@ -111,6 +111,7 @@ class ReferenceFormat:
     key_column: str
     issuer_column: str
     empty_value: str
+    checked_value: str  # TS、IIS 欄的打勾寫法（核對沒問題）
     issuer_values: dict[str, str]  # 上手代號 → 發行機構欄的寫法
     columns: dict[str, str]  # Excel 欄名 → 標準欄位
     ignored: tuple[str, ...]
@@ -218,6 +219,7 @@ def load_reference_format(path: Path) -> ReferenceFormat:
             key_column=layout["key_column"],
             issuer_column=layout["issuer_column"],
             empty_value=layout["empty_value"],
+            checked_value=layout["checked_value"],
             issuer_values=dict(d["issuer_values"]),
             columns=cols,
             ignored=ignored,

@@ -258,6 +258,8 @@ def build_inquiry(path: Path, s: Spec, overrides=None):
         "tenor_months": 6,
         "first_callable_period": 2,
         "initial_pricing": "收盤價",
+        "checked_term_sheet": None,  # TS、IIS：回填欄位，預設空白
+        "checked_iis": None,
     }
     for i in range(1, 13):
         vals[f"autocall_date_{i}"] = (
