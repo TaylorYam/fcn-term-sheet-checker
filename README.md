@@ -91,7 +91,7 @@ fcn-batch data/FCN參考條件_1001.xlsx data/ts/029*.pdf --out runtime/reports
 | `--issuer-prefixes` | 上手編號對照設定檔，預設 `config/issuer_prefixes.toml` |
 | `--out` | 核對結果檔的輸出資料夾，預設 `runtime/reports` |
 
-- 每份說明書用商品代號對參考條件表上的 `TDCC Code`，拿那一列的條件來核對；投資人須知用檔名前 12 碼對同一列，和同商品說明書配成一組。同一檔商品要一起選說明書與投資人須知，缺一份時那一份轉人工覆核（「這批缺投資人須知」），不能人工放行；檔名結尾不是 `_TS`／`_IIS` 時「檔名無法辨識」。
+- 每份說明書用商品代號對參考條件表上的 `TDCC Code`，拿那一列的條件來核對；投資人須知用檔名前 12 碼對同一列，和同商品說明書配成一組；說明書檔名的商品代號也必須等於封面商品代號。同一檔商品要一起選說明書與投資人須知，缺一份時那一份轉人工覆核（「這批缺投資人須知」），不能人工放行；檔名結尾不是 `_TS`／`_IIS` 時「檔名無法辨識」。
 - 結果是一份核對結果檔 `<原檔名>_核對結果_<日期時間>.xlsx`，存到 `--out` 資料夾，完成後印出檔案路徑。原檔不動，也不覆蓋既有檔案。
   - `回填後`：版面照原 `樣本清單`，只留說明書與投資人須知都 PASS 或在 PANEL 人工放行的列，空白的 `ISIN Code`、`發行日`、`比價日_1～12` 已回填；`期初定價` 為 `VWAP` 的列，各標的價格欄一律以說明書覆寫。可以直接匯入資料庫。
   - `錯誤清單`：每份沒通過（也沒有人工放行）的 PDF 一列（`TDCC Code`、`PDF 檔名`、`錯訊`）。錯訊是中文，只寫哪裡對不起來、兩邊各是多少，例如「UL_2 進場價對不起來：參考條件表 123.4500／說明書 123.4000」；多條在同一格換行。
@@ -152,7 +152,7 @@ ruff check src tests
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
 - [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
 - [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- 投資人須知（IIS，待實作）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)
+- 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)
 - ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)、[0007 投資人須知與說明書成對核對](docs/adr/0007-iis-paired-with-term-sheet.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。

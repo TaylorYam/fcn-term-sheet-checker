@@ -116,6 +116,7 @@ def _record_item(item: BatchItem, filled: bool) -> reporting.RecordItem:
         pdf=item.term_sheet.name,
         document=item.kind.value if item.kind else None,
         partner=item.partner.term_sheet.name if item.partner else None,
+        not_filled_reason=item.not_filled_reason,
         issuer=item.issuer,
         product_code=item.product_code,
         reference_row=item.reference_row,

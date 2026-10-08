@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from collections.abc import Callable
 
 from ..config import NAME_FLAGS
+from ..investor_sheet import IisSheet, read_iis
 from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import fee_field
@@ -509,9 +509,29 @@ def _iis_warning(ctx: Context) -> CheckResult:
     return _fixed_warning(ctx, expected)
 
 
-def _iis_occurrences(ctx: Context, rid: str, name: str, expected: str | None, what: str, phone: bool = False):
+def _iis_risk_summary(ctx: Context, sheet: IisSheet) -> CheckResult:
+    """商品簡介「本商品風險程度：RRn」（沒有【】，全文【RRn】規則抓不到）= 審查標準風險等級。"""
+    rid, pf, item = "standard.risk_level", read_iis(sheet, "risk_level_summary"), Item.standard("風險等級（商品簡介）")
+    if not pf.ok:
+        return doc_review(rid, "risk_level_summary", pf, ctx.std.risk_level, item=item)
+    ok = pf.value == ctx.std.risk_level
+    return result(
+        rid,
+        "risk_level_summary",
+        S.PASS if ok else S.MISMATCH,
+        expected=ctx.std.risk_level,
+        actual=pf.value,
+        pf=pf,
+        reason="" if ok else "value_mismatch",
+        item=item,
+    )
+
+
+def _iis_occurrences(
+    ctx: Context, sheet: IisSheet, rid: str, name: str, expected: str | None, what: str, missing: str, phone: bool
+) -> list[CheckResult]:
     """投資人須知出處清單型欄位（各處受託機構名稱／地址／電話、發行機構名稱）每一處 = 審查標準。"""
-    container = ctx.ts.f(name)  # 投資人須知才有的欄位（parsers/iis.py 的 IIS_FIELDS），不是標準欄位
+    container = read_iis(sheet, name)
     if not container.ok:
         return [doc_review(rid, name, container, item=Item.standard(what))]
     items = container.value
@@ -523,7 +543,7 @@ def _iis_occurrences(ctx: Context, rid: str, name: str, expected: str | None, wh
                 S.REVIEW_REQUIRED,
                 pf=occ.value,
                 reason="standard_missing",
-                message=f"審查標準沒有 {ctx.issuer} 的發行機構全名（issuer_name.{ctx.issuer.lower()}）",
+                message=missing,
                 item=Item.standard(occ.name),
             )
             for occ in items
@@ -534,32 +554,33 @@ def _iis_occurrences(ctx: Context, rid: str, name: str, expected: str | None, wh
     ]
 
 
-def iis_review_standard_rules(
-    ctx: Context, *, trade: ParsedField, provides: Callable[[str], bool]
-) -> list[CheckResult]:
-    """投資人須知的審查標準規則：`ctx.ts` 是投資人須知的讀出結果，只核對範本有的項目（`provides`）。
+def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedField) -> list[CheckResult]:
+    """投資人須知的審查標準規則：`sheet`（也是 `ctx.ts`）是投資人須知的讀出結果，只核對範本有的項目。
 
     風險等級、固定警語（次數為投資人須知專屬）、禁用語一律核對；刊印日期的交易日由呼叫端給（參考條件表）。
     發行機構名稱只寫中文的範本（HSBC）只比中文。
     """
-    std = ctx.issuer_std
+    std, provides = ctx.issuer_std, sheet.provides
     issuer_name = std.issuer_name
-    if issuer_name is not None and getattr(ctx.ts, "issuer_name_zh_only", False):
+    if issuer_name is not None and sheet.issuer_name_zh_only:
         issuer_name = re.split(r"[（(]", issuer_name, maxsplit=1)[0]
     out = [_risk_level(ctx), _iis_warning(ctx), _forbidden_wording(ctx)]
+    if provides("risk_level_summary"):
+        out.append(_iis_risk_summary(ctx, sheet))
     if provides("print_dates"):
         out.extend(_print_dates(ctx, trade))
     if provides("issue_price_pct"):
         out.append(_issue_price(ctx))
-    occurrence_checks = (
-        ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", False),
-        ("distributor_names", "standard.distributor", std.distributor_name, "受託或銷售機構名稱", False),
-        ("distributor_addresses", "standard.distributor", std.distributor_address, "受託或銷售機構地址", False),
-        ("distributor_phones", "standard.distributor", std.distributor_phone, "受託或銷售機構電話", True),
+    no_issuer = f"審查標準沒有 {ctx.issuer} 的發行機構全名（issuer_name.{ctx.issuer.lower()}）"
+    occurrence_checks = (  # 欄位、rule_id、審查標準值、說明用名稱、審查標準沒有值時的說明、是否電話
+        ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", no_issuer, False),
+        ("distributor_names", "standard.distributor", std.distributor_name, "受託或銷售機構名稱", "", False),
+        ("distributor_addresses", "standard.distributor", std.distributor_address, "受託或銷售機構地址", "", False),
+        ("distributor_phones", "standard.distributor", std.distributor_phone, "受託或銷售機構電話", "", True),
     )
-    for name, rid, expected, what, phone in occurrence_checks:
+    for name, rid, expected, what, missing, phone in occurrence_checks:
         if provides(name):
-            out.extend(_iis_occurrences(ctx, rid, name, expected, what, phone))
+            out.extend(_iis_occurrences(ctx, sheet, rid, name, expected, what, missing, phone))
     if any(provides(fee_field(label)) for label in ctx.std.fees):
         out.extend(_fees(ctx))
     return out

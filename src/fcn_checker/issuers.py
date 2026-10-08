@@ -11,10 +11,10 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
 from .parsers import barc_iis, hsbc_iis
 from .parsers import hsbc as hsbc_parser
-from .parsers.iis import IisSheet
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
 from .rules.kit import IssuerContext
@@ -54,7 +54,7 @@ class Issuer:
     iis: IisTemplate | None = None
 
 
-_IIS_ONE_SAMPLE = {
+_IIS_SAMPLES = {
     "rule_id": "iis.template_variants",
     "description": "投資人須知依各 8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表）：其他型態的寫法未驗證，"
     "範本以外的欄位或寫法會轉人工覆核",
@@ -76,7 +76,7 @@ BARC = Issuer(
         parser_version=barc_iis.PARSER_VERSION,
         detect=barc_iis.detect,
         read=barc_iis.read,
-        not_covered=(_IIS_ONE_SAMPLE,),
+        not_covered=(_IIS_SAMPLES,),
     ),
 )
 
@@ -95,7 +95,7 @@ HSBC = Issuer(
         parser_version=hsbc_iis.PARSER_VERSION,
         detect=hsbc_iis.detect,
         read=hsbc_iis.read,
-        not_covered=(_IIS_ONE_SAMPLE,),
+        not_covered=(_IIS_SAMPLES,),
     ),
 )
 

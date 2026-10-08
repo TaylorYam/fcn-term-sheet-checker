@@ -10,12 +10,14 @@
 設定（審查標準、參考條件表格式、上手編號對照、上手註冊表）由呼叫端載入成一個核對設定（check_config.py）傳入。
 
 辨識流程（每份 PDF）：
-0. 檔名（不含副檔名）結尾剛好是 `_TS` → 說明書、`_IIS` → 投資人須知；其他 → 檔名無法辨識（人工覆核、不能放行）。
+0. 檔名（不含副檔名）須為 `<12 位商品代號>_TS`（說明書）或 `<12 位商品代號>_IIS`（投資人須知）；
+   其他 → 檔名無法辨識（人工覆核、不能放行）。
 1. 檔名前三碼（上手編號）查上手編號對照 → 上手；不在對照表或上手沒有該種文件的範本 → 未支援上手。
-2. 內容辨識出的上手必須與檔名一致；說明書商品代號前三碼也要一致，否則轉人工覆核。
-3. 以商品代號（說明書取封面、投資人須知取檔名前 12 碼）找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
-4. 參考條件表一列最多對到一份說明書加一份投資人須知；同種文件有多份時，這一列的文件全部轉人工覆核，不核對也不回填。
-5. 一列只有說明書或只有投資人須知時，那一份轉人工覆核（這批缺另一份），不能人工放行。
+2. 內容辨識出的上手必須與檔名一致；說明書封面商品代號也要等於檔名的商品代號，否則轉人工覆核。
+3. 以商品代號找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
+4. 同一商品代號（檔名）的說明書與投資人須知配成一組；同種文件有多份時，對到列的全部轉人工覆核，不核對也不回填。
+5. 這批只有說明書或只有投資人須知、且已對到列時，那一份轉人工覆核（這批缺另一份），不能人工放行。
+   另一份在這批裡但本身配對失敗（例：未支援上手、範本不符）時不算缺，但那份沒通過，說明書就不回填。
 
 範本辨識與讀出每份說明書各只做一次（在預覽）；配對成功後由單份核對（single_check.py）依序執行所有規則。
 批量入口只負責載入參考條件表、逐份呼叫、組裝記錄資料與單份錯誤隔離。
@@ -42,10 +44,10 @@ from .check_config import CheckConfig
 from .config import ReferenceFormat
 from .extraction import extract_lines
 from .ingestion import IngestionError, SourceSnapshot, error_result, open_pdf
+from .investor_sheet import IisSheet
 from .issuers import Issuer, by_code, detect, detect_iis
 from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
-from .parsers.iis import IisSheet
 from .rules.kit import doc_review, read_standard
 from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Item, ParsedField, overall_status
 from .single_check import Paired, PairedIis, check_document, check_investor_sheet
@@ -58,6 +60,7 @@ ROW_DUPLICATE = "reference_row_duplicate"
 ISSUER_MISMATCH = "reference_issuer_mismatch"
 PREFIX_MISMATCH = "issuer_prefix_mismatch"
 NAME_UNRECOGNIZED = "file_name_unrecognized"
+CODE_MISMATCH = "file_code_mismatch"  # 說明書封面商品代號與檔名的商品代號不同
 MISSING_IIS = "counterpart_missing_iis"  # 這批有說明書、沒有同商品的投資人須知
 MISSING_TS = "counterpart_missing_ts"  # 這批有投資人須知、沒有同商品的說明書
 
@@ -116,12 +119,14 @@ _PAIRING_LABELS = {
     ISSUER_MISMATCH: "條件表發行機構不符",
     PREFIX_MISMATCH: "檔名上手編號不符",
     NAME_UNRECOGNIZED: "檔名無法辨識",
+    CODE_MISMATCH: "檔名商品代號不符",
     MISSING_IIS: "這批缺投資人須知",
     MISSING_TS: "這批缺說明書",
 }
 # 不能人工放行的配對問題：原因
 _UNRELEASABLE = {
     NAME_UNRECOGNIZED: "檔名無法辨識，請修正檔名後重新載入",
+    CODE_MISMATCH: "檔名的商品代號與說明書封面不同，可能放錯檔案，請修正後重新載入",
     SHARED_ROW: "同一批有多份文件對到同一列（說明書與投資人須知各只能一份），不能人工放行",
     MISSING_IIS: "這批缺同商品的投資人須知，請一起選取說明書與投資人須知後重新載入",
     MISSING_TS: "這批缺同商品的說明書，請一起選取說明書與投資人須知後重新載入",
@@ -322,7 +327,8 @@ class _Identified:
         if self.issuer is None or self.iis is None or self.row is None or self.shared or self.pages is None:
             return None
         code = self.product_code.value if self.product_code is not None else ""
-        partner_ts = self.partner.ts if self.partner is not None else None
+        partner = self.partner  # 同商品說明書配對成功才拿來比對
+        partner_ts = partner.ts if partner is not None and partner.row is not None and not partner.shared else None
         return PairedIis(self.issuer, self.iis, self.row, sheet.record(self.row), partner_ts, self.pages, code)
 
     def mark_shared(self, row_no: int, what: str, others: str) -> None:
@@ -381,9 +387,9 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
     registry = config.registry
     out = _Identified(pdf, [], kind=doc_kind(pdf))
     results = out.results
-    if out.kind is None or (out.kind == DocKind.IIS and file_code(pdf) is None):
-        need = "「<12 位商品代號>_IIS」" if out.kind == DocKind.IIS else "「_TS」（說明書）或「_IIS」（投資人須知）"
-        msg = f"檔名須以{need}結尾，無法辨識；請修正檔名後重新載入"
+    if out.kind is None or file_code(pdf) is None:
+        need = "「<12 位商品代號>_TS」（說明書）或「<12 位商品代號>_IIS」（投資人須知）"
+        msg = f"檔名須為{need}，無法辨識；請修正檔名後重新載入"
         results.append(_review("batch.file_name", "file_name", FILE_NAME_ITEM, NAME_UNRECOGNIZED, msg))
         return out
     what = out.kind.value
@@ -450,6 +456,12 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
                 _review("batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, PREFIX_MISMATCH, msg, actual=pc.value)
             )
             return out
+        if pc.value != file_code(pdf):  # 同商品的兩份以檔名的商品代號配成一組，說明書檔名不能和封面不同
+            msg = f"說明書封面商品代號 {pc.value} 與檔名的商品代號 {file_code(pdf)} 不同，可能檔名取錯或檔案放錯"
+            results.append(
+                _review("batch.file_name", "product_code", PRODUCT_CODE_ITEM, CODE_MISMATCH, msg, actual=pc.value)
+            )
+            return out
 
     rows = sheet.find(pc.value)
     if not rows:
@@ -508,9 +520,9 @@ def _other_names(found: _Identified, group: Sequence[_Identified]) -> str:
 
 
 def _identify_all(term_sheets: Sequence[Path], sheet: ReferenceSheet, config: CheckConfig) -> list[_Identified]:
-    """先辨識全部 PDF，再依參考條件表的列配成一組（一份說明書＋一份投資人須知）；單份非預期錯誤不中斷整批。
+    """先辨識全部 PDF，再依檔名的商品代號配成一組（一份說明書＋一份投資人須知）；單份非預期錯誤不中斷整批。
 
-    同一列有多份同種文件 → 這一列的文件全部轉人工覆核；只有一種文件 → 那一份轉人工覆核（這批缺另一份）。
+    同一商品有多份同種文件 → 對到列的全部轉人工覆核；只有一種文件且已對到列 → 那一份轉人工覆核（這批缺另一份）。
     """
     identified = []
     for pdf in map(Path, term_sheets):
@@ -519,21 +531,23 @@ def _identify_all(term_sheets: Sequence[Path], sheet: ReferenceSheet, config: Ch
         except Exception as e:
             found = _Identified(pdf, [_unexpected(e)], kind=doc_kind(pdf))
         identified.append(found)
-    by_row: dict[int, list[_Identified]] = {}
+    by_code: dict[str, list[_Identified]] = {}
     for found in identified:
-        if found.row is not None:
-            by_row.setdefault(found.row.row, []).append(found)
-    for row_no, group in by_row.items():
+        code = file_code(found.pdf)
+        if found.kind is not None and code is not None:
+            by_code.setdefault(code, []).append(found)
+    for group in by_code.values():
         kinds = [f.kind for f in group]
         duplicated = [k for k in DocKind if kinds.count(k) > 1]
         if duplicated:
             what = "、".join(k.value for k in duplicated)
             for found in group:
-                found.mark_shared(row_no, what, _other_names(found, group))
+                if found.row is not None:
+                    found.mark_shared(found.row.row, what, _other_names(found, group))
         elif len(group) == 2:
             first, second = group
             first.partner, second.partner = second, first
-        else:
+        elif group[0].row is not None:
             group[0].mark_alone()
     return identified
 

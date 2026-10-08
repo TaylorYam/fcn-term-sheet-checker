@@ -63,11 +63,16 @@ def load_record(root: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def iis_path(ts: Path) -> Path:
+    """說明書 `<商品代號>_TS.pdf` 旁的同商品投資人須知 `<商品代號>_IIS.pdf`（各上手合成器共用）。"""
+    return ts.with_name(ts.stem[: -len("_TS")] + "_IIS.pdf")
+
+
 def with_iis(pdfs: Sequence[Path]) -> list[Path]:
     """每份 `<商品代號>_TS.pdf` 旁若有同商品 `<商品代號>_IIS.pdf` 且沒選到，就加在最後（說明書的順序不變）。"""
     out = [Path(p) for p in pdfs]
     for p in list(out):
-        sibling = p.with_name(p.stem[: -len("_TS")] + "_IIS.pdf")
+        sibling = iis_path(p)
         if p.stem.endswith("_TS") and sibling.exists() and sibling not in out:
             out.append(sibling)
     return out

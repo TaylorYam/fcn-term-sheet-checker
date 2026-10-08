@@ -3,8 +3,9 @@
 - 文件本身：頁數、頁首總頁數、封面商品代號（= 檔名前 12 碼）。
 - 參考條件表有的欄位：沿用參考條件表共用規則（rules/reference.py），文件那一邊是投資人須知。
   期初定價為 VWAP 時參考條件表價格欄不比對（Issue #122），價格改和說明書比。
-- 參考條件表沒有的欄位（ISIN、商品名稱、最低申購金額、標的中文名稱、發行日）：和同商品說明書讀出的值比
-  （發行日是回填欄位，表上可能還空白）。說明書錯時錯訊只在說明書那份，這裡不重複報。
+- 參考條件表沒有的欄位（ISIN、商品名稱、最低申購金額、標的中文名稱）：和同商品說明書讀出的值比。
+  發行日是回填欄位：表上有值就和參考條件表比，空白時才和說明書比（將回填的值）。
+  說明書錯時錯訊只在說明書那份，這裡不重複報。
 審查標準類（C 類）在 review_standard.iis_review_standard_rules。
 """
 
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from ..parsers.iis import IisSheet
+from ..investor_sheet import IisSheet, read_iis
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import TermSheet
@@ -79,7 +80,7 @@ def pages(ctx: IisContext) -> CheckResult:
 
 
 def page_totals(ctx: IisContext) -> CheckResult:
-    rid, pf, item = "iis.page_totals", ctx.sheet.f("page_totals"), Item.expected("頁首總頁數")
+    rid, pf, item = "iis.page_totals", read_iis(ctx.sheet, "page_totals"), Item.expected("頁首總頁數")
     if not pf.ok:
         return doc_review(rid, "page_totals", pf, ctx.pages, item=item)
     bad = sorted({m for m in pf.value if m != ctx.pages})
@@ -97,7 +98,7 @@ def page_totals(ctx: IisContext) -> CheckResult:
 
 
 def product_codes(ctx: IisContext) -> list[CheckResult]:
-    rid, container = "iis.product_code", ctx.sheet.f("product_codes")
+    rid, container = "iis.product_code", read_iis(ctx.sheet, "product_codes")
     if not container.ok:
         return [doc_review(rid, "product_codes", container, item=Item.expected("封面商品代號"))]
     out = []
@@ -128,10 +129,10 @@ def product_codes(ctx: IisContext) -> list[CheckResult]:
 
 def _prices(ctx: IisContext) -> list[CheckResult]:
     """各標的期初價格、執行價、KO 價：表上值四捨五入到 4 位後相等；VWAP 時改和說明書價格表同一列比。"""
-    rid, rows = "iis.underlying_prices", ctx.sheet.f("underlying_prices")
+    rid, rows = "iis.underlying_prices", read_iis(ctx.sheet, "underlying_prices")
     if not rows.ok:
         return [doc_review(rid, "price_table", rows, item=Item.sheet("價格表"))]
-    uls = ctx.sheet.f("underlyings")
+    uls = read_iis(ctx.sheet, "underlyings")
     if uls.ok and len(uls.value) != len(rows.value):
         return [
             result(
@@ -147,7 +148,7 @@ def _prices(ctx: IisContext) -> list[CheckResult]:
             )
         ]
     vwap = reference.is_vwap(ctx.base)
-    ts_rows, why = _term_sheet_field(ctx, "underlying_prices") if vwap else (None, None)
+    ts_rows, why = _term_sheet_field(ctx, "underlying_prices", "價格表") if vwap else (None, None)
     order = ctx.base.order
     out = []
     for i, row in enumerate(rows.value, start=1):
@@ -196,7 +197,7 @@ def _prices(ctx: IisContext) -> list[CheckResult]:
 
 def _monthly_coupon(ctx: IisContext) -> CheckResult:
     """月配息率 = 參考條件表年利率 ÷ 12（差 ≤ 0.0001 視為一致，同 BARC 說明書規則）。"""
-    rid, pf = "iis.monthly_coupon", ctx.sheet.f("monthly_coupon_pct")
+    rid, pf = "iis.monthly_coupon", read_iis(ctx.sheet, "monthly_coupon_pct")
     annual, ov, problem = order_value(
         ctx.base, "coupon_pa_pct", rid, "monthly_coupon_pct", pf, to_decimal, "數字", name="月配息率"
     )
@@ -271,13 +272,13 @@ def reference_fields(ctx: IisContext) -> list[CheckResult]:
 Found = tuple[Any, str | None]  # （說明書的值, 無法比對的原因）
 
 
-def _term_sheet_field(ctx: IisContext, name: str) -> Found:
-    """同商品說明書讀出的標準欄位值；這批沒有說明書或讀不到時回傳原因。"""
+def _term_sheet_field(ctx: IisContext, name: str, label: str) -> Found:
+    """同商品說明書讀出的標準欄位值；沒有可比對的說明書或讀不到時回傳原因（`label` 是給作業人員看的名稱）。"""
     if ctx.term_sheet is None:
-        return None, "這批沒有同商品可讀的說明書，無法比對"
+        return None, "沒有可比對的同商品說明書（這批沒有、讀不到或沒有配對成功），無法比對"
     pf = read_standard(ctx.term_sheet, name)
     if not pf.ok:
-        return None, f"同商品說明書讀不到「{name}」，無法比對"
+        return None, f"同商品說明書讀不到「{label}」，無法比對"
     return pf.value, None
 
 
@@ -302,7 +303,7 @@ def _vs_term_sheet(
     normalize: Callable[[Any], Any],
     tolerance: str | None,
 ) -> CheckResult:
-    pf, item = ctx.sheet.f(field), Item.term_sheet(name)
+    pf, item = read_iis(ctx.sheet, field), Item.term_sheet(name)
     if not pf.ok:
         return as_iis([doc_review(rid, field, pf, item=item)])[0]
     expected, why = found
@@ -328,7 +329,7 @@ def _name(text: str) -> str:
 
 
 def _min_subscription(ctx: IisContext) -> Found:
-    occs, why = _term_sheet_field(ctx, "min_amounts")
+    occs, why = _term_sheet_field(ctx, "min_amounts", "最低申購金額")
     if why:
         return None, why
     occ = next((o for o in occs if o.name == "最低申購金額"), None)
@@ -338,7 +339,7 @@ def _min_subscription(ctx: IisContext) -> Found:
 
 
 def _underlying_names(ctx: IisContext) -> Found:
-    rows, why = _term_sheet_field(ctx, "underlying_prices")
+    rows, why = _term_sheet_field(ctx, "underlying_prices", "價格表")
     if why:
         return None, why
     if not all(r.name for r in rows):
@@ -349,30 +350,41 @@ def _underlying_names(ctx: IisContext) -> Found:
 def term_sheet_fields(ctx: IisContext) -> list[CheckResult]:
     names = lambda v: [squash(x) for x in v] if isinstance(v, list) else v  # noqa: E731
     checks = (
-        ("isin", "ISIN", lambda: _term_sheet_field(ctx, "isin"), lambda v: v, None),
+        ("isin", "ISIN", lambda: _term_sheet_field(ctx, "isin", "ISIN"), lambda v: v, None),
         (
             "name_zh",
             "中文商品名稱",
-            lambda: _term_sheet_field(ctx, "name_zh"),
+            lambda: _term_sheet_field(ctx, "name_zh", "中文商品名稱"),
             _name,
             "忽略空白；全形／半形括號不計；不看「下稱「本商品」」",
         ),
         (
             "name_en",
             "英文商品名稱",
-            lambda: _term_sheet_field(ctx, "name_en"),
+            lambda: _term_sheet_field(ctx, "name_en", "英文商品名稱"),
             _name,
             "忽略所有空白；全形／半形括號不計",
         ),
         ("min_subscription", "最低申購金額", lambda: _min_subscription(ctx), lambda v: v, None),
         ("underlying_names", "標的中文名稱", lambda: _underlying_names(ctx), names, "忽略空白，依標的順序"),
-        ("issue_date", "發行日", lambda: _term_sheet_field(ctx, "issue_date"), lambda v: v, None),
     )
-    return [
+    out = [
         _vs_term_sheet(ctx, f"iis.{field}", field, name, expected(), normalize, tolerance)
         for field, name, expected, normalize, tolerance in checks
         if ctx.sheet.provides(field)
     ]
+    if ctx.sheet.provides("issue_date"):
+        out.append(_issue_date(ctx))
+    return out
+
+
+def _issue_date(ctx: IisContext) -> CheckResult:
+    """發行日是回填欄位：表上有值就和參考條件表比（說明書錯時不在這裡重複報），空白時和說明書（將回填的值）比。"""
+    ov = ctx.base.order.fields.get("issue_date")
+    if ov is not None and ov.value is not None:
+        return as_iis([reference.compare_field(ctx.base, "iis.issue_date", "issue_date", "發行日", to_date, "日期")])[0]
+    found = _term_sheet_field(ctx, "issue_date", "發行日")
+    return _vs_term_sheet(ctx, "iis.issue_date", "issue_date", "發行日", found, lambda v: v, None)
 
 
 # ---------------------------------------------------------------- 入口

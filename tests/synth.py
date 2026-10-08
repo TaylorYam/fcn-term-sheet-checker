@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fcn_checker.issuers import BARC, Issuer
-from harness import REVIEW_STANDARD, check_rows
+from harness import REVIEW_STANDARD, check_rows, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import make_row
 
@@ -702,11 +702,6 @@ def barc_adapter(**overrides: Any) -> Issuer:
 # ---------------------------------------------------------------- 投資人須知（docs/templates/barc-zh-iis.md）
 
 IIS_PAGES = 4  # 審查標準 iis.pages
-
-
-def iis_path(ts: Path) -> Path:
-    """說明書 `<商品代號>_TS.pdf` 旁的同商品投資人須知 `<商品代號>_IIS.pdf`。"""
-    return ts.with_name(ts.stem[: -len("_TS")] + "_IIS.pdf")
 
 
 def build_iis_pdf(path: Path, s: Spec, *, pages: int = IIS_PAGES, replace: dict[str, str] | None = None) -> Path:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import openpyxl
 
-from harness import REVIEW_STANDARD
+from harness import REVIEW_STANDARD, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import REFERENCE_FORMAT, issuer_value
 
@@ -283,11 +283,6 @@ def build_inquiry(path: Path, s: Spec, overrides=None):
 # ---------------------------------------------------------------- 投資人須知（docs/templates/hsbc-zh-iis.md）
 
 IIS_PAGES = 4  # 審查標準 iis.pages
-
-
-def iis_path(ts: Path) -> Path:
-    """說明書 `<商品代號>_TS.pdf` 旁的同商品投資人須知 `<商品代號>_IIS.pdf`。"""
-    return ts.with_name(ts.stem[: -len("_TS")] + "_IIS.pdf")
 
 
 def build_iis_pdf(

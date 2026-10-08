@@ -41,6 +41,7 @@ class RecordItem:
     report: CheckReport
     document: str | None = None  # 說明書／投資人須知；None → 檔名無法辨識
     partner: str | None = None  # 同商品另一份的 PDF 檔名
+    not_filled_reason: str = ""  # 說明書本身通過或放行、卻沒有回填的原因（同商品投資人須知沒過或這批沒有）
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,7 @@ def _record(batch: BatchRecord, root: Path, now: dt.datetime) -> dict[str, Any]:
                 "pdf": i.pdf,
                 "document": i.document,
                 "partner": i.partner,
+                "not_filled_reason": i.not_filled_reason,
                 "issuer": i.issuer,
                 "product_code": i.product_code,
                 "reference_row": i.reference_row,

@@ -35,6 +35,7 @@ COLUMN_REACH = 70  # 欄頭或數字離欄中心超過此距離（pt）視為範
 PROVIDED = frozenset(
     {
         "product_codes",
+        "risk_level_summary",
         "isin",
         "name_zh",
         "name_en",
@@ -83,7 +84,7 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
 
 
 def _underlyings(ti: TextIndex) -> ParsedField:
-    found = iis.raw(ti, r"10\.連結標的資產[:：].+?11\.商品年期")
+    found = iis.raw(ti, r"連結標的資產[:：].+?商品年期")
     if found is None:
         return ParsedField.missing("underlyings", "找不到「連結標的資產」")
     text, lns = found
@@ -209,6 +210,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         ),
     )
     put("isin", r"ISIN[:：]([A-Z]{2}[A-Z0-9]{10})")
+    put("risk_level_summary", r"本商品風險程度[:：](RR\d)")
     put("name_zh", r"(英商巴克萊銀行.+?結構型商品(?:[（(][^（）()]*[）)])*)\(\d")  # 括號全形半形混用
     put("name_en", r"結構型商品(?:[（(][^（）()]*[）)])*\((\d.+?)\)（下稱")
     put("currency_zh", r"計價幣別[:：]([^，。]+)")  # 例：人民幣，於香港銀行同業市場進行交易之貨幣
@@ -216,9 +218,9 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("min_subscription", r"最低申購金額為([\d,]+)", iis.integer)
     put("issue_price_pct", r"發行價格為商品面額之([\d.]+)%", Decimal)
     fields["underlyings"] = _underlyings(ti)
-    put("tenor_months", r"11\.商品年期[:：](\d+)個月", int)
-    put("issue_date", r"12\.發行日[:：]" + iis.DATE, parse_date)
-    put("maturity_date", r"13\.到期日或最終實物贖回日[:：]" + iis.DATE, parse_date)
+    put("tenor_months", r"商品年期[:：](\d+)個月", int)
+    put("issue_date", r"發行日[:：]" + iis.DATE, parse_date)
+    put("maturity_date", r"到期日或最終實物贖回日[:：]" + iis.DATE, parse_date)
     put("monthly_coupon_pct", r"每月之配息率（為([\d.]+)%", Decimal)
     put("coupon_pa_pct", r"即年利率為([\d.]+)%", Decimal)
     fields.update(_price_table(lines))

@@ -26,6 +26,11 @@ def display_value(value: object) -> str:
     return "未提供" if value is None else str(value)
 
 
+def kind_label(kind: DocKind | None) -> str:
+    """PDF 種類欄：說明書／投資人須知；檔名結尾不是 _TS／_IIS 時寫檔名無法辨識。"""
+    return kind.value if kind is not None else "檔名無法辨識"
+
+
 _DETAIL_DEFAULTS = {
     CheckStatus.PASS: "此已核對項目一致。",
     CheckStatus.NOT_APPLICABLE: "依明確規則，此項目不適用。",
@@ -208,7 +213,10 @@ class ResultPane(ttk.Frame):
             row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8)
         )
         self.item_table = _table(
-            self, (("status", "狀態", 150), ("file", "PDF 檔名", 220), ("problems", "問題數", 70)), pixels, height=8
+            self,
+            (("status", "狀態", 150), ("kind", "種類", 90), ("file", "PDF 檔名", 220), ("problems", "問題數", 70)),
+            pixels,
+            height=8,
         )
         self.item_table.frame.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
         self.table = _table(
@@ -258,7 +266,8 @@ class ResultPane(ttk.Frame):
         chosen = None
         for item in outcome.ordered_items:
             problems = sum(r.status.is_problem for r in item.report.results)
-            key = self.item_table.insert("", "end", values=(item.status_label, item.term_sheet.name, problems))
+            values = (item.status_label, kind_label(item.kind), item.term_sheet.name, problems)
+            key = self.item_table.insert("", "end", values=values)
             self.items[key] = item
             if item is select:
                 chosen = key
@@ -459,14 +468,15 @@ class PanelWindow:
         ttk.Label(frame, text="Term Sheet 核對", style="Heading.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
         ttk.Label(
             frame,
-            text="選取參考條件表與說明書 PDF，先載入預覽確認每份對到的列，再按「開始核對」。上手由 PDF 檔名前三碼決定。",
+            text="選取參考條件表與說明書、投資人須知 PDF（同一檔商品的 _TS 與 _IIS 一起選），先載入預覽確認每份對到的列，"
+            "再按「開始核對」。上手由 PDF 檔名前三碼決定。",
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 10))
         self.sheet_text = tk.StringVar()
         self.pdf_text = tk.StringVar()
         self.controls: list[ttk.Widget] = []
         for row, label, variable, kind in (
             (2, "參考條件表", self.sheet_text, "sheet"),
-            (3, "說明書 PDF", self.pdf_text, "pdf"),
+            (3, "說明書／投資人須知 PDF", self.pdf_text, "pdf"),
         ):
             ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", padx=(0, 16), pady=5)
             ttk.Entry(frame, textvariable=variable, state="readonly").grid(
@@ -503,6 +513,7 @@ class PanelWindow:
             preview_frame,
             (
                 ("file", "PDF 檔名", 230),
+                ("kind", "種類", 90),
                 ("issuer", "上手", 90),
                 ("code", "PDF 商品代號", 150),
                 ("row", "參考條件表列", 110),
@@ -576,8 +587,8 @@ class PanelWindow:
             return
         selected = filedialog.askopenfilenames(
             parent=self.root,
-            title="選取說明書 PDF（可多選）",
-            filetypes=[("PDF 說明書", "*.pdf")],
+            title="選取說明書與投資人須知 PDF（可多選）",
+            filetypes=[("PDF 說明書／投資人須知", "*.pdf")],
             initialdir=self.folders.initial(kind),
         )
         if selected:
@@ -631,6 +642,7 @@ class PanelWindow:
                 "end",
                 values=(
                     row.term_sheet.name,
+                    kind_label(row.kind),
                     "未支援上手" if row.unsupported else display_value(row.issuer),
                     display_value(row.product_code),
                     f"第 {row.reference_row} 列" if row.reference_row else "—",

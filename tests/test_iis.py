@@ -17,9 +17,9 @@ from fcn_checker.issuers import BARC
 from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
-from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, with_iis
+from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, iis_path, with_iis
 from reference_synth import build_reference_sheet
-from synth import Spec, barc_adapter, build_iis_pdf, build_pdf, iis_path, reference_row
+from synth import Spec, barc_adapter, build_iis_pdf, build_pdf, reference_row
 
 PASS, MISMATCH, REVIEW = CheckStatus.PASS, CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
@@ -125,7 +125,7 @@ def test_iis_must_have_exactly_four_pages(tmp_path, pages):
 def test_hsbc_page_header_total_must_match_the_pages(tmp_path):
     s = hsbc_synth.Spec()
     ts = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s, iis=False)
-    iis = hsbc_synth.build_iis_pdf(hsbc_synth.iis_path(ts), s, page_total=5)
+    iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, page_total=5)
     sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
     _, item = check_all(sheet, [ts, iis]).items
     assert problems(item) == ["頁首總頁數：頁首寫「共 5 頁」，實際 4 頁"]
@@ -167,7 +167,9 @@ def test_iis_of_an_issuer_without_an_iis_template_is_unsupported(tmp_path):
     ).items
     assert sheet.unsupported and sheet.status_label == "未支援上手"
     assert "還沒有投資人須知範本" in problems(sheet)[0]
-    assert item.status_label == "這批缺投資人須知"
+    assert item.status_label == "通過", "投資人須知在這批裡（只是未支援），說明書不算缺投資人須知"
+    assert item.partner is sheet and not item.fills_sheet
+    assert item.not_filled_reason == "同商品的投資人須知尚未通過或人工放行，不回填。"
 
 
 def test_term_sheet_named_as_iis_is_not_a_known_iis_template(tmp_path):
@@ -299,7 +301,7 @@ def test_hsbc_iis_forbidden_wording_and_print_date(tmp_path):
         "四、本商品雖經": "四、受託或銷售機構將為投資人受託投資本商品。本商品雖經",
         "2030 年1 月7 日": "2030 年1 月9 日",
     }
-    iis = hsbc_synth.build_iis_pdf(hsbc_synth.iis_path(ts), s, replace=replace)
+    iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, replace=replace)
     sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
     _, item = check_all(sheet, [ts, iis]).items
     messages = problems(item)
@@ -382,3 +384,73 @@ def test_unreadable_iis_price_table_requires_review_naming_the_iis(tmp_path):
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert sheet.report.status == REVIEW
     assert "價格表：投資人須知的值無法辨識：價格表欄頭找不到或有多個「最初價格」" in problems(sheet)
+
+
+# ---------------------------------------------------------------- Issue #124 審查後補充
+
+
+def test_term_sheet_file_name_must_carry_its_cover_product_code(tmp_path):
+    spec, other = Spec(), Spec(product_code="029199990002")
+    ts = build_pdf(tmp_path / f"{other.product_code}_TS.pdf", spec, iis=False)  # 檔名是 other，封面是 spec
+    iis = build_iis_pdf(tmp_path / f"{other.product_code}_IIS.pdf", other)
+    item, sheet = check_all(
+        build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec), reference_row(other)]), [ts, iis]
+    ).items
+    assert item.status_label == "檔名商品代號不符"
+    assert "可能放錯檔案" in item.release_problem
+    assert sheet.partner is item and sheet.report.status != PASS, "說明書沒配對成功，投資人須知無法和它比"
+    isin = next(r for r in sheet.report.results if r.rule_id == "iis.isin")
+    assert isin.reason_code == "term_sheet_unavailable"
+
+
+def test_iis_failing_its_own_pairing_does_not_make_the_term_sheet_miss_it(tmp_path):
+    spec = Spec()
+    ts = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec, iis=False)
+    fake = build_pdf(tmp_path / f"{spec.product_code}_IIS.pdf", spec, iis=False)  # 範本不符的投資人須知
+    item, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, fake]).items
+    assert sheet.status_label == "需人工覆核"
+    assert item.status_label == "通過" and item.release_problem == "已經通過，不需要人工放行"
+    assert not item.fills_sheet
+
+
+def test_issue_date_on_the_sheet_is_compared_with_the_sheet_and_a_term_sheet_error_is_not_repeated(tmp_path):
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec, ts_spec=spec.with_(issue_date=dt.date(2030, 1, 15)))
+    rows = [reference_row(spec, 發行日=dt.datetime(2030, 1, 14))]
+    item, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", rows), [ts, iis]).items
+    assert any(m.startswith("發行日對不起來：參考條件表 2030-01-14／說明書 2030-01-15") for m in problems(item))
+    assert sheet.report.status == PASS, problems(sheet)
+
+    (tmp_path / "iis").mkdir()
+    ts, iis = pair(tmp_path / "iis", spec, replace={"2030 年1 月14 日": "2030 年1 月16 日"})
+    _, sheet = check_all(build_reference_sheet(tmp_path / "iis" / "ref.xlsx", rows), [ts, iis]).items
+    assert problems(sheet) == ["發行日對不起來：參考條件表 2030-01-14／投資人須知 2030-01-16"]
+
+
+def test_barc_risk_level_in_the_product_summary_is_checked(tmp_path):
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec, replace={"3.本商品風險程度：RR4": "3.本商品風險程度：RR5"})
+    _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
+    assert problems(sheet) == ["風險等級（商品簡介）：兩邊的值不同（審查標準 RR4／投資人須知 RR5）"]
+
+
+def test_term_sheet_error_messages_never_show_field_codes(tmp_path):
+    spec = Spec()
+    _, iis = pair(tmp_path, spec)
+    (item,) = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [iis]).items
+    messages = " ".join(problems(item))
+    assert "沒有可比對的同商品說明書" in messages
+    assert not any(code in messages for code in ("name_zh", "underlying_prices", "min_amounts", "isin"))
+
+
+def test_cli_exit_code_and_not_filled_reason_when_the_iis_fails(tmp_path, monkeypatch, capsys):
+    from fcn_checker.cli import main
+
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec, pages=5)
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    cli_root(tmp_path, monkeypatch)
+    assert main([str(sheet), str(ts), str(iis), "--out", str(tmp_path / "reports")]) == 1
+    out = capsys.readouterr().out
+    assert f"通過  {ts.name}  同商品的投資人須知尚未通過或人工放行，不回填。" in out
+    assert f"不一致  {iis.name}" in out

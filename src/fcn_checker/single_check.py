@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from . import backfill
 from .check_config import CheckConfig
 from .config import ReviewStandard
+from .investor_sheet import IisSheet
 from .issuers import Issuer
 from .orders.reference import OrderRecord, ReferenceRow
-from .parsers.iis import IisSheet
 from .rules import derivation, iis, reference
 from .rules.kit import Context, IssuerContext
 from .rules.review_standard import iis_review_standard_rules, review_standard_rules
@@ -99,7 +99,7 @@ def check_investor_sheet(pairing: list[CheckResult], paired: PairedIis | None, c
         ctx = iis.IisContext(base, paired.sheet, paired.term_sheet, paired.pages, paired.file_code)
         results.extend(iis.run_all(ctx))
         trade = iis.trade_date(ctx)
-        results.extend(iis.as_iis(iis_review_standard_rules(base, trade=trade, provides=paired.sheet.provides)))
+        results.extend(iis.as_iis(iis_review_standard_rules(base, paired.sheet, trade=trade)))
         template = paired.issuer.iis
         report.not_covered = [dict(n) for n in template.not_covered] if template is not None else []
     report.status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
