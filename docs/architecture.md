@@ -91,6 +91,6 @@ Issue #13 新增本機 Tkinter PANEL，#14、#15、#17 接上預覽、核對與�
 
 未來 LLM fallback 若獲批准，只能作為 extraction adapter 提供候選欄位與來源證據；不得修改預期下單值或取代 rule engine。需另立 ADR、資料傳送政策與驗證門檻；第一版無相關 SDK、開關或外部呼叫。
 
-決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)、[0004：核對條件統一改用參考條件表](adr/0004-reference-sheet-as-check-source.md)、[0005：上手 adapter 只提供標準欄位與說明書內部規則，參考條件表與審查標準規則各上手共用](adr/0005-issuer-adapter-and-shared-rules.md)。
+決策：[0001：第一版採規則式核對](adr/0001-deterministic-runtime.md)、[0002：本機 Python CLI，PDF 擷取採用 PyMuPDF](adr/0002-python-cli-pymupdf.md)、[0004：核對條件統一改用參考條件表](adr/0004-reference-sheet-as-check-source.md)、[0005：上手 adapter 只提供標準欄位與說明書內部規則，參考條件表與審查標準規則各上手共用](adr/0005-issuer-adapter-and-shared-rules.md)、[0007：投資人須知與說明書成對核對，三方一致才回填](adr/0007-iis-paired-with-term-sheet.md)（規格：[投資人須知核對規則](rules/iis-check-rules.md)，待實作）。
 
 更新方式：[0006：PANEL 只供維護者使用，移除自動更新](adr/0006-panel-maintainer-only-no-self-update.md)，以 `git pull`＋`setup_panel.cmd` 更新（取代 [0003](adr/0003-public-github-panel-update.md)）。程式更新與審查設定導入仍分開。

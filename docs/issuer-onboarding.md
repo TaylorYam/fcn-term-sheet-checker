@@ -84,6 +84,7 @@
 | 文件 | 路徑 | 內容 |
 |---|---|---|
 | 範本規格 | `docs/templates/<上手>-<範本>.md` | 範本代號（例 `xxx-zh-pd`）、文件特性、骨架、欄位錨點表、型態維度、表格解析、多出處、誤抓清單、**範本辨識條件**、樣本總表 |
+| 投資人須知範本規格 | `docs/templates/<上手>-zh-iis.md` | 每檔商品另有一份投資人須知（[ADR 0007](adr/0007-iis-paired-with-term-sheet.md)）：骨架、欄位錨點、範本辨識條件，並在[投資人須知核對規則](rules/iis-check-rules.md) §3 補該上手的檢查點欄 |
 | 參考條件表對照 | `docs/order-formats/<上手>-fcn-reference.md` | 參考條件表各欄在該上手說明書的來源、比價日的日期定義；共用格式見 [reference-sheet.md](order-formats/reference-sheet.md) |
 | 核對規則 | `docs/rules/<上手>-check-rules.md` | 標準欄位對照、值對應、數值與容差、推算規則、說明書內部交叉驗證、日期規則、不核對項目、待確認事項、決策紀錄 |
 | 審查標準 | `config/review_standard.toml`＋`docs/rules/review-standard.md` | 只新增該上手不同的基準（例如名稱樣板）；共用基準不重複 |
