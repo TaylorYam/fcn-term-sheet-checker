@@ -4,6 +4,8 @@
 每條核對結果建立時就帶著項目（`Item`：中文名稱與預期值出處，Issue #91），這裡只依出處組句：
 
 - 參考條件表且兩邊不同：「<項目>對不起來：參考條件表 <值>／說明書 <值>」；多格（例：比價日）逐格列出 Excel 欄名。
+- 投資人須知：文件那一邊寫「投資人須知」（`document`）；預期值來自同商品說明書且兩邊不同時寫
+  「<項目>對不起來：說明書 <值>／投資人須知 <值>」（ADR 0007）。
 - 其他（含由參考條件表推算的值）：「<項目>：<規則的中文說明>」，有雙方值時附上「（參考條件表／審查標準／預期 <值>／說明書 <值>）」；
   不比對值的項目（配對、範本、讀檔、寫檔、參考條件表表頭）只寫說明。
 - 規則沒寫說明時，依原因與狀態給中文預設。
@@ -33,7 +35,9 @@ SOURCE_ZH = {
     ItemSource.REFERENCE_DERIVED: "參考條件表",
     ItemSource.STANDARD: "審查標準",
     ItemSource.EXPECTED: "預期",
+    ItemSource.TERM_SHEET: "說明書",
 }
+TERM_SHEET, IIS = "說明書", "投資人須知"  # 錯訊裡文件那一邊的稱呼
 
 REASON_ZH = {
     "value_mismatch": "兩邊的值不同",
@@ -88,24 +92,26 @@ def _shows_values(r: CheckResult, detail: str) -> bool:
     return not all(show(v) in detail for v in (r.expected, r.actual))
 
 
-def _detail(r: CheckResult) -> str:
-    return r.message or REASON_ZH.get(r.reason_code) or STATUS_DEFAULT.get(r.status, "需要人工確認")
+def _detail(r: CheckResult, document: str) -> str:
+    default = REASON_ZH.get(r.reason_code) or STATUS_DEFAULT.get(r.status, "需要人工確認")
+    return r.message or default.replace(TERM_SHEET, document)
 
 
-def problem_message(r: CheckResult) -> str:
-    """一條問題的中文錯訊。"""
+def problem_message(r: CheckResult, document: str = TERM_SHEET) -> str:
+    """一條問題的中文錯訊；`document` 是被核對的文件（說明書或投資人須知）。"""
     where, source = r.item.name, r.item.source
-    if source == ItemSource.REFERENCE and r.status == CheckStatus.MISMATCH:
+    if source in (ItemSource.REFERENCE, ItemSource.TERM_SHEET) and r.status == CheckStatus.MISMATCH:
+        other = SOURCE_ZH[source]
         if isinstance(r.expected, dict) and isinstance(r.actual, dict):  # 多格（例：比價日）逐格列出
             return "；".join(
-                f"{column_label(str(k))}對不起來：參考條件表 {show(v)}／說明書 {show(r.actual.get(k))}"
+                f"{column_label(str(k))}對不起來：{other} {show(v)}／{document} {show(r.actual.get(k))}"
                 for k, v in r.expected.items()
             )
-        return f"{where}對不起來：參考條件表 {show(r.expected)}／說明書 {show(r.actual)}"
-    detail = _detail(r)
+        return f"{where}對不起來：{other} {show(r.expected)}／{document} {show(r.actual)}"
+    detail = _detail(r, document)
     has_both = r.expected is not None and r.actual is not None
     values = ""
     if has_both and _shows_values(r, detail):
-        values = f"（{SOURCE_ZH[source]} {show(r.expected)}／說明書 {show(r.actual)}）"
+        values = f"（{SOURCE_ZH[source]} {show(r.expected)}／{document} {show(r.actual)}）"
     head = "" if detail.startswith(where) else f"{where}："  # 說明已經以項目開頭時不重複
     return f"{head}{detail}{values}"

@@ -1,6 +1,7 @@
 """審查標準規則：各上手共用，依上手代號取得已解析的審查標準（docs/rules/review-standard.md）。
 
-只用說明書標準欄位、全文索引與審查標準，不碰參考條件表。對外只有 `review_standard_rules` 一個進入點。
+只用說明書標準欄位、全文索引與審查標準，不碰參考條件表。對外只有兩個進入點：說明書的 `review_standard_rules`，
+與投資人須知的 `iis_review_standard_rules`（只核對範本有的項目，ADR 0007）。
 項目：standard.* 的預期值出自審查標準；面額、受理申購日、刊印日期（doc.*）的錯訊沿用「預期」。
 """
 
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Callable
 
 from ..config import NAME_FLAGS
 from ..schema import CheckResult, Evidence, Item, ParsedField
@@ -16,7 +18,7 @@ from ..standard_fields import fee_field
 from ..text import full_brackets, squash
 from .kit import Context, doc_review, occurrences_of, result, standard_field
 
-__all__ = ["review_standard_rules"]
+__all__ = ["iis_review_standard_rules", "review_standard_rules"]
 
 # ---------------------------------------------------------------- 審查標準
 
@@ -133,9 +135,9 @@ def _subscription_dates(ctx: Context) -> list[CheckResult]:
     return out
 
 
-def _print_dates(ctx: Context) -> list[CheckResult]:
-    """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）。"""
-    rid, trade = "doc.print_date", standard_field(ctx, "trade_date")
+def _print_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckResult]:
+    """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）；交易日預設取說明書。"""
+    rid, trade = "doc.print_date", trade or standard_field(ctx, "trade_date")
     items, problem = occurrences_of(ctx, rid, "print_dates", Item.expected("刊印日期"))
     if problem:
         return [problem]
@@ -190,14 +192,14 @@ def _chairman(ctx: Context) -> CheckResult:
     )
 
 
-def _fixed_warning(ctx: Context) -> CheckResult:
-    """該上手適用的固定風險警語（有上手版本就用，否則用預設）逐字出現的次數 = 審查標準。"""
+def _fixed_warning(ctx: Context, expected: int | None = None) -> CheckResult:
+    """該上手適用的固定風險警語（有上手版本就用，否則用預設）逐字出現的次數 = 審查標準（`expected` 另給時用它）。"""
     rid, std = "standard.fixed_warning", ctx.issuer_std
     ti = ctx.ts.full_text
     target = squash(std.fixed_warning)
     hits = [m for m in re.finditer(re.escape(target), ti.text)]
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
-    expected = std.fixed_warning_occurrences
+    expected = std.fixed_warning_occurrences if expected is None else expected
     ok = len(hits) == expected
     return result(
         rid,
@@ -329,26 +331,31 @@ def _distributor_info(ctx: Context) -> list[CheckResult]:
             "第二章受託或銷售機構地址",
         ),
     )
-    out = []
-    for name, exp, what, zh in checks:
-        pf = standard_field(ctx, name)
-        equivalents = {squash(p) for p in std.distributor_phone_equivalents}
-        if name == "distributor_phone_cover" and pf.ok and squash(pf.value) in equivalents:
-            out.append(
-                result(
-                    rid,
-                    name,
-                    S.PASS,
-                    expected=exp,
-                    actual=pf.value,
-                    pf=pf,
-                    tolerance="審查標準列出的電話等價寫法（distributor.phone_equivalents）",
-                    item=Item.standard(zh),
-                )
-            )
-            continue
-        out.append(_fixed_text(rid, name, pf, exp, what, zh))
-    return out
+    return [
+        _distributor_text(
+            ctx, rid, name, standard_field(ctx, name), exp, what, zh, phone=name == "distributor_phone_cover"
+        )
+        for name, exp, what, zh in checks
+    ]
+
+
+def _distributor_text(
+    ctx: Context, rid: str, field: str, pf: ParsedField, exp: str, what: str, name: str, *, phone: bool
+) -> CheckResult:
+    """受託或銷售機構的一處文字 = 審查標準；電話另接受審查標準列出的等價寫法。"""
+    equivalents = {squash(p) for p in ctx.issuer_std.distributor_phone_equivalents}
+    if phone and pf.ok and squash(pf.value) in equivalents:
+        return result(
+            rid,
+            field,
+            S.PASS,
+            expected=exp,
+            actual=pf.value,
+            pf=pf,
+            tolerance="審查標準列出的電話等價寫法（distributor.phone_equivalents）",
+            item=Item.standard(name),
+        )
+    return _fixed_text(rid, field, pf, exp, what, name)
 
 
 def _fees(ctx: Context) -> list[CheckResult]:
@@ -481,6 +488,80 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 item=item,
             )
         )
+    return out
+
+
+# ---------------------------------------------------------------- 投資人須知（ADR 0007）
+
+
+def _iis_warning(ctx: Context) -> CheckResult:
+    """固定警語全文同說明書（依上手版本），次數用審查標準的投資人須知專屬值。"""
+    expected = ctx.issuer_std.iis_fixed_warning_occurrences
+    if expected is None:
+        return result(
+            "standard.fixed_warning",
+            "fixed_warning",
+            S.REVIEW_REQUIRED,
+            reason="standard_missing",
+            message=f"審查標準沒有 {ctx.issuer} 投資人須知的固定警語次數（iis.fixed_warning_occurrences.{ctx.issuer.lower()}）",
+            item=Item.standard("固定風險警語"),
+        )
+    return _fixed_warning(ctx, expected)
+
+
+def _iis_occurrences(ctx: Context, rid: str, name: str, expected: str | None, what: str, phone: bool = False):
+    """投資人須知出處清單型欄位（各處受託機構名稱／地址／電話、發行機構名稱）每一處 = 審查標準。"""
+    container = ctx.ts.f(name)  # 投資人須知才有的欄位（parsers/iis.py 的 IIS_FIELDS），不是標準欄位
+    if not container.ok:
+        return [doc_review(rid, name, container, item=Item.standard(what))]
+    items = container.value
+    if expected is None:
+        return [
+            result(
+                rid,
+                occ.field,
+                S.REVIEW_REQUIRED,
+                pf=occ.value,
+                reason="standard_missing",
+                message=f"審查標準沒有 {ctx.issuer} 的發行機構全名（issuer_name.{ctx.issuer.lower()}）",
+                item=Item.standard(occ.name),
+            )
+            for occ in items
+        ]
+    return [
+        _distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, phone=phone)
+        for occ in items
+    ]
+
+
+def iis_review_standard_rules(
+    ctx: Context, *, trade: ParsedField, provides: Callable[[str], bool]
+) -> list[CheckResult]:
+    """投資人須知的審查標準規則：`ctx.ts` 是投資人須知的讀出結果，只核對範本有的項目（`provides`）。
+
+    風險等級、固定警語（次數為投資人須知專屬）、禁用語一律核對；刊印日期的交易日由呼叫端給（參考條件表）。
+    發行機構名稱只寫中文的範本（HSBC）只比中文。
+    """
+    std = ctx.issuer_std
+    issuer_name = std.issuer_name
+    if issuer_name is not None and getattr(ctx.ts, "issuer_name_zh_only", False):
+        issuer_name = re.split(r"[（(]", issuer_name, maxsplit=1)[0]
+    out = [_risk_level(ctx), _iis_warning(ctx), _forbidden_wording(ctx)]
+    if provides("print_dates"):
+        out.extend(_print_dates(ctx, trade))
+    if provides("issue_price_pct"):
+        out.append(_issue_price(ctx))
+    occurrence_checks = (
+        ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", False),
+        ("distributor_names", "standard.distributor", std.distributor_name, "受託或銷售機構名稱", False),
+        ("distributor_addresses", "standard.distributor", std.distributor_address, "受託或銷售機構地址", False),
+        ("distributor_phones", "standard.distributor", std.distributor_phone, "受託或銷售機構電話", True),
+    )
+    for name, rid, expected, what, phone in occurrence_checks:
+        if provides(name):
+            out.extend(_iis_occurrences(ctx, rid, name, expected, what, phone))
+    if any(provides(fee_field(label)) for label in ctx.std.fees):
+        out.extend(_fees(ctx))
     return out
 
 

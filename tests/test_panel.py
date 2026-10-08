@@ -15,7 +15,7 @@ import pytest
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel import parse_args, session_from_args
 from fcn_checker.panel_workflow import PanelSession
-from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT
+from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT, with_iis
 from reference_synth import REFERENCE_FORMAT, build_reference_sheet
 from synth import SYNTH_ISIN, Spec, build_pdf, reference_row
 
@@ -31,7 +31,7 @@ def inputs(tmp_path: Path, *specs: Spec, rows: list[dict] | None = None):
 
 def session_for(tmp_path: Path, sheet, pdfs, standard=REVIEW_STANDARD, config_dir=None) -> PanelSession:
     session = PanelSession(standard, config_dir or ROOT / "config", install_root=tmp_path)
-    session.select(sheet, pdfs)
+    session.select(sheet, with_iis(pdfs))
     return session
 
 
@@ -45,8 +45,10 @@ def test_preview_lists_each_pdf_without_writing_anything(tmp_path):
     session = session_for(tmp_path, sheet, pdfs)
 
     preview = session.load_preview()
-    first, missing, unsupported = preview.rows
+    first, missing, unsupported, *iis = preview.rows
     assert (first.issuer, first.product_code, first.reference_row, first.problem) == ("BARC", ok.product_code, 4, "")
+    assert [r.kind.value for r in (first, *iis)] == ["說明書", "投資人須知", "投資人須知", "投資人須知"]
+    assert (iis[0].product_code, iis[0].reference_row, iis[0].problem) == (ok.product_code, 4, "")
     assert first.product_code_evidence[0].page == 1
     assert missing.reference_row is None and "找不到" in missing.problem
     assert unsupported.unsupported and "未支援上手" in unsupported.problem
@@ -58,18 +60,20 @@ def test_preview_lists_each_pdf_without_writing_anything(tmp_path):
 
 def test_preview_and_result_show_pdfs_sharing_one_reference_row(tmp_path):
     spec = Spec()
-    pdfs = [build_pdf(tmp_path / f"{spec.product_code}_{v}.pdf", spec) for v in ("舊版", "新版")]
+    for v in ("old", "new"):
+        (tmp_path / v).mkdir()
+    pdfs = [build_pdf(tmp_path / v / f"{spec.product_code}_TS.pdf", spec, iis=False) for v in ("old", "new")]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     session = session_for(tmp_path, sheet, pdfs)
     old, new = session.load_preview().rows
     assert old.reference_row == new.reference_row == 4
-    assert "同一批有多份說明書對到同一個 TDCC Code" in old.problem and pdfs[1].name in old.problem
-    assert pdfs[0].name in new.problem
+    assert "同一批有多份說明書對到同一個 TDCC Code" in old.problem and str(pdfs[1]) in old.problem
+    assert str(pdfs[0]) in new.problem
 
     outcome = session.start_check()
     assert "2 份需人工覆核" in outcome.headline
     for item, other in zip(outcome.ordered_items, reversed(pdfs), strict=True):
-        assert other.name in outcome.ordered_results(item)[0].message
+        assert str(other) in outcome.ordered_results(item)[0].message
 
 
 def test_preview_reports_reference_sheet_column_problems(tmp_path):
@@ -135,8 +139,8 @@ def test_check_requires_preview_and_writes_nothing(tmp_path):
     outcome = session.start_check()
     assert set(tmp_path.rglob("*")) == before
     assert session.outcome is outcome
-    assert [i.term_sheet for i in outcome.ordered_items] == [pdfs[1], pdfs[0]], "有問題的排前面"
-    assert "1 份通過" in outcome.headline and "1 份不一致" in outcome.headline
+    assert [i.term_sheet for i in outcome.ordered_items] == with_iis([pdfs[1]]) + with_iis([pdfs[0]]), "有問題的排前面"
+    assert "2 份通過" in outcome.headline and "2 份不一致" in outcome.headline
     assert "按「儲存核對結果」" in outcome.headline and "新檔" not in outcome.headline
     first = outcome.ordered_results(outcome.ordered_items[0])
     assert first[0].status.value == "MISMATCH"
@@ -156,7 +160,7 @@ def test_changing_sources_clears_result_and_requires_new_preview(tmp_path, chang
     session.load_preview()
     session.start_check()
     if changed == "selection":
-        session.select(sheet, pdfs)
+        session.select(sheet, with_iis(pdfs))
     elif changed == "pdf":
         build_pdf(pdfs[0], Spec(tenor=7))
     elif changed == "sheet":
@@ -180,7 +184,7 @@ def test_reading_preview_and_outcome_never_touches_the_files(tmp_path):
     session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()
     outcome = session.start_check()
-    (item,) = outcome.batch.items
+    item, _ = outcome.batch.items
     pdfs[0].unlink()  # 外部刪掉說明書
 
     assert session.preview is not None and session.outcome is outcome, "讀取屬性不讀檔、不清狀態"
@@ -196,7 +200,7 @@ def test_release_and_save_check_the_sources_first(tmp_path, action):
     sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
     session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()
-    (item,) = session.start_check().batch.items
+    item, iis = session.start_check().batch.items
     build_reference_sheet(sheet, [reference_row(spec, **{"K(%)": 72})])  # 外部改了參考條件表
 
     with pytest.raises(IngestionError, match="重新"):
@@ -214,7 +218,7 @@ def test_pdf_missing_at_preview_is_listed_and_the_rest_still_loads(tmp_path):
     missing = tmp_path / "029199990009_TS.pdf"
     session = session_for(tmp_path, sheet, [*pdfs, missing])
     preview = session.load_preview()
-    assert [bool(r.problem) for r in preview.rows] == [False, True]
+    assert [bool(r.problem) for r in preview.rows] == [False, True, False]
     assert "找不到說明書" in preview.rows[1].problem
     assert session.check_sources(), "選取時就不存在的說明書不算來源變更"
     session.start_check()
@@ -265,8 +269,9 @@ def test_session_keeps_the_latest_receipt_for_the_current_result(tmp_path):
     sheet, pdfs = inputs(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
     session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()
-    (item,) = session.start_check().batch.items
+    item, iis = session.start_check().batch.items
     session.release(item)
+    session.release(iis)  # K(%) 投資人須知也對不起來；兩份都放行才回填
     receipt = session.save(tmp_path / "reports", now=NOW)
     assert session.receipt is receipt and receipt.filled(item), "「已回填」來自最近一次儲存的收據"
 
@@ -336,20 +341,20 @@ def saved(session: PanelSession, tmp_path: Path):
 def test_release_and_cancel_update_the_headline(tmp_path, row, original):
     spec = Spec()
     session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **row)])
-    (item,) = outcome.batch.items
+    item, _ = outcome.batch.items
     session.release(item)
     assert item.released
-    assert "0 份通過、1 份人工放行" in session.message and f"0 份{original}" in session.message
+    assert "0 份通過、1 份人工放行" in session.message and f"1 份{original}" in session.message, "投資人須知還沒放行"
     assert "再儲存" not in session.message, "還沒儲存過，不必提醒"
     session.cancel_release(item)
     assert not item.released
-    assert "0 份人工放行" in session.message and f"1 份{original}" in session.message
+    assert "0 份人工放行" in session.message and f"2 份{original}" in session.message
 
 
 def test_changing_a_release_after_saving_says_to_save_again(tmp_path):
     spec = Spec()
     session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
-    (item,) = outcome.batch.items
+    item, _ = outcome.batch.items
     session.release(item)
     assert session.save(tmp_path / "reports", now=NOW).complete
     session.cancel_release(item)
@@ -359,7 +364,7 @@ def test_changing_a_release_after_saving_says_to_save_again(tmp_path):
 def test_release_button_state_hides_the_reason_for_passed_term_sheets(tmp_path):
     ok, bad = Spec(), Spec(product_code="029199990002")
     session, outcome = checked(tmp_path, ok, bad, rows=[reference_row(ok), reference_row(bad, **{"K(%)": 71})])
-    passed, mismatch = outcome.batch.items
+    passed, mismatch, *_ = outcome.batch.items
     assert session.release_state(passed) == (False, ""), "已通過的不能放行，也不必說明原因"
     assert session.release_state(mismatch) == (True, "")
     session.start_check()  # 原結果失效
@@ -373,12 +378,15 @@ def test_released_items_sort_with_passed_ones(tmp_path):
     session, outcome = checked(tmp_path, ok, bad, other, rows=rows)
     released = outcome.batch.items[1]
     session.release(released)
-    assert [i.term_sheet.name[:12] for i in outcome.ordered_items] == [
-        other.product_code,
-        ok.product_code,
-        bad.product_code,
+    assert [i.term_sheet.name for i in outcome.ordered_items] == [
+        f"{other.product_code}_TS.pdf",
+        f"{bad.product_code}_IIS.pdf",
+        f"{other.product_code}_IIS.pdf",
+        f"{ok.product_code}_TS.pdf",
+        f"{bad.product_code}_TS.pdf",
+        f"{ok.product_code}_IIS.pdf",
     ]
-    assert "1 份通過、1 份人工放行、1 份不一致" in outcome.headline
+    assert "2 份通過、1 份人工放行、3 份不一致" in outcome.headline
 
 
 def test_release_selects_the_top_item_and_cancel_keeps_the_same_one(tmp_path):
@@ -444,13 +452,14 @@ def test_not_covered_is_grouped_by_issuer_without_overwriting(tmp_path):
     groups = {g.issuer: g.descriptions for g in outcome.not_covered}
     assert list(groups) == ["BARC", "HSBC"]
     for issuer in (BARC, HSBC):
-        assert groups[issuer.code] == tuple(n["description"] for n in issuer.not_covered), "同一家只列一次"
+        expected = tuple(n["description"] for n in (*issuer.not_covered, *issuer.iis.not_covered))
+        assert groups[issuer.code] == expected, "同一家只列一次（含投資人須知範本）"
     shared = {"doc.underlying_names", "field.monthly_ki"}
     for rule_id in shared:  # 兩家都有、說明不同的 rule_id 各自保留
         for issuer in (BARC, HSBC):
             (desc,) = [n["description"] for n in issuer.not_covered if n["rule_id"] == rule_id]
             assert desc in groups[issuer.code]
-    assert outcome.not_covered_count == len(BARC.not_covered) + len(HSBC.not_covered)
+    assert outcome.not_covered_count == sum(len(i.not_covered) + len(i.iis.not_covered) for i in (BARC, HSBC))
 
 
 # ---------------------------------------------------------------- 設定檔與啟動參數

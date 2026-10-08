@@ -9,6 +9,7 @@ import dataclasses
 import datetime as dt
 import re
 from decimal import Decimal
+from pathlib import Path
 
 import fitz
 import pytest
@@ -118,12 +119,16 @@ def test_latest_compare_date_check_does_not_label_document_dates_as_sheet_values
     assert problem_message(r) == "比價日：說明書最晚的比價日 2030-07-09 不等於最終比價日 2030-07-08，不回填"
 
 
-def test_pdfs_sharing_one_reference_row_get_a_plain_chinese_message(tmp_path):
+def test_pdfs_sharing_one_reference_row_get_a_plain_chinese_message(tmp_path, monkeypatch):
     spec = Spec()
-    pdfs = [build_pdf(tmp_path / f"{spec.product_code}_{v}.pdf", spec) for v in ("舊版", "新版")]
+    monkeypatch.chdir(tmp_path)  # 同名檔案的錯訊列出選取時的路徑；用相對路徑，不帶測試暫存資料夾名稱
+    for v in ("舊", "新"):
+        Path(v).mkdir()
+    pdfs = [build_pdf(Path(v) / f"{spec.product_code}_TS.pdf", spec) for v in ("舊", "新")]
     sheet = check_rows(tmp_path, pdfs[0], [reference_row(spec)])  # 建好參考條件表
     assert sheet.status == CheckStatus.PASS
     outcome = check_all(tmp_path / "FCN參考條件.xlsx", pdfs)
+    assert [i.status_label for i in outcome.items] == ["多份對到同一列"] * 4
 
     for item in outcome.items:
         assert_plain_chinese(item.report)
@@ -205,7 +210,7 @@ def test_pairing_unsupported_and_unreadable_pdf_are_plain_chinese(tmp_path):
     spec = Spec()
     missing_row = build_pdf(tmp_path / "029199990009_TS.pdf", Spec(product_code="029199990009"))
     unsupported = build_pdf(tmp_path / "999199990001_TS.pdf", spec)
-    broken = tmp_path / "029199990001_broken.pdf"
+    broken = tmp_path / "029199990001_TS.pdf"
     broken.write_bytes(b"not a pdf")
     sheet_report = check_rows(tmp_path, missing_row, [reference_row(spec)])
     outcome = check_all(tmp_path / "FCN參考條件.xlsx", [unsupported, broken])

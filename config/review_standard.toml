@@ -7,8 +7,8 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 6
-effective_date = 2026-10-05
+version = 7
+effective_date = 2026-10-08
 
 [distributor]
 # 受託或銷售機構審查通過之日期（說明書封面 p1）：歷次日期都保留，由舊到新。
@@ -124,3 +124,14 @@ CNH = 100000
 [dates]
 # 中文產品說明書刊印日期：交易日當天或之後 N 個日曆日內
 print_date_max_days_after_trade = 1
+
+[iis]
+# 投資人須知（檔名結尾 _IIS，docs/rules/iis-check-rules.md）：必須剛好 N 頁。
+# 使用者 2026-10-08 確認：比外規「不超過 5 頁」嚴格，5 頁也判不一致。
+pages = 4
+
+# 固定風險警語（依上手版本，同上）在投資人須知出現的次數（鍵為上手代號小寫）；沒列出的上手轉人工覆核。
+# BARC：警語第 1 點；HSBC：警語一、商品簡介第 3 點（2026-10-08 依樣本確認）。
+[iis.fixed_warning_occurrences]
+barc = 1
+hsbc = 2

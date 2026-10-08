@@ -30,7 +30,7 @@ RECORD_VERSION = 2
 
 @dataclass(frozen=True)
 class RecordItem:
-    """核對紀錄的一份說明書（由儲存流程交來）。"""
+    """核對紀錄的一份 PDF（說明書或投資人須知，由儲存流程交來）。"""
 
     pdf: str  # PDF 檔名
     issuer: str | None
@@ -39,6 +39,8 @@ class RecordItem:
     filled: bool
     manual_release: bool
     report: CheckReport
+    document: str | None = None  # 說明書／投資人須知；None → 檔名無法辨識
+    partner: str | None = None  # 同商品另一份的 PDF 檔名
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,8 @@ def _record(batch: BatchRecord, root: Path, now: dt.datetime) -> dict[str, Any]:
         "items": [
             {
                 "pdf": i.pdf,
+                "document": i.document,
+                "partner": i.partner,
                 "issuer": i.issuer,
                 "product_code": i.product_code,
                 "reference_row": i.reference_row,

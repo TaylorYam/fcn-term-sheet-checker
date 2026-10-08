@@ -53,7 +53,10 @@ class Spec:
         )
 
 
-def build_pdf(path: Path, s: Spec):
+def build_pdf(path: Path, s: Spec, *, iis: bool = True):
+    """合成說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時，旁邊另寫一份同商品投資人須知（ADR 0007：兩份一起核對）。"""
+    if iis and path.stem.endswith("_TS"):
+        build_iis_pdf(iis_path(path), s)
     w = PdfWriter()
 
     def line(t, x=110):
@@ -275,3 +278,97 @@ def build_inquiry(path: Path, s: Spec, overrides=None):
     wb.save(path)
     wb.close()
     return path
+
+
+# ---------------------------------------------------------------- 投資人須知（docs/templates/hsbc-zh-iis.md）
+
+IIS_PAGES = 4  # 審查標準 iis.pages
+
+
+def iis_path(ts: Path) -> Path:
+    """說明書 `<商品代號>_TS.pdf` 旁的同商品投資人須知 `<商品代號>_IIS.pdf`。"""
+    return ts.with_name(ts.stem[: -len("_TS")] + "_IIS.pdf")
+
+
+def build_iis_pdf(
+    path: Path,
+    s: Spec,
+    *,
+    pages: int = IIS_PAGES,
+    replace: dict[str, str] | None = None,
+    page_total: int | None = None,
+) -> Path:
+    """仿 HSBC 中文投資人須知（4 頁）；值與 `s` 的說明書一致。`replace` 逐行替換文字（製造錯誤）、`pages` 改頁數、
+    `page_total` 改頁首「共 M 頁」的 M。"""
+    w = PdfWriter()
+    replace = replace or {}
+    dist, addr = STD["distributor"]["name"], STD["distributor"]["address"]
+    warning = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
+    issuer = STD["issuer_name"]["hsbc"].split("（")[0]
+    short = s.name.replace("（以下簡稱「本商品」）", "").replace("（", "(").replace("）", ")")
+    names = [f"虛構標的{i + 1}" for i in range(s.count)]
+    tickers = [f"ZZ{i + 1} UW" for i in range(s.count)]
+
+    def line(t: str, x: float = 60) -> None:
+        for old, new in replace.items():
+            t = t.replace(old, new)
+        for k in range(0, len(t), 44):
+            w.line(x, t[k : k + 44])
+
+    def page1() -> None:
+        line("中文投資人須知(最終版)", 214)
+        line(short)
+        line(s.en)
+        line("本商品之投資風險警語：")
+        line("一、" + warning)
+        line(f"四、本商品雖經{dist}審查，並不代表證實申請事項。")
+        line(f"五、本商品持有期間如有保證配息收益或保證保本率，係由{issuer}保證，而非由{dist}所保證。")
+        line("七、本商品係依境外結構型商品管理規則規定，於臺灣境內受託投資、受託買賣或為投資型保單之投資標的。")
+        line("十、投資人應詳閱本中文投資人須知內容，刊印日期：2030 年1 月7 日")
+        line("相關機構")
+        line(f"發行機構: {issuer}，電話: 852 0000 0000，地址：香港中環")
+        line(f"受託或銷售機構：{dist}，電話：+886-2-5556-1313，地址：{addr}(營業活動所在地)")
+        line("第一　商品簡介")
+        line("3. " + warning)
+
+    def page2() -> None:
+        line("6. 計價幣別：美元")
+        line("7. 每單位面額：10,000 美元")
+        line(f"10. 連結標的資產: {', '.join(names)}")
+        line(f"(彭博代碼: {', '.join(tickers)})。")
+        line("11. 本商品年期: 如未發生自動提前到期事件，且投資人持有本商品至到期日，為6 個月")
+        line("12. 發行日：預定為2030 年1 月14 日")
+        line(f"13. 到期日：如未發生提前贖回之條件，目前表定為{zh_date(s.payments[-1])}。")
+        line("14. 開始受理贖回日期：發行日後的次一個預定交易日")
+
+    def page3() -> None:
+        line("第五　商品風險揭露")
+        line("第六　商品相關費用")
+        for t in ["費用項目", "申購費用", "申購價金的", "0%~5%", "提前贖回費用", "投資人提前贖", "回價金的", "0%~5%"]:
+            line(t)
+
+    def page4() -> None:
+        for t in [
+            "報酬無",
+            "費用申購價金的",
+            "0%~5%",
+            "分銷費用(如屬發行機構或發行人給予受託或銷售機構之報酬)",
+            "折讓無",
+        ]:
+            line(t)
+        line("第七　相關機構之權利、義務及責任")
+        line("第八　協助投資人權益之保護方式")
+        line("3. 受託或銷售機構連絡方式：電話：+886-2-5556-1313")
+
+    builders = [page1, page2, page3, page4]
+    for k, build in enumerate(builders):
+        if 0 < k < pages:
+            w.new_page()
+        build()
+    for _ in range(pages - len(builders)):
+        w.new_page()
+        line("（續）")
+    for i, page in enumerate(w.doc):
+        page.insert_text((250, 30), f"第 {i + 1} 頁，共 {page_total or len(w.doc)} 頁", fontname=FONT, fontsize=8)
+        page.insert_text((60, 45), "PUBLIC", fontname="helv", fontsize=8)
+    return w.save(path)

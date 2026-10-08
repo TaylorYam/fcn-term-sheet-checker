@@ -112,6 +112,7 @@
 | 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`，只有五樣（§6.2a）：識別資料（`code`、`template_id`、`label`、`parser_version`、`not_covered`）、`detect`、`read`、`rules`、`reference_fields`（通常為空） |
 | 上手編號 | `config/issuer_prefixes.toml`、`config/reference_sheet.toml` | 登記商品代號前三碼 → 上手代號，以及該上手在參考條件表「發行機構」欄的寫法（[參考條件表格式](order-formats/reference-sheet.md)） |
 | 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔） | 範本辨識 `detect`；讀出 `read` 交出 `standard_fields.STANDARD_FIELDS` 的全部標準欄位（含提前出場排程、各出處清單）與該上手規則需要的專屬資料；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
+| 投資人須知 parser | `src/fcn_checker/parsers/<上手>_iis.py` | `detect`、`read` 交出 `parsers/iis.py` 的 `IisSheet`（範本有的欄位以 `provides` 宣告），在 `issuers.py` 以 `IisTemplate` 掛到該上手的 `iis`；規則各上手共用（`rules/iis.py`、`review_standard.iis_review_standard_rules`），範本特有的固定警語次數放審查標準 `[iis]`（ADR 0007） |
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
 | 規則 | `src/fcn_checker/rules/<上手>.py` | 只寫該上手專屬的說明書內部規則（不碰參考條件表）與未涵蓋清單；其他規則自動沿用（§6.2a） |

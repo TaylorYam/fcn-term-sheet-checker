@@ -19,7 +19,7 @@ pytestmark = [
 
 
 def test_real_hsbc_samples_match_exploration():
-    items = check_all(ORDER, PDFS).items
+    items = [i for i in check_all(ORDER, PDFS).items if i.term_sheet.name.endswith("_TS.pdf")]  # 投資人須知另見批量測試
     reports = [i.report for i in items]
     assert len(reports) == 9 and all(r.template == "hsbc-zh-pd" for r in reports)
     bad = Counter(

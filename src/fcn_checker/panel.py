@@ -13,7 +13,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .approval_dates import parse_input_date
-from .batch import BatchItem, BatchPreview
+from .batch import BatchItem, BatchPreview, DocKind
 from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
 from .messages import STATUS_ZH, problem_message
@@ -32,9 +32,9 @@ _DETAIL_DEFAULTS = {
 }
 
 
-def result_detail(row: CheckResult) -> str:
+def result_detail(row: CheckResult, document: str = "說明書") -> str:
     """結果明細：有問題的項目用共用錯訊（不含 rule_id），再列雙方值、來源、容差與 PDF 原文。"""
-    reason = problem_message(row) if row.status.is_problem else row.message or _DETAIL_DEFAULTS[row.status]
+    reason = problem_message(row, document) if row.status.is_problem else row.message or _DETAIL_DEFAULTS[row.status]
     evidence = (
         "\n".join(f"第 {e.page} 頁：{e.text}" for e in row.document_evidence) or "無法定位：沒有可用的 PDF 原文證據。"
     )
@@ -318,9 +318,13 @@ class ResultPane(ttk.Frame):
 
     @staticmethod
     def _backfill_text(item: BatchItem) -> str:
+        if item.kind == DocKind.IIS:
+            return "投資人須知不回填；同商品的說明書與投資人須知都通過或人工放行，才回填說明書的值。"
         if not item.report.backfill:
             return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
-        head = "回填欄位（整份通過或人工放行才會回填；按「儲存核對結果」後寫入核對結果檔）："
+        head = "回填欄位（說明書與投資人須知都通過或人工放行才會回填；按「儲存核對結果」後寫入核對結果檔）："
+        if item.not_filled_reason:
+            head = item.not_filled_reason + "\n" + head
         lines = [
             f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {d.action.label}"
             for d in item.report.backfill
@@ -331,7 +335,8 @@ class ResultPane(ttk.Frame):
         selection = self.table.selection()
         if not selection or selection[0] not in self.rows:
             return
-        _write(self.detail, result_detail(self.rows[selection[0]]))
+        item = self.selected_item()
+        _write(self.detail, result_detail(self.rows[selection[0]], item.document if item else "說明書"))
 
 
 class ApprovalDatesDialog(tk.Toplevel):
@@ -663,7 +668,7 @@ class PanelWindow:
         action = self.session.cancel_release if item.released else self.session.release
         if not item.released:
             text = (
-                f"{item.term_sheet.name}\n\n這份說明書的問題：\n"
+                f"{item.term_sheet.name}\n\n這份{item.document}的問題：\n"
                 + "\n".join(f"・{m}" for m in item.problem_messages)
                 + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
             )

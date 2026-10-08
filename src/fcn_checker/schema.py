@@ -163,6 +163,7 @@ class ItemSource(StrEnum):
     REFERENCE_DERIVED = "reference_derived"  # 由參考條件表的值推算（例：月配息率；錯訊附「參考條件表」值與推算說明）
     STANDARD = "standard"  # 審查標準
     EXPECTED = "expected"  # 說明書其他位置或由說明書推算（錯訊寫「預期」）
+    TERM_SHEET = "term_sheet"  # 同商品說明書讀出的值（投資人須知用；錯訊寫「<項目>對不起來：說明書 …／投資人須知 …」）
     NONE = "none"  # 不比對值：配對、範本、讀檔、寫檔、參考條件表表頭
 
 
@@ -223,6 +224,11 @@ class Item:
     @classmethod
     def expected(cls, name: str) -> Item:
         return cls(name, ItemSource.EXPECTED)
+
+    @classmethod
+    def term_sheet(cls, name: str) -> Item:
+        """預期值是同商品說明書讀出的值（投資人須知上參考條件表沒有的欄位，ADR 0007）。"""
+        return cls(name, ItemSource.TERM_SHEET)
 
     @classmethod
     def note(cls, name: str) -> Item:

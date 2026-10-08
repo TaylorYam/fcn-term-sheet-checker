@@ -21,9 +21,9 @@ from fcn_checker.ingestion import IngestionError, sha256_of
 from fcn_checker.issuers import BARC
 from fcn_checker.saving import run_batch, save_batch
 from fcn_checker.schema import CheckStatus, DetectionResult
-from harness import CONFIG, ISSUER_PREFIXES, REVIEW_STANDARD, check_all, load_config
+from harness import CONFIG, ISSUER_PREFIXES, REVIEW_STANDARD, check_all, load_config, with_iis
 from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
-from synth import SYNTH_ISIN, Spec, barc_adapter, build_pdf, reference_row, schedule_rows
+from synth import SYNTH_ISIN, Spec, barc_adapter, build_iis_pdf, build_pdf, reference_row, schedule_rows
 
 PASS, MISMATCH, REVIEW, ERROR = (
     CheckStatus.PASS,
@@ -40,7 +40,7 @@ def pdf_for(tmp_path: Path, spec: Spec, name: str | None = None) -> Path:
 
 def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], *, sheet: Path | None = None, config=CONFIG):
     sheet = sheet or build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
-    outcome, receipt = run_batch(config, sheet, pdfs, tmp_path / "reports", root=tmp_path, now=NOW)
+    outcome, receipt = run_batch(config, sheet, with_iis(pdfs), tmp_path / "reports", root=tmp_path, now=NOW)
     return outcome, receipt, sheet
 
 
@@ -263,9 +263,10 @@ def test_prefix_not_in_table_is_unsupported_issuer(tmp_path):
     assert (r.status, r.reason_code) == (REVIEW, "issuer_unsupported")
     assert item.unsupported and item.report.status == REVIEW and item.status_label == "未支援上手"
     assert not any(x.rule_id.startswith("field.") for x in item.report.results)
-    [error] = error_rows(receipt.output)
-    assert error["TDCC Code"] == spec.product_code, "取不到封面商品代號時用檔名前 12 碼"
-    assert "未支援上手" in error["錯訊"]
+    errors = error_rows(receipt.output)
+    assert [e["PDF 檔名"] for e in errors] == [f"{spec.product_code}_TS.pdf", f"{spec.product_code}_IIS.pdf"]
+    assert errors[0]["TDCC Code"] == spec.product_code, "取不到封面商品代號時用檔名前 12 碼"
+    assert all("未支援上手" in e["錯訊"] for e in errors)
 
 
 def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
@@ -295,10 +296,26 @@ def test_term_sheet_content_of_another_issuer_requires_review(tmp_path):
     assert outcome.items[0].status_label == "檔名上手編號不符"
 
 
-def test_file_name_only_needs_the_same_issuer_prefix_as_the_product_code(tmp_path):
+@pytest.mark.parametrize(
+    "name", ["029 任意檔名.pdf", "029199990001_ TS.pdf", "029199990001_ts.pdf", "029199990001.pdf"]
+)
+def test_file_name_not_ending_with_ts_or_iis_cannot_be_recognized_or_released(tmp_path, name):
     spec = Spec()
-    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec, name="029 任意檔名.pdf")], [reference_row(spec)])
-    assert outcome.items[0].report.status == PASS, problems(outcome.items[0])
+    pdf = pdf_for(tmp_path, spec, name=name)
+    iis_pdf = build_iis_pdf(tmp_path / f"{spec.product_code}_IIS.pdf", spec)
+    outcome, receipt, _ = batch(tmp_path, [pdf, iis_pdf], [reference_row(spec)])
+
+    item, iis = outcome.items
+    r = only(item, "batch.file_name")
+    assert (r.status, r.reason_code) == (REVIEW, "file_name_unrecognized")
+    assert item.kind is None and item.status_label == "檔名無法辨識"
+    assert not any(x.rule_id.startswith(("field.", "backfill.")) for x in item.report.results)
+    assert "檔名無法辨識" in item.release_problem
+    with pytest.raises(IngestionError, match="檔名無法辨識"):
+        outcome.release(item)
+    assert iis.status_label == "這批缺說明書", "辨識不了的檔案不算同商品的說明書"
+    assert [e["PDF 檔名"] for e in error_rows(receipt.output)] == [name, iis.term_sheet.name]
+    assert sheet_rows(receipt.output) == {}
 
 
 def test_product_code_prefix_differs_from_file_name_requires_review(tmp_path):
@@ -326,33 +343,35 @@ def test_missing_or_duplicate_reference_row_requires_review(tmp_path):
 
 def test_pdfs_sharing_one_reference_row_all_require_review_and_others_still_back_fill(tmp_path):
     spec, other = Spec(), Spec(product_code="029199990002")
-    old = pdf_for(tmp_path, spec, name=f"{spec.product_code}_舊版.pdf")
-    new = pdf_for(tmp_path, spec, name=f"{spec.product_code}_新版.pdf")
+    (tmp_path / "old").mkdir()
+    old = build_pdf(tmp_path / "old" / f"{spec.product_code}_TS.pdf", spec, iis=False)
+    new = pdf_for(tmp_path, spec)  # 旁邊有同商品投資人須知
     ok = pdf_for(tmp_path, other)
     outcome, receipt, _ = batch(tmp_path, [old, ok, new], [reference_row(spec), reference_row(other)])
 
-    first, second, third = outcome.items
+    first, second, third, ok_iis, new_iis = outcome.items
     for item, another in ((first, new), (third, old)):
         r = only(item, "batch.pairing")
         assert (r.status, r.reason_code) == (REVIEW, "reference_row_shared")
-        assert "同一批有多份說明書對到同一個 TDCC Code" in r.message and another.name in r.message
-        assert item.term_sheet.name not in r.message
+        assert "同一批有多份說明書對到同一個 TDCC Code" in r.message and str(another) in r.message
         assert item.report.status == REVIEW and not receipt.filled(item)
         assert item.status_label == "多份對到同一列"
         assert not any(x.rule_id.startswith(("field.", "backfill.")) for x in item.report.results)
+    assert new_iis.status_label == "多份對到同一列", "同一列的投資人須知也無法確定配哪一份說明書"
     assert second.report.status == PASS and receipt.filled(second) and second.status_label == "通過"
+    assert ok_iis.report.status == PASS and second.partner is ok_iis
     assert list(sheet_rows(receipt.output)) == [other.product_code]
     assert row_of(receipt.output, other.product_code)["ISIN Code"] == SYNTH_ISIN
     errors = error_rows(receipt.output)
-    assert [e["PDF 檔名"] for e in errors] == [old.name, new.name]
-    assert new.name in errors[0]["錯訊"] and old.name in errors[1]["錯訊"]
+    assert [e["PDF 檔名"] for e in errors] == [old.name, new.name, new_iis.term_sheet.name]
+    assert str(new) in errors[0]["錯訊"] and str(old) in errors[1]["錯訊"]
 
 
 def test_same_pdf_selected_twice_says_so_and_same_names_show_full_paths(tmp_path):
     spec = Spec()
     pdf = pdf_for(tmp_path, spec)
     outcome, receipt, _ = batch(tmp_path, [pdf, pdf], [reference_row(spec)])
-    for item in outcome.items:
+    for item in outcome.items[:2]:
         assert f"{pdf.name}（同一個檔案重複選取）" in only(item, "batch.pairing").message
 
     (tmp_path / "v2").mkdir()
@@ -461,7 +480,7 @@ def test_result_file_keeps_only_passing_rows_in_sheet_order_with_the_original_la
     before = sheet.read_bytes()
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, s) for s in (c, b, a)], [], sheet=sheet)  # d 這批沒選到
 
-    assert [receipt.filled(i) for i in outcome.items] == [True, False, True]
+    assert [receipt.filled(i) for i in outcome.items] == [True, False, True, False, False, False], "投資人須知不回填"
     assert receipt.output == tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
     assert sheet.read_bytes() == before, "原檔不動"
     assert list(tmp_path.glob("*_回填_*.xlsx")) == []
@@ -498,6 +517,7 @@ def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
         (unsupported.product_code, pdfs[3].name),
         ("029199990009", unreadable.name),
         (None, nameless.name),
+        *((s.product_code, f"{s.product_code}_IIS.pdf") for s in (bad, missing, unsupported)),
     ], "每份沒通過的 PDF 一列，依輸入順序；TDCC Code 取封面商品代號、檔名前 12 碼，都取不到時留白"
     lines = errors[0]["錯訊"].split("\n")
     assert len(lines) == 2 and "K(%)對不起來：參考條件表 71.00／說明書 70.00" in lines, "多條錯訊在同一格，以換行分隔"
@@ -670,7 +690,7 @@ def test_check_reuses_the_preview_when_its_snapshot_is_still_valid(tmp_path):
     ok, missing = Spec(), Spec(product_code="029199990002")
     pdfs = [pdf_for(tmp_path, ok), pdf_for(tmp_path, missing)]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(ok)])
-    preview = preview_batch(CONFIG, sheet, pdfs)
+    preview = preview_batch(CONFIG, sheet, with_iis(pdfs))
 
     outcome = check_batch(preview)
     assert outcome.snapshot is preview.snapshot
@@ -681,14 +701,14 @@ def test_check_reuses_the_preview_when_its_snapshot_is_still_valid(tmp_path):
             row.product_code,
             row.reference_row,
         ), "核對結果與預覽的辨識一致"
-    assert [i.report.status for i in outcome.items] == [PASS, REVIEW]
+    assert [i.report.status for i in outcome.items] == [PASS, REVIEW, PASS, REVIEW]
 
 
 def test_term_sheet_replaced_after_preview_requires_a_new_preview(tmp_path):
     spec = Spec()
     pdf = pdf_for(tmp_path, spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    preview = preview_batch(CONFIG, sheet, [pdf])
+    preview = preview_batch(CONFIG, sheet, with_iis([pdf]))
     build_pdf(pdf, Spec(tenor=7))  # 同名、內容不同
 
     with pytest.raises(IngestionError, match="重新載入預覽") as raised:
@@ -705,7 +725,7 @@ def test_config_file_changed_after_loading_the_config_requires_a_new_preview(tmp
     config = load_config(review_standard=standard)
     standard.write_text(standard.read_text(encoding="utf-8") + "\n# 載入後被改過\n", encoding="utf-8")
 
-    preview = preview_batch(config, sheet, [pdf])  # 快照的設定檔 hash 取自核對設定（載入前取）
+    preview = preview_batch(config, sheet, with_iis([pdf]))  # 快照的設定檔 hash 取自核對設定（載入前取）
     with pytest.raises(IngestionError, match="重新載入預覽"):
         check_batch(preview)
 
@@ -738,10 +758,10 @@ def test_each_term_sheet_is_read_once_across_preview_and_check(tmp_path):
     pdfs = [pdf_for(tmp_path, s) for s in specs]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(s) for s in specs])
 
-    preview = preview_batch(config, sheet, pdfs)
+    preview = preview_batch(config, sheet, with_iis(pdfs))
     assert len(reads) == 2
     outcome = check_batch(preview)
-    assert [i.report.status for i in outcome.items] == [PASS, PASS]
+    assert [i.report.status for i in outcome.items] == [PASS, PASS, PASS, PASS]
     assert len(reads) == 2, "核對沿用預覽的讀出，不再讀一次"
 
 
@@ -764,6 +784,12 @@ def checked(tmp_path: Path, pdfs: list[Path], rows: list[dict]):
     return check_all(sheet, pdfs)
 
 
+def release_both(outcome, item) -> None:
+    """放行說明書與同商品投資人須知（兩份都通過或放行才回填，ADR 0007）。"""
+    outcome.release(item)
+    outcome.release(item.partner)
+
+
 def saved(outcome, tmp_path: Path, now: dt.datetime = NOW):
     """儲存一次：回傳收據與這次的核對紀錄。"""
     receipt = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=now)
@@ -779,12 +805,15 @@ def saved(outcome, tmp_path: Path, now: dt.datetime = NOW):
 def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **row)])
-    (item,) = outcome.items
-    assert outcome.status != PASS and item.release_problem == ""
+    item = outcome.items[0]
+    assert outcome.status != PASS and item.release_problem == "" and item.partner.release_problem == ""
 
     outcome.release(item)
     assert item.released and item.status_label == f"人工放行（原：{original}）"
-    assert outcome.status == PASS, "整批狀態不必另外重算"
+    assert not item.fills_sheet, "同商品投資人須知也對不起來，還沒放行就不回填"
+    assert item.not_filled_reason == "同商品的投資人須知尚未通過或人工放行，不回填。"
+    outcome.release(item.partner)
+    assert item.fills_sheet and outcome.status == PASS, "整批狀態不必另外重算"
 
     receipt, record = saved(outcome, tmp_path)
     result = receipt.output
@@ -792,9 +821,14 @@ def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
     assert row_of(result, spec.product_code)["ISIN Code"] == SYNTH_ISIN
     assert error_rows(result) == [], "人工放行的說明書不列入錯誤清單"
     assert receipt.filled(item)
-    (entry,) = record["items"]
+    entry, iis_entry = record["items"]
     assert entry["manual_release"] is True and entry["filled"] is True
     assert entry["status"] != "PASS", "核對紀錄保留原判定"
+    assert (iis_entry["document"], iis_entry["partner"], iis_entry["manual_release"]) == (
+        "投資人須知",
+        item.term_sheet.name,
+        True,
+    )
     assert record["status"] == "PASS"
 
 
@@ -805,7 +839,7 @@ def test_released_flag_cannot_be_set_from_outside(tmp_path):
 
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
-    (item,) = outcome.items
+    item = outcome.items[0]
     with pytest.raises(AttributeError):
         item.released = True
     with pytest.raises(TypeError):
@@ -827,8 +861,8 @@ def test_only_items_of_this_outcome_can_be_released(tmp_path):
 def test_cancelled_release_returns_to_the_original_result(tmp_path):
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
-    (item,) = outcome.items
-    outcome.release(item)
+    item = outcome.items[0]
+    release_both(outcome, item)
     outcome.cancel_release(item)
     assert not item.released and item.status_label == "不一致" and outcome.status == MISMATCH
 
@@ -842,8 +876,8 @@ def test_cancelled_release_returns_to_the_original_result(tmp_path):
 def test_changing_a_release_after_saving_needs_a_new_save_and_keeps_the_old_receipt(tmp_path):
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71})])
-    (item,) = outcome.items
-    outcome.release(item)
+    item = outcome.items[0]
+    release_both(outcome, item)
     first, _ = saved(outcome, tmp_path)
     assert first.filled(item)
 
@@ -880,11 +914,13 @@ def test_saving_twice_gives_two_files_and_a_fresh_receipt_without_the_earlier_er
 def test_release_problem_messages_match_the_error_list(tmp_path):
     spec = Spec()
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71, "KO(%)": 99})])
-    (item,) = outcome.items
+    item, iis = outcome.items
     receipt, _ = saved(outcome, tmp_path)
-    (error,) = error_rows(receipt.output)
+    error, iis_error = error_rows(receipt.output)
     assert len(item.problem_messages) == 2
     assert error["錯訊"] == "\n".join(item.problem_messages), "放行確認視窗與錯誤清單列出同樣的錯訊"
+    assert iis_error["錯訊"] == "\n".join(iis.problem_messages)
+    assert "K(%)對不起來：參考條件表 71.00／投資人須知 70.00" in iis.problem_messages
 
 
 def _unreadable(tmp_path: Path, spec: Spec) -> Path:
@@ -899,7 +935,8 @@ def _unreadable(tmp_path: Path, spec: Spec) -> Path:
         ("pass", "已經通過"),
         ("backfill_unknown", "回填值無法確定"),
         ("backfill_conflict", "請先修正參考條件表"),
-        ("shared_row", "同一批有多份說明書對到同一列"),
+        ("shared_row", "同一批有多份文件對到同一列"),
+        ("missing_iis", "這批缺同商品的投資人須知"),
         ("missing_row", "沒有對到參考條件表的列"),
         ("unsupported", "未支援上手"),
         ("error", "執行錯誤"),
@@ -915,7 +952,11 @@ def test_release_is_refused_when_backfill_is_not_trustworthy(tmp_path, case, rea
     elif case == "backfill_conflict":
         rows = [reference_row(spec, **{"ISIN Code": "XS9999999999"})]
     elif case == "shared_row":
-        pdfs = [pdf_for(tmp_path, spec, f"{spec.product_code}_{v}.pdf") for v in ("舊版", "新版")]
+        (tmp_path / "copy").mkdir()
+        pdfs = [pdfs[0], pdf_for(tmp_path / "copy", spec)]
+    elif case == "missing_iis":
+        (tmp_path / "solo").mkdir()
+        pdfs = [build_pdf(tmp_path / "solo" / f"{spec.product_code}_TS.pdf", spec, iis=False)]
     elif case == "missing_row":
         rows = [reference_row(Spec(product_code="029199990009"))]
     elif case == "unsupported":
@@ -956,8 +997,14 @@ def test_save_writes_one_audit_record_named_like_the_result_file(tmp_path):
         assert (meta[key]["path"], meta[key]["sha256"]) == (str(path.resolve()), sha256_of(path)), key
     assert meta["inputs"]["reference_sheet"]["sha256"] == sha256_of(sheet)
 
-    first, second = data["items"]
-    assert [i["pdf"] for i in data["items"]] == [p.name for p in pdfs]
+    first, second, *iis = data["items"]
+    assert [i["pdf"] for i in data["items"]] == [p.name for p in with_iis(pdfs)]
+    assert [(i["document"], i["partner"]) for i in data["items"]] == [
+        ("說明書", "029199990001_IIS.pdf"),
+        ("說明書", "029199990002_IIS.pdf"),
+        ("投資人須知", "029199990001_TS.pdf"),
+        ("投資人須知", "029199990002_TS.pdf"),
+    ]
     assert first["metadata"]["inputs"]["term_sheet"]["sha256"] == sha256_of(pdfs[0])
     assert (first["status"], first["filled"], first["reference_row"]) == ("PASS", True, 4)
     assert {"column": "ISIN Code", "cell": "F4", "action": "fill"}.items() <= first["backfill"][0].items()

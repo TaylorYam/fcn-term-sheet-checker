@@ -17,7 +17,7 @@ from fcn_checker.issuers import HSBC, REGISTRY
 from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
-from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, load_record
+from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, load_record, with_iis
 from hsbc_synth import Spec, build_inquiry, build_pdf
 
 
@@ -219,11 +219,11 @@ def test_cli_and_panel_select_hsbc(tmp_path, monkeypatch):
     pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
     cli_root(tmp_path, monkeypatch)
-    assert main([str(excel), str(pdf), "--out", str(tmp_path / "reports")]) == 0
+    assert main([str(excel), *map(str, with_iis([pdf])), "--out", str(tmp_path / "reports")]) == 0
     assert load_record(tmp_path)["items"][0]["template"] == HSBC.template_id
     assert "HSBC" in [x.code for x in REGISTRY]
     session = PanelSession(REVIEW_STANDARD, ROOT / "config")
-    session.select(excel, [pdf])
+    session.select(excel, with_iis([pdf]))
     session.load_preview()
     assert session.start_check().batch.status == S.PASS
 
@@ -255,7 +255,8 @@ def test_encrypted_pdf_is_not_checked(tmp_path):
     s = Spec()
     plain = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
     excel = build_inquiry(tmp_path / "order.xlsx", s)
-    encrypted = tmp_path / f"{s.code}_encrypted.pdf"
+    (tmp_path / "locked").mkdir()
+    encrypted = tmp_path / "locked" / f"{s.code}_TS.pdf"
     with fitz.open(plain) as d:
         d.save(encrypted, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="fake-owner", user_pw="fake-user")
     assert run_check(encrypted, excel).status == S.ERROR
@@ -378,7 +379,7 @@ def test_panel_preview_selects_the_matching_table_row(tmp_path):
     wb.save(excel)
     wb.close()
     session = PanelSession(REVIEW_STANDARD, ROOT / "config")
-    session.select(excel, [pdf])
+    session.select(excel, with_iis([pdf]))
     preview = session.load_preview()
     assert preview.rows[0].product_code == s.code
     assert preview.rows[0].reference_row == 5
@@ -551,7 +552,7 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
             ws.cell(4, c.column).value = None
     wb.save(excel)
     wb.close()
-    r, receipt = run_batch(CONFIG, excel, [pdf], tmp_path / "reports", root=tmp_path)
+    r, receipt = run_batch(CONFIG, excel, with_iis([pdf]), tmp_path / "reports", root=tmp_path)
     assert receipt.status == S.PASS, [
         (x.rule_id, x.field, x.status, x.reason_code)
         for x in r.items[0].report.results
@@ -593,7 +594,7 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
     r, receipt = run_batch(
         CONFIG,
         build_inquiry(tmp_path / "order.xlsx", s, {"issue_date": sheet_value}),
-        [build_pdf(tmp_path / f"{s.code}_TS.pdf", s)],
+        with_iis([build_pdf(tmp_path / f"{s.code}_TS.pdf", s)]),
         tmp_path / "reports",
         root=tmp_path,
     )

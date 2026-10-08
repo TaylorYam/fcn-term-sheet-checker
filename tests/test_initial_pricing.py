@@ -13,7 +13,7 @@ import pytest
 
 from fcn_checker.panel import ResultPane
 from fcn_checker.saving import run_batch, save_batch
-from harness import CONFIG, check_all, load_record
+from harness import CONFIG, check_all, load_record, with_iis
 from reference_synth import REFERENCE_HEADERS, build_reference_sheet
 from synth import Spec, build_pdf, reference_row
 from test_batch import row_of
@@ -34,7 +34,7 @@ def run(tmp_path: Path, spec: Spec | None = None, **overrides):
     spec = spec or Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
-    outcome, receipt = run_batch(CONFIG, sheet, [pdf], tmp_path / "reports", root=tmp_path, now=NOW)
+    outcome, receipt = run_batch(CONFIG, sheet, with_iis([pdf]), tmp_path / "reports", root=tmp_path, now=NOW)
     return outcome.items[0], receipt, spec
 
 
@@ -52,7 +52,7 @@ def test_vwap_overwrites_different_sheet_prices_and_records_the_old_values(tmp_p
     item, receipt, spec = run(tmp_path, 期初定價="VWAP", **STALE)
     assert item.report.status.value == "PASS", [r for r in item.report.results if r.status.is_problem]
     assert prices_of(row_of(receipt.output, spec.product_code)) == DOC_PRICES
-    [doc] = load_record(tmp_path)["items"]
+    doc, _ = load_record(tmp_path)["items"]
     ul1 = {d["column"]: (d["sheet_value"], d["action"]) for d in doc["backfill"] if d["column"].startswith("UL_1_")}
     assert ul1 == {c: ("1", "overwrite") for c in ("UL_1_進場價", "UL_1_執行價", "UL_1_下限價", "UL_1_KO價")}
 
@@ -62,10 +62,11 @@ def test_vwap_term_sheet_with_other_problems_can_be_released_and_is_overwritten(
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     rows = [reference_row(spec, **{"K(%)": 71, "期初定價": "VWAP", **STALE})]
     outcome = check_all(build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows), [pdf])
-    (item,) = outcome.items
+    item, iis = outcome.items
     assert item.report.status.value == "MISMATCH"
     assert item.release_problem == "", "覆寫的價格欄不算回填欄位已有不同的值"
     outcome.release(item)
+    outcome.release(iis)  # K(%) 投資人須知也對不起來；兩份都放行才回填
     receipt = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
     assert prices_of(row_of(receipt.output, spec.product_code)) == DOC_PRICES
 
@@ -92,7 +93,7 @@ def test_sheet_without_the_pricing_column_requires_review_naming_it(tmp_path):
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     headers = [h for h in REFERENCE_HEADERS if h != "期初定價"]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers)
-    (item,) = check_all(sheet, [pdf]).items
+    item, _ = check_all(sheet, [pdf]).items
     assert item.report.status.value == "REVIEW_REQUIRED"
     assert any("期初定價" in m for m in item.problem_messages), item.problem_messages
 
