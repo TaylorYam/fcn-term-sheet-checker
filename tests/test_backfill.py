@@ -1,4 +1,4 @@
-"""回填欄位（ISIN Code、發行日、比價日_1～12）：缺欄時的處理、顯示標籤、儲存前的參考條件表變更檢查。
+"""回填欄位（TS、IIS、ISIN Code、發行日、比價日_1～12）：TS、IIS 打勾、缺欄時的處理、顯示標籤、儲存前的參考條件表變更檢查。
 
 測試切點是批量入口（預覽＋核對）與 save_batch；回填與日期格式的一般流程見 test_batch.py。
 """
@@ -8,11 +8,14 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+import openpyxl
+import pytest
+
 from fcn_checker.backfill import BackfillAction
 from fcn_checker.ingestion import sha256_of
 from fcn_checker.panel import ResultPane
 from fcn_checker.saving import save_batch
-from harness import CONFIG, PASS, REVIEW, check_all, load_config, results
+from harness import CONFIG, MISMATCH, PASS, REVIEW, check_all, load_config, results
 from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
 from synth import Spec, build_pdf, reference_row
 
@@ -36,6 +39,56 @@ def assert_column_missing(outcome, rule_id: str, name: str, tmp_path: Path) -> N
     assert all(d.cell != "?" for d in report.backfill)
     receipt = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
     assert not receipt.filled(outcome.items[0])
+
+
+# ---------------------------------------------------------------- TS、IIS（Issue #127）
+
+
+def saved_sheet(outcome, tmp_path: Path):
+    receipt = save_batch(outcome, tmp_path / "reports", root=tmp_path, now=NOW)
+    return receipt, openpyxl.load_workbook(receipt.output)
+
+
+def test_passing_product_gets_v_in_ts_and_iis(tmp_path):
+    outcome = run(tmp_path)
+    item = outcome.items[0]
+    assert item.report.status == PASS and item.fills_sheet
+    assert not [r for r in item.report.results if r.rule_id.startswith("order.")], "表頭有 TS、IIS 不算未知欄名"
+    assert results(item.report, "backfill.checked")[0].status == PASS
+    marks = [(d.column, d.cell, d.sheet_value, d.expected, d.action) for d in item.report.backfill[:2]]
+    assert marks == [("TS", "A4", None, "V", BackfillAction.FILL), ("IIS", "B4", None, "V", BackfillAction.FILL)]
+    receipt, wb = saved_sheet(outcome, tmp_path)
+    assert receipt.filled(item)
+    assert (wb["回填後"]["A4"].value, wb["回填後"]["B4"].value) == ("V", "V")
+
+
+def test_existing_v_is_the_same_value(tmp_path):
+    outcome = run(tmp_path, overrides={"TS": "V", "IIS": " V "})
+    item = outcome.items[0]
+    assert item.report.status == PASS
+    assert [d.action for d in item.report.backfill[:2]] == [BackfillAction.MATCH, BackfillAction.MATCH]
+    _, wb = saved_sheet(outcome, tmp_path)
+    assert wb["回填後"]["A4"].value == "V"
+
+
+@pytest.mark.parametrize("value", ["X", "v", "-", "✓"])
+def test_other_value_in_ts_is_a_mismatch_kept_and_not_filled(tmp_path, value):
+    outcome = run(tmp_path, overrides={"TS": value})
+    item = outcome.items[0]
+    r = results(item.report, "backfill.checked")[0]
+    assert (item.report.status, r.status) == (MISMATCH, MISMATCH)
+    assert [d.action for d in item.report.backfill[:2]] == [BackfillAction.MISMATCH, BackfillAction.FILL]
+    assert f"TS對不起來：參考條件表 {value}／說明書 V" in item.problem_messages
+    assert item.release_problem == "參考條件表回填欄位已有不同的值，請先修正參考條件表再核對"
+    receipt, wb = saved_sheet(outcome, tmp_path)
+    assert not receipt.filled(item) and wb["回填後"].max_row == 3, "沒回填的商品不出現在「回填後」"
+
+
+def test_sheet_without_ts_column_requires_review_naming_it(tmp_path):
+    headers = [h for h in REFERENCE_HEADERS if h != "TS"]
+    outcome = run(tmp_path, headers=headers)
+    assert_column_missing(outcome, "backfill.checked", "TS", tmp_path)
+    assert results(outcome.items[0].report, "order.missing_column")[0].message.endswith("「TS」")
 
 
 # ---------------------------------------------------------------- 缺欄

@@ -19,6 +19,8 @@ _FORMAT = tomllib.loads(REFERENCE_FORMAT.read_text(encoding="utf-8"))
 REFERENCE_COLUMNS: dict[str, str] = {h: f for h, f in _FORMAT["columns"].items() if isinstance(f, str)}
 
 REFERENCE_HEADERS = [
+    "TS",
+    "IIS",
     "庫存狀態",
     "當日比價",
     "Product",
@@ -57,7 +59,7 @@ def issuer_value(issuer: str) -> str:
 def make_row(issuer: str, fields: dict[str, Any], **overrides: Any) -> dict[str, Any]:
     """一列參考條件表：fields 以標準欄位為鍵（依格式設定對到 Excel 欄名），overrides 以 Excel 欄名覆寫。
 
-    沒給的欄位（例：回填欄位 ISIN、發行日、比價日）留空；只用來辨識或存續管理的欄位填固定的虛構值。
+    沒給的欄位（例：回填欄位 TS、IIS、ISIN、發行日、比價日）留空；只用來辨識或存續管理的欄位填固定的虛構值。
     """
     row: dict[str, Any] = {
         "庫存狀態": None,

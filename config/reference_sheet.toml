@@ -2,11 +2,12 @@
 #
 # 核對條件的來源，也是核對後匯入資料庫的格式（ADR 0004）。每列一檔商品、多家上手混在同一張表。
 # 以說明書商品代號找 TDCC Code 相同的列；該列的發行機構必須是對應上手的值。
-# 回填欄位（ISIN Code、發行日、比價日_1～12）由工具依說明書填入；其他欄位由作業人員事先填好，只做核對。
+# 回填欄位（TS、IIS、ISIN Code、發行日、比價日_1～12）由工具填入；其他欄位由作業人員事先填好，只做核對。
+# TS、IIS：說明書與投資人須知都通過或人工放行的商品打勾（checked_value，Issue #127）。
 # 期初定價為 VWAP 的商品，UL_n 四個價格欄不比對，核對通過後以說明書價格覆寫（Issue #122）。
 # 規則說明見 docs/order-formats/reference-sheet.md。
 
-version = 2
+version = 3
 effective_date = 2026-10-08
 
 [layout]
@@ -16,6 +17,7 @@ first_data_row = 4
 key_column = "TDCC Code"  # 商品代號，用來配對說明書；同一代號出現多列 → 轉人工覆核
 issuer_column = "發行機構"
 empty_value = "-"         # 空值寫法（比價日不需要填的期別也寫 -）
+checked_value = "V"       # TS、IIS 欄的打勾寫法（半形英文字母 V，同「當日比價」「私銀註記」）
 
 # 上手代號 → 該上手在「發行機構」欄的寫法
 [issuer_values]
@@ -24,6 +26,8 @@ HSBC = "HSBC"
 
 # Excel 欄名 → 標準欄位
 [columns]
+"TS" = "checked_term_sheet"  # 回填欄位：說明書核對沒問題
+"IIS" = "checked_iis"        # 回填欄位：投資人須知核對沒問題
 "TDCC Code" = "product_code"
 "ISIN Code" = "isin"
 "單位面額" = "denomination"

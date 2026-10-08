@@ -134,7 +134,7 @@
 - 參考條件表欄位規則（`rules/reference.py`）：商品代號、承作幣別、UL 與各標的價格、百分比、天期、日期、單位面額、最低金額、KO／KI 欄位、Non-Call。
 - 說明書推算規則（`rules/derivation.py`）：價格推算 `derive.prices`（各標的執行價／KO 價／下限價 = 最初價格 × 百分比，四捨五入到 4 位；價格表列數 = 標的數、下限價欄與 KI 型態一致），只讀 `underlyings`、`underlying_prices`、`strike_pct`／`ko_pct`／`ki_pct`、`ki_type`。
 - 審查標準規則（`rules/review_standard.py` 的 `review_standard_rules`）：面額預設值、受理申購日、刊印日期、審查日期、負責人、固定警語、風險等級、禁用語、商品名稱、發行機構全名、受託機構資訊、費率、發行價格。上手不同的基準只放在 `config/review_standard.toml`。
-- 回填（`backfill.py`）：ISIN、發行日、比價日的核對、回填決策與寫入。
+- 回填（`backfill.py`）：TS、IIS 打勾，ISIN、發行日、比價日的核對、回填決策與寫入。
 - 單份核對順序（`single_check.py`）與批量入口、CLI、PANEL。
 
 標準欄位清單（`standard_fields.STANDARD_FIELDS`）就是共用規則會讀的全部說明書欄位，分兩組：
