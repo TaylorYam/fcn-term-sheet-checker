@@ -1,7 +1,8 @@
-"""測試切點：各 parser 共用的欄位擷取 `capture(name, TextIndex, pattern, convert)`（Issue #146 統一前，先鎖住兩種版本的行為）。
+"""測試切點：各 parser 共用的欄位擷取 `capture(name, TextIndex, pattern, convert)`（Issue #146 統一前各 parser 各一份，
+這裡鎖住兩種用法的行為）。
 
-- 投資人須知 parser：證據只引第 1 組（值）所在的行。
-- 說明書 parser（BARC 以外）：證據引整個命中的行（含欄位標籤那一行）；MS 另把括號統一全形再比對。
+- 投資人須知 parser：證據只引第 1 組（值）所在的行（預設）。
+- 說明書 parser（BARC 以外）：`whole_match` 證據引整個命中的行（含欄位標籤那一行）；MS 另以 `unify_brackets` 把括號統一全形再比對。
 手刻幾行文字，不讀 PDF。
 """
 

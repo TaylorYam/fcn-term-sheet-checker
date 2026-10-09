@@ -36,7 +36,7 @@ def test_ki_sentence_gives_the_type_for_term_sheet_and_iis_wordings(when, kind, 
     event = f"{quoted[:1]}觸及下限事件{quoted[1:]}"
     ti = text_index(f"{event}：若在{when}，籃子中任一連結標的之收盤價低於其下限價格，則觸及下限事件視同發生。")
 
-    pf = ms_wording.ki_type(ti, missing_note="找不到")
+    pf = ms_wording.ki_type(ti, invalid_note="找不到")
 
     assert (pf.status, pf.value) == (FieldStatus.PRESENT, kind) and pf.evidence
 
@@ -47,7 +47,7 @@ def test_no_ki_is_the_two_strike_sentences_without_any_knock_in_wording():
         "(b)實物交割：若於期末定價日時籃子中表現最差的連結標的之收盤價低於其執行價，以實物交割。",
     )
 
-    pf = ms_wording.ki_type(ti, missing_note="找不到")
+    pf = ms_wording.ki_type(ti, invalid_note="找不到")
 
     assert (pf.status, pf.value) == (FieldStatus.PRESENT, "none") and len(pf.evidence) == 2
 
@@ -56,8 +56,8 @@ def test_unknown_ki_wording_or_nothing_is_invalid_with_the_callers_note():
     unknown = text_index("觸及下限事件：若在任一交易日，籃子中任一連結標的之收盤價低於其下限價格，")
     nothing = text_index("到期日以現金結算收益。")
 
-    assert ms_wording.ki_type(unknown, missing_note="找不到").note == "觸及下限事件的觀察寫法不在範本規格內"
-    pf = ms_wording.ki_type(nothing, missing_note="找不到觸及下限事件定義，也不是無 KI 的到期贖回寫法")
+    assert ms_wording.ki_type(unknown, invalid_note="找不到").note == "觸及下限事件的觀察寫法不在範本規格內"
+    pf = ms_wording.ki_type(nothing, invalid_note="找不到觸及下限事件定義，也不是無 KI 的到期贖回寫法")
     assert pf.status == FieldStatus.INVALID and pf.note == "找不到觸及下限事件定義，也不是無 KI 的到期贖回寫法"
 
 
@@ -71,12 +71,12 @@ def test_memory_needs_the_definition_sentence_only_when_the_caller_requires_it()
         "記憶事件觀察日：每一個定價日自第1 個定價日開始觀察",
     )
 
-    assert ms_wording.ko_memory(both, definition_required=True, note="n").value is True
-    assert ms_wording.ko_memory(only_observation, definition_required=False, note="n").value is True, (
+    assert ms_wording.ko_memory(both, definition_required=True, invalid_note="n").value is True
+    assert ms_wording.ko_memory(only_observation, definition_required=False, invalid_note="n").value is True, (
         "S04-IIS 沒有定義句"
     )
     pf = ms_wording.ko_memory(
-        only_observation, definition_required=True, note="第 17 項記憶事件寫法缺漏或不在範本規格內"
+        only_observation, definition_required=True, invalid_note="第 17 項記憶事件寫法缺漏或不在範本規格內"
     )
     assert pf.status == FieldStatus.INVALID and pf.note == "第 17 項記憶事件寫法缺漏或不在範本規格內"
 
@@ -90,15 +90,25 @@ def test_memory_needs_the_definition_sentence_only_when_the_caller_requires_it()
     ],
 )
 def test_non_memory_wordings_of_both_documents_are_plain_ko(sentence):
-    pf = ms_wording.ko_memory(text_index(sentence), definition_required=True, note="n")
+    pf = ms_wording.ko_memory(text_index(sentence), definition_required=True, invalid_note="n")
 
     assert (pf.status, pf.value) == (FieldStatus.PRESENT, False)
 
 
 def test_memory_and_plain_sentences_together_or_neither_is_invalid():
     neither = text_index("自動提前出場日：自動提前出場事件發生日後的第3 個營業日。")
+    together = text_index(
+        "記憶事件觀察日：每一個定價日自第1 期定價日（含）開始觀察",
+        "自動提前出場事件：若於任一觀察日該連結標的之收盤價大於或等於其自動提前出場價。",
+    )
 
-    assert ms_wording.ko_memory(neither, definition_required=False, note="缺漏").note == "缺漏"
+    assert ms_wording.ko_memory(neither, definition_required=False, invalid_note="缺漏").note == "缺漏"
+    assert ms_wording.ko_memory(together, definition_required=False, invalid_note="缺漏").value is True, (
+        "有記憶事件就不算非記憶式寫法"
+    )
+    only_plain_mentions_memory = text_index("記憶事件", "該連結標的之收盤價大於或等於其自動提前出場價")
+    pf = ms_wording.ko_memory(only_plain_mentions_memory, definition_required=False, invalid_note="缺漏")
+    assert pf.status == FieldStatus.INVALID and pf.note == "缺漏", "提到記憶事件卻沒有觀察日：兩種都不成立"
 
 
 @pytest.mark.parametrize(
@@ -124,18 +134,25 @@ def test_periodic_ko_wordings_of_both_documents_give_the_first_callable_period(s
     assert (found, int(m[1])) == (kind, k)
 
 
-def test_daily_ko_wording_carries_the_observation_dates_and_accepts_the_memory_prefix():
-    for prefix in ("", "記憶事件"):
-        ti = text_index(
-            f"{prefix}觀察日：每日觀察，為自第1 個配息週期終止日（2025年2月3日）（包含）至",
-            "期末定價日（2025年7月1日）（包含）的任一共同預定交易日。",
-        )
-        [(m, kind)] = ms_wording.ko_observations(ti)
-        assert kind == "D" and int(m[1]) == 1
-        assert (m[2], m[3]) == ("2025年2月3日", "2025年7月1日")
-        assert len(ti.lines_for(m.start(), m.end())) == 2, "跨行的句子兩行都是證據"
+@pytest.mark.parametrize("prefix", ["", "記憶事件"])
+def test_daily_ko_wording_carries_the_observation_dates_and_accepts_the_memory_prefix(prefix):
+    ti = text_index(
+        f"{prefix}觀察日：每日觀察，為自第1 個配息週期終止日（2025年2月3日）（包含）至",
+        "期末定價日（2025年7月1日）（包含）的任一共同預定交易日。",
+    )
+
+    [(m, kind)] = ms_wording.ko_observations(ti)
+
+    assert kind == "D" and int(m[1]) == 1
+    assert (parse_date(m[2]), parse_date(m[3])) == (dt.date(2025, 2, 3), dt.date(2025, 7, 1)), "日期由呼叫端轉換"
+    assert len(ti.lines_for(m.start(), m.end())) == 2, "跨行的句子兩行都是證據"
+
+
+def test_other_observation_wordings_are_not_in_the_table():
     assert ms_wording.ko_observations(text_index("觀察日：每月觀察")) == []
-    assert parse_date(m[2]) == dt.date(2025, 2, 3), "日期由呼叫端轉換"
+    assert ms_wording.ki_type(text_index("觸及下限事件」：若在期末定價日，"), invalid_note="x").note == "x", (
+        "引號要成對"
+    )
 
 
 # ---------------------------------------------------------------- 商品種類

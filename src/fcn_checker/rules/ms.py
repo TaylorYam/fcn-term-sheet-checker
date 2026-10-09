@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+from ..parsers.ms_wording import MEMORY_NAME
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
@@ -207,7 +208,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             mem.value,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="商品名稱有無「（記憶式自動提前出場）」與第 17 項記憶事件寫法不一致",
+            fail_message=f"商品名稱有無「{MEMORY_NAME}」與第 17 項記憶事件寫法不一致",
         )
     )
     pt, k, tenor = f("price_table"), f("first_callable_period"), f("tenor_months")

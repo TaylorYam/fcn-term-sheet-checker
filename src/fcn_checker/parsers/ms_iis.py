@@ -129,7 +129,7 @@ def _ko_terms(sec: TextIndex | None) -> dict[str, ParsedField]:
     lns = sec.lines
     out: dict[str, ParsedField] = {}
     note = "記憶事件寫法缺漏或不在範本規格內"
-    out["ko_memory"] = ms_wording.ko_memory(sec, definition_required=False, note=note)
+    out["ko_memory"] = ms_wording.ko_memory(sec, definition_required=False, invalid_note=note)
     found = ms_wording.ko_observations(sec)
     if len(found) != 1:
         note = "自動提前出場的觀察日寫法缺漏、重複或不在範本規格內"
@@ -154,7 +154,7 @@ def _ki_type(sec: TextIndex | None) -> ParsedField:
     """「觸及下限事件」的觀察寫法；沒有這句且到期贖回只有 ≥／< 執行價兩種寫法時為無 KI（範本規格 §4.3）。"""
     if sec is None:
         return ParsedField.missing("ki_type", "找不到「贖回價金之計算」段落")
-    return ms_wording.ki_type(sec, missing_note="找不到觸及下限事件，也不是無 KI 的到期贖回寫法")
+    return ms_wording.ki_type(sec, invalid_note="找不到觸及下限事件，也不是無 KI 的到期贖回寫法")
 
 
 def _monthly_coupons(sec: TextIndex | None, ko: ParsedField) -> ParsedField:

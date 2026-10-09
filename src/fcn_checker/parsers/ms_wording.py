@@ -11,9 +11,9 @@ import re
 
 from ..schema import ParsedField
 from ..text import full_brackets
+from .iis import DATE
 from .layout import TextIndex
 
-DATE = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 MEMORY_NAME = "（記憶式自動提前出場）"  # 中文名稱裡的記憶式字樣
 MEMORY_DEFINITION = "記憶事件："  # 記憶事件定義句（投資人須知 S04-IIS 沒有，只有觀察日）
 MEMORY_OBSERVATION = "記憶事件觀察日："
@@ -25,10 +25,10 @@ KO_WORDINGS = (
         rf"(?:記憶事件)?觀察日：每日觀察，為自第(\d+)個配息週期終止日（{DATE}）（包含）至期末定價日（{DATE}）（包含）",
         "D",
     ),
-    (r"記憶事件觀察日：每一個定價日自第(\d+)(?:期|個)定價日(?:（含）)?開始觀察", "P"),
+    (rf"{MEMORY_OBSERVATION}每一個定價日自第(\d+)(?:期|個)定價日(?:（含）)?開始觀察", "P"),
     (r"自動提前出場事件：自第(\d+)(?:期|個)定價日（含）開始，若於任一定價日", "P"),
 )
-KI_SENTENCE = re.compile(r"「?觸及下限事件」?：若在([^，]*?)，")  # 「觸及下限事件」：若在…， → 觀察寫法
+KI_SENTENCE = re.compile(r"(?:「觸及下限事件」|觸及下限事件)：若在([^，]*?)，")  # 投資人須知有「」、說明書沒有
 KI_WORDINGS = {
     "期末定價日": "AM",
     "交易日（含）至期末定價日（含）間的任一共同預定交易日": "D",
@@ -38,10 +38,10 @@ KI_WORDINGS = {
 NO_KI_SENTENCES = ("收盤價高於或等於其執行價", "收盤價低於其執行價")  # 無 KI 的到期贖回：現金／實物兩種
 
 
-def ki_type(ti: TextIndex, *, missing_note: str) -> ParsedField:
+def ki_type(ti: TextIndex, *, invalid_note: str) -> ParsedField:
     """觸及下限事件定義句 → KI 型態；沒有這句且到期贖回只有 ≥／< 執行價兩種寫法時為無 KI（`none`）。
 
-    寫法不在表內 → 不合法；兩者都不是 → 不合法，說明用呼叫端的 `missing_note`。
+    寫法不在表內 → 不合法；兩者都不是 → 不合法，說明用呼叫端的 `invalid_note`。括號全半形在這裡統一，呼叫端不必先換。
     """
     name = "ki_type"
     text = full_brackets(ti.text)
@@ -55,17 +55,17 @@ def ki_type(ti: TextIndex, *, missing_note: str) -> ParsedField:
         return ParsedField.from_hits(name, hits)
     if "觸及下限" not in text and all(s in text for s in NO_KI_SENTENCES):
         return ParsedField.present(name, "none", ti.lines)
-    return ParsedField.invalid(name, ti.lines, missing_note)
+    return ParsedField.invalid(name, ti.lines, invalid_note)
 
 
-def ko_memory(ti: TextIndex, *, definition_required: bool, note: str) -> ParsedField:
-    """記憶式（有記憶事件觀察日；`definition_required` 時還要有記憶事件定義句）或非記憶式（沒有記憶事件、
-    有非記憶式的提前出場條件）；兩者都成立或都不成立 → 不合法，說明用呼叫端的 `note`。"""
+def ko_memory(ti: TextIndex, *, definition_required: bool, invalid_note: str) -> ParsedField:
+    """記憶式（有記憶事件觀察日；`definition_required` 時還要有記憶事件定義句：說明書要、投資人須知不要）或
+    非記憶式（沒有記憶事件、有非記憶式的提前出場條件）；兩者都成立或都不成立 → 不合法，說明用呼叫端的 `invalid_note`。"""
     text = full_brackets(ti.text)
     memory = MEMORY_OBSERVATION in text and (MEMORY_DEFINITION in text or not definition_required)
     plain = "記憶事件" not in text and any(p in text for p in NON_MEMORY_KO)
     if memory == plain:
-        return ParsedField.invalid("ko_memory", ti.lines, note)
+        return ParsedField.invalid("ko_memory", ti.lines, invalid_note)
     return ParsedField.present("ko_memory", memory, ti.lines)
 
 

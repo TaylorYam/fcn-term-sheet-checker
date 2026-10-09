@@ -16,7 +16,6 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import ms_scenario, ms_tables, ms_wording
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
-from .ms_wording import MEMORY_NAME
 
 TEMPLATE_ID = "ms-zh-pd"
 PARSER_VERSION = "1"
@@ -170,7 +169,7 @@ def _derived(name: str, src: ParsedField, value=None) -> ParsedField:
 def _ki_type(lines: list[Line]) -> ParsedField:
     """第 16 項「觸及下限事件：」定義句（範本規格 §4.4）；沒有這句且到期贖回只有 ≥／< 執行價兩種時為無 KI。"""
     note = "找不到觸及下限事件定義，也不是無 KI 的到期贖回寫法"
-    return ms_wording.ki_type(TextIndex(lines), missing_note=note)
+    return ms_wording.ki_type(TextIndex(lines), invalid_note=note)
 
 
 def _art17(lines: list[Line]) -> tuple[ParsedField, ParsedField]:
@@ -178,7 +177,7 @@ def _art17(lines: list[Line]) -> tuple[ParsedField, ParsedField]:
     第一個可提前出場期 k、D 型觀察起訖日）。寫法不在範本規格內一律不合法。"""
     ti = TextIndex(lines)
     note = "第 17 項記憶事件寫法缺漏或不在範本規格內"
-    mem = ms_wording.ko_memory(ti, definition_required=True, note=note)
+    mem = ms_wording.ko_memory(ti, definition_required=True, invalid_note=note)
     found = []
     for m, kind in ms_wording.ko_observations(ti):
         dates = (parse_date(m[2]), parse_date(m[3])) if kind == "D" else (None, None)
@@ -273,7 +272,9 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     )
     fields["ko_memory"], fields["ko_observation_art17"] = _art17(article(17))
     zh = fields["name_zh"]
-    fields["name_memory"] = _derived("name_memory", zh, zh.ok and MEMORY_NAME in full_brackets(squash(zh.value)))
+    fields["name_memory"] = _derived(
+        "name_memory", zh, zh.ok and ms_wording.MEMORY_NAME in full_brackets(squash(zh.value))
+    )
     _schedule(fields)
     _prices(fields)
 
