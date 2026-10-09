@@ -600,14 +600,10 @@ class PanelWindow:
         if self._busy_any():
             return
         action = self.session.cancel_release if item.released else self.session.release
-        if not item.released:
-            text = (
-                f"{item.term_sheet.name}\n\n這份{item.document}的問題：\n"
-                + "\n".join(f"・{m}" for m in item.problem_messages)
-                + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
-            )
-            if not messagebox.askyesno("人工放行", text, parent=self.root):
-                return
+        if not item.released and not messagebox.askyesno(
+            "人工放行", PanelOutcome.release_prompt(item), parent=self.root
+        ):
+            return
 
         def run() -> IngestionError | None:
             try:
