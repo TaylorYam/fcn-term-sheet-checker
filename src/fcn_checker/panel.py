@@ -11,6 +11,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 from .approval_dates import parse_input_date
 from .check_config import CONFIG_DIR, DEFAULTS
@@ -165,12 +166,12 @@ class ResultPane(ttk.Frame):
         self,
         parent,
         pixels,
-        release_state: Callable[[object], ReleaseState],
-        on_release: Callable[[object], None],
+        release_state: Callable[..., ReleaseState],
+        on_release: Callable[..., None],
     ):
         super().__init__(parent, padding=8)
         self.release_state, self.on_release = release_state, on_release
-        self.items: dict[str, object] = {}  # 結果清單列 → PanelOutcome.ordered_items 的一份
+        self.items: dict[str, Any] = {}  # 結果清單列 → PanelOutcome.ordered_items 的一份
         self.rows: dict[str, str] = {}  # 明細清單列 → 選取時顯示的明細
         self.outcome: PanelOutcome | None = None
         self.columnconfigure(1, weight=1)
@@ -225,7 +226,7 @@ class ResultPane(ttk.Frame):
         _write(self.detail, "")
         self._release_state(None)
 
-    def show(self, outcome: PanelOutcome, select: object | None = None):
+    def show(self, outcome: PanelOutcome, select: Any = None):
         """顯示結果並選取 select（沒給或不在結果中時選第一份）。"""
         self.clear()
         self.outcome = outcome
