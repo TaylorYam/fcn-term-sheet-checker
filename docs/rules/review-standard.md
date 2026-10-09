@@ -37,7 +37,7 @@
 | `denomination` | USD 10,000／JPY 1,000,000／CNH 100,000 | §6 商品面額 | 等於該幣別預設值；不等於時**轉人工審查**（客戶可要求不同面額，不直接判錯） |
 | `dates.print_date_max_days_after_trade` | 1 | 「中文產品說明書刊印日期」 | 刊印日期在交易日當天到交易日後 1 天之內 |
 | `iis.pages` | 4 | 投資人須知（Issue #124） | 頁數剛好等於設定值（比外規「不超過 5 頁」嚴格） |
-| `iis.fixed_warning_occurrences.<上手>` | BARC 1、HSBC 2 | 投資人須知全文 | 固定警語（依上手版本）出現次數；沒列出的上手轉人工覆核 |
+| `iis.fixed_warning_occurrences.<上手>` | BARC 1、HSBC 2、MS 1（警語 1)，2026-10-09，Issue #137） | 投資人須知全文 | 固定警語（依上手版本）出現次數；沒列出的上手轉人工覆核 |
 
 ### 2.1 商品名稱樣板（BARC，依最新 5 份說明書）
 
