@@ -12,6 +12,7 @@ from ..parsers.hsbc import ScenarioIndex
 from ..schema import CheckStatus as S
 from ..schema import Evidence, Item
 from . import kit
+from .kit import Check
 
 N = r"([\d,]+(?:\.\d+)?)"
 Q2, Q4 = kit.Q2, kit.Q4
@@ -46,22 +47,19 @@ def run(ctx):
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
         return [
-            kit.doc_review("doc.scenario_parameters", "scenario", bad, item=SCENARIO),
-            kit.doc_review("doc.scenario_calculations", "scenario", bad, item=SCENARIO),
+            Check("doc.scenario_parameters", "scenario", SCENARIO, ctx.document).review(bad),
+            Check("doc.scenario_calculations", "scenario", SCENARIO, ctx.document).review(bad),
         ]
     ti = ts.scenario_index
     headings = list(ti.finditer(r"情境分析([一二三四五六])\)"))
     expected_count = 3 if ts.f("ki_type").ok and ts.f("ki_type").value == "none" else 4
     if len(headings) != expected_count or [m[1] for m in headings] != list("一二三四")[:expected_count]:
         return [
-            kit.result(
-                "doc.scenario_parameters",
-                "scenario",
+            Check("doc.scenario_parameters", "scenario", SCENARIO, ctx.document).result(
                 S.REVIEW_REQUIRED,
                 reason="scenario_unknown",
                 message="情境數量或順序不符已知範本",
                 evidence=[Evidence.of(x) for x in ts.scenarios[:2]],
-                item=SCENARIO,
             )
         ]
     rate, tenor, denom, currency, issue_price, _ = [p.value for p in deps]
@@ -75,31 +73,23 @@ def run(ctx):
     def compare(rid, label, name, expected, actual, index, start, end, valid=None, tolerance=None):
         nonlocal serial
         serial += 1
-        ok = expected == actual if valid is None else valid
         out.append(
-            kit.result(
-                rid,
-                f"{label}.{serial}",
-                S.PASS if ok else S.MISMATCH,
-                expected=expected,
-                actual=actual,
-                reason="" if ok else "value_mismatch",
+            Check(rid, f"{label}.{serial}", Item.expected(name), ctx.document).compare(
+                expected,
+                actual,
+                ok=valid,
                 tolerance=tolerance,
                 evidence=[Evidence.of(x) for x in index.lines_for(start, end)],
-                item=Item.expected(name),
             )
         )
 
     def missing(label, name, index):
         out.append(
-            kit.result(
-                "doc.scenario_calculations",
-                label,
+            Check("doc.scenario_calculations", label, Item.expected(name), ctx.document).result(
                 S.REVIEW_REQUIRED,
                 reason="scenario_formula_unknown",
                 message="必核情境公式缺漏、損壞或寫法未知",
                 evidence=[Evidence.of(x) for x in index.lines[:2]],
-                item=Item.expected(name),
             )
         )
 
@@ -144,7 +134,7 @@ def run(ctx):
         expected_period = first.value if i == 0 and first.ok else tenor
         if i == 0 and not first.ok:
             item = Item.expected("第一個可提前出場期")
-            out.append(kit.doc_review("doc.scenario_calculations", "first_callable_period", first, item=item))
+            out.append(Check("doc.scenario_calculations", "first_callable_period", item, ctx.document).review(first))
         tenor_name = scenario(i, "天期")
         mentions(
             segment, r"(?:存續期間|本商品於)(\d+)個月", Decimal(tenor), f"s{i + 1}.tenor", tenor_name, required=False
