@@ -50,7 +50,7 @@ from .ingestion import IngestionError, SourceSnapshot, error_result, open_pdf
 from .investor_sheet import IisSheet
 from .issuers import Issuer, by_code, detect, detect_iis
 from .messages import STATUS_ZH, problem_message
-from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
+from .orders.reference import OrderRecord, ReferenceSheet, load_reference_sheet
 from .rules.kit import doc_review, read_standard
 from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Item, ParsedField, overall_status
 from .single_check import Paired, PairedIis, check_document, check_investor_sheet
@@ -325,14 +325,13 @@ class PreviewRow:
 
 @dataclass(frozen=True)
 class BatchPreview:
-    """預覽：每份說明書的辨識結果；另帶核對要沿用的核對設定、參考條件表、讀出結果與來源快照。"""
+    """預覽：每份說明書的辨識結果；另帶核對要沿用的核對設定、讀出結果（含對到的參考條件表列）與來源快照。"""
 
     rows: tuple[PreviewRow, ...]
     warnings: tuple[str, ...]  # 參考條件表欄名問題
     reference_sheet: Path
     snapshot: SourceSnapshot  # 讀取前取的來源快照（設定檔的 hash 取自核對設定）
     config: CheckConfig = field(compare=False, repr=False)
-    _sheet: ReferenceSheet = field(compare=False, repr=False)
     _identified: tuple[_Identified, ...] = field(compare=False, repr=False)  # 辨識與讀出結果，核對直接沿用
 
 
@@ -347,7 +346,7 @@ class _Identified:
     issuer_code: str | None = None
     issuer: Issuer | None = None
     product_code: ParsedField | None = None
-    row: ReferenceRow | None = None
+    row: OrderRecord | None = None
     ts: TermSheet | None = None  # 說明書讀出結果：同一份只讀一次，核對直接沿用
     iis: IisSheet | None = None  # 投資人須知讀出結果
     pages: int | None = None
@@ -381,18 +380,18 @@ class _Identified:
         self.problem = problem
         return self
 
-    def paired(self, sheet: ReferenceSheet) -> Paired | None:
+    def paired(self) -> Paired | None:
         if self.issuer is None or self.ts is None or self.row is None or not self.checked:
             return None
-        return Paired(self.issuer, self.ts, self.row, sheet.record(self.row))
+        return Paired(self.issuer, self.ts, self.row)
 
-    def paired_iis(self, sheet: ReferenceSheet) -> PairedIis | None:
+    def paired_iis(self) -> PairedIis | None:
         if self.issuer is None or self.iis is None or self.row is None or not self.checked or self.pages is None:
             return None
         code = self.product_code.value if self.product_code is not None else ""
         partner = self.partner  # 同商品說明書配對成功才拿來比對
         partner_ts = partner.ts if partner is not None and partner.checked else None
-        return PairedIis(self.issuer, self.iis, self.row, sheet.record(self.row), partner_ts, self.pages, code)
+        return PairedIis(self.issuer, self.iis, self.row, partner_ts, self.pages, code)
 
     def mark_shared(self, row_no: int, what: str, others: str) -> None:
         """同一批有多份同種文件對到同一列：這一列的文件配對改為人工覆核，不核對也不回填。"""
@@ -630,7 +629,7 @@ def preview_batch(config: CheckConfig, reference_sheet: Path, term_sheets: Seque
             )
         )
     warnings = _sheet_warnings(sheet)
-    return BatchPreview(tuple(rows), warnings, reference_sheet, snapshot, config, sheet, tuple(identified))
+    return BatchPreview(tuple(rows), warnings, reference_sheet, snapshot, config, tuple(identified))
 
 
 # ---------------------------------------------------------------- 核對
@@ -645,9 +644,7 @@ def _item_metadata(pdf: Path, meta: dict[str, Any], snapshot: SourceSnapshot) ->
     }
 
 
-def _check_one(
-    found: _Identified, sheet: ReferenceSheet, config: CheckConfig, meta: dict[str, Any], snapshot: SourceSnapshot
-) -> BatchItem:
+def _check_one(found: _Identified, config: CheckConfig, meta: dict[str, Any], snapshot: SourceSnapshot) -> BatchItem:
     pdf = found.pdf
     metadata = _item_metadata(pdf, meta, snapshot)
     issuer = found.issuer
@@ -662,9 +659,9 @@ def _check_one(
         )
         metadata["parser"] = {"template": template, "version": version}
     if found.kind == DocKind.IIS:
-        report = check_investor_sheet(found.results, found.paired_iis(sheet), config)
+        report = check_investor_sheet(found.results, found.paired_iis(), config)
     else:
-        report = check_document(found.results, found.paired(sheet), config)
+        report = check_document(found.results, found.paired(), config)
     report.template = template
     report.metadata = metadata
     return BatchItem(pdf, report, found.identification)
@@ -678,7 +675,7 @@ def check_batch(preview: BatchPreview) -> BatchOutcome:
     snapshot = preview.snapshot
     if not snapshot.still_valid():
         raise IngestionError("source_changed", "參考條件表、說明書或設定檔在預覽後已變更或無法讀取，請重新載入預覽。")
-    config, sheet = preview.config, preview._sheet
+    config = preview.config
     meta = {
         "program_version": __version__,
         "extractor": f"PyMuPDF {fitz.VersionBind}",
@@ -689,7 +686,7 @@ def check_batch(preview: BatchPreview) -> BatchOutcome:
     items: list[BatchItem] = []
     for found in preview._identified:
         try:
-            item = _check_one(found, sheet, config, meta, snapshot)
+            item = _check_one(found, config, meta, snapshot)
         except Exception as e:  # 單份非預期錯誤不中斷整批
             pdf = found.pdf
             item = BatchItem(

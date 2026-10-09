@@ -49,7 +49,7 @@ class Context(_IssuerStandardOf):
     """各上手共用的規則（參考條件表欄位、Non-Call、回填、審查標準）的輸入：含參考條件表的列與格式設定。"""
 
     ts: TermSheet
-    order: OrderRecord
+    order: OrderRecord  # 參考條件表的列：值、Excel 欄名與儲存格位置（回填規則也從這裡讀）
     std: ReviewStandard
     fmt: ReferenceFormat
     issuer: str
@@ -59,7 +59,7 @@ class Context(_IssuerStandardOf):
         return self.order.source
 
     def sheet_field(self, key: str) -> OrderValue | None:
-        return self.order.fields.get(key)
+        return self.order.get(key)
 
 
 @dataclass

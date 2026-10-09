@@ -163,7 +163,7 @@ def _prices(ctx: IisContext) -> list[CheckResult]:
     order = ctx.base.order
     out = []
     for i, row in enumerate(rows.value, start=1):
-        for col, std, zh in reference.PRICE_COLUMNS:
+        for col, zh in reference.PRICE_COLUMNS:
             doc_v = row.prices.get(col)
             if doc_v is None:  # 價格表沒有這一欄（例：無 KI）
                 continue
@@ -177,7 +177,7 @@ def _prices(ctx: IisContext) -> list[CheckResult]:
                     continue
                 expected = ts_rows[i - 1].prices[col]
             else:
-                ov = order.fields.get(f"underlying_{i}_{std}")
+                ov = order.price(i, col)
                 if ov is None or ov.value is None or to_decimal(ov.value) is None:
                     reason = "order_missing" if ov is None or ov.value is None else "order_invalid"
                     message = (
@@ -350,51 +350,28 @@ def _ko_observation_dates(ctx: IisContext) -> list[CheckResult]:
     ]
 
 
+# 投資人須知的 KI %：只比數值（無 KI 時表上的空值寫法由說明書那份的 `field.ki_pct` 判定）
+_KI_PCT = reference.FieldCheck("field.ki_pct", "ki_pct", "KI %", to_decimal, "數字", cmp_pct, reference.PCT_TOLERANCE)
+
+
 def reference_fields(ctx: IisContext) -> list[CheckResult]:
-    base, has = ctx.base, ctx.sheet.provides
-    dec, pct = to_decimal, reference.PCT_TOLERANCE
+    """參考條件表有的欄位，只核對範本有的：單欄比對取自欄位核對表（rules/reference.FIELD_CHECKS）。"""
+    base, has, field = ctx.base, ctx.sheet.provides, reference.FIELD_CHECKS
     checks: list[tuple[str, Callable[[], CheckResult | list[CheckResult]]]] = [
         ("currency_zh", lambda: reference.currency(base)),
-        (
-            "denomination",
-            lambda: reference.compare_field(base, "field.denomination", "denomination", "面額", to_int, "整數"),
-        ),
+        ("denomination", lambda: field["denomination"].check(base)),
         ("underlyings", lambda: reference.underlyings(base)),
-        (
-            "tenor_months",
-            lambda: reference.compare_field(base, "field.tenor_months", "tenor_months", "天期（月）", to_int, "整數"),
-        ),
-        (
-            "maturity_date",
-            lambda: reference.compare_field(base, "field.maturity_date", "maturity_date", "到期日", to_date, "日期"),
-        ),
-        (
-            "coupon_pa_pct",
-            lambda: reference.compare_field(
-                base, "field.coupon_pa_pct", "coupon_pa_pct", "年利率 %", dec, "數字", cmp_pct, pct
-            ),
-        ),
+        ("tenor_months", lambda: field["tenor_months"].check(base)),
+        ("maturity_date", lambda: field["maturity_date"].check(base)),
+        ("coupon_pa_pct", lambda: field["coupon_pa_pct"].check(base)),
         ("monthly_coupon_pct", lambda: _monthly_coupon(ctx)),
-        (
-            "strike_pct",
-            lambda: reference.compare_field(
-                base, "field.strike_pct", "strike_pct", "執行 %", dec, "數字", cmp_pct, pct
-            ),
-        ),
-        ("ko_pct", lambda: reference.compare_field(base, "field.ko_pct", "ko_pct", "KO %", dec, "數字", cmp_pct, pct)),
-        ("ki_pct", lambda: reference.compare_field(base, "field.ki_pct", "ki_pct", "KI %", dec, "數字", cmp_pct, pct)),
+        ("strike_pct", lambda: field["strike_pct"].check(base)),
+        ("ko_pct", lambda: field["ko_pct"].check(base)),
+        ("ki_pct", lambda: _KI_PCT.check(base)),
         ("underlying_prices", lambda: _prices(ctx)),
         # 日期與提前出場、觸及下限條件（docs/rules/iis-check-rules.md §3 D 類，MS）
-        (
-            "trade_date",
-            lambda: reference.compare_field(base, "field.trade_date", "trade_date", "交易日", to_date, "日期"),
-        ),
-        (
-            "final_valuation_date",
-            lambda: reference.compare_field(
-                base, "field.final_valuation_date", "final_valuation_date", "最終評價日", to_date, "日期"
-            ),
-        ),
+        ("trade_date", lambda: field["trade_date"].check(base)),
+        ("final_valuation_date", lambda: field["final_valuation_date"].check(base)),
         ("monthly_coupons", lambda: _monthly_coupons(ctx)),
         ("ko_observation", lambda: reference.ko_observation(base)),
         ("ko_memory", lambda: reference.ko_memory(base)),
@@ -523,11 +500,14 @@ def term_sheet_fields(ctx: IisContext) -> list[CheckResult]:
     return out
 
 
+_ISSUE_DATE = reference.FieldCheck("iis.issue_date", "issue_date", "發行日", to_date, "日期")
+
+
 def _issue_date(ctx: IisContext) -> CheckResult:
     """發行日是回填欄位：表上有值就和參考條件表比（說明書錯時不在這裡重複報），空白時和說明書（將回填的值）比。"""
-    ov = ctx.base.order.fields.get("issue_date")
+    ov = ctx.base.order.get("issue_date")
     if ov is not None and ov.value is not None:
-        return as_iis([reference.compare_field(ctx.base, "iis.issue_date", "issue_date", "發行日", to_date, "日期")])[0]
+        return as_iis([_ISSUE_DATE.check(ctx.base)])[0]
     found = _term_sheet_field(ctx, "issue_date", "發行日")
     return _vs_term_sheet(ctx, "iis.issue_date", "issue_date", "發行日", found, lambda v: v, None)
 
@@ -549,7 +529,7 @@ def run_all(ctx: IisContext) -> list[CheckResult]:
 
 def trade_date(ctx: IisContext) -> ParsedField:
     """刊印日期規則用的交易日：取參考條件表（投資人須知上沒有交易日）。"""
-    ov = ctx.base.order.fields.get("trade_date")
+    ov = ctx.base.order.get("trade_date")
     value = to_date(ov.value) if ov is not None else None
     if value is None:
         return ParsedField.missing("trade_date", f"{ctx.base.order.source}沒有交易日，無法決定刊印日期的範圍")
