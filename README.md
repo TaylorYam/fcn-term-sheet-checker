@@ -151,6 +151,7 @@ ruff check src tests
 - [資料契約草案](docs/data-contract.md)
 - [分階段 TODO 與待確認項目](docs/TODO.md)
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
+- [上線驗收流程](docs/acceptance.md)：公司電腦用最新交易逐一驗收每家上手的各種條件
 - [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
 - [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
 - MS（已實作說明書與投資人須知）：[範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)
