@@ -112,22 +112,11 @@ def _status(outcome: BatchOutcome, errors: Sequence[CheckResult]) -> CheckStatus
 
 
 def _error_row(item: BatchItem) -> result_file.ErrorRow:
-    return result_file.ErrorRow.of(item.term_sheet, item.product_code, item.problem_messages)
+    return result_file.ErrorRow.of(item.identification, item.problem_messages)
 
 
 def _record_item(item: BatchItem, filled: bool) -> reporting.RecordItem:
-    return reporting.RecordItem(
-        pdf=item.term_sheet.name,
-        document=item.kind.value if item.kind else None,
-        partner=item.partner.term_sheet.name if item.partner else None,
-        not_filled_reason=item.not_filled_reason,
-        issuer=item.issuer,
-        product_code=item.product_code,
-        reference_row=item.reference_row,
-        filled=filled,
-        manual_release=item.released,
-        report=item.report,
-    )
+    return reporting.RecordItem(item.identification, item.report, filled, item.released, item.not_filled_reason)
 
 
 def _open_unchanged_reference(outcome: BatchOutcome) -> Workbook:

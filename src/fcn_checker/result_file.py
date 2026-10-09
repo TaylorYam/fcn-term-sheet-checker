@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime as dt
 import io
-import re
 from collections.abc import Iterable, Sequence
 from copy import copy
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .config import ReferenceFormat
+from .identification import Identification, name_code
 from .ingestion import IngestionError, write_new
 
 FILLED_SHEET = "回填後"
@@ -42,12 +42,11 @@ class ErrorRow:
     message: str
 
     @classmethod
-    def of(cls, term_sheet: Path, product_code: str | None, messages: Sequence[str]) -> ErrorRow:
-        """一份說明書的錯誤清單列。TDCC Code 取說明書封面商品代號；取不到時用檔名前 12 碼（12 位數字才算），否則留白。
-        錯訊多條以換行分隔。"""
-        head = term_sheet.name[:12]
-        code = product_code or (head if re.fullmatch(r"[0-9]{12}", head) else None)
-        return cls(code, term_sheet.name, "\n".join(messages))
+    def of(cls, identification: Identification, messages: Sequence[str]) -> ErrorRow:
+        """一份 PDF 的錯誤清單列。TDCC Code 取辨識結果的商品代號（說明書封面；投資人須知為檔名）；
+        取不到時用檔名前 12 碼（12 位數字才算），否則留白。錯訊多條以換行分隔。"""
+        pdf = identification.pdf
+        return cls(identification.product_code or name_code(pdf), pdf.name, "\n".join(messages))
 
 
 def output_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:
