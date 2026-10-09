@@ -8,49 +8,38 @@ from __future__ import annotations
 
 from ..investor_sheet import read_iis
 from ..schema import CheckResult, Item
-from ..schema import CheckStatus as S
 from ..text import squash
 from .iis import NO_TERM_SHEET, IisIssuerContext, ts_unavailable
-from .kit import doc_review, result
-from .ms import PRODUCT_TYPES, check
+from .kit import Check
+from .ms import PRODUCT_TYPES
 
 
 def redemption_start(ctx: IisIssuerContext) -> CheckResult:
     """開始受理贖回日期 = 同商品說明書第四章開始受理贖回日期（說明書另核對 = 發行日下一個平日）。"""
     rid, name = "iis.redemption_start", "開始受理贖回日期"
-    pf, item = read_iis(ctx.sheet, "redemption_start"), Item.term_sheet(name)
-    if not pf.ok:
-        return doc_review(rid, "redemption_start", pf, item=item, document=ctx.document)
+    pf = read_iis(ctx.sheet, "redemption_start")
+    check = Check(rid, "redemption_start", Item.term_sheet(name), ctx.document).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     if ctx.term_sheet is None:
         return ts_unavailable(rid, "redemption_start", name, NO_TERM_SHEET, pf.value)
     expected = ctx.term_sheet.f("redemption_start")
     if not expected.ok:
         return ts_unavailable(rid, "redemption_start", name, f"同商品說明書讀不到「{name}」，無法比對", pf.value)
-    ok = expected.value == pf.value
-    return result(
-        rid,
-        "redemption_start",
-        S.PASS if ok else S.MISMATCH,
-        expected=expected.value,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "value_mismatch",
-        item=item,
-    )
+    return check.compare(expected.value, pf.value)
 
 
 def product_type(ctx: IisIssuerContext) -> CheckResult:
     """商品種類依投資人須知的標的數：1 檔與 2 檔以上寫法不同（同 MS 說明書封面 6，rules/ms.py `PRODUCT_TYPES`）。"""
     pf, names = read_iis(ctx.sheet, "product_type"), read_iis(ctx.sheet, "underlying_names")
-    return check(
-        "iis.product_type",
-        "product_type",
-        "商品種類",
-        [pf, names],
-        PRODUCT_TYPES[len(names.value) >= 2] if names.ok else None,
-        squash(pf.value) if pf.ok else None,
-        message="商品種類依連結標的資產的檔數：1 檔與 2 檔以上寫法不同",
-        document=ctx.document,
+    return (
+        Check("iis.product_type", "product_type", Item.expected("商品種類"), ctx.document)
+        .needs(pf, names)
+        .compare(
+            PRODUCT_TYPES[len(names.value) >= 2] if names.ok else None,
+            squash(pf.value) if pf.ok else None,
+            fail_message="商品種類依連結標的資產的檔數：1 檔與 2 檔以上寫法不同",
+        )
     )
 
 
