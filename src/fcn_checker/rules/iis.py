@@ -3,10 +3,11 @@
 - 文件本身：頁數、頁首總頁數、封面商品代號（= 檔名前 12 碼）。
 - 參考條件表有的欄位：沿用參考條件表共用規則（rules/reference.py），文件那一邊是投資人須知。
   期初定價為 VWAP 時參考條件表價格欄不比對（Issue #122），價格改和說明書比。
-- 參考條件表沒有的欄位（ISIN、商品名稱、最低申購金額、標的中文名稱）：和同商品說明書讀出的值比。
+- 參考條件表沒有的欄位（ISIN、商品名稱、最低申購金額、標的中文名稱、D 型觀察起日）：和同商品說明書讀出的值比。
   發行日是回填欄位：表上有值就和參考條件表比，空白時才和說明書比（將回填的值）。
   說明書錯時錯訊只在說明書那份，這裡不重複報。
-審查標準類（C 類）在 review_standard.iis_review_standard_rules。
+審查標準類（C 類）在 review_standard.iis_review_standard_rules；範本專屬的規則（例：MS 商品種類）由上手的投資人須知範本
+提供（`IisTemplate.rules`，輸入 `IisIssuerContext`，不含參考條件表）。
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ from .kit import (
 )
 
 MONTHLY_TOLERANCE = Decimal("0.0001")  # 同 BARC 說明書月配息率推算（docs/rules/barc-check-rules.md）
+NO_TERM_SHEET = "沒有可比對的同商品說明書（這批沒有、讀不到或沒有配對成功），無法比對"
 _NAME_TAIL = re.compile(r"（(?:以下簡稱|下稱)「本商品」）.*$")
 
 
@@ -51,6 +53,15 @@ class IisContext:
     term_sheet: TermSheet | None
     pages: int
     file_code: str  # 檔名前 12 碼
+
+
+@dataclass
+class IisIssuerContext:
+    """上手投資人須知專屬規則的輸入：投資人須知讀出結果與同商品說明書（上手自己 parser 的讀出結果，可讀專屬欄位；
+    這批沒有、讀不到或沒有配對成功時為 None）。不含參考條件表（同 ADR 0005 的說明書內部規則）。"""
+
+    sheet: IisSheet
+    term_sheet: TermSheet | None
 
 
 def as_iis(results: list[CheckResult]) -> list[CheckResult]:
@@ -161,7 +172,7 @@ def _prices(ctx: IisContext) -> list[CheckResult]:
                 item = Item.term_sheet(name)
                 if why or i > len(ts_rows) or col not in ts_rows[i - 1].prices:
                     out.append(
-                        _ts_unavailable(rid, field, name, why or "同商品說明書價格表沒有對應的價格，無法比對", doc_v)
+                        ts_unavailable(rid, field, name, why or "同商品說明書價格表沒有對應的價格，無法比對", doc_v)
                     )
                     continue
                 expected = ts_rows[i - 1].prices[col]
@@ -223,6 +234,122 @@ def _monthly_coupon(ctx: IisContext) -> CheckResult:
     )
 
 
+def _monthly_coupons(ctx: IisContext) -> list[CheckResult]:
+    """月配息率的每一處（MS）= 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位後相等（同 MS 說明書 §3.3）。"""
+    rid, container = "iis.monthly_coupon", read_iis(ctx.sheet, "monthly_coupons")
+    if not container.ok:
+        return [doc_review(rid, "monthly_coupons", container, item=Item.expected("月配息率"))]
+    annual, ov, problem = order_value(
+        ctx.base, "coupon_pa_pct", rid, "monthly_coupons", None, to_decimal, "數字", name="月配息率"
+    )
+    if problem:
+        return [problem]
+    expected = (annual / 12).quantize(Q4, ROUND_HALF_UP)
+    out = []
+    for occ in container.value:
+        pf, item = occ.value, Item.derived(occ.name, [ov])
+        if not pf.ok:
+            out.append(doc_review(rid, occ.field, pf, item=item))
+            continue
+        ok = expected == pf.value
+        out.append(
+            result(
+                rid,
+                occ.field,
+                S.PASS if ok else S.MISMATCH,
+                expected=expected,
+                actual=pf.value,
+                pf=pf,
+                ov=[ov],
+                reason="" if ok else "value_mismatch",
+                tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位",
+                message=f"{occ.where}須等於年利率 ÷ 12",
+                item=item,
+            )
+        )
+    return out
+
+
+def _first_callable(ctx: IisContext) -> CheckResult:
+    """「自第 k 個…開始」的 k = 參考條件表 Non-Call(月)（第一個可以提前出場的期別）。"""
+    rid, key, name = "field.first_callable_period", "first_callable_period", "第一個可提前出場期"
+    pf = read_iis(ctx.sheet, key)
+    v, ov, problem = order_value(ctx.base, key, rid, key, pf, to_int, "整數", name=name)
+    if problem:
+        return problem
+    item = Item.column(name, [ov])
+    if not pf.ok:
+        return doc_review(rid, key, pf, v, [ov], item=item)
+    ok = v == pf.value
+    return result(
+        rid,
+        key,
+        S.PASS if ok else S.MISMATCH,
+        expected=v,
+        actual=pf.value,
+        pf=pf,
+        ov=[ov],
+        reason="" if ok else "value_mismatch",
+        message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）",
+        item=item,
+    )
+
+
+def _ko_observation_dates(ctx: IisContext) -> list[CheckResult]:
+    """期間每日觀察的觀察起日 = 同商品說明書提前出場排程第 k 期的比價日（k 取投資人須知）；迄日 = 參考條件表最終比價日。"""
+    rid = "iis.ko_observation_dates"
+    start, k = read_iis(ctx.sheet, "ko_observation_start"), read_iis(ctx.sheet, "first_callable_period")
+    item = Item.term_sheet("KO 觀察起日")
+    if not (start.ok and k.ok):
+        out = [doc_review(rid, "ko_observation_start", start if not start.ok else k, item=item)]
+    else:
+        schedule, why = _term_sheet_field(ctx, "autocall_schedule", "提前出場排程")
+        expected = None if why else schedule.dates.get(k.value)
+        if expected is None:
+            why = why or f"同商品說明書提前出場排程沒有第 {k.value} 期，無法比對"
+            out = [ts_unavailable(rid, "ko_observation_start", "KO 觀察起日", why, start.value)]
+        else:
+            ok = expected == start.value
+            out = [
+                result(
+                    rid,
+                    "ko_observation_start",
+                    S.PASS if ok else S.MISMATCH,
+                    expected=expected,
+                    actual=start.value,
+                    pf=start,
+                    reason="" if ok else "value_mismatch",
+                    message=f"須等於說明書第 {k.value} 期的比價日（第 {k.value} 個配息週期終止日）",
+                    item=item,
+                )
+            ]
+    end, name = read_iis(ctx.sheet, "ko_observation_end"), "KO 觀察迄日"
+    v, ov, problem = order_value(
+        ctx.base, "final_valuation_date", rid, "ko_observation_end", end, to_date, "日期", name=name
+    )
+    if problem:
+        return [*out, problem]
+    item = Item.sheet(name, [ov])
+    if not end.ok:
+        return [*out, doc_review(rid, "ko_observation_end", end, v, [ov], item=item)]
+    ok = v == end.value
+    return [
+        *out,
+        result(
+            rid,
+            "ko_observation_end",
+            S.PASS if ok else S.MISMATCH,
+            expected=v,
+            actual=end.value,
+            pf=end,
+            ov=[ov],
+            reason="" if ok else "value_mismatch",
+            message="須等於最終比價日",
+            item=item,
+        ),
+    ]
+
+
 def reference_fields(ctx: IisContext) -> list[CheckResult]:
     base, has = ctx.base, ctx.sheet.provides
     dec, pct = to_decimal, reference.PCT_TOLERANCE
@@ -257,6 +384,23 @@ def reference_fields(ctx: IisContext) -> list[CheckResult]:
         ("ko_pct", lambda: reference.compare_field(base, "field.ko_pct", "ko_pct", "KO %", dec, "數字", cmp_pct, pct)),
         ("ki_pct", lambda: reference.compare_field(base, "field.ki_pct", "ki_pct", "KI %", dec, "數字", cmp_pct, pct)),
         ("underlying_prices", lambda: _prices(ctx)),
+        # 日期與提前出場、觸及下限條件（docs/rules/iis-check-rules.md §3 D 類，MS）
+        (
+            "trade_date",
+            lambda: reference.compare_field(base, "field.trade_date", "trade_date", "交易日", to_date, "日期"),
+        ),
+        (
+            "final_valuation_date",
+            lambda: reference.compare_field(
+                base, "field.final_valuation_date", "final_valuation_date", "最終評價日", to_date, "日期"
+            ),
+        ),
+        ("monthly_coupons", lambda: _monthly_coupons(ctx)),
+        ("ko_observation", lambda: reference.ko_observation(base)),
+        ("ko_memory", lambda: reference.ko_memory(base)),
+        ("first_callable_period", lambda: _first_callable(ctx)),
+        ("ko_observation_start", lambda: _ko_observation_dates(ctx)),
+        ("ki_type", lambda: reference.ki_type(base)),
     ]
     out: list[CheckResult] = []
     for name, check in checks:
@@ -275,14 +419,15 @@ Found = tuple[Any, str | None]  # （說明書的值, 無法比對的原因）
 def _term_sheet_field(ctx: IisContext, name: str, label: str) -> Found:
     """同商品說明書讀出的標準欄位值；沒有可比對的說明書或讀不到時回傳原因（`label` 是給作業人員看的名稱）。"""
     if ctx.term_sheet is None:
-        return None, "沒有可比對的同商品說明書（這批沒有、讀不到或沒有配對成功），無法比對"
+        return None, NO_TERM_SHEET
     pf = read_standard(ctx.term_sheet, name)
     if not pf.ok:
         return None, f"同商品說明書讀不到「{label}」，無法比對"
     return pf.value, None
 
 
-def _ts_unavailable(rid: str, field: str, name: str, why: str, actual: Any) -> CheckResult:
+def ts_unavailable(rid: str, field: str, name: str, why: str, actual: Any) -> CheckResult:
+    """同商品說明書沒有可比對的值：轉人工覆核，說明原因（上手投資人須知專屬規則也用）。"""
     return result(
         rid,
         field,
@@ -308,7 +453,7 @@ def _vs_term_sheet(
         return as_iis([doc_review(rid, field, pf, item=item)])[0]
     expected, why = found
     if why:
-        return _ts_unavailable(rid, field, name, why, pf.value)
+        return ts_unavailable(rid, field, name, why, pf.value)
     ok = normalize(expected) == normalize(pf.value)
     return result(
         rid,

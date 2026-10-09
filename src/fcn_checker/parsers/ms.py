@@ -300,6 +300,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     put("denomination", article(6), r"每單位商品面額：\D*?" + NUM + r"元", _number)
     put("issue_price_pct", article(7), r"發行價格：商品面額之(\d+(?:\.\d+)?)%", Decimal)
     fields["underlyings_art11"] = ms_tables.underlying_table(article(11))
+    fields["underlying_names_art11"] = ms_tables.underlying_names(article(11))
     put("tenor_months", sub(14, 1), r"商品年期：(\d+)個月期", int)
     put("trade_date", sub(14, 2), r"交易日：" + D, parse_date)
     put("issue_date", sub(14, 3), r"發行日：" + D, parse_date)
@@ -412,13 +413,22 @@ def _prices(fields: dict[str, ParsedField]) -> None:
         for key in ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct"):
             fields[key] = _derived(key, pt)
         return
-    fields["underlyings"] = _derived("underlyings", pt, [r["ticker"] for r in pt.value["rows"]])
+    tickers = [r["ticker"] for r in pt.value["rows"]]
+    fields["underlyings"] = _derived("underlyings", pt, tickers)
+    # 標的名稱取第 11 項標的表（代碼須依序相同才對得上列；投資人須知的標的名稱和它比）
+    art11, names = fields["underlyings_art11"], fields["underlying_names_art11"]
+    aligned = art11.ok and names.ok and art11.value == tickers and len(names.value) == len(tickers)
     fields["underlying_prices"] = ParsedField(
         "underlying_prices",
         FieldStatus.PRESENT,
         tuple(
-            standard_fields.PriceRow(r["ticker"], dict(r["prices"]), tuple(Evidence.of(ln) for ln in lns))
-            for r, lns in zip(pt.value["rows"], pt.value["row_lines"], strict=True)
+            standard_fields.PriceRow(
+                r["ticker"],
+                dict(r["prices"]),
+                tuple(Evidence.of(ln) for ln in lns),
+                names.value[i] if aligned else None,
+            )
+            for i, (r, lns) in enumerate(zip(pt.value["rows"], pt.value["row_lines"], strict=True))
         ),
         list(pt.evidence),
     )

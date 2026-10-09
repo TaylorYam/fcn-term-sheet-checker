@@ -11,7 +11,8 @@
 9. 整體狀態
 
 投資人須知（ADR 0007）另有 `check_investor_sheet`：配對結果 → 投資人須知規則（rules/iis.py：頁數、文件本身、
-參考條件表、同商品說明書）→ 審查標準規則（只核對範本有的項目）→ 整體狀態；不回填。
+參考條件表、同商品說明書）→ 範本專屬規則（IisTemplate.rules，例：MS）→ 審查標準規則（只核對範本有的項目）→ 整體狀態；
+不回填。
 """
 
 from __future__ import annotations
@@ -105,9 +106,11 @@ def check_investor_sheet(pairing: list[CheckResult], paired: PairedIis | None, c
         base = Context(paired.sheet, paired.record, config.review_standard, config.reference_format, paired.issuer.code)
         ctx = iis.IisContext(base, paired.sheet, paired.term_sheet, paired.pages, paired.file_code)
         results.extend(iis.run_all(ctx))
+        template = paired.issuer.iis
+        if template is not None and template.rules is not None:
+            results.extend(iis.as_iis(template.rules(iis.IisIssuerContext(paired.sheet, paired.term_sheet))))
         trade = iis.trade_date(ctx)
         results.extend(iis.as_iis(iis_review_standard_rules(base, paired.sheet, trade=trade)))
-        template = paired.issuer.iis
         report.not_covered = [dict(n) for n in template.not_covered] if template is not None else []
     report.status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
     return report

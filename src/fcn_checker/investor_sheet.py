@@ -24,10 +24,17 @@ IIS_FIELDS: dict[str, str] = {
     "underlying_names": "list[str]：標的中文名稱，依說明書順序",
     "min_subscription": "int：最低申購金額",
     "monthly_coupon_pct": "Decimal：每月配息率 %，保留顯示位數",
-    "issuer_names": "tuple[Occurrence, ...]：各處發行機構名稱",
+    "issuer_names": "tuple[Occurrence, ...]：各處發行機構名稱（中英文全名）",
+    "issuer_names_zh": "tuple[Occurrence, ...]：各處只寫中文的發行機構名稱（只比審查標準全名括號前的中文部分）",
     "distributor_names": "tuple[Occurrence, ...]：各處受託或銷售機構名稱",
     "distributor_addresses": "tuple[Occurrence, ...]：各處受託或銷售機構地址",
     "distributor_phones": "tuple[Occurrence, ...]：各處受託或銷售機構電話",
+    "monthly_coupons": "tuple[Occurrence, ...]：各處月配息率 %（每處 = 年利率 ÷ 12 四捨五入到 4 位後相等，MS）",
+    "first_callable_period": "int：第一個可提前出場期（「自第 k 個…開始」的 k）",
+    "ko_observation_start": "date：期間每日觀察的 KO 觀察起日（第 k 期配息週期終止日）",
+    "ko_observation_end": "date：期間每日觀察的 KO 觀察迄日（期末定價日）",
+    "product_type": "str：商品種類",
+    "redemption_start": "date：開始受理贖回日期",
 }
 
 
@@ -38,7 +45,6 @@ class IisSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     provided: frozenset[str]  # 這份範本有的欄位；不在其中的不核對
-    issuer_name_zh_only: bool = False  # 範本的發行機構名稱只寫中文（HSBC）
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)

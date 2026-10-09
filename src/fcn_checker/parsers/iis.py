@@ -12,7 +12,19 @@ from ..schema import Line, ParsedField
 from ..standard_fields import Occurrence
 from .layout import TextIndex, join_text
 
-__all__ = ["DATE", "FEES", "RATE", "IisSheet", "capture", "integer", "number", "occurrences", "page_totals", "raw"]
+__all__ = [
+    "DATE",
+    "FEES",
+    "RATE",
+    "IisSheet",
+    "capture",
+    "in_order",
+    "integer",
+    "number",
+    "occurrences",
+    "page_totals",
+    "raw",
+]
 
 DATE = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 RATE = r"(\d+(?:\.\d+)?%~\d+(?:\.\d+)?%)"
@@ -28,6 +40,16 @@ def integer(text: str) -> int:
     if d != d.to_integral_value():
         raise ValueError(text)
     return int(d)
+
+
+def in_order(text: str, anchors: Sequence[str]) -> bool:
+    """`anchors` 依序都出現在 `text`（範本辨識的段落標題）。"""
+    pos = -1
+    for a in anchors:
+        pos = text.find(a, pos + 1)
+        if pos < 0:
+            return False
+    return True
 
 
 def capture(name: str, ti: TextIndex, pattern: str, convert: Callable = lambda x: x) -> ParsedField:

@@ -61,22 +61,13 @@ PROVIDED = frozenset(
 )
 
 
-def _ordered(text: str, anchors: Sequence[str]) -> bool:
-    pos = -1
-    for a in anchors:
-        pos = text.find(a, pos + 1)
-        if pos < 0:
-            return False
-    return True
-
-
 def detect(lines: Sequence[Line]) -> DetectionResult:
     ti = TextIndex(lines)
     failed = []
     for ok, message in (
         ("中文投資人須知" in ti.text, "封面缺少「中文投資人須知」"),
         ("1.發行機構：英商巴克萊銀行股份有限公司" in ti.text, "發行機構不是BARC"),
-        (_ordered(ti.text, SECTIONS), "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
+        (iis.in_order(ti.text, SECTIONS), "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
     ):
         if not ok:
             failed.append(message)
