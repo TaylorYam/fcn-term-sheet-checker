@@ -66,7 +66,7 @@ def check_document(pairing: list[CheckResult], paired: Paired | None, config: Ch
         results.extend(paired.issuer.rules(_issuer_context(paired, std)))
         results.extend(review_standard_rules(ctx))
         results.append(reference.first_callable_period(ctx))
-        decisions = []
+        decisions, backfill_results = [], []
         rules = (
             backfill.checked_marks,
             backfill.isin,
@@ -77,9 +77,11 @@ def check_document(pairing: list[CheckResult], paired: Paired | None, config: Ch
         for rule in rules:
             r, cells = rule(ctx, rfmt, paired.row)
             if r is not None:  # 價格欄只有期初定價 VWAP 時才是回填欄位
-                results.append(r)
+                backfill_results.append(r)
             decisions.extend(cells)
+        results.extend(backfill_results)
         report.backfill = decisions
+        report.backfill_certain = bool(decisions) and all(r.status == CheckStatus.PASS for r in backfill_results)
         report.not_covered = [dict(n) for n in paired.issuer.not_covered]
     report.status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
     return report

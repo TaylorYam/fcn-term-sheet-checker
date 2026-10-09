@@ -22,6 +22,8 @@
 範本辨識與讀出每份說明書各只做一次（在預覽）；配對成功後由單份核對（single_check.py）依序執行所有規則。
 批量入口只負責載入參考條件表、逐份呼叫、組裝記錄資料與單份錯誤隔離。
 
+辨識遇到問題就停，每份 PDF 最多一個配對問題，連同文件種類、上手、商品代號、對到的列記成辨識結果（`Identification`）；
+類別、狀態標籤、能否回填與放行只看辨識結果與核對報告，不回頭翻核對結果的原因碼。
 每份 PDF 各自有類別（整份通過或人工放行 → `BatchItem.fillable`，否則列入錯誤清單）；一檔商品要說明書與同商品
 投資人須知都 fillable，才回填這份說明書（`BatchItem.fills_sheet`）；回填流程見 backfill.py。
 """
@@ -39,7 +41,8 @@ from typing import Any
 import fitz
 import openpyxl
 
-from . import __version__, backfill
+from . import __version__
+from .backfill import BackfillAction
 from .check_config import CheckConfig
 from .config import ReferenceFormat
 from .extraction import extract_lines
@@ -53,16 +56,28 @@ from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Item, Parse
 from .single_check import Paired, PairedIis, check_document, check_investor_sheet
 from .standard_fields import TermSheet
 
-UNSUPPORTED = "issuer_unsupported"
-SHARED_ROW = "reference_row_shared"
-ROW_MISSING = "reference_row_missing"
-ROW_DUPLICATE = "reference_row_duplicate"
-ISSUER_MISMATCH = "reference_issuer_mismatch"
-PREFIX_MISMATCH = "issuer_prefix_mismatch"
-NAME_UNRECOGNIZED = "file_name_unrecognized"
-CODE_MISMATCH = "file_code_mismatch"  # 說明書封面商品代號與檔名的商品代號不同
-MISSING_IIS = "counterpart_missing_iis"  # 這批有說明書、沒有同商品的投資人須知
-MISSING_TS = "counterpart_missing_ts"  # 這批有投資人須知、沒有同商品的說明書
+
+class PairingProblem(StrEnum):
+    """配對問題：辨識結果裡讓這份 PDF 不能正常核對或不能放行的那一個原因（每份最多一個，見 CONTEXT.md）。
+
+    值是對應結果的原因碼；原因碼由例外或範本辨識決定的（PDF 讀不到、範本、封面商品代號）取其中一個代表。
+    """
+
+    NAME_UNRECOGNIZED = "file_name_unrecognized"
+    PDF_UNREADABLE = "pdf_unreadable"  # 找不到、無法開啟、加密或沒有頁面
+    UNSUPPORTED = "issuer_unsupported"
+    TEMPLATE_UNKNOWN = "template_unknown"
+    TEMPLATE_AMBIGUOUS = "template_ambiguous"
+    PREFIX_MISMATCH = "issuer_prefix_mismatch"
+    UNEXPECTED = "unexpected_error"  # 上手讀出或辨識時的非預期錯誤
+    PRODUCT_CODE_UNREADABLE = "product_code_unreadable"  # 說明書封面商品代號讀不到
+    CODE_MISMATCH = "file_code_mismatch"  # 說明書封面商品代號與檔名的商品代號不同
+    ROW_MISSING = "reference_row_missing"
+    ROW_DUPLICATE = "reference_row_duplicate"
+    ISSUER_MISMATCH = "reference_issuer_mismatch"
+    SHARED_ROW = "reference_row_shared"
+    MISSING_IIS = "counterpart_missing_iis"  # 這批有說明書、沒有同商品的投資人須知
+    MISSING_TS = "counterpart_missing_ts"  # 這批有投資人須知、沒有同商品的說明書
 
 
 class DocKind(StrEnum):
@@ -111,38 +126,63 @@ _BY_STATUS = {
 }
 
 # 配對有問題時，狀態標籤直接寫原因，不必點進明細才知道要補參考條件表還是檢查檔案。
-# 「條件表」是參考條件表的簡稱（狀態欄寬有限，見 CONTEXT.md）；要用本模組的原因碼常數，所以不放 messages.py。
+# 「條件表」是參考條件表的簡稱（狀態欄寬有限，見 CONTEXT.md）；以本模組的配對問題為 key，所以不放 messages.py。
 _PAIRING_LABELS = {
-    ROW_MISSING: "條件表找不到這筆",
-    ROW_DUPLICATE: "條件表有重複列",
-    SHARED_ROW: "多份對到同一列",
-    ISSUER_MISMATCH: "條件表發行機構不符",
-    PREFIX_MISMATCH: "檔名上手編號不符",
-    NAME_UNRECOGNIZED: "檔名無法辨識",
-    CODE_MISMATCH: "檔名商品代號不符",
-    MISSING_IIS: "這批缺投資人須知",
-    MISSING_TS: "這批缺說明書",
+    PairingProblem.ROW_MISSING: "條件表找不到這筆",
+    PairingProblem.ROW_DUPLICATE: "條件表有重複列",
+    PairingProblem.SHARED_ROW: "多份對到同一列",
+    PairingProblem.ISSUER_MISMATCH: "條件表發行機構不符",
+    PairingProblem.PREFIX_MISMATCH: "檔名上手編號不符",
+    PairingProblem.NAME_UNRECOGNIZED: "檔名無法辨識",
+    PairingProblem.CODE_MISMATCH: "檔名商品代號不符",
+    PairingProblem.MISSING_IIS: "這批缺投資人須知",
+    PairingProblem.MISSING_TS: "這批缺說明書",
 }
 # 不能人工放行的配對問題：原因
 _UNRELEASABLE = {
-    NAME_UNRECOGNIZED: "檔名無法辨識，請修正檔名後重新載入",
-    CODE_MISMATCH: "檔名的商品代號與說明書封面不同，可能放錯檔案，請修正後重新載入",
-    SHARED_ROW: "同一批有多份文件對到同一列（說明書與投資人須知各只能一份），不能人工放行",
-    MISSING_IIS: "這批缺同商品的投資人須知，請一起選取說明書與投資人須知後重新載入",
-    MISSING_TS: "這批缺同商品的說明書，請一起選取說明書與投資人須知後重新載入",
+    PairingProblem.NAME_UNRECOGNIZED: "檔名無法辨識，請修正檔名後重新載入",
+    PairingProblem.CODE_MISMATCH: "檔名的商品代號與說明書封面不同，可能放錯檔案，請修正後重新載入",
+    PairingProblem.SHARED_ROW: "同一批有多份文件對到同一列（說明書與投資人須知各只能一份），不能人工放行",
+    PairingProblem.MISSING_IIS: "這批缺同商品的投資人須知，請一起選取說明書與投資人須知後重新載入",
+    PairingProblem.MISSING_TS: "這批缺同商品的說明書，請一起選取說明書與投資人須知後重新載入",
 }
+
+
+@dataclass(frozen=True)
+class Identification:
+    """辨識結果：預覽階段對每份 PDF 算出的事實（見 CONTEXT.md）；類別、狀態標籤、能否回填與放行都只看它與核對報告。"""
+
+    kind: DocKind | None  # None → 檔名無法辨識
+    issuer: str | None = None  # 上手代號（檔名上手編號查對照表）
+    product_code: str | None = None
+    reference_row: int | None = None  # 對到的參考條件表列號
+    problem: PairingProblem | None = None  # 唯一的配對問題；None 表示配對乾淨
+    checked: bool = False  # 規則有沒有跑：有對到列、且不是多份對到同一列（缺另一份時仍為 True）
 
 
 @dataclass
 class BatchItem:
     term_sheet: Path  # 這份 PDF（說明書或投資人須知）
     report: CheckReport
-    issuer: str | None = None
-    product_code: str | None = None
-    reference_row: int | None = None  # 對到的參考條件表列號
-    kind: DocKind | None = None  # None → 檔名無法辨識
+    identification: Identification
     partner: BatchItem | None = field(default=None, repr=False, compare=False)  # 同商品的另一份（說明書 ↔ 投資人須知）
     _released: bool = field(default=False, init=False, repr=False)  # 只能經 BatchOutcome.release／cancel_release 改變
+
+    @property
+    def issuer(self) -> str | None:
+        return self.identification.issuer
+
+    @property
+    def product_code(self) -> str | None:
+        return self.identification.product_code
+
+    @property
+    def reference_row(self) -> int | None:
+        return self.identification.reference_row
+
+    @property
+    def kind(self) -> DocKind | None:
+        return self.identification.kind
 
     @property
     def released(self) -> bool:
@@ -151,7 +191,7 @@ class BatchItem:
 
     @property
     def unsupported(self) -> bool:
-        return any(r.reason_code == UNSUPPORTED for r in self.report.results)
+        return self.identification.problem == PairingProblem.UNSUPPORTED
 
     @property
     def category(self) -> Category:
@@ -199,10 +239,10 @@ class BatchItem:
             return category.value
         if category == Category.RELEASED:
             return f"{category.value}（原：{original}）"
-        if self.report.status == CheckStatus.REVIEW_REQUIRED:  # 執行錯誤等其他狀態不被配對原因蓋掉
-            for r in self.report.results:
-                if r.status.is_problem and r.reason_code in _PAIRING_LABELS:
-                    return _PAIRING_LABELS[r.reason_code]
+        problem = self.identification.problem
+        # 執行錯誤等其他狀態不被配對原因蓋掉
+        if self.report.status == CheckStatus.REVIEW_REQUIRED and problem in _PAIRING_LABELS:
+            return _PAIRING_LABELS[problem]
         return original
 
     @property
@@ -222,16 +262,16 @@ class BatchItem:
             return "未支援上手，沒有可以回填的值"
         if category == Category.ERROR:
             return "執行錯誤，沒有可以回填的值"
-        for r in report.results:
-            if r.status.is_problem and r.reason_code in _UNRELEASABLE:
-                return _UNRELEASABLE[r.reason_code]
+        problem = self.identification.problem
+        if problem in _UNRELEASABLE:
+            return _UNRELEASABLE[problem]
         if self.reference_row is None:
             return "沒有對到參考條件表的列，沒有地方可以回填"
         if self.kind == DocKind.IIS:  # 投資人須知不回填，沒有回填值要確認
             return ""
-        if backfill.conflicts_with_sheet(report):
+        if any(d.action == BackfillAction.MISMATCH for d in report.backfill):
             return "參考條件表回填欄位已有不同的值，請先修正參考條件表再核對"
-        if not backfill.values_certain(report):
+        if not report.backfill_certain:
             return "回填值無法確定，請人工處理"
         return ""
 
@@ -311,49 +351,66 @@ class _Identified:
     ts: TermSheet | None = None  # 說明書讀出結果：同一份只讀一次，核對直接沿用
     iis: IisSheet | None = None  # 投資人須知讀出結果
     pages: int | None = None
-    shared: bool = False  # 同一批有其他同種文件對到同一列
+    problem: PairingProblem | None = None  # 每份最多一個：辨識遇到問題就停，多份對到同一列與缺另一份只在對到列後發生
     partner: _Identified | None = None  # 同一列的另一種文件
 
     @property
     def row_no(self) -> int | None:
         return self.row.row if self.row is not None else None
 
+    @property
+    def checked(self) -> bool:
+        """規則會不會跑：有對到列、且不是多份對到同一列。"""
+        return self.row is not None and self.problem != PairingProblem.SHARED_ROW
+
+    @property
+    def identification(self) -> Identification:
+        pc = self.product_code
+        return Identification(
+            self.kind,
+            self.issuer_code,
+            pc.value if pc is not None and pc.ok else None,
+            self.row_no,
+            self.problem,
+            self.checked,
+        )
+
+    def stop(self, problem: PairingProblem, result: CheckResult) -> _Identified:
+        """辨識遇到配對問題：記下問題與對應的結果，辨識到此為止。"""
+        self.results.append(result)
+        self.problem = problem
+        return self
+
     def paired(self, sheet: ReferenceSheet) -> Paired | None:
-        if self.issuer is None or self.ts is None or self.row is None or self.shared:
+        if self.issuer is None or self.ts is None or self.row is None or not self.checked:
             return None
         return Paired(self.issuer, self.ts, self.row, sheet.record(self.row))
 
     def paired_iis(self, sheet: ReferenceSheet) -> PairedIis | None:
-        if self.issuer is None or self.iis is None or self.row is None or self.shared or self.pages is None:
+        if self.issuer is None or self.iis is None or self.row is None or not self.checked or self.pages is None:
             return None
         code = self.product_code.value if self.product_code is not None else ""
         partner = self.partner  # 同商品說明書配對成功才拿來比對
-        partner_ts = partner.ts if partner is not None and partner.row is not None and not partner.shared else None
+        partner_ts = partner.ts if partner is not None and partner.checked else None
         return PairedIis(self.issuer, self.iis, self.row, sheet.record(self.row), partner_ts, self.pages, code)
 
     def mark_shared(self, row_no: int, what: str, others: str) -> None:
         """同一批有多份同種文件對到同一列：這一列的文件配對改為人工覆核，不核對也不回填。"""
         pairing = next(r for r in self.results if r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS)
-        pairing.status, pairing.reason_code = CheckStatus.REVIEW_REQUIRED, SHARED_ROW
+        pairing.status, pairing.reason_code = CheckStatus.REVIEW_REQUIRED, PairingProblem.SHARED_ROW.value
         pairing.message = (
             f"同一批有多份{what}對到同一個 TDCC Code {pairing.actual}（參考條件表第 {row_no} 列），其他文件：{others}"
         )
-        self.shared = True
+        self.problem = PairingProblem.SHARED_ROW
 
     def mark_alone(self) -> None:
         """這批沒有同商品的另一種文件：人工覆核、不能放行；規則照常執行，方便先看這份的問題。"""
         missing = DocKind.IIS if self.kind == DocKind.TERM_SHEET else DocKind.TERM_SHEET
         code = self.product_code.value if self.product_code is not None else ""
         suffix = "_IIS" if missing == DocKind.IIS else "_TS"
-        self.results.append(
-            _review(
-                "batch.counterpart",
-                "counterpart",
-                Item.note(missing.value),
-                MISSING_IIS if missing == DocKind.IIS else MISSING_TS,
-                f"這批沒有同商品的{missing.value}（{code}{suffix}.pdf）；說明書與投資人須知要一起選取、一起核對",
-            )
-        )
+        problem = PairingProblem.MISSING_IIS if missing == DocKind.IIS else PairingProblem.MISSING_TS
+        msg = f"這批沒有同商品的{missing.value}（{code}{suffix}.pdf）；說明書與投資人須知要一起選取、一起核對"
+        self.stop(problem, _review("batch.counterpart", "counterpart", Item.note(missing.value), problem, msg))
 
 
 # 辨識與配對結果的項目：只寫說明，不附雙方值
@@ -371,13 +428,15 @@ def _unexpected(e: Exception) -> CheckResult:
     )
 
 
-def _review(rule_id: str, field_: str, item: Item, reason: str, message: str, actual: Any = None) -> CheckResult:
+def _review(
+    rule_id: str, field_: str, item: Item, reason: PairingProblem, message: str, actual: Any = None
+) -> CheckResult:
     return CheckResult(
         rule_id=rule_id,
         field=field_,
         status=CheckStatus.REVIEW_REQUIRED,
         actual=actual,
-        reason_code=reason,
+        reason_code=reason.value,
         message=message,
         item=item,
     )
@@ -390,8 +449,8 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
     if out.kind is None or file_code(pdf) is None:
         need = "「<12 位商品代號>_TS」（說明書）或「<12 位商品代號>_IIS」（投資人須知）"
         msg = f"檔名須為{need}，無法辨識；請修正檔名後重新載入"
-        results.append(_review("batch.file_name", "file_name", FILE_NAME_ITEM, NAME_UNRECOGNIZED, msg))
-        return out
+        problem = PairingProblem.NAME_UNRECOGNIZED
+        return out.stop(problem, _review("batch.file_name", "file_name", FILE_NAME_ITEM, problem, msg))
     what = out.kind.value
     try:
         doc = open_pdf(pdf)
@@ -401,38 +460,29 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
         finally:
             doc.close()
     except IngestionError as e:
-        results.append(error_result("input.term_sheet", what, e))
-        return out
+        return out.stop(PairingProblem.PDF_UNREADABLE, error_result("input.term_sheet", what, e))
 
     prefix = pdf.name[:3]
     out.issuer_code = config.issuer_prefixes.get(prefix)
     if out.issuer_code is None:
         msg = f"檔名上手編號「{prefix}」不在上手編號對照表，未支援上手"
-        results.append(_review("batch.issuer_prefix", "issuer", ISSUER_ITEM, UNSUPPORTED, msg))
-        return out
+        problem = PairingProblem.UNSUPPORTED
+        return out.stop(problem, _review("batch.issuer_prefix", "issuer", ISSUER_ITEM, problem, msg))
     issuer = by_code(out.issuer_code, registry)
     if issuer is None or (out.kind == DocKind.IIS and issuer.iis is None):
         code = out.issuer_code
         msg = f"上手編號 {prefix} 對應 {code}，但 {code} 還沒有{what}範本，未支援上手"
-        results.append(_review("batch.issuer_prefix", "issuer", ISSUER_ITEM, UNSUPPORTED, msg))
-        return out
+        problem = PairingProblem.UNSUPPORTED
+        return out.stop(problem, _review("batch.issuer_prefix", "issuer", ISSUER_ITEM, problem, msg))
 
     detected, template_result = (detect if out.kind == DocKind.TERM_SHEET else detect_iis)(lines, registry)
+    if detected is None:  # 範本不符或多重命中：原因碼就是配對問題的值
+        return out.stop(PairingProblem(template_result.reason_code), template_result)
     results.append(template_result)
-    if detected is None:
-        return out
     if detected is not issuer:
-        results.append(
-            _review(
-                "batch.issuer_prefix",
-                "issuer",
-                ISSUER_ITEM,
-                PREFIX_MISMATCH,
-                f"檔名上手編號 {prefix} 對應 {issuer.code}，但{what}內容是 {detected.code} 範本，可能檔名取錯或檔案放錯",
-                actual=detected.code,
-            )
-        )
-        return out
+        problem = PairingProblem.PREFIX_MISMATCH
+        msg = f"檔名上手編號 {prefix} 對應 {issuer.code}，但{what}內容是 {detected.code} 範本，可能檔名取錯或檔案放錯"
+        return out.stop(problem, _review("batch.issuer_prefix", "issuer", ISSUER_ITEM, problem, msg, detected.code))
     out.issuer = issuer
     try:
         if issuer.iis is not None and out.kind == DocKind.IIS:
@@ -440,54 +490,51 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
         else:
             out.ts = issuer.read(lines)
     except Exception as e:  # 上手讀出失敗：這份轉執行錯誤，不中斷整批（預覽也一樣）
-        results.append(_unexpected(e))
-        return out
+        return out.stop(PairingProblem.UNEXPECTED, _unexpected(e))
 
     if out.kind == DocKind.IIS:  # 投資人須知以檔名前 12 碼配對（HSBC 範本沒有商品代號；封面有的另由規則核對）
         pc = out.product_code = ParsedField.present("product_code", file_code(pdf), [])
     else:
         pc = out.product_code = read_standard(out.ts, "product_code")
         if not pc.ok:
-            results.append(doc_review("batch.pairing", "product_code", pc, item=PRODUCT_CODE_ITEM))
-            return out
+            problem = PairingProblem.PRODUCT_CODE_UNREADABLE
+            return out.stop(problem, doc_review("batch.pairing", "product_code", pc, item=PRODUCT_CODE_ITEM))
         if not str(pc.value).startswith(prefix):
+            problem = PairingProblem.PREFIX_MISMATCH
             msg = f"說明書商品代號 {pc.value} 的前三碼與檔名上手編號 {prefix} 不同"
-            results.append(
-                _review("batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, PREFIX_MISMATCH, msg, actual=pc.value)
-            )
-            return out
+            r = _review("batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, problem, msg, actual=pc.value)
+            return out.stop(problem, r)
         if pc.value != file_code(pdf):  # 同商品的兩份以檔名的商品代號配成一組，說明書檔名不能和封面不同
+            problem = PairingProblem.CODE_MISMATCH
             msg = f"說明書封面商品代號 {pc.value} 與檔名的商品代號 {file_code(pdf)} 不同，可能檔名取錯或檔案放錯"
-            results.append(
-                _review("batch.file_name", "product_code", PRODUCT_CODE_ITEM, CODE_MISMATCH, msg, actual=pc.value)
-            )
-            return out
+            r = _review("batch.file_name", "product_code", PRODUCT_CODE_ITEM, problem, msg, actual=pc.value)
+            return out.stop(problem, r)
 
     rows = sheet.find(pc.value)
     if not rows:
+        problem = PairingProblem.ROW_MISSING
         msg = f"參考條件表找不到 TDCC Code {pc.value} 的列"
-        results.append(_review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, ROW_MISSING, msg))
-        return out
+        return out.stop(problem, _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, problem, msg))
     if len(rows) > 1:
+        problem = PairingProblem.ROW_DUPLICATE
         msg = f"參考條件表有 {len(rows)} 列 TDCC Code 為 {pc.value}"
-        r = _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, ROW_DUPLICATE, msg)
+        r = _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, problem, msg)
         r.order_source = [x.product_code.source for x in rows]
-        results.append(r)
-        return out
+        return out.stop(problem, r)
     row = rows[0]
     expected_issuer = config.reference_format.issuer_values.get(issuer.code)
     if expected_issuer is None or row.issuer.value != expected_issuer:
+        problem = PairingProblem.ISSUER_MISMATCH
         r = _review(
             "batch.pairing",
             "issuer",
             ISSUER_ITEM,
-            ISSUER_MISMATCH,
+            problem,
             f"參考條件表該列發行機構是「{row.issuer.value}」，{issuer.code} 應為「{expected_issuer}」",
             actual=row.issuer.value,
         )
         r.expected, r.order_source = expected_issuer, [row.issuer.source]
-        results.append(r)
-        return out
+        return out.stop(problem, r)
     out.row = row
     results.append(
         CheckResult(
@@ -529,7 +576,7 @@ def _identify_all(term_sheets: Sequence[Path], sheet: ReferenceSheet, config: Ch
         try:
             found = _identify(pdf, sheet, config)
         except Exception as e:
-            found = _Identified(pdf, [_unexpected(e)], kind=doc_kind(pdf))
+            found = _Identified(pdf, [_unexpected(e)], kind=doc_kind(pdf), problem=PairingProblem.UNEXPECTED)
         identified.append(found)
     by_code: dict[str, list[_Identified]] = {}
     for found in identified:
@@ -569,16 +616,16 @@ def preview_batch(config: CheckConfig, reference_sheet: Path, term_sheets: Seque
     rows = []
     for found in identified:
         problems = [r for r in found.results if r.status != CheckStatus.PASS]
-        pc = found.product_code
+        pc, ident = found.product_code, found.identification
         rows.append(
             PreviewRow(
                 found.pdf,
-                found.kind,
-                found.issuer_code,
-                any(r.reason_code == UNSUPPORTED for r in problems),
-                pc.value if pc is not None and pc.ok else None,
+                ident.kind,
+                ident.issuer,
+                ident.problem == PairingProblem.UNSUPPORTED,
+                ident.product_code,
                 tuple(pc.evidence) if pc is not None else (),
-                found.row_no,
+                ident.reference_row,
                 "；".join(r.message for r in problems),
             )
         )
@@ -620,10 +667,7 @@ def _check_one(
         report = check_document(found.results, found.paired(sheet), config)
     report.template = template
     report.metadata = metadata
-    item = BatchItem(pdf, report, issuer=found.issuer_code, reference_row=found.row_no, kind=found.kind)
-    if found.product_code is not None and found.product_code.ok:
-        item.product_code = found.product_code.value
-    return item
+    return BatchItem(pdf, report, found.identification)
 
 
 def check_batch(preview: BatchPreview) -> BatchOutcome:
@@ -651,7 +695,7 @@ def check_batch(preview: BatchPreview) -> BatchOutcome:
             item = BatchItem(
                 pdf,
                 CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta, snapshot)),
-                kind=found.kind,
+                found.identification,
             )
         items.append(item)
     by_found = {id(f): i for f, i in zip(preview._identified, items, strict=True)}
