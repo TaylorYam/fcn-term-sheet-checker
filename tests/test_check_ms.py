@@ -14,9 +14,9 @@ from fcn_checker.issuers import MS
 from fcn_checker.messages import problem_message
 from fcn_checker.schema import CheckStatus as S
 from harness import check_all
-from ms_synth import Spec, build_pdf, check, reference_row
+from ms_synth import Spec, build_pdf, check
 from pdf_writer import zh_date
-from reference_synth import build_reference_sheet
+from reference_synth import build_reference_sheet, reference_row
 
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
 
@@ -38,18 +38,18 @@ def flagged(report, rule_id, status=None) -> bool:
 @pytest.mark.parametrize(
     "spec",
     [
-        Spec(obs="D", memory=True, ki="AM", count=2),
-        Spec(obs="D", memory=True, ki="D", count=4),
-        Spec(obs="D", memory=True, ki="P", count=3),
-        Spec(obs="D", memory=True, ki="none", count=4, tenor=3),
-        Spec(obs="D", memory=False, ki="AM", count=1),
-        Spec(obs="D", memory=True, ki="AM", count=3, tenor=12, annual=Decimal("15")),
-        Spec(obs="P", memory=True, ki="AM", count=4),
-        Spec(obs="P", memory=True, ki="AM", count=2, non_call=2),
-        Spec(obs="P", memory=False, ki="none", count=4, tenor=6, non_call=6),
-        Spec(obs="P", memory=False, ki="AM", count=1, tenor=6, non_call=6),
+        Spec(ko_obs="D", memory=True, ki="AM", count=2),
+        Spec(ko_obs="D", memory=True, ki="D", count=4),
+        Spec(ko_obs="D", memory=True, ki="P", count=3),
+        Spec(ko_obs="D", memory=True, ki="none", count=4, tenor=3),
+        Spec(ko_obs="D", memory=False, ki="AM", count=1),
+        Spec(ko_obs="D", memory=True, ki="AM", count=3, tenor=12, annual=Decimal("15")),
+        Spec(ko_obs="P", memory=True, ki="AM", count=4),
+        Spec(ko_obs="P", memory=True, ki="AM", count=2, first_callable=2),
+        Spec(ko_obs="P", memory=False, ki="none", count=4, tenor=6, first_callable=6),
+        Spec(ko_obs="P", memory=False, ki="AM", count=1, tenor=6, first_callable=6),
     ],
-    ids=lambda s: f"{s.obs}-{'mem' if s.memory else 'plain'}-KI{s.ki}-{s.count}UL-{s.tenor}m-NC{s.non_call}",
+    ids=lambda s: f"{s.ko_obs}-{'mem' if s.memory else 'plain'}-KI{s.ki}-{s.count}UL-{s.tenor}m-NC{s.first_callable}",
 )
 def test_supported_types_pass(tmp_path, spec):
     r = check(tmp_path, spec)
@@ -236,7 +236,7 @@ def test_blank_trustee_product_code_is_a_mismatch(tmp_path):
 
 
 def test_non_call_equal_to_tenor_without_ko_column_marks_ko_fields_not_applicable(tmp_path):
-    spec = Spec(obs="P", memory=False, ki="none", count=2, tenor=6, non_call=6)
+    spec = Spec(ko_obs="P", memory=False, ki="none", count=2, tenor=6, first_callable=6)
     r = check(tmp_path, spec, **{"KO(%)": 150, "UL_1_KO價": 150, "UL_2_KO價": 300})
     assert r.status == S.PASS, problems(r)
     ko = rule(r, "field.ko_pct")[0]
@@ -254,7 +254,7 @@ def test_ko_column_missing_before_maturity_requires_review(tmp_path):
 
 def test_vwap_without_ko_column_overwrites_ko_prices_with_the_empty_value(tmp_path):
     """期初定價 VWAP 的價格欄一律以說明書覆寫；說明書沒有 KO 價（Non-Call = 天期）時 KO 價寫空值寫法（同沒有 KI 的下限價）。"""
-    spec = Spec(obs="P", memory=False, ki="none", count=2, tenor=6, non_call=6)
+    spec = Spec(ko_obs="P", memory=False, ki="none", count=2, tenor=6, first_callable=6)
     r = check(tmp_path, spec, **{"期初定價": "VWAP", "UL_1_KO價": 150})
     assert r.status == S.PASS, problems(r)
     cells = {d.column: d for d in r.backfill}
@@ -292,11 +292,13 @@ def test_memory_in_name_must_match_article_17(tmp_path):
 
 
 def test_periodic_autocall_dates_follow_non_call(tmp_path):
-    spec = Spec(obs="P", count=2, non_call=2)
+    spec = Spec(ko_obs="P", count=2, first_callable=2)
     r = check(
         tmp_path,
         spec,
-        pdf_spec=Spec(obs="P", count=2, non_call=2, replace=[("art14.table", "無", zh_date(spec.payments[0]))]),
+        pdf_spec=Spec(
+            ko_obs="P", count=2, first_callable=2, replace=[("art14.table", "無", zh_date(spec.payments[0]))]
+        ),
     )
     assert rule(r, "schedule.autocall_dates")[0].status == S.MISMATCH
 
@@ -321,9 +323,9 @@ def test_old_template_is_not_recognised(tmp_path):
 
 def test_ms_and_other_issuers_are_never_confused(tmp_path):
     """MS 說明書只符合 MS 範本；BARC、HSBC 說明書也不符合 MS 範本（檔名上手編號故意給錯）。"""
-    ms = build_pdf(tmp_path / "029199990004_TS.pdf", Spec(code="029199990004"))
+    ms = build_pdf(tmp_path / "029199990004_TS.pdf", Spec(product_code="029199990004"))
     barc = synth.build_pdf(tmp_path / "147199990002_TS.pdf", synth.Spec(product_code="147199990002"))
-    hsbc = hsbc_synth.build_pdf(tmp_path / "147199990003_TS.pdf", hsbc_synth.Spec(code="147199990003"))
+    hsbc = hsbc_synth.build_pdf(tmp_path / "147199990003_TS.pdf", hsbc_synth.Spec(product_code="147199990003"))
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(Spec())])
     outcome = check_all(sheet, [ms, barc, hsbc])
     detected = {
@@ -342,7 +344,7 @@ def test_ms_and_other_issuers_are_never_confused(tmp_path):
 def test_ms_term_sheet_is_filled_when_the_investor_sheet_passes_too(tmp_path):
     """MS 投資人須知已有範本（Issue #137）：兩份都通過才回填；投資人須知的各檢查點見 test_iis_ms.py。"""
     spec = Spec()
-    pdf = build_pdf(tmp_path / f"{spec.code}_TS.pdf", spec)
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     outcome = check_all(sheet, [pdf])
     ts, iis = sorted(outcome.items, key=lambda i: i.term_sheet.name.endswith("_IIS.pdf"))

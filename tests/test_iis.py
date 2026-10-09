@@ -18,8 +18,8 @@ from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
 from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, iis_path, with_iis
-from reference_synth import build_reference_sheet
-from synth import Spec, barc_adapter, build_iis_pdf, build_pdf, reference_row
+from reference_synth import build_reference_sheet, reference_row
+from synth import Spec, barc_adapter, build_iis_pdf, build_pdf
 
 PASS, MISMATCH, REVIEW = CheckStatus.PASS, CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
@@ -92,8 +92,8 @@ def test_consistent_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tmp_pat
 
 def test_hsbc_term_sheet_and_iis_pass_together(tmp_path):
     s = hsbc_synth.Spec()
-    ts = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
+    ts = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     outcome, receipt = run_batch(CONFIG, sheet, with_iis([ts]), tmp_path / "reports", root=tmp_path, now=NOW)
 
     item, iis = outcome.items
@@ -124,9 +124,9 @@ def test_iis_must_have_exactly_four_pages(tmp_path, pages):
 
 def test_hsbc_page_header_total_must_match_the_pages(tmp_path):
     s = hsbc_synth.Spec()
-    ts = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s, iis=False)
+    ts = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, iis=False)
     iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, page_total=5)
-    sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
+    sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     _, item = check_all(sheet, [ts, iis]).items
     assert problems(item) == ["頁首總頁數：頁首寫「共 5 頁」，實際 4 頁"]
 
@@ -296,13 +296,13 @@ def test_iis_fee_differs_from_the_review_standard(tmp_path):
 
 def test_hsbc_iis_forbidden_wording_and_print_date(tmp_path):
     s = hsbc_synth.Spec()
-    ts = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s, iis=False)
+    ts = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, iis=False)
     replace = {
         "四、本商品雖經": "四、受託或銷售機構將為投資人受託投資本商品。本商品雖經",
         "2030 年1 月7 日": "2030 年1 月9 日",
     }
     iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, replace=replace)
-    sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
+    sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     _, item = check_all(sheet, [ts, iis]).items
     messages = problems(item)
     assert any(m.startswith("禁用語「受託投資」：允許片語以外出現「受託投資」1 處") for m in messages), messages

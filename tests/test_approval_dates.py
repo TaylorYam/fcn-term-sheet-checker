@@ -16,8 +16,8 @@ from fcn_checker.config import load_review_standard
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel_workflow import PanelSession
 from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, ROOT, check_sheet, load_config, results
-from reference_synth import build_reference_sheet
-from synth import Spec, build_pdf, reference_row
+from reference_synth import build_reference_sheet, reference_row
+from synth import Spec, build_pdf
 
 TODAY = dt.date(2031, 3, 4)
 D = dt.date

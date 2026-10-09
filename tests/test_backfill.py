@@ -16,8 +16,8 @@ from fcn_checker.ingestion import sha256_of
 from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.saving import save_batch
 from harness import CONFIG, MISMATCH, PASS, REVIEW, check_all, load_config, results
-from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
-from synth import Spec, build_pdf, reference_row
+from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet, reference_row
+from synth import Spec, build_pdf
 
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 

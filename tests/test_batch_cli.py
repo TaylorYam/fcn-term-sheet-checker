@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fcn_checker.cli import main
 from harness import cli_root, load_record, with_iis
-from reference_synth import build_reference_sheet
-from synth import Spec, build_pdf, reference_row
+from reference_synth import build_reference_sheet, reference_row
+from synth import Spec, build_pdf
 
 
 def run(tmp_path, monkeypatch, capsys, specs, rows, extra=()):

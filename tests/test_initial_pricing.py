@@ -14,8 +14,8 @@ import pytest
 from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.saving import run_batch, save_batch
 from harness import CONFIG, check_all, load_record, with_iis
-from reference_synth import REFERENCE_HEADERS, build_reference_sheet
-from synth import Spec, build_pdf, reference_row
+from reference_synth import REFERENCE_HEADERS, build_reference_sheet, reference_row
+from synth import Spec, build_pdf
 from test_batch import row_of
 
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)

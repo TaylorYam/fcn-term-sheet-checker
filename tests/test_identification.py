@@ -16,8 +16,8 @@ from fcn_checker.orders.reference import load_reference_sheet
 from fcn_checker.result_file import ErrorRow
 from fcn_checker.schema import CheckStatus, DocKind
 from harness import CONFIG, iis_path, with_iis
-from reference_synth import build_reference_sheet
-from synth import Spec, build_iis_pdf, build_pdf, reference_row
+from reference_synth import build_reference_sheet, reference_row
+from synth import Spec, build_iis_pdf, build_pdf
 
 PASS, REVIEW = CheckStatus.PASS, CheckStatus.REVIEW_REQUIRED
 TS, IIS = DocKind.TERM_SHEET, DocKind.IIS

@@ -22,8 +22,8 @@ from fcn_checker.issuers import BARC
 from fcn_checker.saving import run_batch, save_batch
 from fcn_checker.schema import CheckStatus, DetectionResult
 from harness import CONFIG, ISSUER_PREFIXES, REVIEW_STANDARD, check_all, load_config, with_iis
-from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
-from synth import SYNTH_ISIN, Spec, barc_adapter, build_iis_pdf, build_pdf, reference_row, schedule_rows
+from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet, reference_row
+from synth import SYNTH_ISIN, Spec, barc_adapter, build_iis_pdf, build_pdf, schedule_rows
 
 PASS, MISMATCH, REVIEW, ERROR = (
     CheckStatus.PASS,

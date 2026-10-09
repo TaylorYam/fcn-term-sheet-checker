@@ -13,8 +13,8 @@ from fcn_checker.cli import main
 from fcn_checker.issuers import BARC
 from fcn_checker.schema import CheckStatus
 from harness import CONFIG, REVIEW_STANDARD, check_all, cli_root, load_config, load_record, with_iis
-from reference_synth import build_reference_sheet
-from synth import Spec, barc_adapter, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
+from reference_synth import build_reference_sheet, reference_row
+from synth import Spec, barc_adapter, build_not_barc_pdf, build_pdf, check, check_pdf
 
 PASS, REVIEW = CheckStatus.PASS, CheckStatus.REVIEW_REQUIRED
 
@@ -109,8 +109,8 @@ def _check_withholding(tmp_path, names, *, raises=False, issuer="BARC", issuer_r
         sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
     else:
         s = hsbc_synth.Spec()
-        pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-        sheet = hsbc_synth.build_inquiry(tmp_path / "ref.xlsx", s)
+        pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+        sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(s)])
     return check_all(sheet, [pdf], CONFIG.with_registry((adapter,))).items[0].report
 
 
