@@ -35,7 +35,7 @@ from .ingestion import IngestionError
 from .orders.reference import ReferenceRow
 from .rules.kit import Context, doc_review, result
 from .rules.reference import PRICE_COLUMNS, is_vwap, standard_field
-from .schema import CheckReport, CheckResult, FieldStatus, Item, OrderValue, ParsedField
+from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
 from .schema import CheckStatus as S
 from .standard_fields import AutocallSchedule
 
@@ -253,7 +253,7 @@ def underlying_prices(
     """期初定價為 VWAP：UL_1～UL_5 的四個價格欄一律以說明書價格表覆寫。
 
     說明書價格表上有的標的寫說明書的值（無 KI 時下限價為空值寫法）；沒有的標的四欄都寫空值寫法。
-    說明書判定 KO 價不適用（MS Non-Call = 天期時沒有 KO 欄）時，價格表上有的標的 KO 價欄不動。
+    說明書沒有 KO 價（MS Non-Call = 天期時沒有 KO 欄）時 KO 價也寫空值寫法（2026-10-09 確認照此規則）。
     不是 VWAP 時沒有結果也沒有決策（價格欄由 `field.underlying_prices` 比對）。
     """
     if not is_vwap(ctx):
@@ -270,12 +270,9 @@ def underlying_prices(
     if not table.ok:
         return doc_review(rid, key, table, None, ovs, item=item), []
     decisions = []
-    ko_na = standard_field(ctx, "ko_pct").status == FieldStatus.NOT_APPLICABLE
     for i in range(1, n + 1):
         prices = table.value[i - 1].prices if i <= len(table.value) else {}
         for col, std, _ in PRICE_COLUMNS:
-            if col == "ko" and ko_na and i <= len(table.value):
-                continue
             d = _decide(fmt, row, f"underlying_{i}_{std}", prices.get(col, fmt.empty_value))
             if d.action == BackfillAction.MISMATCH:
                 d = replace(d, action=BackfillAction.OVERWRITE)

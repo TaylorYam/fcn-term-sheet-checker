@@ -69,6 +69,7 @@ class IssuerStandard:
     distributor_phone: str
     distributor_phone_equivalents: tuple[str, ...]  # 電話可接受的其他寫法（所有上手適用）
     distributor_address: str
+    distributor_address_equivalents: tuple[str, ...]  # 地址可接受的其他寫法（所有上手適用）
     iis_fixed_warning_occurrences: int | None  # 投資人須知的固定警語次數；None → 審查標準沒有該上手的值
 
 
@@ -97,6 +98,7 @@ class ReviewStandard:
     iis_fixed_warning_occurrences: dict[str, int]  # 上手代號（小寫）→ 固定警語在投資人須知出現的次數
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
     distributor_phone_equivalents: tuple[str, ...] = ()
+    distributor_address_equivalents: tuple[str, ...] = ()
     fixed_warning_openings: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 警語開頭句的其他寫法
     risk_level_formats: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 風險等級寫法
     issuer_name_ignore: dict[str, frozenset[str]] = field(default_factory=dict)  # 上手 → 全名比對另外忽略的差異
@@ -122,6 +124,7 @@ class ReviewStandard:
             distributor_phone=self.distributor_phone,
             distributor_phone_equivalents=self.distributor_phone_equivalents,
             distributor_address=self.distributor_address,
+            distributor_address_equivalents=self.distributor_address_equivalents,
             iis_fixed_warning_occurrences=self.iis_fixed_warning_occurrences.get(key),
         )
 
@@ -271,6 +274,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             distributor_name=d["distributor"]["name"],
             distributor_phone=d["distributor"]["phone"],
             distributor_phone_equivalents=tuple(d["distributor"].get("phone_equivalents", ())),
+            distributor_address_equivalents=tuple(d["distributor"].get("address_equivalents", ())),
             distributor_address=d["distributor"]["address"],
             issuer_names=dict(d["issuer_name"]),
             fees=dict(d["fees"]),

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import hsbc_synth
+import ms_synth
 from fcn_checker.ingestion import IngestionError
 from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, check_sheet, load_config, results
 from reference_synth import build_reference_sheet
@@ -155,4 +156,24 @@ def test_issuer_name_ignores_apply_only_to_the_configured_issuer(tmp_path):
     """BARC 沒有設定 issuer_name_ignore：第二章少了括號仍是不一致。"""
     plain = STD["issuer_name"]["barc"].replace("（", "").replace("）", "")
     r = results(check(tmp_path, Spec(issuer_ch2=plain)), "standard.issuer_name", "issuer_name_ch2")[0]
+    assert r.status == MISMATCH
+
+
+def test_address_form_not_listed_in_standard_is_mismatch(tmp_path):
+    """MS 第二章沒有「松山區」的地址靠審查標準 address_equivalents 才算相符；清單拿掉就判不一致。"""
+    variant = ms_synth.Spec(
+        replace=[("ch二", "◎ 營業所在地：台北市松山區民生東路三段158號6樓", "◎ 營業所在地：台北市民生東路三段158號6樓")]
+    )
+    r = results(
+        ms_synth.check(sub(tmp_path, "listed"), pdf_spec=variant), "standard.distributor", "distributor_address_ch2"
+    )[0]
+    assert r.status == PASS and "address_equivalents" in r.tolerance
+    standard = standard_with(
+        tmp_path, 'address_equivalents = ["台北市民生東路三段158號6樓"]', "address_equivalents = []"
+    )
+    r = results(
+        ms_synth.check(sub(tmp_path, "unlisted"), pdf_spec=variant, config=load_config(review_standard=standard)),
+        "standard.distributor",
+        "distributor_address_ch2",
+    )[0]
     assert r.status == MISMATCH
