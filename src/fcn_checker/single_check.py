@@ -108,9 +108,13 @@ class PairedIis:
     @classmethod
     def of(cls, ident: Identification) -> PairedIis | None:
         """配對成功的投資人須知；同商品說明書配對成功（規則有跑）才拿它的讀出結果來比對。"""
-        if ident.adapter is None or ident.investor_sheet is None or ident.row is None or ident.pages is None:
-            return None
-        if not ident.checked:
+        if (
+            ident.adapter is None
+            or ident.investor_sheet is None
+            or ident.row is None
+            or ident.pages is None
+            or not ident.checked
+        ):
             return None
         partner = ident.partner
         term_sheet = partner.term_sheet if partner is not None and partner.checked else None

@@ -117,7 +117,7 @@ class Identification:
 
 
 # 辨識與配對結果的項目：只寫說明，不附雙方值
-ISSUER_ITEM, PRODUCT_CODE_ITEM, FILE_NAME_ITEM = Item.note("上手"), Item.note("商品代號"), Item.note("檔名")
+_ISSUER_ITEM, _PRODUCT_CODE_ITEM, _FILE_NAME_ITEM = Item.note("上手"), Item.note("商品代號"), Item.note("檔名")
 
 
 def unexpected_result(e: Exception, kind: DocKind | None) -> CheckResult:
@@ -184,7 +184,7 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
         need = "「<12 位商品代號>_TS」（說明書）或「<12 位商品代號>_IIS」（投資人須知）"
         msg = f"檔名須為{need}，無法辨識；請修正檔名後重新載入"
         problem = PairingProblem.NAME_UNRECOGNIZED
-        return out.stop(problem, _review("batch.file_name", "file_name", FILE_NAME_ITEM, problem, msg))
+        return out.stop(problem, _review("batch.file_name", "file_name", _FILE_NAME_ITEM, problem, msg))
     what = out.kind.value
     try:
         doc = open_pdf(pdf)
@@ -201,13 +201,13 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
     if out.issuer is None:
         msg = f"檔名上手編號「{prefix}」不在上手編號對照表，未支援上手"
         problem = PairingProblem.UNSUPPORTED
-        return out.stop(problem, _review("batch.issuer_prefix", "issuer", ISSUER_ITEM, problem, msg))
+        return out.stop(problem, _review("batch.issuer_prefix", "issuer", _ISSUER_ITEM, problem, msg))
     issuer = by_code(out.issuer, registry)
     if issuer is None or (out.kind == DocKind.IIS and issuer.iis is None):
         code = out.issuer
         msg = f"上手編號 {prefix} 對應 {code}，但 {code} 還沒有{what}範本，未支援上手"
         problem = PairingProblem.UNSUPPORTED
-        return out.stop(problem, _review("batch.issuer_prefix", "issuer", ISSUER_ITEM, problem, msg))
+        return out.stop(problem, _review("batch.issuer_prefix", "issuer", _ISSUER_ITEM, problem, msg))
 
     detected, template_result = (detect if out.kind == DocKind.TERM_SHEET else detect_iis)(lines, registry)
     if detected is None:  # 範本不符或多重命中：原因碼就是配對問題的值
@@ -216,7 +216,7 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
     if detected is not issuer:
         problem = PairingProblem.PREFIX_MISMATCH
         msg = f"檔名上手編號 {prefix} 對應 {issuer.code}，但{what}內容是 {detected.code} 範本，可能檔名取錯或檔案放錯"
-        return out.stop(problem, _review("batch.issuer_prefix", "issuer", ISSUER_ITEM, problem, msg, detected.code))
+        return out.stop(problem, _review("batch.issuer_prefix", "issuer", _ISSUER_ITEM, problem, msg, detected.code))
     out.adapter = issuer
     try:
         if issuer.iis is not None and out.kind == DocKind.IIS:
@@ -232,27 +232,27 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
         pc = out.product_code = read_standard(out.term_sheet, "product_code")
         if not pc.ok:
             problem = PairingProblem.PRODUCT_CODE_UNREADABLE
-            return out.stop(problem, doc_review("batch.pairing", "product_code", pc, item=PRODUCT_CODE_ITEM))
+            return out.stop(problem, doc_review("batch.pairing", "product_code", pc, item=_PRODUCT_CODE_ITEM))
         if not str(pc.value).startswith(prefix):
             problem = PairingProblem.PREFIX_MISMATCH
             msg = f"說明書商品代號 {pc.value} 的前三碼與檔名上手編號 {prefix} 不同"
-            r = _review("batch.issuer_prefix", "product_code", PRODUCT_CODE_ITEM, problem, msg, actual=pc.value)
+            r = _review("batch.issuer_prefix", "product_code", _PRODUCT_CODE_ITEM, problem, msg, actual=pc.value)
             return out.stop(problem, r)
         if pc.value != file_code(pdf):  # 同商品的兩份以檔名的商品代號配成一組，說明書檔名不能和封面不同
             problem = PairingProblem.CODE_MISMATCH
             msg = f"說明書封面商品代號 {pc.value} 與檔名的商品代號 {file_code(pdf)} 不同，可能檔名取錯或檔案放錯"
-            r = _review("batch.file_name", "product_code", PRODUCT_CODE_ITEM, problem, msg, actual=pc.value)
+            r = _review("batch.file_name", "product_code", _PRODUCT_CODE_ITEM, problem, msg, actual=pc.value)
             return out.stop(problem, r)
 
     rows = sheet.find(pc.value)
     if not rows:
         problem = PairingProblem.ROW_MISSING
         msg = f"參考條件表找不到 TDCC Code {pc.value} 的列"
-        return out.stop(problem, _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, problem, msg))
+        return out.stop(problem, _review("batch.pairing", "product_code", _PRODUCT_CODE_ITEM, problem, msg))
     if len(rows) > 1:
         problem = PairingProblem.ROW_DUPLICATE
         msg = f"參考條件表有 {len(rows)} 列 TDCC Code 為 {pc.value}"
-        r = _review("batch.pairing", "product_code", PRODUCT_CODE_ITEM, problem, msg)
+        r = _review("batch.pairing", "product_code", _PRODUCT_CODE_ITEM, problem, msg)
         r.order_source = [x.product_code.source for x in rows]
         return out.stop(problem, r)
     row = rows[0]
@@ -262,7 +262,7 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
         r = _review(
             "batch.pairing",
             "issuer",
-            ISSUER_ITEM,
+            _ISSUER_ITEM,
             problem,
             f"參考條件表該列發行機構是「{row.issuer.value}」，{issuer.code} 應為「{expected_issuer}」",
             actual=row.issuer.value,
@@ -295,12 +295,12 @@ def _group(drafts: Sequence[_Draft]) -> None:
 
     同一商品有多份同種文件 → 對到列的全部多份對到同一列；只有一種文件且已對到列 → 那一份缺另一份。
     """
-    by_code: dict[str, list[_Draft]] = {}
+    groups: dict[str, list[_Draft]] = {}  # 檔名的商品代號 → 同商品的文件
     for found in drafts:
         code = file_code(found.pdf)
         if found.kind is not None and code is not None:
-            by_code.setdefault(code, []).append(found)
-    for group in by_code.values():
+            groups.setdefault(code, []).append(found)
+    for group in groups.values():
         kinds = [f.kind for f in group]
         duplicated = [k for k in DocKind if kinds.count(k) > 1]
         if duplicated:
@@ -333,7 +333,7 @@ def _pairing(d: _Draft) -> CheckResult:
         message=message,
         document_evidence=pc.evidence,
         order_source=[row.product_code.source],
-        item=PRODUCT_CODE_ITEM,
+        item=_PRODUCT_CODE_ITEM,
     )
 
 
