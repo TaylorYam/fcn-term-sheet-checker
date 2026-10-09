@@ -13,7 +13,7 @@ from fcn_checker.rules import barc, reference
 from fcn_checker.rules.kit import Check
 from fcn_checker.rules.review_standard import review_standard_rules
 from fcn_checker.schema import Item, ParsedField
-from harness import MISMATCH, NA, PASS, REVIEW
+from harness import CONFIG, MISMATCH, NA, PASS, REVIEW
 from rule_fixtures import context, issuer_context, term_sheet
 
 # ---------------------------------------------------------------- 參考條件表欄位：KI %
@@ -54,25 +54,28 @@ def test_ki_pct_pass_shows_the_rounded_sheet_value():
 # ---------------------------------------------------------------- 審查標準：負責人
 
 
+CHAIRMAN = CONFIG.review_standard.chairman
+
+
 def _chairman(ts):
     [r] = [r for r in review_standard_rules(context(ts)) if r.rule_id == "standard.chairman"]
     return r
 
 
 def test_chairman_matches_the_review_standard():
-    r = _chairman(term_sheet(chairman="林晋輝"))
-    assert (r.status, r.expected, r.actual, r.message) == (PASS, "林晋輝", "林晋輝", "")
+    r = _chairman(term_sheet(chairman=CHAIRMAN))
+    assert (r.status, r.expected, r.actual, r.message) == (PASS, CHAIRMAN, CHAIRMAN, "")
 
 
 def test_chairman_mismatch_spells_out_the_codepoints():
-    r = _chairman(term_sheet(chairman="林晉輝"))
+    r = _chairman(term_sheet(chairman=CHAIRMAN + "（代理）"))
     assert (r.status, r.reason_code) == (MISMATCH, "value_mismatch")
     assert "U+" in r.message and r.item.name == "受託機構負責人"
 
 
 def test_chairman_unreadable_is_review_with_the_standard_shown():
     r = _chairman(term_sheet())
-    assert (r.status, r.reason_code, r.expected) == (REVIEW, "document_missing", "林晋輝")
+    assert (r.status, r.reason_code, r.expected) == (REVIEW, "document_missing", CHAIRMAN)
     assert r.message.startswith("說明書抓不到此欄位")
 
 

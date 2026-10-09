@@ -203,8 +203,6 @@ def ko_observation(ctx: Context) -> CheckResult:
     if problem:
         return problem
     check = _column(ctx, rid, key, name, ov, mapped).needs(pf)
-    if (problem := check.blocked) is not None:
-        return problem
     return check.compare(f"{ov.value}（{OBS_LABEL[mapped]}）", OBS_LABEL.get(pf.value, pf.value), ok=mapped == pf.value)
 
 
@@ -214,8 +212,6 @@ def ko_memory(ctx: Context) -> CheckResult:
     if problem:
         return problem
     check = _column(ctx, rid, key, name, ov, mapped).needs(pf)
-    if (problem := check.blocked) is not None:
-        return problem
 
     def label(m: bool) -> str:
         return "記憶式" if m else "非記憶式"

@@ -176,16 +176,9 @@ class Check:
     ov: tuple[OrderValue | None, ...] = ()
     expected: Any = None
 
-    def needs(
-        self, *deps: ParsedField, ov: Sequence[OrderValue | None] | None = None, expected: Any = MISSING
-    ) -> Check:
-        """掛上依賴的欄位（依序），可一併給參考條件表來源與人工覆核時顯示的預期值。"""
-        return replace(
-            self,
-            deps=(*self.deps, *deps),
-            ov=self.ov if ov is None else tuple(ov),
-            expected=self.expected if expected is MISSING else expected,
-        )
+    def needs(self, *deps: ParsedField) -> Check:
+        """掛上依賴的欄位（依序；第一個有問題的決定人工覆核的原因）。"""
+        return replace(self, deps=(*self.deps, *deps))
 
     @property
     def blocked(self) -> CheckResult | None:
@@ -275,7 +268,8 @@ class Check:
 
 
 def result(rule_id: str, field: str, status: S, *, item: Item, **detail: Any) -> CheckResult:
-    """`Check(...).result(...)` 的捷徑（測試與舊呼叫用）：`detail` 同 `Check.result`，另可帶 `ov`、`pf`（證據來源）、`document`。"""
+    """`Check(...).result(...)` 的捷徑，給結果身分只用一次的呼叫端（backfill、batch、測試）：`detail` 同 `Check.result`，
+    另可帶 `ov`、`pf`（證據來源）、`document`。規則檔一律直接用 `Check`。"""
     pf = detail.pop("pf", None)
     if pf is not None and detail.get("evidence") is None:
         detail["evidence"] = pf.evidence
@@ -302,7 +296,7 @@ def doc_review(
     item: Item,
     document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    """`Check(...).review(pf)` 的捷徑：被核對文件的欄位讀不到、歧義或不合法，轉人工覆核。"""
+    """`Check(...).review(pf)` 的捷徑（結果身分只用一次的呼叫端）：被核對文件的欄位讀不到、歧義或不合法，轉人工覆核。"""
     return Check(rule_id, field, item, document, ov=tuple(ov or ()), expected=expected).review(pf)
 
 

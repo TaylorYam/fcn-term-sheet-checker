@@ -22,10 +22,12 @@ def redemption_start(ctx: IisIssuerContext) -> CheckResult:
     if (problem := check.blocked) is not None:
         return problem
     if ctx.term_sheet is None:
-        return ts_unavailable(rid, "redemption_start", name, NO_TERM_SHEET, pf.value)
+        return ts_unavailable(rid, "redemption_start", name, NO_TERM_SHEET, pf.value, document=ctx.document)
     expected = ctx.term_sheet.f("redemption_start")
     if not expected.ok:
-        return ts_unavailable(rid, "redemption_start", name, f"同商品說明書讀不到「{name}」，無法比對", pf.value)
+        return ts_unavailable(
+            rid, "redemption_start", name, f"同商品說明書讀不到「{name}」，無法比對", pf.value, document=ctx.document
+        )
     return check.compare(expected.value, pf.value)
 
 

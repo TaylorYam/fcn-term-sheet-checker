@@ -123,7 +123,14 @@ def _prices(ctx: Context) -> list[CheckResult]:
                 item = Item.term_sheet(name)
                 if why or i > len(ts_rows) or col not in ts_rows[i - 1].prices:
                     out.append(
-                        ts_unavailable(rid, field, name, why or "同商品說明書價格表沒有對應的價格，無法比對", doc_v)
+                        ts_unavailable(
+                            rid,
+                            field,
+                            name,
+                            why or "同商品說明書價格表沒有對應的價格，無法比對",
+                            doc_v,
+                            document=ctx.document,
+                        )
                     )
                     continue
                 expected = ts_rows[i - 1].prices[col]
@@ -211,7 +218,7 @@ def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
         expected = None if why else schedule.dates.get(k.value)
         if expected is None:
             why = why or f"同商品說明書提前出場排程沒有第 {k.value} 期，無法比對"
-            out = [ts_unavailable(rid, "ko_observation_start", "KO 觀察起日", why, start.value)]
+            out = [ts_unavailable(rid, "ko_observation_start", "KO 觀察起日", why, start.value, document=ctx.document)]
         else:
             out = [
                 check.needs(start).compare(
@@ -283,9 +290,11 @@ def _term_sheet_field(ctx: Context, name: str, label: str) -> Found:
     return pf.value, None
 
 
-def ts_unavailable(rid: str, field: str, name: str, why: str, actual: Any) -> CheckResult:
+def ts_unavailable(
+    rid: str, field: str, name: str, why: str, actual: Any, *, document: DocKind = DocKind.IIS
+) -> CheckResult:
     """同商品說明書沒有可比對的值：轉人工覆核，說明原因（上手投資人須知專屬規則也用）。"""
-    return Check(rid, field, Item.term_sheet(name)).result(
+    return Check(rid, field, Item.term_sheet(name), document).result(
         S.REVIEW_REQUIRED, actual=actual, reason="term_sheet_unavailable", message=why
     )
 
@@ -305,7 +314,7 @@ def _vs_term_sheet(
         return problem
     expected, why = found
     if why:
-        return ts_unavailable(rid, field, name, why, pf.value)
+        return ts_unavailable(rid, field, name, why, pf.value, document=ctx.document)
     return check.compare(expected, pf.value, ok=normalize(expected) == normalize(pf.value), tolerance=tolerance)
 
 

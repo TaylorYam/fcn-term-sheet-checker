@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
@@ -82,8 +83,14 @@ def schedules(ctx):
                 valid &= row["start"] == kit.next_weekday(rows[i - 1]["end"]) and row["nt"] is not None
                 valid &= row["start"] is not None and row["start"] <= row["end"]
         out.append(
-            Check("schedule.autocall_dates", "daily", Item.expected("期間每日觀察的提前出場表"), ctx.document)
-            .needs(c, first, final, expected=final.value)
+            Check(
+                "schedule.autocall_dates",
+                "daily",
+                Item.expected("期間每日觀察的提前出場表"),
+                ctx.document,
+                expected=final.value,
+            )
+            .needs(c, first, final)
             .compare(final.value, rows[-1]["end"], ok=valid and final.ok and rows[-1]["end"] == final.value)
         )
     else:
@@ -100,8 +107,14 @@ def schedules(ctx):
         valid &= mapped == list(range(first.value, len(rows) + 1))
         valid &= all(a["decision"] < b["decision"] for a, b in zip(ko.value, ko.value[1:], strict=False))
         out.append(
-            Check("schedule.autocall_dates", "periodic", Item.expected("定期觀察的提前出場表"), ctx.document)
-            .needs(c, ko, first, final, expected=final.value)
+            Check(
+                "schedule.autocall_dates",
+                "periodic",
+                Item.expected("定期觀察的提前出場表"),
+                ctx.document,
+                expected=final.value,
+            )
+            .needs(c, ko, first, final)
             .compare(
                 final.value, ko.value[-1]["decision"], ok=valid and final.ok and ko.value[-1]["decision"] == final.value
             )
@@ -130,7 +143,8 @@ def price_headers(ctx):
                 )
             )
             continue
-        out.append(header.needs(pf, pct, expected=pct.value).compare(pct.value, headers.get(col)))
+        header = replace(header, expected=pct.value).needs(pf, pct)
+        out.append(header.compare(pct.value, headers.get(col)))
     if not scenario.ok:
         out.append(
             Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document).review(scenario)
@@ -142,14 +156,20 @@ def price_headers(ctx):
 
         table, header = normalized(pf.value), normalized(scenario.value)
         out.append(
-            Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document)
-            .needs(pf, scenario, expected=table)
+            Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document, expected=table)
+            .needs(pf, scenario)
             .compare(table, header)
         )
         scenario_headers = scenario.value["headers"]
         out.append(
-            Check("doc.scenario_header_pct", "headers", Item.expected("情境試算價格表欄頭"), ctx.document)
-            .needs(pf, scenario, expected=headers)
+            Check(
+                "doc.scenario_header_pct",
+                "headers",
+                Item.expected("情境試算價格表欄頭"),
+                ctx.document,
+                expected=headers,
+            )
+            .needs(pf, scenario)
             .compare(headers, scenario_headers)
         )
     return out
@@ -160,8 +180,14 @@ def document_info(ctx):
     out = []
     cz, c5 = f("currency_zh"), f("currency_art5")
     out.append(
-        Check("doc.currency_consistency", "currency", Item.expected("第一章第 5 條計價幣別"), ctx.document)
-        .needs(cz, c5, expected=cz.value)
+        Check(
+            "doc.currency_consistency",
+            "currency",
+            Item.expected("第一章第 5 條計價幣別"),
+            ctx.document,
+            expected=cz.value,
+        )
+        .needs(cz, c5)
         .compare(cz.value, c5.value)
     )
 
@@ -179,8 +205,8 @@ def document_info(ctx):
         pf = f(key)
         actual = norm(pf.value) if pf.ok else None
         out.append(
-            Check("doc.name_consistency", key, Item.expected(name), ctx.document)
-            .needs(zh, en, pf, expected=expected)
+            Check("doc.name_consistency", key, Item.expected(name), ctx.document, expected=expected)
+            .needs(zh, en, pf)
             .compare(expected, actual)
         )
     return out

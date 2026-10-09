@@ -37,7 +37,6 @@ PRODUCT_TYPES = {  # 封面第 6 項商品種類：依標的數（範本規格 �
     True: "股票與/或指數股票型基金連結結構型債券",
 }
 START_GAP = dt.timedelta(days=4)  # D 型配息週期起始日最晚在前期終止日後 4 個日曆天（遇美國假日順延，工具沒有假日曆）
-INCONSISTENT = "document_inconsistent"  # 說明書內部寫法不一致、超出範本規格：轉人工覆核
 
 
 def _bad(deps: list[ParsedField]) -> ParsedField | None:
@@ -190,7 +189,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             table.value["type"] if table.ok else None,
             obs.value["type"] if obs.ok else None,
             fail=S.REVIEW_REQUIRED,
-            reason=INCONSISTENT,
+            reason="document_inconsistent",
             fail_message="第 14 項(6) 日期表型與第 17 項觀察日寫法不一致",
         )
     ]
@@ -200,7 +199,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             named.value,
             mem.value,
             fail=S.REVIEW_REQUIRED,
-            reason=INCONSISTENT,
+            reason="document_inconsistent",
             fail_message="商品名稱有無「（記憶式自動提前出場）」與第 17 項記憶事件寫法不一致",
         )
     )
@@ -210,7 +209,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             "有" if k.ok and tenor.ok and k.value < tenor.value else "無",
             "有" if pt.ok and "ko" in pt.value["columns"] else "無",
             fail=S.REVIEW_REQUIRED,
-            reason=INCONSISTENT,
+            reason="document_inconsistent",
             fail_message="第一個可提前出場期早於到期時價格表要有自動提前出場價欄，Non-Call = 天期時不會有",
         )
     )

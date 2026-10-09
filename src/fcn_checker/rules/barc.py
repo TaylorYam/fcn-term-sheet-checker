@@ -12,7 +12,7 @@ import datetime as dt
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..parsers.barc_schedule import NA, ScheduleRow, Table
-from ..schema import CheckResult, Evidence, Item
+from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from .kit import (
@@ -340,9 +340,22 @@ def _matches(expected: object, actual: object) -> bool:
     return _same_text(str(actual), str(expected)) if isinstance(expected, str) else actual == expected
 
 
-def _consistent(ctx: IssuerContext, rid: str, field: str, name: str) -> Check:
-    """文件內重複出現處的結果身分：預期值來自說明書其他位置，不一致的原因為 document_inconsistent。"""
-    return Check(rid, field, Item.expected(name), ctx.document)
+def _consistent(
+    ctx: IssuerContext,
+    rid: str,
+    field: str,
+    name: str,
+    pf: ParsedField,
+    ref: ParsedField,
+    expected: object,
+    message: str,
+) -> CheckResult:
+    """說明書某處（`pf`）的值須等於另一處（`ref`）推得的值（`expected`）；項目名稱為 `name`，不一致的原因為 document_inconsistent。"""
+    return (
+        Check(rid, field, Item.expected(name), ctx.document)
+        .needs(pf, ref)
+        .compare(expected, pf.value, ok=_matches(expected, pf.value), reason="document_inconsistent", message=message)
+    )
 
 
 def name_consistency(ctx: IssuerContext) -> list[CheckResult]:
@@ -351,73 +364,68 @@ def name_consistency(ctx: IssuerContext) -> list[CheckResult]:
     title_pf, art1_pf = ctx.ts.f("title_name"), ctx.ts.f("art1_name")
     # 括號先統一為全形，半形的「(下稱「本商品」)」也要去掉
     short = full_brackets(squash(cover.value)).replace(_NAME_SUFFIX, "") if cover.ok else None
-    title = (
-        _consistent(ctx, rid, "title_name", "封面標題商品名稱")
-        .needs(title_pf, cover)
-        .compare(
-            short,
-            title_pf.value,
-            ok=_matches(short, title_pf.value),
-            reason="document_inconsistent",
-            message="封面標題須等於封面「商品中文名稱」（去掉「（下稱「本商品」）」）",
-        )
+    title = _consistent(
+        ctx,
+        rid,
+        "title_name",
+        "封面標題商品名稱",
+        title_pf,
+        cover,
+        short,
+        "封面標題須等於封面「商品中文名稱」（去掉「（下稱「本商品」）」）",
     )
-    art1 = (
-        _consistent(ctx, rid, "art1_name", "第一章第 1 條商品名稱")
-        .needs(art1_pf, cover)
-        .compare(
-            cover.value,
-            art1_pf.value,
-            ok=_matches(cover.value, art1_pf.value),
-            reason="document_inconsistent",
-            message="第一章第 1 條商品名稱須等於封面「商品中文名稱」",
-        )
+    art1 = _consistent(
+        ctx,
+        rid,
+        "art1_name",
+        "第一章第 1 條商品名稱",
+        art1_pf,
+        cover,
+        cover.value,
+        "第一章第 1 條商品名稱須等於封面「商品中文名稱」",
     )
     return [title, art1]
 
 
 def distributor_product_code(ctx: IssuerContext) -> CheckResult:
     code, pf = ctx.ts.f("product_code"), ctx.ts.f("distributor_product_code")
-    return (
-        _consistent(ctx, "doc.distributor_product_code", "distributor_product_code", "受託或銷售機構商品代號")
-        .needs(pf, code)
-        .compare(
-            code.value,
-            pf.value,
-            ok=_matches(code.value, pf.value),
-            reason="document_inconsistent",
-            message="封面「受託或銷售機構商品代號」須等於「商品代號」",
-        )
+    return _consistent(
+        ctx,
+        "doc.distributor_product_code",
+        "distributor_product_code",
+        "受託或銷售機構商品代號",
+        pf,
+        code,
+        code.value,
+        "封面「受託或銷售機構商品代號」須等於「商品代號」",
     )
 
 
 def currency_consistency(ctx: IssuerContext) -> CheckResult:
     cz, pf = ctx.ts.f("currency_zh"), ctx.ts.f("art5_currency")
-    return (
-        _consistent(ctx, "doc.currency_consistency", "art5_currency", "第一章第 5 條計價幣別")
-        .needs(pf, cz)
-        .compare(
-            cz.value,
-            pf.value,
-            ok=_matches(cz.value, pf.value),
-            reason="document_inconsistent",
-            message="第一章第 5 條計價幣別須等於封面「計價幣別」",
-        )
+    return _consistent(
+        ctx,
+        "doc.currency_consistency",
+        "art5_currency",
+        "第一章第 5 條計價幣別",
+        pf,
+        cz,
+        cz.value,
+        "第一章第 5 條計價幣別須等於封面「計價幣別」",
     )
 
 
 def scenario_notional(ctx: IssuerContext) -> CheckResult:
     denom, pf = ctx.ts.f("denomination"), ctx.ts.f("scenario_notional")
-    return (
-        _consistent(ctx, "doc.scenario_notional", "scenario_notional", "情境假設每單位面額")
-        .needs(pf, denom)
-        .compare(
-            denom.value,
-            pf.value,
-            ok=_matches(denom.value, pf.value),
-            reason="document_inconsistent",
-            message="第 16 條情境假設的每單位商品面額須等於第 6 條面額",
-        )
+    return _consistent(
+        ctx,
+        "doc.scenario_notional",
+        "scenario_notional",
+        "情境假設每單位面額",
+        pf,
+        denom,
+        denom.value,
+        "第 16 條情境假設的每單位商品面額須等於第 6 條面額",
     )
 
 

@@ -424,6 +424,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
     for field in ("name_zh", "name_en"):
         pf = standard_field(ctx, field)
         check = Check(rid, field, items[field], ctx.document).needs(pf)
+        # 組名稱要四個欄位都讀得到；結果的證據只掛名稱那一欄，守門時才把其他三個暫掛上去
         if (problem := check.needs(tenor, cz, mem).blocked) is not None:
             out.append(problem)
             continue
