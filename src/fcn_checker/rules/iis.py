@@ -26,14 +26,13 @@ from ..text import full_brackets, squash
 from . import reference
 from .kit import (
     Q4,
+    Check,
     Context,
     cmp_pct,
-    doc_review,
     order_review,
     order_value,
     price_item,
     read_standard,
-    result,
     to_date,
     to_decimal,
     to_int,
@@ -59,62 +58,35 @@ class IisIssuerContext:
 
 def pages(ctx: Context) -> CheckResult:
     expected, actual = ctx.std.iis_pages, ctx.pages
-    ok = actual == expected
-    return result(
-        "iis.pages",
-        "pages",
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=actual,
-        reason="" if ok else "value_mismatch",
-        message=f"預期 {expected} 頁／實際 {actual} 頁",
-        item=Item.standard("投資人須知頁數"),
+    return Check("iis.pages", "pages", Item.standard("投資人須知頁數"), ctx.document).compare(
+        expected, actual, message=f"預期 {expected} 頁／實際 {actual} 頁"
     )
 
 
 def page_totals(ctx: Context) -> CheckResult:
     rid, pf, item = "iis.page_totals", read_iis(ctx.iis, "page_totals"), Item.expected("頁首總頁數")
-    if not pf.ok:
-        return doc_review(rid, "page_totals", pf, ctx.pages, item=item, document=ctx.document)
+    check = Check(rid, "page_totals", item, ctx.document, expected=ctx.pages).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     bad = sorted({m for m in pf.value if m != ctx.pages})
-    return result(
-        rid,
-        "page_totals",
-        S.MISMATCH if bad else S.PASS,
-        expected=ctx.pages,
-        actual=bad or ctx.pages,
-        pf=pf,
-        reason="value_mismatch" if bad else "",
-        message=f"頁首寫「共 {'、'.join(map(str, bad))} 頁」，實際 {ctx.pages} 頁" if bad else "",
-        item=item,
+    return check.compare(
+        ctx.pages,
+        bad or ctx.pages,
+        ok=not bad,
+        fail_message=f"頁首寫「共 {'、'.join(map(str, bad))} 頁」，實際 {ctx.pages} 頁",
     )
 
 
 def product_codes(ctx: Context) -> list[CheckResult]:
     rid, container = "iis.product_code", read_iis(ctx.iis, "product_codes")
     if not container.ok:
-        return [doc_review(rid, "product_codes", container, item=Item.expected("封面商品代號"), document=ctx.document)]
-    out = []
-    for occ in container.value:
-        pf, item = occ.value, Item.expected(occ.name)
-        if not pf.ok:
-            out.append(doc_review(rid, occ.field, pf, ctx.file_code, item=item, document=ctx.document))
-            continue
-        ok = pf.value == ctx.file_code
-        out.append(
-            result(
-                rid,
-                occ.field,
-                S.PASS if ok else S.MISMATCH,
-                expected=ctx.file_code,
-                actual=pf.value,
-                pf=pf,
-                reason="" if ok else "value_mismatch",
-                message="" if ok else f"{occ.where}與檔名前 12 碼不同，可能放錯檔案",
-                item=item,
-            )
-        )
-    return out
+        return [Check(rid, "product_codes", Item.expected("封面商品代號"), ctx.document).review(container)]
+    return [
+        Check(rid, occ.field, Item.expected(occ.name), ctx.document, expected=ctx.file_code)
+        .needs(occ.value)
+        .compare(ctx.file_code, occ.value.value, fail_message=f"{occ.where}與檔名前 12 碼不同，可能放錯檔案")
+        for occ in container.value
+    ]
 
 
 # ---------------------------------------------------------------- 參考條件表
@@ -123,21 +95,18 @@ def product_codes(ctx: Context) -> list[CheckResult]:
 def _prices(ctx: Context) -> list[CheckResult]:
     """各標的期初價格、執行價、KO 價：表上值四捨五入到 4 位後相等；VWAP 時改和說明書價格表同一列比。"""
     rid, rows = "iis.underlying_prices", read_iis(ctx.iis, "underlying_prices")
+    table = Check(rid, "price_table", Item.sheet("價格表"), ctx.document)
     if not rows.ok:
-        return [doc_review(rid, "price_table", rows, item=Item.sheet("價格表"), document=ctx.document)]
+        return [table.review(rows)]
     uls = read_iis(ctx.iis, "underlyings")
     if uls.ok and len(uls.value) != len(rows.value):
         return [
-            result(
-                rid,
-                "price_table",
+            table.needs(rows).result(
                 S.REVIEW_REQUIRED,
                 expected=len(uls.value),
                 actual=len(rows.value),
-                pf=rows,
                 reason="document_inconsistent",
                 message=f"價格表有 {len(rows.value)} 列，連結標的資產有 {len(uls.value)} 檔",
-                item=Item.sheet("價格表"),
             )
         ]
     vwap = reference.is_vwap(ctx)
@@ -171,18 +140,9 @@ def _prices(ctx: Context) -> list[CheckResult]:
                     continue
                 item = Item.column(name, [ov])
                 expected = to_decimal(ov.value).quantize(Q4, ROUND_HALF_UP)
-            ok = expected == doc_v
             out.append(
-                result(
-                    rid,
-                    field,
-                    S.PASS if ok else S.MISMATCH,
-                    expected=expected,
-                    actual=doc_v,
-                    evidence=ev,
-                    reason="" if ok else "value_mismatch",
-                    tolerance=None if vwap else "表上值四捨五入（half-up）到 4 位",
-                    item=item,
+                Check(rid, field, item, ctx.document).compare(
+                    expected, doc_v, evidence=ev, tolerance=None if vwap else "表上值四捨五入（half-up）到 4 位"
                 )
             )
     return out
@@ -196,60 +156,36 @@ def _monthly_coupon(ctx: Context) -> CheckResult:
     )
     if problem:
         return problem
-    item = Item.derived("月配息率", [ov])
-    if not pf.ok:
-        return doc_review(rid, "monthly_coupon_pct", pf, item=item, document=ctx.document)
+    check = Check(rid, "monthly_coupon_pct", Item.derived("月配息率", [ov]), ctx.document, ov=(ov,)).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     expected = (annual / 12).quantize(Q4, ROUND_HALF_UP)
     ok = abs(expected - pf.value) <= MONTHLY_TOLERANCE
-    return result(
-        rid,
-        "monthly_coupon_pct",
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        tolerance=f"差 ≤ {MONTHLY_TOLERANCE}",
-        message="須等於年利率 ÷ 12",
-        item=item,
-    )
+    return check.compare(expected, pf.value, ok=ok, tolerance=f"差 ≤ {MONTHLY_TOLERANCE}", message="須等於年利率 ÷ 12")
 
 
 def _monthly_coupons(ctx: Context) -> list[CheckResult]:
     """月配息率的每一處（MS）= 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位後相等（同 MS 說明書 §3.3）。"""
     rid, container = "iis.monthly_coupon", read_iis(ctx.iis, "monthly_coupons")
     if not container.ok:
-        return [doc_review(rid, "monthly_coupons", container, item=Item.expected("月配息率"), document=ctx.document)]
+        return [Check(rid, "monthly_coupons", Item.expected("月配息率"), ctx.document).review(container)]
     annual, ov, problem = order_value(
         ctx, "coupon_pa_pct", rid, "monthly_coupons", None, to_decimal, "數字", name="月配息率"
     )
     if problem:
         return [problem]
     expected = (annual / 12).quantize(Q4, ROUND_HALF_UP)
-    out = []
-    for occ in container.value:
-        pf, item = occ.value, Item.derived(occ.name, [ov])
-        if not pf.ok:
-            out.append(doc_review(rid, occ.field, pf, item=item, document=ctx.document))
-            continue
-        ok = expected == pf.value
-        out.append(
-            result(
-                rid,
-                occ.field,
-                S.PASS if ok else S.MISMATCH,
-                expected=expected,
-                actual=pf.value,
-                pf=pf,
-                ov=[ov],
-                reason="" if ok else "value_mismatch",
-                tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位",
-                message=f"{occ.where}須等於年利率 ÷ 12",
-                item=item,
-            )
+    return [
+        Check(rid, occ.field, Item.derived(occ.name, [ov]), ctx.document, ov=(ov,))
+        .needs(occ.value)
+        .compare(
+            expected,
+            occ.value.value,
+            tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位",
+            message=f"{occ.where}須等於年利率 ÷ 12",
         )
-    return out
+        for occ in container.value
+    ]
 
 
 def _first_callable(ctx: Context) -> CheckResult:
@@ -259,31 +195,17 @@ def _first_callable(ctx: Context) -> CheckResult:
     v, ov, problem = order_value(ctx, key, rid, key, pf, to_int, "整數", name=name)
     if problem:
         return problem
-    item = Item.column(name, [ov])
-    if not pf.ok:
-        return doc_review(rid, key, pf, v, [ov], item=item, document=ctx.document)
-    ok = v == pf.value
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=v,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）",
-        item=item,
-    )
+    check = Check(rid, key, Item.column(name, [ov]), ctx.document, ov=(ov,), expected=v).needs(pf)
+    return check.compare(v, pf.value, message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）")
 
 
 def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
     """期間每日觀察的觀察起日 = 同商品說明書提前出場排程第 k 期的比價日（k 取投資人須知）；迄日 = 參考條件表最終比價日。"""
     rid = "iis.ko_observation_dates"
     start, k = read_iis(ctx.iis, "ko_observation_start"), read_iis(ctx.iis, "first_callable_period")
-    item = Item.term_sheet("KO 觀察起日")
+    check = Check(rid, "ko_observation_start", Item.term_sheet("KO 觀察起日"), ctx.document)
     if not (start.ok and k.ok):
-        out = [doc_review(rid, "ko_observation_start", start if not start.ok else k, item=item, document=ctx.document)]
+        out = [check.review(start if not start.ok else k)]
     else:
         schedule, why = _term_sheet_field(ctx, "autocall_schedule", "提前出場排程")
         expected = None if why else schedule.dates.get(k.value)
@@ -291,18 +213,11 @@ def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
             why = why or f"同商品說明書提前出場排程沒有第 {k.value} 期，無法比對"
             out = [ts_unavailable(rid, "ko_observation_start", "KO 觀察起日", why, start.value)]
         else:
-            ok = expected == start.value
             out = [
-                result(
-                    rid,
-                    "ko_observation_start",
-                    S.PASS if ok else S.MISMATCH,
-                    expected=expected,
-                    actual=start.value,
-                    pf=start,
-                    reason="" if ok else "value_mismatch",
+                check.needs(start).compare(
+                    expected,
+                    start.value,
                     message=f"須等於說明書第 {k.value} 期的比價日（第 {k.value} 個配息週期終止日）",
-                    item=item,
                 )
             ]
     end, name = read_iis(ctx.iis, "ko_observation_end"), "KO 觀察迄日"
@@ -311,25 +226,8 @@ def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
     )
     if problem:
         return [*out, problem]
-    item = Item.sheet(name, [ov])
-    if not end.ok:
-        return [*out, doc_review(rid, "ko_observation_end", end, v, [ov], item=item, document=ctx.document)]
-    ok = v == end.value
-    return [
-        *out,
-        result(
-            rid,
-            "ko_observation_end",
-            S.PASS if ok else S.MISMATCH,
-            expected=v,
-            actual=end.value,
-            pf=end,
-            ov=[ov],
-            reason="" if ok else "value_mismatch",
-            message="須等於最終比價日",
-            item=item,
-        ),
-    ]
+    check = Check(rid, "ko_observation_end", Item.sheet(name, [ov]), ctx.document, ov=(ov,), expected=v).needs(end)
+    return [*out, check.compare(v, end.value, message="須等於最終比價日")]
 
 
 # 投資人須知的 KI %：只比數值（無 KI 時表上的空值寫法由說明書那份的 `field.ki_pct` 判定）
@@ -387,14 +285,8 @@ def _term_sheet_field(ctx: Context, name: str, label: str) -> Found:
 
 def ts_unavailable(rid: str, field: str, name: str, why: str, actual: Any) -> CheckResult:
     """同商品說明書沒有可比對的值：轉人工覆核，說明原因（上手投資人須知專屬規則也用）。"""
-    return result(
-        rid,
-        field,
-        S.REVIEW_REQUIRED,
-        actual=actual,
-        reason="term_sheet_unavailable",
-        message=why,
-        item=Item.term_sheet(name),
+    return Check(rid, field, Item.term_sheet(name)).result(
+        S.REVIEW_REQUIRED, actual=actual, reason="term_sheet_unavailable", message=why
     )
 
 
@@ -407,24 +299,14 @@ def _vs_term_sheet(
     normalize: Callable[[Any], Any],
     tolerance: str | None,
 ) -> CheckResult:
-    pf, item = read_iis(ctx.iis, field), Item.term_sheet(name)
-    if not pf.ok:
-        return doc_review(rid, field, pf, item=item, document=ctx.document)
+    pf = read_iis(ctx.iis, field)
+    check = Check(rid, field, Item.term_sheet(name), ctx.document).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     expected, why = found
     if why:
         return ts_unavailable(rid, field, name, why, pf.value)
-    ok = normalize(expected) == normalize(pf.value)
-    return result(
-        rid,
-        field,
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "value_mismatch",
-        tolerance=tolerance,
-        item=item,
-    )
+    return check.compare(expected, pf.value, ok=normalize(expected) == normalize(pf.value), tolerance=tolerance)
 
 
 def _name(text: str) -> str:
