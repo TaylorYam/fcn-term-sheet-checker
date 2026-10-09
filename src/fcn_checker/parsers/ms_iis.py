@@ -31,8 +31,8 @@ SECTIONS = (
 PAGE_FOOTER = re.compile(r"-?\s*第\s*\d+\s*頁，共\s*\d+\s*頁")
 PRINT_DATE = "中文投資人須知刊印日期"
 NAME_EN = "MorganStanley&Co.InternationalPlcissuanceof"  # 新版（舊版為 plc）
-REDEMPTION = ("贖回價金之計算：", "發行不成立之處理")  # KO／KI 寫法所在的段落（開頭、結尾錨點）
-COUPON = ("收益分配事項：", "贖回價金之計算：")
+REDEMPTION_SECTION = ("贖回價金之計算：", "發行不成立之處理")  # KO／KI 寫法所在的段落（開頭、結尾錨點）
+COUPON_SECTION = ("收益分配事項：", "贖回價金之計算：")  # 月配息率所在的段落（開頭、結尾錨點）
 # KO 觀察寫法（括號統一全形、去空白後）：表型、第一個可提前出場期 k，D 型另有觀察起訖日（範本規格 §4.1）
 KO_WORDINGS = (
     (
@@ -42,7 +42,8 @@ KO_WORDINGS = (
     (r"記憶事件觀察日：每一個定價日自第(\d+)(?:期|個)定價日（含）開始觀察", "P"),
     (r"自動提前出場事件：自第(\d+)(?:期|個)定價日（含）開始，若於任一定價日", "P"),
 )
-PLAIN_KO = ("所有連結標的皆等於或高於", "所有連結標的之收盤價皆等於或高於", "該連結標的之收盤價大於或等於")
+# 非記憶式的提前出場條件寫法（多標的兩種、單一標的一種）
+NON_MEMORY_KO = ("所有連結標的皆等於或高於", "所有連結標的之收盤價皆等於或高於", "該連結標的之收盤價大於或等於")
 KI_WORDINGS = {  # 「觸及下限事件」：若在…， → KI 型態（同 MS 說明書第 16 項，範本規格 §4.3）
     "期末定價日": "AM",
     "交易日（含）至期末定價日（含）間的任一共同預定交易日": "D",
@@ -86,15 +87,6 @@ def body(lines: Sequence[Line]) -> list[Line]:
     return [x for x in lines if not PAGE_FOOTER.fullmatch(x.text)]
 
 
-def _ordered(text: str, anchors: Sequence[str]) -> bool:
-    pos = -1
-    for a in anchors:
-        pos = text.find(a, pos + 1)
-        if pos < 0:
-            return False
-    return True
-
-
 def detect(lines: Sequence[Line]) -> DetectionResult:
     text = TextIndex(body(lines)).text
     failed = []
@@ -109,7 +101,7 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
             re.search(r"相關機構：?(?:1\.)?發行機構：英商摩根士丹利國際股份有限公司", text) is not None,
             "相關機構的發行機構不是MS",
         ),
-        (_ordered(text, SECTIONS), "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
+        (iis.in_order(text, SECTIONS), "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
     ):
         if not ok:
             failed.append(message)
@@ -152,7 +144,7 @@ def _ko_terms(sec: TextIndex | None) -> dict[str, ParsedField]:
     text, lns = full_brackets(sec.text), sec.lines
     out: dict[str, ParsedField] = {}
     memory = "記憶事件觀察日：" in text
-    plain = "記憶事件" not in text and any(p in text for p in PLAIN_KO)
+    plain = "記憶事件" not in text and any(p in text for p in NON_MEMORY_KO)
     out["ko_memory"] = (
         ParsedField.present("ko_memory", memory, lns)
         if memory != plain
@@ -244,10 +236,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("final_valuation_date", r"期末定價日[:：]" + iis.DATE, parse_date)
     put("redemption_start", r"開始受理贖回日期[:：]" + iis.DATE, parse_date)
     # 收益分配事項、贖回價金之計算
-    redemption = _section(ti, REDEMPTION)
+    redemption = _section(ti, REDEMPTION_SECTION)
     fields.update(_ko_terms(redemption))
     fields["ki_type"] = _ki_type(redemption)
-    fields["monthly_coupons"] = _monthly_coupons(_section(ti, COUPON), fields["ko_observation"])
+    fields["monthly_coupons"] = _monthly_coupons(_section(ti, COUPON_SECTION), fields["ko_observation"])
     provided = PROVIDED | {k for k in ("ko_observation_start", "ko_observation_end") if k in fields}
     # 相關機構與警語（審查標準）
     fields["issuer_names"] = iis.occurrences(

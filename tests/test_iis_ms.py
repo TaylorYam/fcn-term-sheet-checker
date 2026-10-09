@@ -16,7 +16,7 @@ from fcn_checker.extraction import extract_lines
 from fcn_checker.issuers import MS, detect_iis
 from fcn_checker.parsers import ms as ms_parser
 from harness import MISMATCH, NA, PASS, REVIEW, iis_path
-from ms_synth import DIST, ISSUE, TRADE, Spec, build_pdf, check_pair
+from ms_synth import DIST, ISSUE, TRADE, WARNING, Spec, build_pdf, check_pair
 from pdf_writer import zh_date
 
 S = Spec()
@@ -222,6 +222,52 @@ def test_each_ms_iis_check_point_reports_a_wrong_value(tmp_path, replace, expect
     if message:
         assert any(message in m for m in iis.problem_messages), iis.problem_messages
     assert ts.report.status == PASS and not ts.fills_sheet, "投資人須知沒通過，說明書不回填"
+
+
+DIST_PLACES = {  # 受託機構名稱各處（警語 4) 三處、5)、6)）：投資人須知原文 → 欄位
+    f"商品雖經{DIST['name']}審查": "distributor_name_w4a",
+    f"且{DIST['name']}不負": "distributor_name_w4b",
+    f"。{DIST['name']}依法不得": "distributor_name_w4c",
+    f"而非由{DIST['name']}所保證": "distributor_name_w5",
+    f"受託機構(即{DIST['name']})": "distributor_name_w6",
+}
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "field"),
+    [(o, o.replace(DIST["name"], "虛構證券股份有限公司"), f) for o, f in DIST_PLACES.items()]
+    + [
+        ("英商摩根士丹利國際股份有限公司（發行機構）", "英商虛構國際股份有限公司（發行機構）", "issuer_name_w5"),
+        ("或由發行機構英商摩根士丹利國際股份有限公司", "或由發行機構英商虛構國際股份有限公司", "issuer_name_w6"),
+    ],
+)
+def test_every_name_place_in_the_warnings_is_checked(tmp_path, old, new, field):
+    rule = "standard.distributor" if field.startswith("distributor") else "standard.issuer_name"
+    _, iis = check_pair(tmp_path, Spec(iis_replace=[("warn", old, new)]))
+    assert bad(iis) == {(rule, field, MISMATCH)}
+
+
+def test_risk_level_inside_the_fixed_warning_is_checked(tmp_path):
+    """警語 1) 的 RRn 寫錯：全文風險等級不一致，固定警語也不再逐字相符。"""
+    _, iis = check_pair(tmp_path, Spec(iis_replace=[("warn", "歸類為RR4", "歸類為RR3")]))
+    assert bad(iis) == {
+        ("standard.risk_level", "risk_level", MISMATCH),
+        ("standard.fixed_warning", "fixed_warning", MISMATCH),
+    }
+
+
+def test_fixed_warning_must_appear_exactly_once(tmp_path):
+    _, iis = check_pair(tmp_path, Spec(iis_replace=[("warn", "8) 範本說明。", "8) " + WARNING + "。")]))
+    (r,) = [r for r in iis.report.results if r.rule_id == "standard.fixed_warning"]
+    assert (r.status, r.expected, r.actual) == (MISMATCH, 1, 2)
+
+
+def test_unknown_memory_wording_requires_review(tmp_path):
+    spec = Spec(
+        count=1, memory=False, iis_replace=[("redeem", "該連結標的之收盤價大於或等於", "該連結標的之收盤價高於")]
+    )
+    _, iis = check_pair(tmp_path, spec)
+    assert bad(iis) == {("field.ko_memory", "ko_memory", REVIEW)}
 
 
 def test_all_fee_rates_are_checked(tmp_path):

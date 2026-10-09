@@ -12,7 +12,7 @@ from ..schema import CheckStatus as S
 from ..text import squash
 from .iis import NO_TERM_SHEET, IisIssuerContext, ts_unavailable
 from .kit import doc_review, result
-from .ms import PRODUCT_TYPES
+from .ms import PRODUCT_TYPES, check
 
 
 def redemption_start(ctx: IisIssuerContext) -> CheckResult:
@@ -41,23 +41,15 @@ def redemption_start(ctx: IisIssuerContext) -> CheckResult:
 
 def product_type(ctx: IisIssuerContext) -> CheckResult:
     """商品種類依投資人須知的標的數：1 檔與 2 檔以上寫法不同（同 MS 說明書封面 6，rules/ms.py `PRODUCT_TYPES`）。"""
-    rid, item = "iis.product_type", Item.expected("商品種類")
     pf, names = read_iis(ctx.sheet, "product_type"), read_iis(ctx.sheet, "underlying_names")
-    bad = next((p for p in (pf, names) if not p.ok), None)
-    if bad is not None:
-        return doc_review(rid, "product_type", bad, item=item)
-    expected = PRODUCT_TYPES[len(names.value) >= 2]
-    ok = squash(pf.value) == expected
-    return result(
-        rid,
+    return check(
+        "iis.product_type",
         "product_type",
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=pf.value,
-        evidence=pf.evidence + names.evidence,
-        reason="" if ok else "value_mismatch",
-        message=f"連結標的資產共 {len(names.value)} 檔；商品種類 1 檔與 2 檔以上寫法不同",
-        item=item,
+        "商品種類",
+        [pf, names],
+        PRODUCT_TYPES[len(names.value) >= 2] if names.ok else None,
+        squash(pf.value) if pf.ok else None,
+        message="商品種類依連結標的資產的檔數：1 檔與 2 檔以上寫法不同",
     )
 
 

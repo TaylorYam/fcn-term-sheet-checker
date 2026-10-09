@@ -52,8 +52,10 @@ def test_other_issuers_are_unsupported(saved):
     outcome, receipt = saved
     others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147"))]
     assert others and all(i.unsupported and not receipt.filled(i) for i in others)
-    ms = [i for i in outcome.items if i.term_sheet.name.startswith("147")]  # MS 投資人須知未支援，說明書不回填
-    assert ms and not any(receipt.filled(i) for i in ms)
+    # MS 說明書與投資人須知都通過的 3 檔才回填（docs/templates/ms-zh-iis.md §7、test_real_ms.py）
+    ms = [i for i in outcome.items if i.kind == DocKind.TERM_SHEET and i.term_sheet.name.startswith("147")]
+    filled = [i for i in ms if receipt.filled(i)]
+    assert len(filled) == 3 and all(i.partner is not None and not i.partner.unsupported for i in filled)
 
 
 def term_sheets(outcome):
@@ -170,6 +172,7 @@ def test_hsbc_investor_sheets_only_differ_by_the_forbidden_wording(outcome):
         assert item.partner is not None and not item.partner.fills_sheet
 
 
-def test_investor_sheets_of_unsupported_issuers_are_unsupported(outcome):
-    others = [i for i in outcome.items if i.kind == DocKind.IIS and not i.term_sheet.name.startswith(("029", "325"))]
-    assert others and all(i.unsupported for i in others)
+def test_every_local_investor_sheet_belongs_to_an_issuer_with_an_iis_template(outcome):
+    """本機投資人須知只有 BARC、HSBC、MS，三家都有範本（MS：Issue #137）；未支援上手的投資人須知見合成測試 test_iis.py。"""
+    sheets = [i for i in outcome.items if i.kind == DocKind.IIS]
+    assert len(sheets) >= 24 and not any(i.unsupported for i in sheets)

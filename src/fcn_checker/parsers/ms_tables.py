@@ -160,19 +160,30 @@ def price_region(lines: list[Line], end_prefixes: tuple[str, ...]) -> tuple[str,
     return hits[0][0], lines[start:end]
 
 
-def underlying_table(lines: list[Line]) -> ParsedField:
-    """第 11 項標的表的彭博代碼欄（依序）：表頭「彭博代碼」正下方、到「相對權重」之前的代碼。"""
-    name = "underlyings_art11"
+def _art11_table(lines: list[Line]) -> tuple[Line, list[Line]] | None:
+    """第 11 項標的表的「彭博代碼」表頭與表頭以下到「相對權重」之前的行；找不到或表頭重複時為 None。"""
     headers = [ln for ln in lines if squash(ln.text).startswith("彭博代碼")]
     end = next((ln for ln in lines if squash(ln.text).startswith("相對權重")), None)
     if len(headers) != 1 or end is None:
+        return None
+    return headers[0], lines[lines.index(headers[0]) + 1 : lines.index(end)]
+
+
+def _in_ticker_column(ln: Line, hdr: Line) -> bool:
+    return hdr.x0 - 30 <= ln.xc <= hdr.x1 + 30
+
+
+def underlying_table(lines: list[Line]) -> ParsedField:
+    """第 11 項標的表的彭博代碼欄（依序）：表頭「彭博代碼」正下方、到「相對權重」之前的代碼。"""
+    name = "underlyings_art11"
+    table = _art11_table(lines)
+    if table is None:
         return ParsedField.missing(name, "找不到第 11 項標的表的彭博代碼欄或結束錨點")
-    hdr = headers[0]
-    a, b = lines.index(hdr) + 1, lines.index(end)
-    cells = [ln for ln in lines[a:b] if hdr.x0 - 30 <= ln.xc <= hdr.x1 + 30]
+    hdr, region = table
+    cells = [ln for ln in region if _in_ticker_column(ln, hdr)]
     bad = [ln for ln in cells if not TICKER.fullmatch(ln.text.strip())]
     if bad or not cells:
-        return ParsedField.invalid(name, bad or lines[a:b], "第 11 項彭博代碼欄無法辨識")
+        return ParsedField.invalid(name, bad or region, "第 11 項彭博代碼欄無法辨識")
     tickers = [re.sub(r"\s+", " ", ln.text.strip()) for ln in cells]
     return ParsedField.present(name, tickers, cells)
 
@@ -182,13 +193,11 @@ def underlying_names(lines: list[Line]) -> ParsedField:
     下一頁頂端）。多標的時依擷取順序歸到前一個列號（`1`、`2`…）；單一標的沒有列號欄，全部屬於那一列。
     只用來和投資人須知的標的名稱比對（docs/rules/iis-check-rules.md B12）。"""
     name = "underlying_names_art11"
-    headers = [ln for ln in lines if squash(ln.text).startswith("彭博代碼")]
-    end = next((ln for ln in lines if squash(ln.text).startswith("相對權重")), None)
-    if len(headers) != 1 or end is None:
+    table = _art11_table(lines)
+    if table is None:
         return ParsedField.missing(name, "找不到第 11 項標的表的彭博代碼欄或結束錨點")
-    hdr = headers[0]
-    region = lines[lines.index(hdr) + 1 : lines.index(end)]
-    count = sum(1 for ln in region if hdr.x0 - 30 <= ln.xc <= hdr.x1 + 30)
+    hdr, region = table
+    count = sum(1 for ln in region if _in_ticker_column(ln, hdr))
     left = [ln for ln in region if ln.x1 <= hdr.x0]  # 彭博代碼欄左側：列號與名稱
     rows: list[list[Line]] = [[] for _ in range(count)]
     row = 0 if count == 1 else -1

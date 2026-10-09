@@ -48,14 +48,10 @@ def body(lines: Sequence[Line]) -> list[Line]:
 def detect(lines: Sequence[Line]) -> DetectionResult:
     text = TextIndex(body(lines)).text
     failed = []
-    pos, ordered = -1, True
-    for anchor in SECTIONS:
-        pos = text.find(anchor, pos + 1)
-        ordered = ordered and pos >= 0
     for ok, message in (
         ("中文投資人須知" in text, "封面缺少「中文投資人須知」"),
         (re.search(r"相關機構.?發行機構[:：]香港商香港上海滙豐銀行股份有限公司", text) is not None, "發行機構不是HSBC"),
-        (ordered, "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
+        (iis.in_order(text, SECTIONS), "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
     ):
         if not ok:
             failed.append(message)
