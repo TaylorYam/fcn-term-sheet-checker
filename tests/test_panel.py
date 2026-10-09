@@ -14,7 +14,7 @@ import pytest
 
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel import parse_args, session_from_args
-from fcn_checker.panel_workflow import PanelSession
+from fcn_checker.panel_workflow import PanelOutcome, PanelSession
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT, with_iis
 from reference_synth import REFERENCE_FORMAT, build_reference_sheet
 from synth import SYNTH_ISIN, Spec, build_pdf, reference_row
@@ -145,6 +145,33 @@ def test_check_requires_preview_and_writes_nothing(tmp_path):
     first = outcome.ordered_results(outcome.ordered_items[0])
     assert first[0].status.value == "MISMATCH"
     assert session.receipt is None, "還沒儲存，沒有收據"
+
+
+def test_outcome_gives_the_text_shown_in_the_panel_tables(tmp_path):
+    ok, bad = Spec(), Spec(product_code="029199990002")
+    sheet, pdfs = inputs(tmp_path, ok, bad, rows=[reference_row(ok), reference_row(bad, **{"K(%)": 71})])
+    unknown = build_pdf(tmp_path / "weird.pdf", Spec(product_code="029199990005"))
+    session = session_for(tmp_path, sheet, pdfs)
+    session.select(sheet, [*with_iis(pdfs), unknown])
+    first, *_, last = session.load_preview().rows
+    assert PanelOutcome.preview_row(first) == (
+        "029199990001_TS.pdf",
+        "說明書",
+        "BARC",
+        "029199990001",
+        "第 4 列",
+        "可以核對",
+    )
+    assert PanelOutcome.preview_row(last)[:5] == ("weird.pdf", "檔名無法辨識", "未提供", "未提供", "—")
+
+    outcome = session.start_check()
+    item = outcome.ordered_items[0]
+    assert item.term_sheet == pdfs[1]
+    assert outcome.item_row(item) == ("不一致", "說明書", "029199990002_TS.pdf", "1")
+    [row, *_] = outcome.result_rows(item)
+    assert row.values == ("不一致", "K(%)", "71.00", "70.00", "第 4 頁")
+    assert row.detail.startswith("K(%)｜不一致\n原因：K(%)對不起來：參考條件表 71.00／說明書 70.00\n")
+    assert "\n參考條件表／標準值：71.00\nPDF 值：70.00\n" in row.detail
 
 
 @pytest.mark.parametrize("changed", ["selection", "pdf", "sheet", "standard", "config"])
@@ -359,6 +386,23 @@ def test_changing_a_release_after_saving_says_to_save_again(tmp_path):
     assert session.save(tmp_path / "reports", now=NOW).complete
     session.cancel_release(item)
     assert "上一次儲存的核對結果檔已不是目前的結果，請再儲存一次" in session.message
+
+
+def test_release_prompt_lists_every_problem_of_the_document(tmp_path):
+    spec = Spec()
+    _, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71, "UL_2_進場價": 123.45})])
+    term_sheet, iis = outcome.batch.items
+    prompt = PanelOutcome.release_prompt(term_sheet)
+    head, problems, tail = prompt.split("\n\n")
+    assert head == "029199990001_TS.pdf"
+    assert tail == "確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
+    lines = problems.split("\n")
+    assert lines[:2] == ["這份說明書的問題：", "・K(%)對不起來：參考條件表 71.00／說明書 70.00"]
+    assert any(line.startswith("・UL_2 進場價") for line in lines[2:]), lines
+    assert lines[1:] == [f"・{m}" for m in term_sheet.problem_messages]
+    assert PanelOutcome.release_prompt(iis).startswith(
+        "029199990001_IIS.pdf\n\n這份投資人須知的問題：\n・K(%)對不起來：參考條件表 71.00／投資人須知 "
+    )
 
 
 def test_release_button_state_hides_the_reason_for_passed_term_sheets(tmp_path):

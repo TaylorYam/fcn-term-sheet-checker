@@ -13,7 +13,7 @@ import pytest
 
 from fcn_checker.backfill import BackfillAction
 from fcn_checker.ingestion import sha256_of
-from fcn_checker.panel import ResultPane
+from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.saving import save_batch
 from harness import CONFIG, MISMATCH, PASS, REVIEW, check_all, load_config, results
 from reference_synth import REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet
@@ -138,7 +138,7 @@ def test_panel_shows_the_backfill_labels(tmp_path):
     assert item.report.status == PASS
     actions = {d.action for d in item.report.backfill}
     assert actions == {BackfillAction.FILL, BackfillAction.MATCH}  # 空白格與已填「-」的格子
-    panel = ResultPane._backfill_text(item)
+    panel = PanelOutcome.backfill_text(item)
     for action in actions:
         assert action.label in panel
 

@@ -11,45 +11,13 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 from .approval_dates import parse_input_date
-from .batch import BatchItem, BatchPreview, DocKind
 from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
-from .messages import STATUS_ZH, problem_message
 from .panel_workflow import PanelOutcome, PanelSession, ReleaseState
 from .saving import SaveReceipt
-from .schema import CheckResult, CheckStatus
-
-
-def display_value(value: object) -> str:
-    return "未提供" if value is None else str(value)
-
-
-def kind_label(kind: DocKind | None) -> str:
-    """PDF 種類欄：說明書／投資人須知；檔名結尾不是 _TS／_IIS 時寫檔名無法辨識。"""
-    return kind.value if kind is not None else "檔名無法辨識"
-
-
-_DETAIL_DEFAULTS = {
-    CheckStatus.PASS: "此已核對項目一致。",
-    CheckStatus.NOT_APPLICABLE: "依明確規則，此項目不適用。",
-}
-
-
-def result_detail(row: CheckResult, document: str = "說明書") -> str:
-    """結果明細：有問題的項目用共用錯訊（不含 rule_id），再列雙方值、來源、容差與 PDF 原文。"""
-    reason = problem_message(row, document) if row.status.is_problem else row.message or _DETAIL_DEFAULTS[row.status]
-    evidence = (
-        "\n".join(f"第 {e.page} 頁：{e.text}" for e in row.document_evidence) or "無法定位：沒有可用的 PDF 原文證據。"
-    )
-    return (
-        f"{row.item.name}｜{STATUS_ZH[row.status]}\n"
-        f"原因：{reason}\n"
-        f"參考條件表／標準值：{display_value(row.expected)}\nPDF 值：{display_value(row.actual)}\n"
-        f"參考條件表來源：{'、'.join(row.order_source) or '非參考條件表欄位，依審查標準或文件內部規則核對。'}\n"
-        f"容差：{row.tolerance or '未設定'}\nPDF 原文：\n{evidence}"
-    )
 
 
 def enable_windows_dpi_awareness() -> None:
@@ -198,13 +166,13 @@ class ResultPane(ttk.Frame):
         self,
         parent,
         pixels,
-        release_state: Callable[[BatchItem], ReleaseState],
-        on_release: Callable[[BatchItem], None],
+        release_state: Callable[..., ReleaseState],
+        on_release: Callable[..., None],
     ):
         super().__init__(parent, padding=8)
         self.release_state, self.on_release = release_state, on_release
-        self.items: dict[str, BatchItem] = {}
-        self.rows: dict[str, CheckResult] = {}
+        self.items: dict[str, Any] = {}  # 結果清單列 → PanelOutcome.ordered_items 的一份
+        self.rows: dict[str, str] = {}  # 明細清單列 → 選取時顯示的明細
         self.outcome: PanelOutcome | None = None
         self.columnconfigure(1, weight=1)
         self.rowconfigure(1, weight=1)
@@ -258,16 +226,14 @@ class ResultPane(ttk.Frame):
         _write(self.detail, "")
         self._release_state(None)
 
-    def show(self, outcome: PanelOutcome, select: BatchItem | None = None):
+    def show(self, outcome: PanelOutcome, select: Any = None):
         """顯示結果並選取 select（沒給或不在結果中時選第一份）。"""
         self.clear()
         self.outcome = outcome
         self.summary.set(outcome.headline)
         chosen = None
         for item in outcome.ordered_items:
-            problems = sum(r.status.is_problem for r in item.report.results)
-            values = (item.status_label, kind_label(item.kind), item.term_sheet.name, problems)
-            key = self.item_table.insert("", "end", values=values)
+            key = self.item_table.insert("", "end", values=outcome.item_row(item))
             self.items[key] = item
             if item is select:
                 chosen = key
@@ -277,7 +243,7 @@ class ResultPane(ttk.Frame):
             self.item_table.see(chosen)
             self._item_selected(None)
 
-    def _release_state(self, item: BatchItem | None) -> None:
+    def _release_state(self, item) -> None:
         if item is None:
             self.release_button.configure(text="人工放行…", state="disabled")
             self.release_reason.set("")
@@ -294,7 +260,7 @@ class ResultPane(ttk.Frame):
         if item is not None:
             self.on_release(item)
 
-    def selected_item(self) -> BatchItem | None:
+    def selected_item(self):
         selection = self.item_table.selection()
         return self.items.get(selection[0]) if selection else None
 
@@ -305,47 +271,14 @@ class ResultPane(ttk.Frame):
         self._release_state(item)
         self.rows.clear()
         self.table.delete(*self.table.get_children())
-        for row in self.outcome.ordered_results(item):
-            pages = (
-                "第 " + "、".join(str(p) for p in sorted({e.page for e in row.document_evidence})) + " 頁"
-                if row.document_evidence
-                else "無法定位"
-            )
-            key = self.table.insert(
-                "",
-                "end",
-                values=(
-                    STATUS_ZH[row.status],
-                    row.item.name,
-                    display_value(row.expected),
-                    display_value(row.actual),
-                    pages,
-                ),
-            )
-            self.rows[key] = row
-        _write(self.detail, self._backfill_text(item))
-
-    @staticmethod
-    def _backfill_text(item: BatchItem) -> str:
-        if item.kind == DocKind.IIS:
-            return "投資人須知本身沒有回填決策；同商品的說明書與投資人須知都通過或人工放行，才依說明書的回填決策回填（含 TS、IIS 打 V）。"
-        if not item.report.backfill:
-            return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
-        head = "回填欄位（說明書與投資人須知都通過或人工放行才會回填；按「儲存核對結果」後寫入核對結果檔）："
-        if item.not_filled_reason:
-            head = item.not_filled_reason + "\n" + head
-        lines = [
-            f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {d.action.label}"
-            for d in item.report.backfill
-        ]
-        return "\n".join([head, *lines])
+        for row in self.outcome.result_rows(item):
+            self.rows[self.table.insert("", "end", values=row.values)] = row.detail
+        _write(self.detail, self.outcome.backfill_text(item))
 
     def _row_selected(self, _):
         selection = self.table.selection()
-        if not selection or selection[0] not in self.rows:
-            return
-        item = self.selected_item()
-        _write(self.detail, result_detail(self.rows[selection[0]], item.document if item else "說明書"))
+        if selection and selection[0] in self.rows:
+            _write(self.detail, self.rows[selection[0]])
 
 
 class ApprovalDatesDialog(tk.Toplevel):
@@ -424,7 +357,7 @@ class PanelWindow:
     def __init__(self, root: tk.Tk, session: PanelSession):
         self.root, self.session = root, session
         self.executor = ThreadPoolExecutor(max_workers=1)
-        self.pending: Future[BatchPreview] | None = None
+        self.pending: Future | None = None
         self.check_pending: Future[PanelOutcome] | None = None
         self.save_pending: Future[SaveReceipt] | None = None
         self.release_pending: Future[IngestionError | None] | None = None
@@ -432,7 +365,7 @@ class PanelWindow:
         self.validation: Future[bool] | None = None  # 背景只計算來源快照是否仍一致，不改工作階段
         self.checking_for: SourceSnapshot | None = None
         self.closed = False
-        self.shown: BatchPreview | None = None
+        self.shown = None  # 目前顯示的預覽
         self.sheet_path: Path | None = None
         self.pdf_paths: tuple[Path, ...] = ()
         self.folders = LastFolders(session.install_root / FOLDERS_RECORD)
@@ -634,21 +567,10 @@ class PanelWindow:
             80, lambda: self._after("pending", self._show_preview, "預覽讀取失敗，請確認檔案與設定後重新載入")
         )
 
-    def _show_preview(self, preview: BatchPreview):
+    def _show_preview(self, preview):
         self.shown = preview
         for row in preview.rows:
-            self.preview_table.insert(
-                "",
-                "end",
-                values=(
-                    row.term_sheet.name,
-                    kind_label(row.kind),
-                    "未支援上手" if row.unsupported else display_value(row.issuer),
-                    display_value(row.product_code),
-                    f"第 {row.reference_row} 列" if row.reference_row else "—",
-                    row.problem or "可以核對",
-                ),
-            )
+            self.preview_table.insert("", "end", values=PanelOutcome.preview_row(row))
         self.preview_warnings.set("參考條件表欄名問題：" + "；".join(preview.warnings) if preview.warnings else "")
         self.status.set(self.session.message)
         self.tabs.select(0)
@@ -673,19 +595,15 @@ class PanelWindow:
         self.tabs.tab(self.not_covered, text=f"待處理（{outcome.not_covered_count}）")
         self.status.set(outcome.headline)
 
-    def toggle_release(self, item: BatchItem):
+    def toggle_release(self, item):
         """人工放行（先確認全部錯訊）或取消放行；放行前的來源檢查在背景執行，結果失效時清空畫面並顯示原因。"""
         if self._busy_any():
             return
         action = self.session.cancel_release if item.released else self.session.release
-        if not item.released:
-            text = (
-                f"{item.term_sheet.name}\n\n這份{item.document}的問題：\n"
-                + "\n".join(f"・{m}" for m in item.problem_messages)
-                + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
-            )
-            if not messagebox.askyesno("人工放行", text, parent=self.root):
-                return
+        if not item.released and not messagebox.askyesno(
+            "人工放行", PanelOutcome.release_prompt(item), parent=self.root
+        ):
+            return
 
         def run() -> IngestionError | None:
             try:
@@ -701,7 +619,7 @@ class PanelWindow:
             80, lambda: self._after("release_pending", lambda e: self._show_release(item, e), "人工放行失敗")
         )
 
-    def _show_release(self, item: BatchItem, error: IngestionError | None):
+    def _show_release(self, item, error: IngestionError | None):
         if error is not None:
             if self.session.outcome is None:  # 來源已變更、結果失效：清空畫面，不顯示空結果
                 self._clear()

@@ -1,6 +1,6 @@
 """期初定價（Issue #122）：參考條件表「期初定價」欄，VWAP 商品的四個價格欄不比對、改以說明書覆寫。
 
-測試切點是批量入口（run_batch／check_all、save_batch）與 PANEL 結果窗格；回填結果讀核對結果檔「回填後」。
+測試切點是批量入口（run_batch／check_all、save_batch）與 PANEL 回填決策文字（PanelOutcome.backfill_text）；回填結果讀核對結果檔「回填後」。
 只用合成資料（tests/synth.py）；預期價格是依合成說明書的期初價格與百分比手算的字面值。
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from fcn_checker.panel import ResultPane
+from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.saving import run_batch, save_batch
 from harness import CONFIG, check_all, load_record, with_iis
 from reference_synth import REFERENCE_HEADERS, build_reference_sheet
@@ -109,7 +109,7 @@ def test_vwap_with_ki_fills_the_ki_prices(tmp_path):
 
 def test_panel_shows_vwap_prices_as_overwritten(tmp_path):
     item, receipt, spec = run(tmp_path, 期初定價="VWAP", UL_1_進場價=1.0)
-    panel = ResultPane._backfill_text(item)
+    panel = PanelOutcome.backfill_text(item)
     assert "UL_1_進場價（" in panel and "→ VWAP，核對通過後以說明書覆寫" in panel, panel
 
 

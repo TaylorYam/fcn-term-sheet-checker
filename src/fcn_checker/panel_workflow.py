@@ -1,6 +1,7 @@
 """PANEL 公開工作流程：參考條件表＋多份說明書與投資人須知的唯讀預覽、核對、失效檢查與手動儲存。
 
 核對與儲存都呼叫批量入口（batch.py），PANEL 不另做規則；按「儲存」之前不寫任何檔案。
+PANEL 操作員讀到的預覽列、結果清單列、結果明細與回填決策文字都由 PanelOutcome 組好，Tk 視窗只負責顯示。
 每次載入預覽時載入一次核對設定；核對沿用預覽的辨識與讀出，同一份說明書只讀一次。
 """
 
@@ -18,6 +19,8 @@ from .batch import (
     BatchOutcome,
     BatchPreview,
     Category,
+    DocKind,
+    PreviewRow,
     check_batch,
     preview_batch,
 )
@@ -25,8 +28,31 @@ from .check_config import CONFIG_DIR, DEFAULTS, ConfigPaths
 from .config import load_review_standard
 from .ingestion import IngestionError, SourceSnapshot
 from .issuers import REGISTRY, Issuer
+from .messages import STATUS_ZH, problem_message
 from .saving import SaveReceipt, save_batch
-from .schema import CheckResult
+from .schema import CheckResult, CheckStatus
+
+
+def display_value(value: object) -> str:
+    return "未提供" if value is None else str(value)
+
+
+def kind_label(kind: DocKind | None) -> str:
+    """PDF 種類欄：說明書／投資人須知；檔名結尾不是 _TS／_IIS 時寫檔名無法辨識。"""
+    return kind.value if kind is not None else "檔名無法辨識"
+
+
+_DETAIL_DEFAULTS = {
+    CheckStatus.PASS: "此已核對項目一致。",
+    CheckStatus.NOT_APPLICABLE: "依明確規則，此項目不適用。",
+}
+
+
+class ResultRow(NamedTuple):
+    """結果明細清單一列（狀態、欄位、參考條件表／標準值、PDF 值、PDF 頁碼）與選取時顯示的明細。"""
+
+    values: tuple[str, ...]
+    detail: str
 
 
 class NotCoveredGroup(NamedTuple):
@@ -52,6 +78,87 @@ class PanelOutcome:
     @staticmethod
     def ordered_results(item: BatchItem) -> tuple[CheckResult, ...]:
         return tuple(sorted(item.report.results, key=lambda r: r.status.display_rank))
+
+    @staticmethod
+    def preview_row(row: PreviewRow) -> tuple[str, ...]:
+        """預覽表一列：PDF 檔名、種類、上手、商品代號、對到的列、狀態。"""
+        return (
+            row.term_sheet.name,
+            kind_label(row.kind),
+            "未支援上手" if row.unsupported else display_value(row.issuer),
+            display_value(row.product_code),
+            f"第 {row.reference_row} 列" if row.reference_row else "—",
+            row.problem or "可以核對",
+        )
+
+    @staticmethod
+    def item_row(item: BatchItem) -> tuple[str, ...]:
+        """結果清單一列：狀態標籤、種類、PDF 檔名、問題數。"""
+        problems = sum(r.status.is_problem for r in item.report.results)
+        return (item.status_label, kind_label(item.kind), item.term_sheet.name, str(problems))
+
+    @classmethod
+    def result_rows(cls, item: BatchItem) -> tuple[ResultRow, ...]:
+        """明細清單：有問題的項目排前面；每列帶選取時顯示的明細。"""
+        return tuple(
+            ResultRow(
+                (
+                    STATUS_ZH[r.status],
+                    r.item.name,
+                    display_value(r.expected),
+                    display_value(r.actual),
+                    "第 " + "、".join(str(p) for p in sorted({e.page for e in r.document_evidence})) + " 頁"
+                    if r.document_evidence
+                    else "無法定位",
+                ),
+                cls.detail(r, item),
+            )
+            for r in cls.ordered_results(item)
+        )
+
+    @staticmethod
+    def detail(result: CheckResult, item: BatchItem) -> str:
+        """結果明細：有問題的項目用共用錯訊（不含 rule_id），再列雙方值、來源、容差與 PDF 原文。"""
+        if result.status.is_problem:
+            reason = problem_message(result, item.document)
+        else:
+            reason = result.message or _DETAIL_DEFAULTS[result.status]
+        evidence = (
+            "\n".join(f"第 {e.page} 頁：{e.text}" for e in result.document_evidence)
+            or "無法定位：沒有可用的 PDF 原文證據。"
+        )
+        return (
+            f"{result.item.name}｜{STATUS_ZH[result.status]}\n"
+            f"原因：{reason}\n"
+            f"參考條件表／標準值：{display_value(result.expected)}\nPDF 值：{display_value(result.actual)}\n"
+            f"參考條件表來源：{'、'.join(result.order_source) or '非參考條件表欄位，依審查標準或文件內部規則核對。'}\n"
+            f"容差：{result.tolerance or '未設定'}\nPDF 原文：\n{evidence}"
+        )
+
+    @staticmethod
+    def backfill_text(item: BatchItem) -> str:
+        """選取一份 PDF 時顯示的回填決策：投資人須知本身沒有，說明書逐欄列表上值、說明書值與動作。"""
+        if item.kind == DocKind.IIS:
+            return "投資人須知本身沒有回填決策；同商品的說明書與投資人須知都通過或人工放行，才依說明書的回填決策回填（含 TS、IIS 打 V）。"
+        if not item.report.backfill:
+            return "這份說明書沒有回填決策（未配對到參考條件表或無法核對）。"
+        head = "回填欄位（說明書與投資人須知都通過或人工放行才會回填；按「儲存核對結果」後寫入核對結果檔）："
+        if item.not_filled_reason:
+            head = item.not_filled_reason + "\n" + head
+        lines = [
+            f"{d.column}（{d.cell}）：表上 {display_value(d.sheet_value)}／說明書 {display_value(d.expected)} → {d.action.label}"
+            for d in item.report.backfill
+        ]
+        return "\n".join([head, *lines])
+
+    @staticmethod
+    def release_prompt(item: BatchItem) -> str:
+        """人工放行確認視窗內文：PDF 檔名、這份的全部錯訊，再請操作員確認。"""
+        return (
+            f"{item.term_sheet.name}\n\n這份{item.document}的問題：\n"
+            + "\n".join(f"・{m}" for m in item.problem_messages)
+            + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
+        )
 
     @property
     def not_covered(self) -> tuple[NotCoveredGroup, ...]:
