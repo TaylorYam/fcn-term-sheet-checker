@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Protocol
 
@@ -156,37 +156,133 @@ def standard_field(ctx: RuleContext, name: str) -> ParsedField:
     return read_standard(ctx.ts, name)
 
 
-def result(
-    rule_id: str,
-    field: str,
-    status: S,
-    *,
-    item: Item,
-    expected: Any = None,
-    actual: Any = None,
-    pf: ParsedField | None = None,
-    ov: list[OrderValue | None] | None = None,
-    reason: str = "",
-    message: str = "",
-    tolerance: str | None = None,
-    evidence: list[Evidence] | None = None,
-    document: DocKind = DocKind.TERM_SHEET,
-) -> CheckResult:
-    """`item` 必填：這筆結果在講哪一項、預期值從哪裡來；`document` 是這筆結果屬於哪份文件。"""
-    return CheckResult(
-        rule_id=rule_id,
-        field=field,
-        status=status,
-        expected=expected,
-        actual=actual,
-        tolerance=tolerance,
-        reason_code=reason,
-        message=message,
-        document_evidence=list(evidence if evidence is not None else (pf.evidence if pf else [])),
-        order_source=[o.source for o in (ov or []) if o is not None],
-        item=item,
-        document=document,
+MISSING = object()  # 參數沒給（和明確給 None 分開）
+
+
+@dataclass(frozen=True)
+class Check:
+    """一條核對結果的身分：規則、欄位、項目、所屬文件；掛上依賴的欄位後產生結果。
+
+    規則的四段式只寫一次在這裡：依賴的欄位（`needs`）第一個有問題的就轉人工覆核（`blocked`，同 `doc_review`），
+    都沒問題才比對（`compare`）；證據預設是全部依賴欄位的證據，參考條件表來源（`ov`）寫進 `order_source`。
+    `expected` 是人工覆核時也要顯示的預期值（例：表上的值、審查標準）；`compare` 另給顯示用的預期值時以它為準。
+    """
+
+    rule_id: str
+    field: str
+    item: Item
+    document: DocKind = DocKind.TERM_SHEET
+    deps: tuple[ParsedField, ...] = ()
+    ov: tuple[OrderValue | None, ...] = ()
+    expected: Any = None
+
+    def needs(
+        self, *deps: ParsedField, ov: Sequence[OrderValue | None] | None = None, expected: Any = MISSING
+    ) -> Check:
+        """掛上依賴的欄位（依序），可一併給參考條件表來源與人工覆核時顯示的預期值。"""
+        return replace(
+            self,
+            deps=(*self.deps, *deps),
+            ov=self.ov if ov is None else tuple(ov),
+            expected=self.expected if expected is MISSING else expected,
+        )
+
+    @property
+    def blocked(self) -> CheckResult | None:
+        """第一個有問題的依賴欄位的人工覆核結果；都沒問題時為 None。"""
+        bad = next((pf for pf in self.deps if not pf.ok), None)
+        return None if bad is None else self.review(bad)
+
+    def review(self, pf: ParsedField, *, expected: Any = MISSING) -> CheckResult:
+        """被核對文件的欄位讀不到、歧義或不合法：轉人工覆核，說明以文件稱呼開頭。"""
+        reason, msg = DOC_REASON.get(pf.status, ("document_not_applicable", "判定此欄位不適用"))
+        detail = f"：{pf.note}" if pf.note else ""
+        return self.result(
+            S.REVIEW_REQUIRED,
+            expected=self.expected if expected is MISSING else expected,
+            actual=pf.candidates or None,
+            evidence=pf.evidence,
+            reason=reason,
+            message=f"{self.document}{msg}{detail}",
+        )
+
+    def not_applicable(self, pf: ParsedField) -> CheckResult:
+        """被核對文件明確判定不適用的欄位（例：範本沒有、Non-Call = 天期時沒有 KO 價）：不核對，結果為不適用並附說明。"""
+        first = self.ov[0] if self.ov else None
+        return self.result(
+            S.NOT_APPLICABLE,
+            expected=first.value if first is not None else None,
+            evidence=pf.evidence,
+            message=pf.note or f"{self.document}判定此欄位不適用",
+        )
+
+    def result(
+        self,
+        status: S,
+        *,
+        expected: Any = None,
+        actual: Any = None,
+        reason: str = "",
+        message: str = "",
+        tolerance: str | None = None,
+        evidence: Sequence[Evidence] | None = None,
+    ) -> CheckResult:
+        """任意狀態的結果；證據沒給時是全部依賴欄位的證據。"""
+        if evidence is None:
+            evidence = [e for pf in self.deps for e in pf.evidence]
+        return CheckResult(
+            rule_id=self.rule_id,
+            field=self.field,
+            status=status,
+            expected=expected,
+            actual=actual,
+            tolerance=tolerance,
+            reason_code=reason,
+            message=message,
+            document_evidence=list(evidence),
+            order_source=[o.source for o in self.ov if o is not None],
+            item=self.item,
+            document=self.document,
+        )
+
+    def compare(
+        self,
+        expected: Any,
+        actual: Any,
+        *,
+        ok: bool | None = None,
+        fail: S = S.MISMATCH,
+        reason: str = "value_mismatch",
+        message: str = "",
+        fail_message: str = "",
+        tolerance: str | None = None,
+        evidence: Sequence[Evidence] | None = None,
+    ) -> CheckResult:
+        """依賴欄位都沒問題時比對（預設相等，`ok` 另給判定）：成立為 PASS，否則為 `fail` 並附 `reason`；
+        `message` 一律寫，`fail_message` 只在不成立時接在後面。"""
+        if (problem := self.blocked) is not None:
+            return problem
+        good = expected == actual if ok is None else ok
+        return self.result(
+            S.PASS if good else fail,
+            expected=expected,
+            actual=actual,
+            reason="" if good else reason,
+            message=message if good else message + fail_message,
+            tolerance=tolerance,
+            evidence=evidence,
+        )
+
+
+def result(rule_id: str, field: str, status: S, *, item: Item, **detail: Any) -> CheckResult:
+    """`Check(...).result(...)` 的捷徑（測試與舊呼叫用）：`detail` 同 `Check.result`，另可帶 `ov`、`pf`（證據來源）、`document`。"""
+    pf = detail.pop("pf", None)
+    if pf is not None and detail.get("evidence") is None:
+        detail["evidence"] = pf.evidence
+    check = Check(
+        rule_id, field, item, detail.pop("document", DocKind.TERM_SHEET), ov=tuple(detail.pop("ov", None) or ())
     )
+    return check.result(status, **detail)
 
 
 DOC_REASON = {  # 說明前面接被核對文件的稱呼（例：說明書抓不到此欄位）
@@ -206,23 +302,8 @@ def doc_review(
     item: Item,
     document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    """被核對文件的欄位讀不到、歧義或不合法：轉人工覆核，說明以文件稱呼開頭。"""
-    reason, msg = DOC_REASON.get(pf.status, ("document_not_applicable", "判定此欄位不適用"))
-    detail = f"：{pf.note}" if pf.note else ""
-    actual = pf.candidates or None
-    return result(
-        rule_id,
-        field,
-        S.REVIEW_REQUIRED,
-        expected=expected,
-        actual=actual,
-        pf=pf,
-        ov=ov,
-        reason=reason,
-        message=f"{document}{msg}{detail}",
-        item=item,
-        document=document,
-    )
+    """`Check(...).review(pf)` 的捷徑：被核對文件的欄位讀不到、歧義或不合法，轉人工覆核。"""
+    return Check(rule_id, field, item, document, ov=tuple(ov or ()), expected=expected).review(pf)
 
 
 def doc_not_applicable(
@@ -234,35 +315,21 @@ def doc_not_applicable(
     item: Item,
     document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    """被核對文件明確判定不適用的欄位（例：範本沒有、Non-Call = 天期時沒有 KO 價）：不核對，結果為不適用並附說明。"""
-    return result(
-        rule_id,
-        field,
-        S.NOT_APPLICABLE,
-        expected=ov[0].value if ov and ov[0] is not None else None,
-        pf=pf,
-        ov=ov,
-        message=pf.note or f"{document}判定此欄位不適用",
-        item=item,
-        document=document,
-    )
+    """`Check(...).not_applicable(pf)` 的捷徑。"""
+    return Check(rule_id, field, item, document, ov=tuple(ov or ())).not_applicable(pf)
 
 
 def order_review(
     rule_id: str, field: str, ov: OrderValue | None, pf: ParsedField | None, reason: str, message: str, *, name: str
 ) -> CheckResult:
     """參考條件表的值有問題：項目是那一欄（以 Excel 欄名為名稱；沒有這欄時用 `name`）。"""
-    return result(
-        rule_id,
-        field,
+    return Check(rule_id, field, Item.column(name, [ov]), ov=(ov,)).result(
         S.REVIEW_REQUIRED,
         expected=ov.value if ov else None,
         actual=pf.value if pf and pf.ok else None,
-        pf=pf,
-        ov=[ov],
+        evidence=pf.evidence if pf else [],
         reason=reason,
         message=message,
-        item=Item.column(name, [ov]),
     )
 
 
