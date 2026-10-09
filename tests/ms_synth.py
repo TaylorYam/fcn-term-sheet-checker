@@ -16,7 +16,7 @@ from typing import Any
 
 import fitz
 
-from harness import REVIEW_STANDARD, check_all, iis_path
+from harness import CONFIG, REVIEW_STANDARD, check_all, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import build_reference_sheet, make_row
 
@@ -519,10 +519,13 @@ def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
     return make_row("MS", fields, **overrides)
 
 
-def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, **overrides: Any):
-    """合成說明書（`pdf_spec`，預設同 `spec`）＋與 `spec` 一致的參考條件表一列，經批量入口核對，回傳該說明書的 CheckReport。"""
+def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, config=CONFIG, **overrides: Any):
+    """合成說明書（`pdf_spec`，預設同 `spec`）＋與 `spec` 一致的參考條件表一列，經批量入口核對，回傳該說明書的 CheckReport。
+
+    `config` 換核對設定（例：改過的審查標準）。
+    """
     spec = spec or Spec()
     pdf = build_pdf(tmp_path / f"{spec.code}_TS.pdf", pdf_spec or spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
-    outcome = check_all(sheet, [pdf])
+    outcome = check_all(sheet, [pdf], config)
     return next(i.report for i in outcome.items if i.term_sheet == pdf)

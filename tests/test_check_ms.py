@@ -185,6 +185,11 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
         (("art3", "發行機構為英商摩根士丹利國際", "發行機構為英商摩根士丹利證券"), "standard.issuer_name", S.MISMATCH),
         (("ch二", "International Plc，係依", "International plc，係依"), "standard.issuer_name", S.MISMATCH),
         (("cover", "電話: +886 2 5556 1313", "電話: +886 2 5556 1314"), "standard.distributor", S.MISMATCH),
+        (
+            ("ch二", "◎ 營業所在地：台北市松山區民生東路三段158號6樓", "◎ 營業所在地：台北市民生東路三段159號6樓"),
+            "standard.distributor",
+            S.MISMATCH,
+        ),
         (("cover", "連結一籃子股票與/或", "連結股票或"), "standard.product_name", S.MISMATCH),
         (("cover", "Worst of Shares", "Shares"), "standard.product_name", S.MISMATCH),
     ],
@@ -201,6 +206,11 @@ def test_document_difference_is_reported(tmp_path, replace, rule_id, status):
         ("art2", "本商品風險程度為RR4。", "本商品風險程度等級為RR4。"),  # 第一章第 2 項兩種開頭都視為正確
         ("ch二", "International Plc，係依", "International Plc.，係依"),  # 英文名結尾句點不計
         ("ch二", "股份有限公司Morgan", "股份有限公司（Morgan"),  # 括號不計
+        (
+            "ch二",
+            "◎ 營業所在地：台北市松山區民生東路三段158號6樓",
+            "◎ 營業所在地：台北市民生東路三段158 號6 樓",
+        ),  # 審查標準的地址等價寫法
     ],
 )
 def test_allowed_variants_still_pass(tmp_path, replace):
@@ -242,13 +252,17 @@ def test_ko_column_missing_before_maturity_requires_review(tmp_path):
     assert rule(r, "doc.ko_column")[0].status == S.REVIEW_REQUIRED
 
 
-def test_vwap_without_ko_column_leaves_ko_price_cells_alone(tmp_path):
+def test_vwap_without_ko_column_overwrites_ko_prices_with_the_empty_value(tmp_path):
+    """期初定價 VWAP 的價格欄一律以說明書覆寫；說明書沒有 KO 價（Non-Call = 天期）時 KO 價寫空值寫法（同沒有 KI 的下限價）。"""
     spec = Spec(obs="P", memory=False, ki="none", count=2, tenor=6, non_call=6)
     r = check(tmp_path, spec, **{"期初定價": "VWAP", "UL_1_KO價": 150})
     assert r.status == S.PASS, problems(r)
-    columns = {d.column for d in r.backfill}
-    assert "UL_1_進場價" in columns and "UL_1_KO價" not in columns and "UL_2_KO價" not in columns
-    assert "UL_3_KO價" in columns  # 說明書沒有的標的仍寫空值寫法
+    cells = {d.column: d for d in r.backfill}
+    assert cells["UL_1_進場價"].expected == Decimal("100.0000")
+    for column in ("UL_1_KO價", "UL_2_KO價"):  # 表上原有的 KO 價（150、200）都覆寫成空值寫法
+        assert cells[column].expected == "-" and cells[column].action == BackfillAction.OVERWRITE, column
+    assert cells["UL_1_下限價"].expected == "-" and cells["UL_1_下限價"].action == BackfillAction.MATCH
+    assert cells["UL_3_KO價"].expected == "-"  # 說明書沒有的標的
 
 
 def test_observation_wording_must_match_the_date_table(tmp_path):

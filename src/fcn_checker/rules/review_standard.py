@@ -366,34 +366,50 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
 
 
 def _distributor_info(ctx: Context) -> list[CheckResult]:
-    """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準；電話另接受審查標準列出的等價寫法。"""
+    """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準；電話、地址另接受審查標準列出的等價寫法。"""
     rid, std = "standard.distributor", ctx.issuer_std
-    checks = (  # 標準欄位、審查標準值、說明的開頭、項目名稱
-        ("distributor_name_cover", std.distributor_name, "封面受託或銷售機構名稱", "封面受託或銷售機構名稱"),
-        ("distributor_phone_cover", std.distributor_phone, "封面受託或銷售機構電話", "封面受託或銷售機構電話"),
-        ("distributor_address_cover", std.distributor_address, "封面受託或銷售機構地址", "封面受託或銷售機構地址"),
-        ("distributor_name_ch2", std.distributor_name, "第二章受託或銷售機構事業名稱", "第二章受託或銷售機構名稱"),
+    checks = (  # 標準欄位、種類、審查標準值、說明的開頭、項目名稱
+        ("distributor_name_cover", "name", std.distributor_name, "封面受託或銷售機構名稱", "封面受託或銷售機構名稱"),
+        ("distributor_phone_cover", "phone", std.distributor_phone, "封面受託或銷售機構電話", "封面受託或銷售機構電話"),
+        (
+            "distributor_address_cover",
+            "address",
+            std.distributor_address,
+            "封面受託或銷售機構地址",
+            "封面受託或銷售機構地址",
+        ),
+        (
+            "distributor_name_ch2",
+            "name",
+            std.distributor_name,
+            "第二章受託或銷售機構事業名稱",
+            "第二章受託或銷售機構名稱",
+        ),
         (
             "distributor_address_ch2",
+            "address",
             std.distributor_address,
             "第二章受託或銷售機構營業所在地",
             "第二章受託或銷售機構地址",
         ),
     )
     return [
-        _distributor_text(
-            ctx, rid, name, standard_field(ctx, name), exp, what, zh, phone=name == "distributor_phone_cover"
-        )
-        for name, exp, what, zh in checks
+        _distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)
+        for name, kind, exp, what, zh in checks
     ]
 
 
 def _distributor_text(
-    ctx: Context, rid: str, field: str, pf: ParsedField, exp: str, what: str, name: str, *, phone: bool
+    ctx: Context, rid: str, field: str, pf: ParsedField, exp: str, what: str, name: str, *, kind: str
 ) -> CheckResult:
-    """受託或銷售機構的一處文字 = 審查標準；電話另接受審查標準列出的等價寫法。"""
-    equivalents = {squash(p) for p in ctx.issuer_std.distributor_phone_equivalents}
-    if phone and pf.ok and squash(pf.value) in equivalents:
+    """受託或銷售機構的一處文字（`kind`：name 名稱／phone 電話／address 地址）= 審查標準；
+    電話、地址另接受審查標準列出的等價寫法（忽略空白後相等）。"""
+    std = ctx.issuer_std
+    listed = {
+        "phone": (std.distributor_phone_equivalents, "電話", "distributor.phone_equivalents"),
+        "address": (std.distributor_address_equivalents, "地址", "distributor.address_equivalents"),
+    }.get(kind)
+    if listed is not None and pf.ok and squash(pf.value) in {squash(v) for v in listed[0]}:
         return result(
             rid,
             field,
@@ -401,7 +417,7 @@ def _distributor_text(
             expected=exp,
             actual=pf.value,
             pf=pf,
-            tolerance="審查標準列出的電話等價寫法（distributor.phone_equivalents）",
+            tolerance=f"審查標準列出的{listed[1]}等價寫法（{listed[2]}）",
             item=Item.standard(name),
         )
     return _fixed_text(rid, field, pf, exp, what, name)
@@ -594,7 +610,7 @@ def _iis_risk_summary(ctx: Context, sheet: IisSheet) -> CheckResult:
 
 
 def _iis_occurrences(
-    ctx: Context, sheet: IisSheet, rid: str, name: str, expected: str | None, what: str, missing: str, phone: bool
+    ctx: Context, sheet: IisSheet, rid: str, name: str, expected: str | None, what: str, missing: str, kind: str
 ) -> list[CheckResult]:
     """投資人須知出處清單型欄位（各處受託機構名稱／地址／電話、發行機構名稱）每一處 = 審查標準。"""
     container = read_iis(sheet, name)
@@ -615,7 +631,7 @@ def _iis_occurrences(
             for occ in items
         ]
     return [
-        _distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, phone=phone)
+        _distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, kind=kind)
         for occ in items
     ]
 
@@ -638,15 +654,15 @@ def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedFie
     if provides("issue_price_pct"):
         out.extend(_issue_price(ctx, others=False))
     no_issuer = f"審查標準沒有 {ctx.issuer} 的發行機構全名（issuer_name.{ctx.issuer.lower()}）"
-    occurrence_checks = (  # 欄位、rule_id、審查標準值、說明用名稱、審查標準沒有值時的說明、是否電話
-        ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", no_issuer, False),
-        ("distributor_names", "standard.distributor", std.distributor_name, "受託或銷售機構名稱", "", False),
-        ("distributor_addresses", "standard.distributor", std.distributor_address, "受託或銷售機構地址", "", False),
-        ("distributor_phones", "standard.distributor", std.distributor_phone, "受託或銷售機構電話", "", True),
+    occurrence_checks = (  # 欄位、rule_id、審查標準值、說明用名稱、審查標準沒有值時的說明、種類（決定等價寫法）
+        ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", no_issuer, "issuer"),
+        ("distributor_names", "standard.distributor", std.distributor_name, "受託或銷售機構名稱", "", "name"),
+        ("distributor_addresses", "standard.distributor", std.distributor_address, "受託或銷售機構地址", "", "address"),
+        ("distributor_phones", "standard.distributor", std.distributor_phone, "受託或銷售機構電話", "", "phone"),
     )
-    for name, rid, expected, what, missing, phone in occurrence_checks:
+    for name, rid, expected, what, missing, kind in occurrence_checks:
         if provides(name):
-            out.extend(_iis_occurrences(ctx, sheet, rid, name, expected, what, missing, phone))
+            out.extend(_iis_occurrences(ctx, sheet, rid, name, expected, what, missing, kind))
     if any(provides(fee_field(label)) for label in ctx.std.fees):
         out.extend(_fees(ctx))
     return out

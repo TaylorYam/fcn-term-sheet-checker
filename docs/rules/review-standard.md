@@ -21,6 +21,7 @@
 | `distributor.chairman` | 林晋輝 | 第二章「受託或銷售機構」→「負責人姓名」 | 逐字相等（含字碼）；「晋」是古字 U+664B，寫成「晉」U+6649 即為錯誤 |
 | `distributor.name`／`phone`／`address` | 玉山綜合證券股份有限公司／02-5556-1313／台北市松山區民生東路三段158號6樓 | 封面「受託或銷售機構之名稱、電話及地址」；第二章「受託或銷售機構」→「事業名稱」「營業所在地」 | 忽略空白與換行後逐字相等（2026-10-02，Issue #41） |
 | `distributor.phone_equivalents` | `+886-2-5556-1313`（國際寫法，HSBC 封面使用）、`+886 2 5556 1313`（MS 封面使用） | 封面受託或銷售機構電話 | 電話除 `phone` 外，忽略空白後等於清單中任一寫法也算相符；**所有上手適用**；清單沒列的寫法判定不一致（2026-10-02，Issue #52）。要接受新的寫法時在清單加一筆，不改程式 |
+| `distributor.address_equivalents` | `台北市民生東路三段158號6樓`（沒有「松山區」，MS 第二章使用） | 封面與第二章受託或銷售機構地址（投資人須知各處地址同） | 用法同 `phone_equivalents`：忽略空白後等於清單中任一寫法也算相符；**所有上手適用**（2026-10-09，Issue #135） |
 | `issuer_name.<上手>` | BARC：英商巴克萊銀行股份有限公司（Barclays Bank PLC） | 封面「發行機構」；第二章「發行機構」→「事業名稱」；範本有只寫中文的出處時（MS 第一章 §3）只比中文 | 忽略空白與換行後逐字相等；缺該上手分節時轉人工覆核 |
 | `issuer_name_ignore.<上手>` | MS：`brackets`、`trailing_period` | 同上 | 該上手比對時另外忽略括號（全形／半形）、英文名結尾的句點；沒列出的上手不忽略 |
 | `fees` | 申購費用、提前贖回費用、分銷費用皆為 0%~5% | 第四章「投資人應負擔的各項費用」表的費率欄 | 忽略空白後逐字相等；只核對列出的費用項目 |
@@ -62,7 +63,7 @@
 
 - 固定警語：有 `risk.fixed_warning_by_issuer.<上手>` 就用，否則用 `risk.fixed_warning`。
 - 商品名稱樣板 `product_name.<上手>`、發行機構全名 `issuer_name.<上手>`：缺該上手的值時轉人工覆核（`standard_missing`）。
-- 受託機構名稱、電話（含 `phone_equivalents`）、地址：所有上手共用。
+- 受託機構名稱、電話（含 `phone_equivalents`）、地址（含 `address_equivalents`）：所有上手共用。
 
 商品名稱樣板的佔位符一律由說明書欄位填入，不依上手分支：
 
@@ -107,6 +108,7 @@
 - **商品名稱樣板**（`product_name.ms`）：中文 `英商摩根士丹利發行{天期}個月期{幣別中文}計價連結{標的寫法}固定配息{記憶式}結構型商品(無保證機構)(無擔保)(不保本)(下稱「本商品」)`，英文 `Morgan Stanley & Co. International Plc issuance of {天期} Months {幣別代碼} Fixed Coupon Notes linked to {標的寫法} (non-guaranteed)(unsecured)(non-principal protected)`。標的寫法依 1 檔／多檔是兩組不同字串，用佔位符 `{underlying_zh}`／`{underlying_en}`（§2.3）。
 - **發行機構全名**（`issuer_name.ms`）：英商摩根士丹利國際股份有限公司(Morgan Stanley & Co. International Plc.)；第二章寫法沒有括號與英文結尾句點，比對時忽略（`issuer_name_ignore.ms`）；第一章 §3 只寫中文，只比中文。
 - **受託機構電話**：封面寫 `+886 2 5556 1313`，`phone_equivalents` 加這個寫法。
+- **受託機構地址**：第二章「◎ 營業所在地」寫 `台北市民生東路三段158號6樓`（少「松山區」），2026-10-09 確認視為正確，`address_equivalents` 加這個寫法。
 - **受理申購日**：MS 範本沒有；改由 MS 專屬規則核對開始受理贖回日期。
 - 審查通過日期只以 2026 年後的文件為準，不為 2025 年的舊審查日期加清單。
 

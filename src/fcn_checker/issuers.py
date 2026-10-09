@@ -102,7 +102,7 @@ HSBC = Issuer(
     ),
 )
 
-# MS 只有說明書範本；投資人須知另開 Issue，在那之前 MS 的投資人須知是未支援上手（ADR 0007）
+# MS 只有說明書範本；投資人須知見 Issue #137，在那之前 MS 的投資人須知是未支援上手（ADR 0007）
 MS = Issuer(
     code=ms_rules.ISSUER,
     template_id=ms_parser.TEMPLATE_ID,

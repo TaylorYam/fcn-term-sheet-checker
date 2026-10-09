@@ -50,16 +50,11 @@ def test_new_samples_only_differ_where_the_exploration_said(items):
             # 2025 年交易的 3 份沿用 2025 年的舊審查通過日期：2 份交易日早於清單最早的日期、1 份不一致（只以 2026 年後為準）
             ("standard.approval_date", "approval_date_not_configured"): 2,
             ("standard.approval_date", "value_mismatch"): 1,
-            # 第二章受託機構營業所在地 6 份都少「松山區」（實作時發現，待作業人員確認，核對規則 §5）
-            ("standard.distributor", "value_mismatch"): 6,
         }
     )
-    assert all(
-        r.field == "distributor_address_ch2"
-        for i in new
-        for r in i.report.results
-        if r.rule_id == "standard.distributor" and r.status in PROBLEMS
-    )
+    # 第二章受託機構營業所在地 6 份都少「松山區」：審查標準的地址等價寫法（2026-10-09 確認視為正確）
+    ch2 = [r for i in new for r in i.report.results if r.field == "distributor_address_ch2"]
+    assert len(ch2) == 6 and all(r.status == S.PASS and "address_equivalents" in r.tolerance for r in ch2)
     # Non-Call = 天期的 1 份：價格表沒有 KO 欄，KO(%) 與各標的 KO 價為不適用
     no_ko = [
         i for i in new if any(r.rule_id == "field.ko_pct" and r.status == S.NOT_APPLICABLE for r in i.report.results)
