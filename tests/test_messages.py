@@ -17,7 +17,7 @@ import pytest
 import hsbc_synth
 from fcn_checker.issuers import by_code
 from fcn_checker.messages import problem_message
-from fcn_checker.panel import result_detail
+from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.rules import kit
 from fcn_checker.schema import CheckResult, CheckStatus, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
@@ -241,10 +241,13 @@ def test_encrypted_pdf_message_is_plain_chinese(tmp_path):
 
 
 def test_panel_detail_uses_the_shared_message_without_rule_id(tmp_path):
-    report = check(tmp_path, overrides={"UL_2_進場價": 123.45})
+    spec = Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, UL_2_進場價=123.45)])
+    item = check_all(sheet, [pdf]).items[0]
 
-    [r] = [r for r in issues(report) if r.rule_id == "field.underlying_prices"]
-    detail = result_detail(r)
+    [r] = [r for r in issues(item.report) if r.rule_id == "field.underlying_prices"]
+    detail = PanelOutcome.detail(r, item)
     assert detail.startswith("UL_2 進場價｜不一致\n原因：" + problem_message(r))
     assert r.rule_id not in detail and r.reason_code not in detail
 
