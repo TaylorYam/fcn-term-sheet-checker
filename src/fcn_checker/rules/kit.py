@@ -56,7 +56,7 @@ class Context(_IssuerStandardOf):
     """
 
     ts: TermSheet  # 被核對文件的讀出結果（投資人須知時是 IisSheet，同樣以 f／full_text 讀欄位）
-    order: OrderRecord
+    order: OrderRecord  # 參考條件表的列：值、Excel 欄名與儲存格位置（回填規則也從這裡讀）
     std: ReviewStandard
     fmt: ReferenceFormat
     issuer: str
@@ -70,7 +70,7 @@ class Context(_IssuerStandardOf):
         return self.order.source
 
     def sheet_field(self, key: str) -> OrderValue | None:
-        return self.order.fields.get(key)
+        return self.order.get(key)
 
     @property
     def iis(self) -> IisSheet:

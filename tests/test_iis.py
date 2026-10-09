@@ -497,13 +497,13 @@ def test_iis_review_standard_messages_name_the_iis_when_fields_are_unreadable():
     from fcn_checker.parsers.layout import TextIndex
     from fcn_checker.rules.kit import Context
     from fcn_checker.rules.review_standard import iis_review_standard_rules
-    from fcn_checker.schema import OrderValue, ParsedField
+    from fcn_checker.schema import ParsedField
     from fcn_checker.standard_fields import fee_field
 
     std = CONFIG.review_standard
     provided = frozenset({"print_dates", *(fee_field(label) for label in std.fees)})
     sheet = IisSheet({}, TextIndex([]), provided)
-    order = OrderRecord(OrderValue("029199990001", "參考條件表!B4"), {})
+    order = OrderRecord.offline(CONFIG.reference_format, {"product_code": "029199990001"})
     ctx = Context(sheet, order, std, CONFIG.reference_format, "BARC", document=DocKind.IIS)
 
     results = iis_review_standard_rules(ctx, trade=ParsedField.present("trade_date", dt.date(2030, 1, 7), []))

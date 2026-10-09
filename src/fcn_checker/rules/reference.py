@@ -1,6 +1,7 @@
 """參考條件表的共用規則：表上事先填好的欄位與 Non-Call(月) 的核對。
 
 各上手只交出說明書標準欄位（standard_fields.py）與提前出場排程；比對在這裡實作一次，所有上手共用。
+單欄比對（表上一欄 = 同名標準欄位）宣告在欄位核對表 `FIELD_CHECKS`，只宣告一次：說明書整張執行，投資人須知依範本挑選。
 空值寫法一律取自參考條件表格式設定（`empty_value`）。回填欄位（TS、IIS、ISIN、發行日、比價日）見 backfill.py。
 說明書明確判定不適用的標準欄位（例：MS 範本沒有年利率、Non-Call = 天期時沒有 KO 價）不核對，結果為不適用並附說明。
 項目名稱：讀到參考條件表某一欄時就是該欄的 Excel 欄名（`Item.column`），沒有這欄時用規則旁寫的中文名稱。
@@ -9,10 +10,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP
 from typing import Any
 
-from ..orders.reference import OrderRecord
+from ..orders.reference import UNDERLYING_SLOTS, OrderRecord
 from ..schema import CheckResult, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import AutocallSchedule
@@ -35,57 +37,97 @@ from .kit import (
     to_int,
 )
 
-__all__ = ["AutocallSchedule", "column_checks", "compare_field", "field_rules", "first_callable_period", "is_vwap"]
+__all__ = [
+    "FIELD_CHECKS",
+    "AutocallSchedule",
+    "FieldCheck",
+    "column_checks",
+    "field_rules",
+    "first_callable_period",
+    "is_vwap",
+]
 
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
 OBS_LABEL = {"D": "期間每日觀察", "P": "期末定日觀察"}
 UNDERLYINGS = "標的"  # UL_1～UL_5 合起來核對，項目用這個名稱
-PRICE_COLUMNS = (  # 價格列的鍵、標準欄位、核對結果欄位用的中文
-    ("initial", "initial_price", "進場價"),
-    ("strike", "strike_price", "執行價"),
-    ("ki", "ki_price", "下限價"),
-    ("ko", "ko_price", "KO 價"),
+PRICE_COLUMNS = (  # 價格欄（`OrderRecord.price` 的鍵）與核對結果欄位用的中文
+    ("initial", "進場價"),
+    ("strike", "執行價"),
+    ("ki", "下限價"),
+    ("ko", "KO 價"),
 )
 VWAP = "vwap"  # 期初定價為 VWAP：價格欄不比對，核對通過後以說明書覆寫（Issue #122）
 
 
-# ---------------------------------------------------------------- 表上事先填好的欄位
+# ---------------------------------------------------------------- 表上事先填好的欄位：欄位核對表
 
 
-def compare_field(
-    ctx: Context,
-    rule_id: str,
-    key: str,
-    name: str,
-    convert: Callable[[Any], Any],
-    what: str,
-    compare: Callable[[Any, Any], tuple[bool, Any]] | None = None,
-    tolerance: str | None = None,
-) -> CheckResult:
-    """表上欄位與同名標準欄位比對；預設相等，`compare` 回傳（是否一致, 顯示的預期值）。說明書判定不適用時不比對。"""
-    pf = standard_field(ctx, key)
-    if pf.status == FieldStatus.NOT_APPLICABLE:
-        ov = ctx.sheet_field(key)
-        return doc_not_applicable(rule_id, key, pf, [ov], item=Item.column(name, [ov]), document=ctx.document)
-    v, ov, problem = order_value(ctx, key, rule_id, key, pf, convert, what, name=name)
-    if problem:
-        return problem
-    item = Item.column(name, [ov])
-    if not pf.ok:
-        return doc_review(rule_id, key, pf, v, [ov], item=item, document=ctx.document)
-    ok, shown = compare(v, pf.value) if compare else (v == pf.value, v)
-    return result(
-        rule_id,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=shown,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        tolerance=tolerance,
-        item=item,
+@dataclass(frozen=True)
+class FieldCheck:
+    """表上一欄與同名說明書標準欄位的比對宣告：怎麼轉型、怎麼比、容差多少。
+
+    預設相等；`compare` 回傳（是否一致, 顯示的預期值）。說明書判定不適用時不比對。
+    """
+
+    rule_id: str
+    key: str  # 標準欄位（參考條件表與說明書同名）
+    name: str  # 表上沒有這欄時的項目名稱（有這欄時項目是 Excel 欄名）
+    convert: Callable[[Any], Any]
+    what: str  # 轉型失敗時錯訊寫的型別（數字／整數／日期）
+    compare: Callable[[Any, Any], tuple[bool, Any]] | None = None
+    tolerance: str | None = None
+
+    def check(self, ctx: Context) -> CheckResult:
+        rule_id, key, name = self.rule_id, self.key, self.name
+        pf = standard_field(ctx, key)
+        if pf.status == FieldStatus.NOT_APPLICABLE:
+            ov = ctx.sheet_field(key)
+            return doc_not_applicable(rule_id, key, pf, [ov], item=Item.column(name, [ov]), document=ctx.document)
+        v, ov, problem = order_value(ctx, key, rule_id, key, pf, self.convert, self.what, name=name)
+        if problem:
+            return problem
+        item = Item.column(name, [ov])
+        if not pf.ok:
+            return doc_review(rule_id, key, pf, v, [ov], item=item, document=ctx.document)
+        ok, shown = self.compare(v, pf.value) if self.compare else (v == pf.value, v)
+        return result(
+            rule_id,
+            key,
+            S.PASS if ok else S.MISMATCH,
+            expected=shown,
+            actual=pf.value,
+            pf=pf,
+            ov=[ov],
+            reason="" if ok else "value_mismatch",
+            tolerance=self.tolerance,
+            item=item,
+        )
+
+
+def _pct_check(rule_id: str, key: str, name: str) -> FieldCheck:
+    """百分比欄：依說明書顯示位數四捨五入後比對。"""
+    return FieldCheck(rule_id, key, name, to_decimal, "數字", cmp_pct, PCT_TOLERANCE)
+
+
+# 單欄比對的欄位核對表：說明書（`field_rules`）整張依序執行，投資人須知（rules/iis.py）依範本 `provides` 挑選，
+# 不再另抄一份；投資人須知只多兩筆自己的宣告（KI % 只比數值、發行日）。需要看別的欄位或格式設定才能比的欄位
+# （商品代號、幣別、標的、KO／KI 型態、KI %）仍是下方的函式。
+FIELD_CHECKS: dict[str, FieldCheck] = {
+    c.key: c
+    for c in (
+        _pct_check("field.strike_pct", "strike_pct", "執行 %"),
+        _pct_check("field.ko_pct", "ko_pct", "KO %"),
+        _pct_check("field.coupon_pa_pct", "coupon_pa_pct", "年利率 %"),
+        FieldCheck("field.tenor_months", "tenor_months", "天期（月）", to_int, "整數"),
+        FieldCheck("field.trade_date", "trade_date", "交易日", to_date, "日期"),
+        FieldCheck("field.final_valuation_date", "final_valuation_date", "最終評價日", to_date, "日期"),
+        FieldCheck("field.maturity_date", "maturity_date", "到期日", to_date, "日期"),
+        FieldCheck("field.denomination", "denomination", "面額", to_int, "整數"),
     )
+}
+
+
+# ---------------------------------------------------------------- 表上事先填好的欄位：要看別的欄位或格式設定的規則
 
 
 def product_code(ctx: Context) -> CheckResult:
@@ -152,7 +194,7 @@ def currency(ctx: Context) -> CheckResult:
 
 def underlyings(ctx: Context) -> CheckResult:
     rid, pf, empty = "field.underlyings", standard_field(ctx, "underlyings"), ctx.fmt.empty_value
-    ovs = [ctx.order.fields.get(f"underlying_{i}") for i in range(1, 6)]
+    ovs = [ctx.order.underlying(i) for i in range(1, UNDERLYING_SLOTS + 1)]
     values = [o.value if o and o.value != empty else None for o in ovs]  # 空值寫法表示沒有這檔標的
     filled = [i for i, v in enumerate(values) if v is not None]
     if not filled:
@@ -349,7 +391,7 @@ def ki_pct(ctx: Context) -> CheckResult:
 
 def is_vwap(ctx: Context) -> bool:
     """參考條件表的期初定價是 VWAP（空白或不在允許值內都不算，價格欄照常比對）。"""
-    ov = ctx.order.fields.get("initial_pricing")
+    ov = ctx.order.get("initial_pricing")
     return ov is not None and ctx.fmt.initial_pricing_values.get(ov.value) == VWAP
 
 
@@ -383,9 +425,9 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
         ev = list(row.evidence)
-        for col, std, zh in PRICE_COLUMNS:
+        for col, zh in PRICE_COLUMNS:
             field, name = f"{label} {zh}", price_item(i, col)
-            ov = ctx.order.fields.get(f"underlying_{i}_{std}")
+            ov = ctx.order.price(i, col)
             if col == "ko" and "ko" not in row.prices:  # 價格表沒有 KO 價：說明書判定不適用才不比對
                 item = Item.column(name, [ov])
                 if ko.status == FieldStatus.NOT_APPLICABLE:
@@ -482,19 +524,11 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
 
 def field_rules(ctx: Context) -> list[CheckResult]:
     """表上作業人員事先填好的欄位逐一與說明書標準欄位比對（Non-Call 與回填欄位見下方）。"""
-    dec, intg, date = to_decimal, to_int, to_date
     return [
         product_code(ctx),
         currency(ctx),
         underlyings(ctx),
-        compare_field(ctx, "field.strike_pct", "strike_pct", "執行 %", dec, "數字", cmp_pct, PCT_TOLERANCE),
-        compare_field(ctx, "field.ko_pct", "ko_pct", "KO %", dec, "數字", cmp_pct, PCT_TOLERANCE),
-        compare_field(ctx, "field.coupon_pa_pct", "coupon_pa_pct", "年利率 %", dec, "數字", cmp_pct, PCT_TOLERANCE),
-        compare_field(ctx, "field.tenor_months", "tenor_months", "天期（月）", intg, "整數"),
-        compare_field(ctx, "field.trade_date", "trade_date", "交易日", date, "日期"),
-        compare_field(ctx, "field.final_valuation_date", "final_valuation_date", "最終評價日", date, "日期"),
-        compare_field(ctx, "field.maturity_date", "maturity_date", "到期日", date, "日期"),
-        compare_field(ctx, "field.denomination", "denomination", "面額", intg, "整數"),
+        *(check.check(ctx) for check in FIELD_CHECKS.values()),
         *min_amounts(ctx),
         ko_observation(ctx),
         ko_memory(ctx),

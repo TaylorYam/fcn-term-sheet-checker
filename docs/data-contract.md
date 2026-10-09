@@ -7,7 +7,7 @@
 - `Document`：document_id、sha256、頁數、逐頁 extraction method、工具版本與擷取錯誤。
 - `Evidence`：頁碼（從 1 起）、bbox（使用統一座標系，含頁面尺寸與旋轉處理）、原文、擷取方式。OCR 另留引擎分數；分數不等於欄位正確機率。
 - `ParsedField`：欄位路徑、raw_value、候選值、證據清單及狀態：present / missing / ambiguous / invalid / not_applicable。衝突值保留，不覆寫。
-- `OrderRecord`：預期條款、來源檔案 hash、列／儲存格位置、來源版本與交易識別。正式來源待確認；開發先用合成 JSON。
+- `OrderRecord`：參考條件表的一列（`orders/reference.py`，唯一的列型別）：標準欄位的值、Excel 欄名與儲存格位置、表頭欄名問題與交易識別（商品代號）；來源檔案 hash 與版本記在來源快照與核對紀錄。
 
 ## 核對欄位候選
 

@@ -16,6 +16,7 @@
 - 填出來最晚的比價日必須等於說明書的最終比價日，否則轉人工覆核、不回填。
 
 格式設定沒有回填欄位的欄名、或參考條件表缺少該欄時，回填規則轉人工覆核並寫出缺的欄名，不產生決策。
+回填規則的輸入與其他共用規則相同（`Context`）：表上的值、Excel 欄名與儲存格位置都從 `ctx.order` 讀。
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from openpyxl.workbook.workbook import Workbook
 
 from .config import ReferenceFormat
 from .ingestion import IngestionError
-from .orders.reference import ReferenceRow
+from .orders.reference import OrderRecord, autocall_date_key, price_key
 from .rules.kit import Context, doc_review, result
 from .rules.reference import PRICE_COLUMNS, is_vwap, standard_field
 from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
@@ -81,17 +82,13 @@ class CellDecision:
 # ---------------------------------------------------------------- 每格決策
 
 
-def _header(fmt: ReferenceFormat, std: str) -> str | None:
-    return next((h for h, s in fmt.columns.items() if s == std), None)
-
-
-def _missing_columns(fmt: ReferenceFormat, row: ReferenceRow, stds: Sequence[str]) -> list[str]:
+def _missing_columns(row: OrderRecord, keys: Sequence[str]) -> list[str]:
     out = []
-    for std in stds:
-        header = _header(fmt, std)
+    for key in keys:
+        header = row.header(key)
         if header is None:
-            out.append(f"參考條件表格式設定沒有標準欄位 {std} 的欄名")
-        elif std not in row.cells:
+            out.append(f"參考條件表格式設定沒有標準欄位 {key} 的欄名")
+        elif not row.has(key):
             out.append(f"參考條件表缺少「{header}」欄")
     return out
 
@@ -101,9 +98,9 @@ def _column_missing(rid: str, key: str, missing: list[str], ovs: list[OrderValue
     return result(rid, key, S.REVIEW_REQUIRED, ov=ovs, reason=COLUMN_MISSING, message=message, item=item)
 
 
-def _decide(fmt: ReferenceFormat, row: ReferenceRow, std: str, expected: Any) -> CellDecision:
+def _decide(row: OrderRecord, key: str, expected: Any) -> CellDecision:
     """呼叫前已確認格式設定與參考條件表都有這一欄。"""
-    ov = row.fields.get(std)
+    ov = row.get(key)
     value = ov.value if ov else None
     if value is None:
         action = BackfillAction.FILL
@@ -111,7 +108,7 @@ def _decide(fmt: ReferenceFormat, row: ReferenceRow, std: str, expected: Any) ->
         action = BackfillAction.MATCH
     else:
         action = BackfillAction.MISMATCH
-    return CellDecision(_header(fmt, std) or std, row.cells[std], value, expected, action)
+    return CellDecision(row.header(key) or key, row.cells[key], value, expected, action)
 
 
 def _fill_message(decisions: list[CellDecision]) -> str:
@@ -141,17 +138,17 @@ def expected_slots(sched: AutocallSchedule, tenor: int | None, empty: str) -> li
 
 
 def _single(
-    rid: str, key: str, what: str, name: str, fmt: ReferenceFormat, row: ReferenceRow, pf: ParsedField
+    rid: str, key: str, what: str, name: str, row: OrderRecord, pf: ParsedField
 ) -> tuple[CheckResult, list[CellDecision]]:
     """只有一格的回填欄位：表上值與說明書值比對並決定這一格的處理。項目為該欄（沒有這欄時用 `name`）。"""
-    ov: OrderValue | None = row.fields.get(key)
+    ov: OrderValue | None = row.get(key)
     item = Item.column(name, [ov])
-    missing = _missing_columns(fmt, row, [key])
+    missing = _missing_columns(row, [key])
     if missing:
         return _column_missing(rid, key, missing, [ov], item), []
     if not pf.ok:
         return doc_review(rid, key, pf, ov.value if ov else None, [ov], item=item), []
-    d = _decide(fmt, row, key, pf.value)
+    d = _decide(row, key, pf.value)
     ok = d.action != BackfillAction.MISMATCH
     return (
         result(
@@ -170,28 +167,29 @@ def _single(
     )
 
 
-def isin(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
-    return _single("backfill.isin", "isin", " ISIN ", "ISIN Code", fmt, row, standard_field(ctx, "isin"))
+def isin(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
+    return _single("backfill.isin", "isin", " ISIN ", "ISIN Code", ctx.order, standard_field(ctx, "isin"))
 
 
-def issue_date(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+def issue_date(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
     """說明書發行日取自標準欄位 `issue_date`（BARC 第一章 §13(3)、HSBC 第一章 §15(2)）。"""
     key = "issue_date"
-    return _single("backfill.issue_date", key, "發行日", "發行日", fmt, row, standard_field(ctx, key))
+    return _single("backfill.issue_date", key, "發行日", "發行日", ctx.order, standard_field(ctx, key))
 
 
-def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+def compare_dates(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
     rid, key, sched = "backfill.compare_dates", "compare_dates", standard_field(ctx, "autocall_schedule")
-    stds = [f"autocall_date_{n}" for n in range(1, SLOTS + 1)]
-    ovs = [row.fields.get(s) for s in stds]
+    row = ctx.order
+    keys = [autocall_date_key(n) for n in range(1, SLOTS + 1)]
+    ovs = [row.autocall_date(n) for n in range(1, SLOTS + 1)]
     item = Item.group(COMPARE_DATES, ovs)
-    missing = _missing_columns(fmt, row, stds)
+    missing = _missing_columns(row, keys)
     if missing:
         return _column_missing(rid, key, missing, ovs, item), []
     if not sched.ok:
         return doc_review(rid, key, sched, None, ovs, item=item), []
     tenor = standard_field(ctx, "tenor_months")
-    slots = expected_slots(sched.value, tenor.value if tenor.ok else None, fmt.empty_value)
+    slots = expected_slots(sched.value, tenor.value if tenor.ok else None, ctx.fmt.empty_value)
     if isinstance(slots, str):
         return (
             result(
@@ -206,7 +204,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
             ),
             [],
         )
-    decisions = [_decide(fmt, row, s, e) for s, e in zip(stds, slots, strict=True)]
+    decisions = [_decide(row, k, e) for k, e in zip(keys, slots, strict=True)]
     final = standard_field(ctx, "final_valuation_date")
     if not final.ok:
         return doc_review(rid, key, final, None, ovs, item=item), decisions
@@ -247,9 +245,7 @@ def compare_dates(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
     )
 
 
-def underlying_prices(
-    ctx: Context, fmt: ReferenceFormat, row: ReferenceRow
-) -> tuple[CheckResult | None, list[CellDecision]]:
+def underlying_prices(ctx: Context) -> tuple[CheckResult | None, list[CellDecision]]:
     """期初定價為 VWAP：UL_1～UL_5 的四個價格欄一律以說明書價格表覆寫。
 
     說明書價格表上有的標的寫說明書的值（無 KI 時下限價為空值寫法）；沒有的標的四欄都寫空值寫法。
@@ -259,12 +255,12 @@ def underlying_prices(
     if not is_vwap(ctx):
         return None, []
     rid, key, table = "backfill.underlying_prices", "underlying_prices", standard_field(ctx, "underlying_prices")
-    slots = sum(1 for std in fmt.columns.values() if std.endswith("_initial_price"))  # 表上的標的數（UL_1～UL_5）
-    n = max(slots, len(table.value) if table.ok else 0)
-    stds = [f"underlying_{i}_{std}" for i in range(1, n + 1) for _, std, _ in PRICE_COLUMNS]
-    ovs = [row.fields.get(s) for s in stds]
+    row, empty = ctx.order, ctx.fmt.empty_value
+    n = max(row.underlying_slots, len(table.value) if table.ok else 0)  # 表上的標的數（UL_1～UL_5）
+    keys = [price_key(i, col) for i in range(1, n + 1) for col, _ in PRICE_COLUMNS]
+    ovs = [row.get(k) for k in keys]
     item = Item.group(PRICES, ovs)
-    missing = _missing_columns(fmt, row, stds)
+    missing = _missing_columns(row, keys)
     if missing:
         return _column_missing(rid, key, missing, ovs, item), []
     if not table.ok:
@@ -272,8 +268,8 @@ def underlying_prices(
     decisions = []
     for i in range(1, n + 1):
         prices = table.value[i - 1].prices if i <= len(table.value) else {}
-        for col, std, _ in PRICE_COLUMNS:
-            d = _decide(fmt, row, f"underlying_{i}_{std}", prices.get(col, fmt.empty_value))
+        for col, _ in PRICE_COLUMNS:
+            d = _decide(row, price_key(i, col), prices.get(col, empty))
             if d.action == BackfillAction.MISMATCH:
                 d = replace(d, action=BackfillAction.OVERWRITE)
             decisions.append(d)
@@ -291,18 +287,18 @@ def underlying_prices(
     return result(rid, key, S.PASS, actual=actual, pf=table, ov=ovs, message=message, item=item), decisions
 
 
-def checked_marks(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tuple[CheckResult, list[CellDecision]]:
+def checked_marks(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
     """TS、IIS：說明書與投資人須知核對沒問題的打勾（打勾寫法 `checked_value`，Issue #127）。
 
     值不取自說明書：兩格都是打勾寫法；只有兩份都通過或人工放行的商品才寫入（批量入口的 `fills_sheet`）。
     """
-    rid, key, mark = "backfill.checked", "checked", fmt.checked_value
-    ovs = [row.fields.get(s) for s in CHECKED_FIELDS]
-    item = Item.group("、".join(_header(fmt, s) or s for s in CHECKED_FIELDS), ovs)
-    missing = _missing_columns(fmt, row, CHECKED_FIELDS)
+    rid, key, mark, row = "backfill.checked", "checked", ctx.fmt.checked_value, ctx.order
+    ovs = [row.get(k) for k in CHECKED_FIELDS]
+    item = Item.group("、".join(row.header(k) or k for k in CHECKED_FIELDS), ovs)
+    missing = _missing_columns(row, CHECKED_FIELDS)
     if missing:
         return _column_missing(rid, key, missing, ovs, item), []
-    decisions = [_decide(fmt, row, s, mark) for s in CHECKED_FIELDS]
+    decisions = [_decide(row, k, mark) for k in CHECKED_FIELDS]
     bad = [d for d in decisions if d.action == BackfillAction.MISMATCH]
     n = sum(d.action == BackfillAction.FILL for d in decisions)
     message = "；".join(

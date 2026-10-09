@@ -24,7 +24,7 @@ from .check_config import CheckConfig
 from .config import ReviewStandard
 from .investor_sheet import IisSheet
 from .issuers import Issuer
-from .orders.reference import OrderRecord, ReferenceRow
+from .orders.reference import OrderRecord
 from .rules import derivation, iis, reference
 from .rules.kit import Context, IssuerContext
 from .rules.review_standard import iis_review_standard_rules, review_standard_rules
@@ -34,19 +34,18 @@ from .standard_fields import TermSheet
 
 @dataclass(frozen=True)
 class Paired:
-    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、參考條件表的列與轉成的下單資料。"""
+    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、對到的參考條件表列。"""
 
     issuer: Issuer
     ts: TermSheet
-    row: ReferenceRow
-    record: OrderRecord
+    row: OrderRecord
 
 
 def _issuer_context(paired: Paired, std: ReviewStandard) -> IssuerContext:
     """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0005）。"""
-    record = paired.record
-    declared = {key: record.fields.get(key) for key in paired.issuer.reference_fields}
-    return IssuerContext(paired.ts, std, paired.issuer.code, declared, record.source)
+    row = paired.row
+    declared = {key: row.get(key) for key in paired.issuer.reference_fields}
+    return IssuerContext(paired.ts, std, paired.issuer.code, declared, row.source)
 
 
 def check_document(pairing: list[CheckResult], paired: Paired | None, config: CheckConfig) -> CheckReport:
@@ -58,9 +57,8 @@ def check_document(pairing: list[CheckResult], paired: Paired | None, config: Ch
     results = list(pairing)
     report = CheckReport(CheckStatus.ERROR, None, results, [])
     if paired is not None:
-        record = paired.record
-        ctx = Context(paired.ts, record, std, rfmt, paired.issuer.code)
-        results.extend(reference.column_checks(record))
+        ctx = Context(paired.ts, paired.row, std, rfmt, paired.issuer.code)
+        results.extend(reference.column_checks(paired.row))
         results.extend(reference.field_rules(ctx))
         results.extend(derivation.prices(ctx))
         results.extend(paired.issuer.rules(_issuer_context(paired, std)))
@@ -75,7 +73,7 @@ def check_document(pairing: list[CheckResult], paired: Paired | None, config: Ch
             backfill.underlying_prices,
         )
         for rule in rules:
-            r, cells = rule(ctx, rfmt, paired.row)
+            r, cells = rule(ctx)
             if r is not None:  # 價格欄只有期初定價 VWAP 時才是回填欄位
                 backfill_results.append(r)
             decisions.extend(cells)
@@ -93,8 +91,7 @@ class PairedIis:
 
     issuer: Issuer
     sheet: IisSheet
-    row: ReferenceRow
-    record: OrderRecord
+    row: OrderRecord
     term_sheet: TermSheet | None
     pages: int
     file_code: str  # 檔名前 12 碼
@@ -107,7 +104,7 @@ def check_investor_sheet(pairing: list[CheckResult], paired: PairedIis | None, c
     if paired is not None:
         ctx = Context(
             paired.sheet,
-            paired.record,
+            paired.row,
             config.review_standard,
             config.reference_format,
             paired.issuer.code,
