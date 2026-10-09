@@ -2,7 +2,7 @@
 
 - 適用：BARC（[`barc-zh-iis`](../templates/barc-zh-iis.md)）、HSBC（[`hsbc-zh-iis`](../templates/hsbc-zh-iis.md)）、MS（[`ms-zh-iis`](../templates/ms-zh-iis.md)）中文投資人須知
 - 決策：[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)；名詞見 [CONTEXT.md](../../CONTEXT.md)
-- 狀態：2026-10-08 與使用者確認（grill-with-docs）；已實作（Issue #124：`rules/iis.py`、`rules/review_standard.py` 的 `iis_review_standard_rules`）。MS 欄與 D 類為 2026-10-09 確認（Issue #137），實作見同一 Issue
+- 狀態：2026-10-08 與使用者確認（grill-with-docs）；已實作（Issue #124：`rules/iis.py`、`rules/review_standard.py` 的 `iis_review_standard_rules`）。MS 欄與 D 類為 2026-10-09 確認並實作（Issue #137：`parsers/ms_iis.py`、範本專屬規則 `rules/ms_iis.py`）
 - 依據：SOP「結構債TS、IIS 核對SOP」（IIS 共 4 頁；產品條件、風險等級、警語、受託機構等與說明書相同）＋ BARC、HSBC、MS 各 8 份樣本探勘（MS 只支援新版 6 份的範本）
 
 ## 1. 檔名、配對與結果
@@ -75,19 +75,19 @@
 
 ### D. 日期與提前出場、觸及下限條件
 
-MS 投資人須知另外寫出交易日、期末定價日與提前出場、觸及下限的條件（2026-10-09 確認納入，Issue #137）；BARC、HSBC 投資人須知沒有這些項目。
+MS 投資人須知另外寫出交易日、期末定價日與提前出場、觸及下限的條件（2026-10-09 確認納入，Issue #137）；BARC、HSBC 投資人須知沒有這些項目。D29～D35 是各上手共用的投資人須知規則（範本有這些欄位就核對）；D36、D37 只有 MS 範本有，由 MS 投資人須知範本的專屬規則核對（`IisTemplate.rules`，只拿到投資人須知與同商品說明書的讀出結果）。B16 的 MS 月配息率 rule_id 為 `iis.monthly_coupon`（每處一筆）。
 
-| # | 檢查點 | BARC | HSBC | MS | 預期值 | 比對方式 |
-|---|---|---|---|---|---|---|
-| D29 | 交易日 | — | — | ✓ | 參考條件表交易日 | 相等 |
-| D30 | 期末定價日 | — | — | ✓ | 參考條件表最終比價日 | 相等 |
-| D31 | KO 觀察方式（每日／每個定價日） | — | — | ✓ | 參考條件表 KO(Freq) | 同說明書規則 |
-| D32 | 記憶式 | — | — | ✓ | 參考條件表 KO(memo) | 同說明書規則 |
-| D33 | 第一個可提前出場期（「自第 k 個…開始」的 k） | — | — | ✓ | 參考條件表 Non-Call(月) | 相等 |
-| D34 | 每日觀察的 KO 觀察起日、迄日 | — | — | D 型 ✓ | 起日：說明書提前出場排程第 k 期的比價日（D 型 = 日期表第 k 期終止日）；迄日：參考條件表最終比價日 | 相等 |
-| D35 | KI 型態（觸及下限事件的觀察寫法；沒有 KI 時由到期贖回寫法明確判定） | — | — | ✓ | 參考條件表 KI(Freq) | 同說明書規則 |
-| D36 | 開始受理贖回日期 | — | — | ✓ | 說明書開始受理贖回日期 | 相等 |
-| D37 | 商品種類 | — | — | ✓ | 依投資人須知的標的數：1 檔、2 檔以上寫法不同（同 MS 說明書封面 6 規則） | 忽略空白後相等 |
+| # | 檢查點 | BARC | HSBC | MS | 預期值 | 比對方式 | rule_id |
+|---|---|---|---|---|---|---|---|
+| D29 | 交易日 | — | — | ✓ | 參考條件表交易日 | 相等 | `field.trade_date` |
+| D30 | 期末定價日 | — | — | ✓ | 參考條件表最終比價日 | 相等 | `field.final_valuation_date` |
+| D31 | KO 觀察方式（每日／每個定價日） | — | — | ✓ | 參考條件表 KO(Freq) | 同說明書規則 | `field.ko_observation` |
+| D32 | 記憶式 | — | — | ✓ | 參考條件表 KO(memo) | 同說明書規則 | `field.ko_memory` |
+| D33 | 第一個可提前出場期（「自第 k 個…開始」的 k） | — | — | ✓ | 參考條件表 Non-Call(月) | 相等 | `field.first_callable_period` |
+| D34 | 每日觀察的 KO 觀察起日、迄日 | — | — | D 型 ✓ | 起日：說明書提前出場排程第 k 期的比價日（D 型 = 日期表第 k 期終止日）；迄日：參考條件表最終比價日 | 相等 | `iis.ko_observation_dates` |
+| D35 | KI 型態（觸及下限事件的觀察寫法；沒有 KI 時由到期贖回寫法明確判定） | — | — | ✓ | 參考條件表 KI(Freq) | 同說明書規則 | `field.ki_type` |
+| D36 | 開始受理贖回日期 | — | — | ✓ | 說明書開始受理贖回日期 | 相等 | `iis.redemption_start`（MS 範本專屬規則） |
+| D37 | 商品種類 | — | — | ✓ | 依投資人須知的標的數：1 檔、2 檔以上寫法不同（同 MS 說明書封面 6 規則） | 忽略空白後相等 | `iis.product_type`（MS 範本專屬規則） |
 
 
 ## 4. 不核對項目

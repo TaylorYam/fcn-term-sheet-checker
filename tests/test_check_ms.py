@@ -339,12 +339,13 @@ def test_ms_and_other_issuers_are_never_confused(tmp_path):
     assert all(i.report.status == S.REVIEW_REQUIRED for i in outcome.items)  # 內容上手與檔名不符
 
 
-def test_ms_investor_sheet_is_unsupported_so_nothing_is_filled(tmp_path):
+def test_ms_term_sheet_is_filled_when_the_investor_sheet_passes_too(tmp_path):
+    """MS 投資人須知已有範本（Issue #137）：兩份都通過才回填；投資人須知的各檢查點見 test_iis_ms.py。"""
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     outcome = check_all(sheet, [pdf])
     ts, iis = sorted(outcome.items, key=lambda i: i.term_sheet.name.endswith("_IIS.pdf"))
-    assert ts.report.status == S.PASS and iis.unsupported
-    assert not ts.fills_sheet and ts.not_filled_reason
+    assert ts.report.status == S.PASS and iis.report.status == S.PASS and not iis.unsupported
+    assert ts.fills_sheet and ts.partner is iis
     assert all(d.action in (BackfillAction.FILL, BackfillAction.MATCH) for d in ts.report.backfill)

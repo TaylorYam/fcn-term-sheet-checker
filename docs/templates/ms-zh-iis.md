@@ -3,7 +3,7 @@
 - 範本代號：`ms-zh-iis`
 - 對應說明書範本：[`ms-zh-pd`](ms-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-09 對 8 份真實樣本（S01-IIS～S08-IIS，與說明書 S01–S08 同商品）的探勘與核對範圍決定（Issue #137）
-- 狀態：探勘結論與核對範圍已確認（作業人員 2026-10-09 決定不另畫螢光，依開發者凍結的建議清單逐項決定）；實作見 Issue #137
+- 狀態：探勘結論與核對範圍已確認（作業人員 2026-10-09 決定不另畫螢光，依開發者凍結的建議清單逐項決定）；已實作（Issue #137，`src/fcn_checker/parsers/ms_iis.py`、範本專屬規則 `src/fcn_checker/rules/ms_iis.py`）；新版 6 份全部辨識、讀出並與說明書、參考條件表一致，舊版 2 份辨識失敗
 
 > 真實樣本與擷取文字只放在被 Git 忽略的 `data/`。本文件的數值範例都是虛構的；樣本代號與真實商品代號的對照只存在本機（`data/tmp/ms/sample_map.txt`）。
 

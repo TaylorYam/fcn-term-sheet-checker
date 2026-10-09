@@ -54,7 +54,8 @@ class PriceRow:
     ticker: str | None  # 價格列上的彭博代號；表上沒有代號時為 None，以 `underlyings` 同順序的代號為準
     prices: dict[str, Decimal]  # initial／strike／ko／ki；說明書無 KI 時沒有 ki
     evidence: tuple[Evidence, ...]
-    name: str | None = None  # 價格列上的標的名稱；只在讀不到標的代號時用來指出是哪一檔
+    # 標的名稱（BARC 價格列、MS 第 11 項標的表）：投資人須知的標的名稱和它比；讀不到代號時也用來指出是哪一檔
+    name: str | None = None
 
 
 @dataclass(frozen=True)

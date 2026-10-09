@@ -50,7 +50,7 @@
 - [ ] 每新增 issuer／版本附 fixtures、偵測策略與支援欄位表；依[新增上手實作規範](issuer-onboarding.md)進行（第二家上手需先完成多上手架構調整，見規範 §7）。
   - [x] HSBC：規格與 H02 螢光範圍完成，Issue #34 實作 parser、整理表按商品代號選列、規則與 CLI／PANEL；SG 暫緩（Issue #27）。
   - [x] MS：說明書規格與 S06 螢光範圍完成（Issue #132），說明書實作（Issue #135）。
-  - [ ] MS 投資人須知：Issue #137（範本規格 `docs/templates/ms-zh-iis.md`、核對規則 §3 MS 欄已確認；實作完成前 MS 的投資人須知為未支援上手，MS 商品不回填）。
+  - [x] MS 投資人須知：範本規格 `docs/templates/ms-zh-iis.md`、核對規則 §3 MS 欄（Issue #137，已實作；只支援新版範本）。
   - [x] MS 第二章受託機構營業所在地 6 份樣本都少「松山區」：2026-10-09 確認視為正確，審查標準加地址等價寫法（[核對規則](rules/ms-check-rules.md) §5）。
 
 ## 4. 試行前

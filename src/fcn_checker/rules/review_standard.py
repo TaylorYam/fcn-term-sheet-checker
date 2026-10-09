@@ -640,12 +640,11 @@ def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedFie
     """投資人須知的審查標準規則：`sheet`（也是 `ctx.ts`）是投資人須知的讀出結果，只核對範本有的項目。
 
     風險等級、固定警語（次數為投資人須知專屬）、禁用語一律核對；刊印日期的交易日由呼叫端給（參考條件表）。
-    發行機構名稱只寫中文的範本（HSBC）只比中文。
+    只寫中文的發行機構名稱出處（`issuer_names_zh`，例：HSBC 各處、MS 警語與商品簡介）只比全名的中文部分。
     """
     std, provides = ctx.issuer_std, sheet.provides
     issuer_name = std.issuer_name
-    if issuer_name is not None and sheet.issuer_name_zh_only:
-        issuer_name = re.split(r"[（(]", issuer_name, maxsplit=1)[0]
+    issuer_name_zh = re.split(r"[（(]", issuer_name, maxsplit=1)[0] if issuer_name is not None else None
     out = [_risk_level(ctx), _iis_warning(ctx), _forbidden_wording(ctx)]
     if provides("risk_level_summary"):
         out.append(_iis_risk_summary(ctx, sheet))
@@ -656,6 +655,7 @@ def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedFie
     no_issuer = f"審查標準沒有 {ctx.issuer} 的發行機構全名（issuer_name.{ctx.issuer.lower()}）"
     occurrence_checks = (  # 欄位、rule_id、審查標準值、說明用名稱、審查標準沒有值時的說明、種類（決定等價寫法）
         ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", no_issuer, "issuer"),
+        ("issuer_names_zh", "standard.issuer_name", issuer_name_zh, "發行機構名稱", no_issuer, "issuer"),
         ("distributor_names", "standard.distributor", std.distributor_name, "受託或銷售機構名稱", "", "name"),
         ("distributor_addresses", "standard.distributor", std.distributor_address, "受託或銷售機構地址", "", "address"),
         ("distributor_phones", "standard.distributor", std.distributor_phone, "受託或銷售機構電話", "", "phone"),

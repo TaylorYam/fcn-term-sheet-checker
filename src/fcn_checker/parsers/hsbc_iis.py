@@ -31,7 +31,7 @@ PROVIDED = frozenset(
         "issue_date",
         "maturity_date",
         "print_dates",
-        "issuer_names",
+        "issuer_names_zh",
         "distributor_names",
         "distributor_addresses",
         "distributor_phones",
@@ -96,8 +96,8 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (("print_date_iis", "刊印日期", "警語十", r"刊印日期[:：]" + iis.DATE),),
         parse_date,
     )
-    fields["issuer_names"] = iis.occurrences(
-        "issuer_names",
+    fields["issuer_names_zh"] = iis.occurrences(  # 發行機構名稱只寫中文
+        "issuer_names_zh",
         ti,
         (
             ("issuer_name_w5", "發行機構名稱（警語五）", "警語五", r"五、本商品持有期間.+?係由(.+?)保證"),
@@ -149,4 +149,4 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         ("分銷費用", r"報酬無[^%]{0,30}?"),  # 分銷費用列拆成報酬／費用／折讓三個子列，費率在「費用」子列
     ):
         put(f"fee_{label}", pattern + iis.RATE)
-    return iis.IisSheet(fields, ti, PROVIDED, issuer_name_zh_only=True)
+    return iis.IisSheet(fields, ti, PROVIDED)

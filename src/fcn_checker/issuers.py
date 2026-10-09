@@ -13,12 +13,14 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, hsbc_iis
+from .parsers import barc_iis, hsbc_iis, ms_iis
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
 from .rules import ms as ms_rules
+from .rules import ms_iis as ms_iis_rules
+from .rules.iis import IisIssuerContext
 from .rules.kit import IssuerContext
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Item, Line
 from .standard_fields import TermSheet
@@ -26,7 +28,11 @@ from .standard_fields import TermSheet
 
 @dataclass(frozen=True)
 class IisTemplate:
-    """某上手的投資人須知範本：檢查點依範本實際有的欄位（`IisSheet.provides`），規則各上手共用（rules/iis.py）。"""
+    """某上手的投資人須知範本：檢查點依範本實際有的欄位（`IisSheet.provides`），規則各上手共用（rules/iis.py）。
+
+    範本另有共用規則表達不了的檢查（例：MS 商品種類依標的數）時，由 `rules` 提供；只拿到投資人須知與同商品說明書的
+    讀出結果，不含參考條件表（同上手說明書內部規則）。
+    """
 
     template_id: str
     label: str
@@ -34,6 +40,7 @@ class IisTemplate:
     detect: Callable[[Sequence[Line]], DetectionResult]
     read: Callable[[Sequence[Line]], IisSheet]
     not_covered: tuple[dict[str, str], ...] = ()  # 範本未涵蓋的型態（PANEL「待處理」與核對紀錄）
+    rules: Callable[[IisIssuerContext], list[CheckResult]] | None = None  # 範本專屬的投資人須知規則
 
 
 @dataclass(frozen=True)
@@ -59,8 +66,8 @@ class Issuer:
 
 _IIS_SAMPLES = {
     "rule_id": "iis.template_variants",
-    "description": "投資人須知依各 8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表）：其他型態的寫法未驗證，"
-    "範本以外的欄位或寫法會轉人工覆核",
+    "description": "投資人須知依各 8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表；MS 只支援其中新版 6 份）："
+    "其他型態的寫法未驗證，範本以外的欄位或寫法會轉人工覆核",
 }
 
 BARC = Issuer(
@@ -102,7 +109,6 @@ HSBC = Issuer(
     ),
 )
 
-# MS 只有說明書範本；投資人須知見 Issue #137，在那之前 MS 的投資人須知是未支援上手（ADR 0007）
 MS = Issuer(
     code=ms_rules.ISSUER,
     template_id=ms_parser.TEMPLATE_ID,
@@ -113,6 +119,15 @@ MS = Issuer(
     read=ms_parser.read,
     rules=ms_rules.run_all,
     reference_fields=ms_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=ms_iis.TEMPLATE_ID,
+        label="MS 中文投資人須知",
+        parser_version=ms_iis.PARSER_VERSION,
+        detect=ms_iis.detect,
+        read=ms_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=ms_iis_rules.run_all,
+    ),
 )
 
 REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS)
