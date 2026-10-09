@@ -9,13 +9,13 @@ import datetime as dt
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
-from . import ms_scenario, ms_tables
-from .layout import Document, LayoutSpec, TextIndex, join_text, parse_date
+from . import ms_scenario, ms_tables, ms_wording
+from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
 PARSER_VERSION = "1"
@@ -38,7 +38,6 @@ LAYOUT = LayoutSpec(
 )
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 NUM = r"([\d,]+(?:\.\d+)?)"
-MEMORY_NAME = "（記憶式自動提前出場）"
 FEES = ("申購費用", "提前贖回費用", "分銷費用")
 
 
@@ -155,23 +154,6 @@ class MsTermSheet:
         return standard_fields.lookup(self.fields, name)
 
 
-def capture(name: str, lines: list[Line], pattern: str, convert: Callable = lambda x: x) -> ParsedField:
-    """在 `lines`（去空白、括號統一全形）找 `pattern`；全部命中的值相同才是存在。"""
-    ti = TextIndex(lines)
-    text = full_brackets(ti.text)  # 一對一換字，位置不變
-    hits = []
-    for m in re.finditer(pattern, text):
-        lns = ti.lines_for(m.start(), m.end())
-        try:
-            value = convert(m[1])
-        except (ValueError, TypeError, InvalidOperation):
-            return ParsedField.invalid(name, lns)
-        if value is None:
-            return ParsedField.invalid(name, lns)
-        hits.append((value, lns))
-    return ParsedField.from_hits(name, hits, missing_note="找不到欄位標籤或已知寫法")
-
-
 def _number(x: str) -> int | Decimal:
     d = Decimal(x.replace(",", ""))
     return int(d) if d == d.to_integral_value() else d
@@ -186,52 +168,21 @@ def _derived(name: str, src: ParsedField, value=None) -> ParsedField:
 
 def _ki_type(lines: list[Line]) -> ParsedField:
     """第 16 項「觸及下限事件：」定義句（範本規格 §4.4）；沒有這句且到期贖回只有 ≥／< 執行價兩種時為無 KI。"""
-    name = "ki_type"
-    ti = TextIndex(lines)
-    text = full_brackets(ti.text)
-    kinds = {
-        "期末定價日": "AM",
-        "交易日（含）至期末定價日（含）間的任一共同預定交易日": "D",
-        "交易日（含）至期末定價日（含）間的任一預定交易日": "D",
-        "任一配息週期終止日（含期末定價日）": "P",
-    }
-    hits = []
-    for m in re.finditer(r"觸及下限事件：若在([^，]*?)，", text):
-        lns = ti.lines_for(m.start(), m.end())
-        if m[1] not in kinds:
-            return ParsedField.invalid(name, lns, "觸及下限事件的觀察寫法不在範本規格內")
-        hits.append((kinds[m[1]], lns))
-    if hits:
-        return ParsedField.from_hits(name, hits)
-    if "觸及下限" not in text and "收盤價高於或等於其執行價" in text and "收盤價低於其執行價" in text:
-        return ParsedField.present(name, "none", lines)
-    return ParsedField.invalid(name, lines, "找不到觸及下限事件定義，也不是無 KI 的到期贖回寫法")
+    note = "找不到觸及下限事件定義，也不是無 KI 的到期贖回寫法"
+    return ms_wording.ki_type(TextIndex(lines), invalid_note=note)
 
 
 def _art17(lines: list[Line]) -> tuple[ParsedField, ParsedField]:
-    """第 17 項：記憶式（`ko_memory`）與觀察寫法（`ko_observation_art17`：表型 D／P、第一個可提前出場期 k、
-    D 型觀察起訖日）。寫法不在範本規格內一律不合法。"""
+    """第 17 項：記憶式（`ko_memory`：要有記憶事件定義句與觀察日）與觀察寫法（`ko_observation_art17`：表型 D／P、
+    第一個可提前出場期 k、D 型觀察起訖日）。寫法不在範本規格內一律不合法。"""
     ti = TextIndex(lines)
-    text = full_brackets(ti.text)
-    memory = "記憶事件：" in text and "記憶事件觀察日：" in text
-    plain = "記憶事件" not in text and (
-        "所有連結標的之收盤價皆等於或高於" in text or "該連結標的之收盤價大於或等於" in text
-    )
-    mem = (
-        ParsedField.present("ko_memory", memory, lines)
-        if memory != plain
-        else ParsedField.invalid("ko_memory", lines, "第 17 項記憶事件寫法缺漏或不在範本規格內")
-    )
+    note = "第 17 項記憶事件寫法缺漏或不在範本規格內"
+    mem = ms_wording.ko_memory(ti, definition_required=True, invalid_note=note)
     found = []
-    for pattern, kind in (
-        (rf"(?:記憶事件)?觀察日：每日觀察，為自第(\d+)個配息週期終止日（{D}）（包含）至期末定價日（{D}）（包含）", "D"),
-        (r"記憶事件觀察日：每一個定價日自第(\d+)個定價日開始觀察", "P"),
-        (r"自動提前出場事件：自第(\d+)個定價日（含）開始，若於任一定價日", "P"),
-    ):
-        for m in re.finditer(pattern, text):
-            dates = (parse_date(m[2]), parse_date(m[3])) if kind == "D" else (None, None)
-            value = {"type": kind, "k": int(m[1]), "start": dates[0], "end": dates[1]}
-            found.append((value, ti.lines_for(m.start(), m.end())))
+    for m, kind in ms_wording.ko_observations(ti):
+        dates = (parse_date(m[2]), parse_date(m[3])) if kind == "D" else (None, None)
+        value = {"type": kind, "k": int(m[1]), "start": dates[0], "end": dates[1]}
+        found.append((value, ti.lines_for(m.start(), m.end())))
     name = "ko_observation_art17"
     if len(found) != 1:
         obs = ParsedField.invalid(name, lines, "第 17 項觀察日寫法缺漏、重複或不在範本規格內")
@@ -254,7 +205,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
         return doc.span_lines(doc.subitems(arts.get(n)).get(k))
 
     def put(name: str, lns: list[Line], pattern: str, convert: Callable = lambda x: x) -> None:
-        fields[name] = capture(name, lns, pattern, convert)
+        fields[name] = capture(name, TextIndex(lns, unify_brackets=True), pattern, convert, whole_match=True)
 
     # 封面
     fields["product_code"] = _item(items, 1, "product_code", "商品代號", r"(\d{12})")
@@ -321,7 +272,9 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     )
     fields["ko_memory"], fields["ko_observation_art17"] = _art17(article(17))
     zh = fields["name_zh"]
-    fields["name_memory"] = _derived("name_memory", zh, zh.ok and MEMORY_NAME in full_brackets(squash(zh.value)))
+    fields["name_memory"] = _derived(
+        "name_memory", zh, zh.ok and ms_wording.MEMORY_NAME in full_brackets(squash(zh.value))
+    )
     _schedule(fields)
     _prices(fields)
 

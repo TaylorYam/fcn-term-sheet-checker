@@ -11,7 +11,7 @@ from ..schema import CheckResult, Item
 from ..text import squash
 from .iis import NO_TERM_SHEET, IisIssuerContext, ts_unavailable
 from .kit import Check
-from .ms import PRODUCT_TYPES
+from .ms import product_type_for
 
 
 def redemption_start(ctx: IisIssuerContext) -> CheckResult:
@@ -32,13 +32,13 @@ def redemption_start(ctx: IisIssuerContext) -> CheckResult:
 
 
 def product_type(ctx: IisIssuerContext) -> CheckResult:
-    """商品種類依投資人須知的標的數：1 檔與 2 檔以上寫法不同（同 MS 說明書封面 6，rules/ms.py `PRODUCT_TYPES`）。"""
+    """商品種類依投資人須知的標的數：寫法與 MS 說明書封面 6 同一套（rules/ms.py `product_type_for`）。"""
     pf, names = read_iis(ctx.sheet, "product_type"), read_iis(ctx.sheet, "underlying_names")
     return (
         Check("iis.product_type", "product_type", Item.expected("商品種類"), ctx.document)
         .needs(pf, names)
         .compare(
-            PRODUCT_TYPES[len(names.value) >= 2] if names.ok else None,
+            product_type_for(len(names.value)) if names.ok else None,
             squash(pf.value) if pf.ok else None,
             fail_message="商品種類依連結標的資產的檔數：1 檔與 2 檔以上寫法不同",
         )

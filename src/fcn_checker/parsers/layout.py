@@ -1,15 +1,16 @@
-"""版面工具：章、條、子項定位與跨行文字索引。只依錨點與座標，不用頁碼定位。"""
+"""版面工具：章、條、子項定位、跨行文字索引與欄位擷取 `capture`（各上手兩種文件的 parser 共用）。只依錨點與座標，不用頁碼定位。"""
 
 from __future__ import annotations
 
 import bisect
 import datetime as dt
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from decimal import InvalidOperation
 
-from ..schema import Line
-from ..text import squash
+from ..schema import Line, ParsedField
+from ..text import full_brackets, squash
 
 DATE_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 
@@ -69,9 +70,12 @@ class Span:
 
 
 class TextIndex:
-    """把一段文字行去空白後串接，並可由字元位置找回原始行（作為證據）。"""
+    """把一段文字行去空白後串接，並可由字元位置找回原始行（作為證據）。
 
-    def __init__(self, lines: Sequence[Line]):
+    `unify_brackets`：半形括號換成全形（一對一換字，位置不變），句型用全形括號寫一次就好（MS）。
+    """
+
+    def __init__(self, lines: Sequence[Line], *, unify_brackets: bool = False):
         self.lines = list(lines)
         parts: list[str] = []
         self._starts: list[int] = []
@@ -81,7 +85,8 @@ class TextIndex:
             self._starts.append(pos)
             parts.append(s)
             pos += len(s)
-        self.text = "".join(parts)
+        text = "".join(parts)
+        self.text = full_brackets(text) if unify_brackets else text
 
     def lines_for(self, start: int, end: int) -> list[Line]:
         if not self.lines:
@@ -92,6 +97,26 @@ class TextIndex:
 
     def finditer(self, pattern: str | re.Pattern[str]):
         return re.finditer(pattern, self.text)
+
+
+def capture(
+    name: str, ti: TextIndex, pattern: str, convert: Callable = lambda x: x, *, whole_match: bool = False
+) -> ParsedField:
+    """全文（已去空白）中 `pattern` 第 1 組的每一處；不同值 → 歧義，沒有 → 缺漏，轉不成值 → 不合法。
+
+    證據預設只引值（第 1 組）所在的行；`whole_match` 連欄位標籤所在的行一起引（說明書 parser 的寫法）。
+    """
+    hits = []
+    for m in ti.finditer(pattern):
+        lns = ti.lines_for(m.start(), m.end()) if whole_match else ti.lines_for(m.start(1), m.end(1))
+        try:
+            value = convert(m[1])
+        except (ValueError, TypeError, InvalidOperation):
+            return ParsedField.invalid(name, lns, f"「{m[1]}」無法辨識")
+        if value is None:
+            return ParsedField.invalid(name, lns, f"「{m[1]}」無法辨識")
+        hits.append((value, lns))
+    return ParsedField.from_hits(name, hits, missing_note="找不到欄位標籤或已知寫法")
 
 
 class Document:
