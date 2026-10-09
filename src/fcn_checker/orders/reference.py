@@ -69,7 +69,7 @@ def headers_of(fmt: ReferenceFormat) -> dict[str, str]:
 
 @dataclass
 class OrderRecord:
-    """參考條件表的一列（核對規則的下單資料）：標準欄位 → 值、Excel 欄名與儲存格，一處完成。
+    """參考條件表的一列（核對規則的條件來源）：標準欄位 → 值、Excel 欄名與儲存格，一處完成。
 
     `fields` 只有這張表有的欄；`headers` 是格式設定宣告的全部欄名（表上缺的欄也查得到欄名，回填規則據此報缺欄）。
     表頭欄名的問題（未知、缺少、重複）屬於整張表，每一列都帶同一份。

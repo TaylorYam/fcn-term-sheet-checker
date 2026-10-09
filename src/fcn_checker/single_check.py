@@ -34,7 +34,7 @@ from .standard_fields import TermSheet
 
 @dataclass(frozen=True)
 class Paired:
-    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、參考條件表的列（下單資料）。"""
+    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、對到的參考條件表列。"""
 
     issuer: Issuer
     ts: TermSheet

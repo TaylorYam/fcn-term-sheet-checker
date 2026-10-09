@@ -104,18 +104,20 @@ class FieldCheck:
         )
 
 
-def _pct(rule_id: str, key: str, name: str) -> FieldCheck:
+def _pct_check(rule_id: str, key: str, name: str) -> FieldCheck:
+    """百分比欄：依說明書顯示位數四捨五入後比對。"""
     return FieldCheck(rule_id, key, name, to_decimal, "數字", cmp_pct, PCT_TOLERANCE)
 
 
-# 單欄比對的欄位核對表，只宣告這一次：說明書（`field_rules`）整張依序執行，投資人須知（rules/iis.py）依範本
-# `provides` 挑選。需要看別的欄位或格式設定才能比的欄位（商品代號、幣別、標的、KO／KI 型態、KI %）仍是下方的函式。
+# 單欄比對的欄位核對表：說明書（`field_rules`）整張依序執行，投資人須知（rules/iis.py）依範本 `provides` 挑選，
+# 不再另抄一份；投資人須知只多兩筆自己的宣告（KI % 只比數值、發行日）。需要看別的欄位或格式設定才能比的欄位
+# （商品代號、幣別、標的、KO／KI 型態、KI %）仍是下方的函式。
 FIELD_CHECKS: dict[str, FieldCheck] = {
     c.key: c
     for c in (
-        _pct("field.strike_pct", "strike_pct", "執行 %"),
-        _pct("field.ko_pct", "ko_pct", "KO %"),
-        _pct("field.coupon_pa_pct", "coupon_pa_pct", "年利率 %"),
+        _pct_check("field.strike_pct", "strike_pct", "執行 %"),
+        _pct_check("field.ko_pct", "ko_pct", "KO %"),
+        _pct_check("field.coupon_pa_pct", "coupon_pa_pct", "年利率 %"),
         FieldCheck("field.tenor_months", "tenor_months", "天期（月）", to_int, "整數"),
         FieldCheck("field.trade_date", "trade_date", "交易日", to_date, "日期"),
         FieldCheck("field.final_valuation_date", "final_valuation_date", "最終評價日", to_date, "日期"),

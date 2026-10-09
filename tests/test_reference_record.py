@@ -9,6 +9,8 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+from openpyxl.utils import get_column_letter
+
 from fcn_checker import backfill
 from fcn_checker.backfill import BackfillAction
 from fcn_checker.orders.reference import OrderRecord
@@ -19,6 +21,11 @@ from fcn_checker.standard_fields import lookup
 from harness import CONFIG, MISMATCH, PASS
 
 FMT = CONFIG.reference_format
+
+
+def cell_of(header: str, row: int) -> str:
+    """離線建的列裡某 Excel 欄名的儲存格：依格式設定 `[columns]` 的順序從 A 欄起編號。"""
+    return f"{get_column_letter(list(FMT.columns).index(header) + 1)}{row}"
 
 
 class _TermSheet:
@@ -44,7 +51,7 @@ def test_a_row_built_from_a_dict_drives_the_field_checks():
 
     trade = reference.FIELD_CHECKS["trade_date"].check(ctx)
     assert (trade.status, trade.item.name, trade.item.columns) == (PASS, "交易日", ("交易日",))
-    assert trade.order_source == [f"{FMT.sheet}!G7"], "交易日是格式設定的第 7 欄、這列是第 7 列"
+    assert trade.order_source == [f"{FMT.sheet}!{cell_of('交易日', 7)}"]
 
     strike = reference.FIELD_CHECKS["strike_pct"].check(ctx)
     assert (strike.status, strike.item.name, strike.tolerance) == (PASS, "K(%)", reference.PCT_TOLERANCE)
@@ -57,7 +64,7 @@ def test_backfill_rules_take_only_the_context():
     ts = _TermSheet(isin="XS1999900002")
     r, [d] = backfill.isin(_context(ts))
     assert r.status == PASS
-    assert (d.column, d.cell, d.sheet_value, d.expected) == ("ISIN Code", "D7", None, "XS1999900002")
+    assert (d.column, d.cell, d.sheet_value, d.expected) == ("ISIN Code", cell_of("ISIN Code", 7), None, "XS1999900002")
     assert d.action == BackfillAction.FILL
 
     r, [d] = backfill.isin(_context(ts, isin="XS0000000000"))
@@ -73,5 +80,5 @@ def test_typed_reads_build_the_underlying_and_autocall_keys_in_one_place():
     assert (record.price(2, "ko").value, record.price(2, "ko").column) == (Decimal("123.4"), "UL_2_KO價")
     assert (record.autocall_date(3).value, record.autocall_date(3).column) == (dt.date(2030, 4, 7), "比價日_3")
     assert record.underlying(1).value is None and record.price(1, "ki").value is None, "沒給值的欄位是空白格"
-    assert (record.header("issue_date"), record.cell("issue_date")) == ("發行日", "H4")
+    assert (record.header("issue_date"), record.cell("issue_date")) == ("發行日", cell_of("發行日", 4))
     assert record.underlying_slots == 5

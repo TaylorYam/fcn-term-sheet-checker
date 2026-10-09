@@ -338,22 +338,22 @@ _KI_PCT = reference.FieldCheck("field.ki_pct", "ki_pct", "KI %", to_decimal, "�
 
 def reference_fields(ctx: Context) -> list[CheckResult]:
     """參考條件表有的欄位，只核對範本有的：單欄比對取自欄位核對表（rules/reference.FIELD_CHECKS）。"""
-    has, field = ctx.provides, reference.FIELD_CHECKS
+    has, table = ctx.provides, reference.FIELD_CHECKS
     checks: list[tuple[str, Callable[[], CheckResult | list[CheckResult]]]] = [
         ("currency_zh", lambda: reference.currency(ctx)),
-        ("denomination", lambda: field["denomination"].check(ctx)),
+        ("denomination", lambda: table["denomination"].check(ctx)),
         ("underlyings", lambda: reference.underlyings(ctx)),
-        ("tenor_months", lambda: field["tenor_months"].check(ctx)),
-        ("maturity_date", lambda: field["maturity_date"].check(ctx)),
-        ("coupon_pa_pct", lambda: field["coupon_pa_pct"].check(ctx)),
+        ("tenor_months", lambda: table["tenor_months"].check(ctx)),
+        ("maturity_date", lambda: table["maturity_date"].check(ctx)),
+        ("coupon_pa_pct", lambda: table["coupon_pa_pct"].check(ctx)),
         ("monthly_coupon_pct", lambda: _monthly_coupon(ctx)),
-        ("strike_pct", lambda: field["strike_pct"].check(ctx)),
-        ("ko_pct", lambda: field["ko_pct"].check(ctx)),
+        ("strike_pct", lambda: table["strike_pct"].check(ctx)),
+        ("ko_pct", lambda: table["ko_pct"].check(ctx)),
         ("ki_pct", lambda: _KI_PCT.check(ctx)),
         ("underlying_prices", lambda: _prices(ctx)),
         # 日期與提前出場、觸及下限條件（docs/rules/iis-check-rules.md §3 D 類，MS）
-        ("trade_date", lambda: field["trade_date"].check(ctx)),
-        ("final_valuation_date", lambda: field["final_valuation_date"].check(ctx)),
+        ("trade_date", lambda: table["trade_date"].check(ctx)),
+        ("final_valuation_date", lambda: table["final_valuation_date"].check(ctx)),
         ("monthly_coupons", lambda: _monthly_coupons(ctx)),
         ("ko_observation", lambda: reference.ko_observation(ctx)),
         ("ko_memory", lambda: reference.ko_memory(ctx)),
