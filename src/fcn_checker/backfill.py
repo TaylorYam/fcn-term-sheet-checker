@@ -332,18 +332,6 @@ def checked_marks(ctx: Context, fmt: ReferenceFormat, row: ReferenceRow) -> tupl
 # ---------------------------------------------------------------- 寫入
 
 
-def conflicts_with_sheet(report: CheckReport) -> bool:
-    """參考條件表的回填欄位已有和說明書不同的值。"""
-    return any(d.action == BackfillAction.MISMATCH for d in report.backfill)
-
-
-def values_certain(report: CheckReport) -> bool:
-    """每個回填欄位都有確定的回填決策（回填規則全部通過）。哪些說明書要回填由批量入口決定。"""
-    return bool(report.backfill) and not any(
-        r.rule_id.startswith("backfill.") and r.status != S.PASS for r in report.results
-    )
-
-
 def open_reference(path: Path) -> Workbook:
     """開啟參考條件表準備回填（來源是否與核對時相同由批量入口以來源快照確認）。"""
     try:

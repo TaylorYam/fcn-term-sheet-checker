@@ -262,6 +262,7 @@ class CheckReport:
     not_covered: list[dict[str, str]]
     metadata: dict[str, Any] = field(default_factory=dict)
     backfill: list[CellDecision] = field(default_factory=list)  # 回填決策
+    backfill_certain: bool = False  # 有回填決策且回填規則全部通過（能否人工放行看它；不寫進核對紀錄）
 
 
 @dataclass
