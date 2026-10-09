@@ -95,6 +95,16 @@ def schedules(ctx):
         )
     else:
         ko = ctx.ts.f("ko_table")
+        autocall = Check(
+            "schedule.autocall_dates",
+            "periodic",
+            Item.expected("定期觀察的提前出場表"),
+            ctx.document,
+            expected=final.value,
+        ).needs(c, ko, first, final)
+        if autocall.blocked is not None:
+            out.append(autocall.blocked)
+            return out
         mapped = []
         valid = True
         for row in ko.value:
@@ -107,15 +117,7 @@ def schedules(ctx):
         valid &= mapped == list(range(first.value, len(rows) + 1))
         valid &= all(a["decision"] < b["decision"] for a, b in zip(ko.value, ko.value[1:], strict=False))
         out.append(
-            Check(
-                "schedule.autocall_dates",
-                "periodic",
-                Item.expected("定期觀察的提前出場表"),
-                ctx.document,
-                expected=final.value,
-            )
-            .needs(c, ko, first, final)
-            .compare(
+            autocall.compare(
                 final.value, ko.value[-1]["decision"], ok=valid and final.ok and ko.value[-1]["decision"] == final.value
             )
         )

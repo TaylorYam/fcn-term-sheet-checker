@@ -499,6 +499,24 @@ def test_daily_schedule_end_must_not_precede_start(tmp_path):
     assert any(x.rule_id == "schedule.autocall_dates" and x.status == S.MISMATCH for x in r.results)
 
 
+@pytest.mark.parametrize(
+    "replacements,reason",
+    [
+        ({"投資人應注意": "投資人注意事項"}, "document_missing"),  # 定期KO表沒有結束錨點
+        ({"2030 年5 月7 日": "2030 年5 月XX日"}, "document_invalid"),  # 第 3 列決定日不是日期；配息表只印付款日
+    ],
+)
+def test_periodic_ko_table_unreadable_requires_review_not_unexpected(tmp_path, replacements, reason):
+    """定期觀察的提前出場表讀不到：schedule.autocall_dates 轉人工覆核，整份不能記成非預期錯誤。"""
+    r = check(tmp_path, Spec(obs="P", memory=False, ki="none", count=1, replacements=replacements))
+    assert not any(x.rule_id == "batch.unexpected" for x in r.results), [(x.rule_id, x.message) for x in r.results]
+    autocall = only(r, "schedule.autocall_dates")
+    assert (autocall.status, autocall.reason_code) == (S.REVIEW_REQUIRED, reason)
+    assert autocall.message.startswith("說明書")
+    assert only(r, "field.ko_pct").status == S.PASS
+    assert only(r, "field.ko_observation").status == S.PASS
+
+
 @pytest.mark.parametrize("amount,status", [("25.00", S.PASS), ("26.00", S.MISMATCH)])
 def test_partial_period_coupon_arithmetic(tmp_path, amount, status):
     s = Spec(partial_coupon=True)
