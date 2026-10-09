@@ -20,7 +20,7 @@ def redemption_start(ctx: IisIssuerContext) -> CheckResult:
     rid, name = "iis.redemption_start", "開始受理贖回日期"
     pf, item = read_iis(ctx.sheet, "redemption_start"), Item.term_sheet(name)
     if not pf.ok:
-        return doc_review(rid, "redemption_start", pf, item=item)
+        return doc_review(rid, "redemption_start", pf, item=item, document=ctx.document)
     if ctx.term_sheet is None:
         return ts_unavailable(rid, "redemption_start", name, NO_TERM_SHEET, pf.value)
     expected = ctx.term_sheet.f("redemption_start")
@@ -50,6 +50,7 @@ def product_type(ctx: IisIssuerContext) -> CheckResult:
         PRODUCT_TYPES[len(names.value) >= 2] if names.ok else None,
         squash(pf.value) if pf.ok else None,
         message="商品種類依連結標的資產的檔數：1 檔與 2 檔以上寫法不同",
+        document=ctx.document,
     )
 
 

@@ -4,7 +4,7 @@
 每條核對結果建立時就帶著項目（`Item`：中文名稱與預期值出處，Issue #91），這裡只依出處組句：
 
 - 參考條件表且兩邊不同：「<項目>對不起來：參考條件表 <值>／說明書 <值>」；多格（例：比價日）逐格列出 Excel 欄名。
-- 投資人須知：文件那一邊寫「投資人須知」（`document`）；預期值來自同商品說明書且兩邊不同時寫
+- 投資人須知：文件那一邊寫「投資人須知」（結果記下的文件種類 `CheckResult.document`）；預期值來自同商品說明書且兩邊不同時寫
   「<項目>對不起來：說明書 <值>／投資人須知 <值>」（ADR 0007）。
 - 其他（含由參考條件表推算的值）：「<項目>：<規則的中文說明>」，有雙方值時附上「（參考條件表／審查標準／預期 <值>／說明書 <值>）」；
   不比對值的項目（配對、範本、讀檔、寫檔、參考條件表表頭）只寫說明。
@@ -19,7 +19,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import Any
 
-from .schema import CheckResult, CheckStatus, ItemSource, column_label
+from .schema import CheckResult, CheckStatus, DocKind, ItemSource, column_label
 
 STATUS_ZH = {
     CheckStatus.PASS: "通過",
@@ -35,9 +35,8 @@ SOURCE_ZH = {
     ItemSource.REFERENCE_DERIVED: "參考條件表",
     ItemSource.STANDARD: "審查標準",
     ItemSource.EXPECTED: "預期",
-    ItemSource.TERM_SHEET: "說明書",
+    ItemSource.TERM_SHEET: DocKind.TERM_SHEET.value,
 }
-TERM_SHEET, IIS = "說明書", "投資人須知"  # 錯訊裡文件那一邊的稱呼
 
 REASON_ZH = {
     "value_mismatch": "兩邊的值不同",
@@ -92,14 +91,14 @@ def _shows_values(r: CheckResult, detail: str) -> bool:
     return not all(show(v) in detail for v in (r.expected, r.actual))
 
 
-def _detail(r: CheckResult, document: str) -> str:
+def _detail(r: CheckResult) -> str:
     default = REASON_ZH.get(r.reason_code) or STATUS_DEFAULT.get(r.status, "需要人工確認")
-    return r.message or default.replace(TERM_SHEET, document)
+    return r.message or default.replace(DocKind.TERM_SHEET.value, r.document.value)
 
 
-def problem_message(r: CheckResult, document: str = TERM_SHEET) -> str:
-    """一條問題的中文錯訊；`document` 是被核對的文件（說明書或投資人須知）。"""
-    where, source = r.item.name, r.item.source
+def problem_message(r: CheckResult) -> str:
+    """一條問題的中文錯訊；文件那一邊依結果記下的文件種類（說明書或投資人須知）稱呼。"""
+    where, source, document = r.item.name, r.item.source, r.document.value
     if source in (ItemSource.REFERENCE, ItemSource.TERM_SHEET) and r.status == CheckStatus.MISMATCH:
         other = SOURCE_ZH[source]
         if isinstance(r.expected, dict) and isinstance(r.actual, dict):  # 多格（例：比價日）逐格列出
@@ -108,7 +107,7 @@ def problem_message(r: CheckResult, document: str = TERM_SHEET) -> str:
                 for k, v in r.expected.items()
             )
         return f"{where}對不起來：{other} {show(r.expected)}／{document} {show(r.actual)}"
-    detail = _detail(r, document)
+    detail = _detail(r)
     has_both = r.expected is not None and r.actual is not None
     values = ""
     if has_both and _shows_values(r, detail):

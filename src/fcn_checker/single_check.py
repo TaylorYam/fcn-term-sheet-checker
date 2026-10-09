@@ -28,7 +28,7 @@ from .orders.reference import OrderRecord
 from .rules import derivation, iis, reference
 from .rules.kit import Context, IssuerContext
 from .rules.review_standard import iis_review_standard_rules, review_standard_rules
-from .schema import CheckReport, CheckResult, CheckStatus, overall_status
+from .schema import CheckReport, CheckResult, CheckStatus, DocKind, overall_status
 from .standard_fields import TermSheet
 
 
@@ -102,14 +102,24 @@ def check_investor_sheet(pairing: list[CheckResult], paired: PairedIis | None, c
     results = list(pairing)
     report = CheckReport(CheckStatus.ERROR, None, results, [])
     if paired is not None:
-        base = Context(paired.sheet, paired.row, config.review_standard, config.reference_format, paired.issuer.code)
-        ctx = iis.IisContext(base, paired.sheet, paired.term_sheet, paired.pages, paired.file_code)
+        ctx = Context(
+            paired.sheet,
+            paired.row,
+            config.review_standard,
+            config.reference_format,
+            paired.issuer.code,
+            document=DocKind.IIS,
+            pages=paired.pages,
+            file_code=paired.file_code,
+            term_sheet=paired.term_sheet,
+        )
         results.extend(iis.run_all(ctx))
         template = paired.issuer.iis
         if template is not None and template.rules is not None:
-            results.extend(iis.as_iis(template.rules(iis.IisIssuerContext(paired.sheet, paired.term_sheet))))
-        trade = iis.trade_date(ctx)
-        results.extend(iis.as_iis(iis_review_standard_rules(base, paired.sheet, trade=trade)))
+            results.extend(template.rules(iis.IisIssuerContext(paired.sheet, paired.term_sheet)))
+        results.extend(iis_review_standard_rules(ctx, trade=iis.trade_date(ctx)))
         report.not_covered = [dict(n) for n in template.not_covered] if template is not None else []
+    for r in results:  # 這份 PDF 的結果（含辨識與配對）都屬於投資人須知，錯訊的文件那一邊依此稱呼
+        r.document = DocKind.IIS
     report.status = overall_status([r.status for r in results]) if results else CheckStatus.ERROR
     return report

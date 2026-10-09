@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, DocKind, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from . import kit, ms_scenario
@@ -43,12 +43,26 @@ def _bad(deps: list[ParsedField]) -> ParsedField | None:
     return next((p for p in deps if not p.ok), None)
 
 
-def check(rid, field, name, deps, expected, actual, ok=None, *, fail=S.MISMATCH, reason="value_mismatch", message=""):
-    """說明書內部比對：依賴欄位有問題轉人工覆核；`name` 為項目名稱（預期值來自說明書其他位置），`fail` 為不成立時的狀態。"""
+def check(
+    rid,
+    field,
+    name,
+    deps,
+    expected,
+    actual,
+    ok=None,
+    *,
+    fail=S.MISMATCH,
+    reason="value_mismatch",
+    message="",
+    document=DocKind.TERM_SHEET,
+):
+    """文件內部比對：依賴欄位有問題轉人工覆核；`name` 為項目名稱（預期值來自同一份文件其他位置），`fail` 為不成立時的狀態；
+    `document` 是被核對的文件（MS 投資人須知的商品種類也用）。"""
     item = Item.expected(name)
     problem = _bad(deps)
     if problem is not None:
-        return kit.doc_review(rid, field, problem, item=item)
+        return kit.doc_review(rid, field, problem, item=item, document=document)
     good = expected == actual if ok is None else ok
     return kit.result(
         rid,
