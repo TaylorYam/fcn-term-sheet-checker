@@ -4,9 +4,10 @@
 # 新增上手時在這裡登記一筆，並在上手註冊表（src/fcn_checker/issuers.py）登記範本。
 # 對照表有、但註冊表還沒有範本的上手 → 標示「未支援上手」。
 
-version = 1
-effective_date = 2026-10-02
+version = 2
+effective_date = 2026-10-09
 
 [prefixes]
 "029" = "BARC"
 "325" = "HSBC"
+"147" = "MS"

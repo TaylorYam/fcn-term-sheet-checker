@@ -102,6 +102,7 @@ def price_item(n: int, col: str) -> str:
 # ---------------------------------------------------------------- 共用
 
 Q4 = Decimal("0.0001")  # 價格與月配息率四捨五入到 4 位
+Q2 = Decimal("0.01")  # 金額（情境配息與損益）四捨五入到 2 位
 
 
 def next_weekday(d: dt.date) -> dt.date:
@@ -196,6 +197,22 @@ def doc_review(
     )
 
 
+def doc_not_applicable(
+    rule_id: str, field: str, pf: ParsedField, ov: list[OrderValue | None] | None = None, *, item: Item
+) -> CheckResult:
+    """說明書明確判定不適用的欄位（例：範本沒有、Non-Call = 天期時沒有 KO 價）：不核對，結果為不適用並附說明。"""
+    return result(
+        rule_id,
+        field,
+        S.NOT_APPLICABLE,
+        expected=ov[0].value if ov and ov[0] is not None else None,
+        pf=pf,
+        ov=ov,
+        message=pf.note or "說明書判定此欄位不適用",
+        item=item,
+    )
+
+
 def order_review(
     rule_id: str, field: str, ov: OrderValue | None, pf: ParsedField | None, reason: str, message: str, *, name: str
 ) -> CheckResult:
@@ -262,7 +279,7 @@ def order_value(
     return v, ov, None
 
 
-KI_LABEL = {"none": "無 KI", "AM": "到期觀察", "D": "每日觀察", "M": "每月觀察（Monthly KI）"}
+KI_LABEL = {"none": "無 KI", "AM": "到期觀察", "D": "每日觀察", "P": "每期觀察", "M": "每月觀察（Monthly KI）"}
 
 
 def doc_ki(pf: ParsedField) -> str | None:
@@ -281,8 +298,10 @@ def cmp_pct(order_v: Decimal, doc_v: Decimal) -> tuple[bool, Decimal]:
 def occurrences_of(
     ctx: RuleContext, rid: str, name: str, item: Item
 ) -> tuple[tuple[Occurrence, ...], CheckResult | None]:
-    """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果（項目為 `item`）。"""
+    """讀出處清單型的標準欄位；上手沒交出時回傳一筆人工覆核結果（項目為 `item`），範本沒有（不適用）時沒有出處也沒有結果。"""
     container = standard_field(ctx, name)
+    if container.status == FieldStatus.NOT_APPLICABLE:
+        return (), None
     if not container.ok:
         return (), doc_review(rid, name, container, item=item)
     return container.value, None

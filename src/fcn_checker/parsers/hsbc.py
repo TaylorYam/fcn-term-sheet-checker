@@ -213,6 +213,8 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     put("isin", article(27), r"ISIN[:：]([A-Z]{2}[A-Z0-9]{10})")
     ch2 = doc.chapter_lines(2)
     put("issuer_name_ch2", ch2, r"發行機構[:：]\(1\)事業名稱[:：](.+?\))", legal_name)
+    fields["issuer_name_ch1"] = standard_fields.absent("issuer_name_ch1", "第一章只寫中文的發行機構名稱")
+    fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     for name, pattern in [
         ("distributor_name_ch2", r"事業名稱[:：](.+?)\(b\)"),
         ("distributor_address_ch2", r"營業所在地[:：](.+?)\(d\)"),

@@ -1,7 +1,7 @@
 # 審查標準（Review Standard）
 
 - 設定檔：[`config/review_standard.toml`](../../config/review_standard.toml)
-- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）。HSBC 差異（§2.2、§3.1）已確認、尚未實作（Issue #32）；MS 差異（§2.6）已確認、尚未實作（Issue #132）
+- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）。HSBC 差異（§2.2、§3.1）已確認並實作（Issue #32、#34）；MS 差異（§2.6）已確認並實作（Issue #132、#135）
 
 ## 1. 為什麼要獨立成設定檔
 
@@ -20,13 +20,16 @@
 | `distributor.approval_dates` | 2025-12-18、2026-06-11（歷次日期，由舊到新） | 封面「受託或銷售機構審查通過之日期」 | 等於清單中「交易日當天或之前最近一次」的日期（§2.5） |
 | `distributor.chairman` | 林晋輝 | 第二章「受託或銷售機構」→「負責人姓名」 | 逐字相等（含字碼）；「晋」是古字 U+664B，寫成「晉」U+6649 即為錯誤 |
 | `distributor.name`／`phone`／`address` | 玉山綜合證券股份有限公司／02-5556-1313／台北市松山區民生東路三段158號6樓 | 封面「受託或銷售機構之名稱、電話及地址」；第二章「受託或銷售機構」→「事業名稱」「營業所在地」 | 忽略空白與換行後逐字相等（2026-10-02，Issue #41） |
-| `distributor.phone_equivalents` | `+886-2-5556-1313`（國際寫法，HSBC 封面使用） | 封面受託或銷售機構電話 | 電話除 `phone` 外，忽略空白後等於清單中任一寫法也算相符；**所有上手適用**；清單沒列的寫法判定不一致（2026-10-02，Issue #52）。要接受新的寫法時在清單加一筆，不改程式 |
-| `issuer_name.<上手>` | BARC：英商巴克萊銀行股份有限公司（Barclays Bank PLC） | 封面「發行機構」；第二章「發行機構」→「事業名稱」 | 忽略空白與換行後逐字相等；缺該上手分節時轉人工覆核 |
+| `distributor.phone_equivalents` | `+886-2-5556-1313`（國際寫法，HSBC 封面使用）、`+886 2 5556 1313`（MS 封面使用） | 封面受託或銷售機構電話 | 電話除 `phone` 外，忽略空白後等於清單中任一寫法也算相符；**所有上手適用**；清單沒列的寫法判定不一致（2026-10-02，Issue #52）。要接受新的寫法時在清單加一筆，不改程式 |
+| `issuer_name.<上手>` | BARC：英商巴克萊銀行股份有限公司（Barclays Bank PLC） | 封面「發行機構」；第二章「發行機構」→「事業名稱」；範本有只寫中文的出處時（MS 第一章 §3）只比中文 | 忽略空白與換行後逐字相等；缺該上手分節時轉人工覆核 |
+| `issuer_name_ignore.<上手>` | MS：`brackets`、`trailing_period` | 同上 | 該上手比對時另外忽略括號（全形／半形）、英文名結尾的句點；沒列出的上手不忽略 |
 | `fees` | 申購費用、提前贖回費用、分銷費用皆為 0%~5% | 第四章「投資人應負擔的各項費用」表的費率欄 | 忽略空白後逐字相等；只核對列出的費用項目 |
-| `issue_price.pct` | 100 | 第一章 §6「發行價格為商品面額之N%」 | 相等；不相等時**轉人工覆核**（不直接判錯） |
-| `risk.level` | RR4 | 全文所有【RRn】 | 全部等於設定值 |
+| `issue_price.pct` | 100 | 第一章 §6「發行價格為商品面額之N%」；範本另有出處時每處一筆（MS 第四章 §5 申購價金） | 相等；不相等時**轉人工覆核**（不直接判錯） |
+| `risk.level` | RR4 | 全文所有【RRn】（寫法不同的上手見 `risk.level_formats`） | 全部等於設定值 |
+| `risk.level_formats.<上手>` | MS：`風險程度等級為{level}`、`風險程度為{level}`、`歸類為{level}` | 全文 | 該上手的風險等級寫法（`{level}` 為 RRn）；沒列出的上手為【RRn】 |
 | `risk.fixed_warning` | 固定風險警語全文（我方提供給上手） | 全文 | 忽略空白與換行後逐字相等，且出現次數 = `fixed_warning_occurrences`（BARC 為 3 次：封面警語 1、第一章 §2、第三章投資風險警語） |
-| `risk.fixed_warning_by_issuer.<上手>` | 依上手不同的固定警語版本（目前只有 `hsbc`） | 同上 | 有該上手版本時改用該版本比對；沒有時用 `risk.fixed_warning` |
+| `risk.fixed_warning_by_issuer.<上手>` | 依上手不同的固定警語版本（`hsbc`、`ms`） | 同上 | 有該上手版本時改用該版本比對；沒有時用 `risk.fixed_warning` |
+| `risk.fixed_warning_openings.<上手>` | MS：`本商品風險程度為RR4。` | 同上 | 開頭句（到第一個「。」）的其他允許寫法；只換開頭句、其餘逐字相同的版本也算一次 |
 | `wording.forbidden` ／ `allowed_phrases` | 禁用「受託投資」；允許「受託投資或受託買賣」「受託投資、受託買賣或為投資型保單」（HSBC） | 全文 | 片語以外出現「受託投資」即為錯誤（SOP：須改為「受託買賣」） |
 | `product_name.<上手>.zh` ／ `en` | 名稱樣板（依上手分節，例如 `product_name.barc`；缺該上手分節時轉人工覆核） | 封面「商品中文名稱」「商品英文名稱」 | 用說明書欄位填佔位符組出預期名稱後逐字比對（§2.3）；全形／半形括號差異不算錯 |
 | `currency` | 美元→USD、日幣→JPY、人民幣→CNH | 計價幣別 | 不在表內的幣別轉人工覆核 |
@@ -70,8 +73,9 @@
 | `{memory_zh}`／`{memory_en}` | 記憶式時填入該上手樣板的 `memory_zh`／`memory_en`，否則空白 |
 | `{maxi_zh}`／`{maxi_en}` | 標的數 ≥ 2 時填入 `maxi_zh`／`maxi_en`，否則空白 |
 | `{daily_zh}`／`{daily_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`，否則空白 |
+| `{underlying_zh}`／`{underlying_en}` | 標的寫法：標的 1 檔填 `single_zh`／`single_en`、2 檔以上填 `basket_zh`／`basket_en`（兩組不同字串，不是「多檔才加前綴」；Issue #135） |
 
-樣板出現上表以外的佔位符時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。
+樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
 
 ### 2.4 各上手共用的出處規則（Issue #55）
 
@@ -94,13 +98,14 @@
 - 維護：在 PANEL「審查通過日期…」新增晚於最新一筆的日期，或修改／刪除最新一筆；較早的日期不能在 PANEL 修改。存檔時自動 `version` + 1、`effective_date` 改為當天，其餘內容與註解不動。改完提交到 main。
 - 不做審查到期提醒（重新審查時間不固定）。固定風險警語與商品名稱樣板只保留目前版本，不依交易日保留歷史。
 
-### 2.6 MS 的差異（2026-10-08 確認，Issue #132，尚未實作）
+### 2.6 MS 的差異（2026-10-08 確認，Issue #132；Issue #135 實作）
 
 細節見 [MS 核對規則](ms-check-rules.md) §3.2、§3.6。審查通過日期、負責人、風險等級、受託機構名稱與地址、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
 
-- **固定警語**（`risk.fixed_warning_by_issuer.ms`）：現行版本去掉【】，結尾沒有句號；第一章 §2 開頭寫成「本商品風險程度為RR4。」（少「等級」）也視為正確。出現 3 次。
-- **商品名稱樣板**（`product_name.ms`）：中文 `英商摩根士丹利發行{天期}個月期{幣別中文}計價連結{標的寫法}固定配息{記憶式}結構型商品(無保證機構)(無擔保)(不保本)(下稱「本商品」)`，英文 `Morgan Stanley & Co. International Plc issuance of {天期} Months {幣別代碼} Fixed Coupon Notes linked to {標的寫法} (non-guaranteed)(unsecured)(non-principal protected)`。標的寫法依 1 檔／多檔是兩組不同字串，需新增佔位符（§2.3）。
-- **發行機構全名**（`issuer_name.ms`）：英商摩根士丹利國際股份有限公司(Morgan Stanley & Co. International Plc.)；第二章寫法沒有括號與英文結尾句點，比對時要忽略。
+- **固定警語**（`risk.fixed_warning_by_issuer.ms`）：現行版本去掉【】，結尾沒有句號；第一章 §2 開頭寫成「本商品風險程度為RR4。」（少「等級」）也視為正確（`risk.fixed_warning_openings.ms`）。出現 3 次。
+- **風險等級**（`risk.level_formats.ms`）：沒有【】，以「風險程度等級為RRn」「風險程度為RRn」「歸類為RRn」找出每一處。
+- **商品名稱樣板**（`product_name.ms`）：中文 `英商摩根士丹利發行{天期}個月期{幣別中文}計價連結{標的寫法}固定配息{記憶式}結構型商品(無保證機構)(無擔保)(不保本)(下稱「本商品」)`，英文 `Morgan Stanley & Co. International Plc issuance of {天期} Months {幣別代碼} Fixed Coupon Notes linked to {標的寫法} (non-guaranteed)(unsecured)(non-principal protected)`。標的寫法依 1 檔／多檔是兩組不同字串，用佔位符 `{underlying_zh}`／`{underlying_en}`（§2.3）。
+- **發行機構全名**（`issuer_name.ms`）：英商摩根士丹利國際股份有限公司(Morgan Stanley & Co. International Plc.)；第二章寫法沒有括號與英文結尾句點，比對時忽略（`issuer_name_ignore.ms`）；第一章 §3 只寫中文，只比中文。
 - **受託機構電話**：封面寫 `+886 2 5556 1313`，`phone_equivalents` 加這個寫法。
 - **受理申購日**：MS 範本沒有；改由 MS 專屬規則核對開始受理贖回日期。
 - 審查通過日期只以 2026 年後的文件為準，不為 2025 年的舊審查日期加清單。

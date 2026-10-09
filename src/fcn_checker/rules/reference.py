@@ -2,6 +2,7 @@
 
 各上手只交出說明書標準欄位（standard_fields.py）與提前出場排程；比對在這裡實作一次，所有上手共用。
 空值寫法一律取自參考條件表格式設定（`empty_value`）。回填欄位（TS、IIS、ISIN、發行日、比價日）見 backfill.py。
+說明書明確判定不適用的標準欄位（例：MS 範本沒有年利率、Non-Call = 天期時沒有 KO 價）不核對，結果為不適用並附說明。
 項目名稱：讀到參考條件表某一欄時就是該欄的 Excel 欄名（`Item.column`），沒有這欄時用規則旁寫的中文名稱。
 """
 
@@ -12,7 +13,7 @@ from decimal import ROUND_HALF_UP
 from typing import Any
 
 from ..orders.reference import OrderRecord
-from ..schema import CheckResult, Item, OrderValue, ParsedField
+from ..schema import CheckResult, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import AutocallSchedule
 from .kit import (
@@ -21,6 +22,7 @@ from .kit import (
     Context,
     cmp_pct,
     doc_ki,
+    doc_not_applicable,
     doc_review,
     occurrences_of,
     order_review,
@@ -60,8 +62,11 @@ def compare_field(
     compare: Callable[[Any, Any], tuple[bool, Any]] | None = None,
     tolerance: str | None = None,
 ) -> CheckResult:
-    """表上欄位與同名標準欄位比對；預設相等，`compare` 回傳（是否一致, 顯示的預期值）。"""
+    """表上欄位與同名標準欄位比對；預設相等，`compare` 回傳（是否一致, 顯示的預期值）。說明書判定不適用時不比對。"""
     pf = standard_field(ctx, key)
+    if pf.status == FieldStatus.NOT_APPLICABLE:
+        ov = ctx.sheet_field(key)
+        return doc_not_applicable(rule_id, key, pf, [ov], item=Item.column(name, [ov]))
     v, ov, problem = order_value(ctx, key, rule_id, key, pf, convert, what, name=name)
     if problem:
         return problem
@@ -364,7 +369,8 @@ def initial_pricing(ctx: Context) -> CheckResult:
 def underlying_prices(ctx: Context) -> list[CheckResult]:
     """各標的進場／執行／下限／KO 價：表上值四捨五入（half-up）到 4 位後與說明書價格列相等。
 
-    期初定價為 VWAP 時不比對（改由回填規則 `backfill.underlying_prices` 覆寫）。
+    期初定價為 VWAP 時不比對（改由回填規則 `backfill.underlying_prices` 覆寫）。說明書判定 KO 價不適用
+    （`ko_pct` 不適用，例：MS Non-Call = 天期時價格表沒有 KO 欄）時各標的 KO 價不比對。
     """
     if is_vwap(ctx):
         return []
@@ -372,7 +378,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     rows, uls = standard_field(ctx, "underlying_prices"), standard_field(ctx, "underlyings")
     if not rows.ok:
         return [doc_review(rid, "price_table", rows, item=Item.sheet("價格表"))]
-    empty = ctx.fmt.empty_value
+    empty, ko = ctx.fmt.empty_value, standard_field(ctx, "ko_pct")
     out = []
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
@@ -380,6 +386,14 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
         for col, std, zh in PRICE_COLUMNS:
             field, name = f"{label} {zh}", price_item(i, col)
             ov = ctx.order.fields.get(f"underlying_{i}_{std}")
+            if col == "ko" and "ko" not in row.prices:  # 價格表沒有 KO 價：說明書判定不適用才不比對
+                item = Item.column(name, [ov])
+                if ko.status == FieldStatus.NOT_APPLICABLE:
+                    out.append(doc_not_applicable(rid, field, ko, [ov], item=item))
+                else:
+                    missing = ko if not ko.ok else ParsedField.missing("ko_pct", "價格表沒有 KO 價")
+                    out.append(doc_review(rid, field, missing, ov.value if ov else None, [ov], item=item))
+                continue
             if ov is None or ov.value is None:
                 message = f"{ctx.order.source}沒有此欄位或值為空白"
                 out.append(order_review(rid, field, ov, None, "order_missing", message, name=name))

@@ -7,8 +7,8 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 7
-effective_date = 2026-10-08
+version = 8
+effective_date = 2026-10-09
 
 [distributor]
 # 受託或銷售機構審查通過之日期（說明書封面 p1）：歷次日期都保留，由舊到新。
@@ -25,12 +25,12 @@ chairman = "林晋輝"
 name = "玉山綜合證券股份有限公司"
 phone = "02-5556-1313"
 # 電話可接受的其他寫法（所有上手適用）；忽略空白後與其中之一相等即視為相符，沒列出的寫法判定不一致。
-# 國際寫法：HSBC 封面使用（2026-10-02 確認）。
-phone_equivalents = ["+886-2-5556-1313"]
+# 國際寫法：HSBC 封面使用（2026-10-02 確認）；空格分隔的國際寫法：MS 封面使用（2026-10-08 確認）。
+phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313"]
 address = "台北市松山區民生東路三段158號6樓"
 
 [risk]
-# 風險等級（說明書中以【RRn】出現）
+# 風險等級（說明書中以【RRn】出現；寫法不同的上手見下方 [risk.level_formats]）
 level = "RR4"
 
 # 固定風險警語：由我方提供給上手，應逐字出現在說明書中。
@@ -58,13 +58,34 @@ RR1~RR5，RR1、RR2為保守型，RR3、RR4為穩健型，RR5為積極型，本�
 總代理人不對此評級之準確性負任何責任。受託對象僅限依據境外結構型商品管理規則(下稱「管理規則」)投資本商品之\
 專業投資人或依據國際證券業務分公司(下稱「OSU」)辦理受託買賣相關規定允許投資本商品之中華民國境外客戶(此類客戶\
 依受託機構審核適合投資本產品)(下稱「OSU客戶」) (專業投資人與OSU客戶以下合稱「投資人」)。"""
+# MS：去掉【】（【RR4】→RR4、【證券交易所交易證券】→證券交易所交易證券），結尾沒有句號（2026-10-08 確認視為正確）。
+# MS 範本中同樣出現 3 次：封面警語 1)、第一章第 2 項、第三章第 4 項 1)。
+ms = """本商品風險程度等級為RR4。根據受託機構的風險等級分類，由於本商品並不保本，連結標的為證券交易所交易證券，在綜合評量包括但不僅限於產品天期、發行機構信用評等與前述因素後，根據受託機構受託買賣境外商品審查管理辦法之境外結構型商品風險及適合度評估標準將本商品在風險等級中歸類為RR4。*投資人請注意，受託機構將風險等級區分為RR1~RR5，RR1、RR2為保守型，RR3、RR4為穩健型，RR5為積極型，本商品風險等級由受託機構釐定及提供，發行機構及/或總代理人不對此評級之準確性負任何責任。受託對象僅限依據境外結構型商品管理規則(下稱「管理規則」)投資本商品之專業投資人或依據國際證券業務分公司(下稱「OSU」)辦理受託買賣相關規定允許投資本商品之中華民國境外客戶(此類客戶依受託機構審核適合投資本產品)(下稱「OSU客戶」) (專業投資人與OSU客戶以下合稱「投資人」)"""
+
+# 固定警語開頭句（到第一個「。」）的其他允許寫法（鍵為上手代號小寫）；只換開頭句，其餘仍須與該上手的警語逐字相同。
+# MS：第一章第 2 項寫成「本商品風險程度為RR4。」（少「等級」），2026-10-08 確認視為正確。
+[risk.fixed_warning_openings]
+ms = ["本商品風險程度為RR4。"]
+
+# 風險等級的寫法（鍵為上手代號小寫；{level} 為 RRn 的位置）。未列出的上手為【{level}】。
+# MS：沒有【】，寫在固定警語的「風險程度等級為」「風險程度為」「歸類為」之後（2026-10-08 確認）。
+[risk.level_formats]
+ms = ["風險程度等級為{level}", "風險程度為{level}", "歸類為{level}"]
 
 [issuer_name]
-# 發行機構中英文法人全名（鍵為上手代號小寫）：封面「發行機構」與第二章「發行機構」條的「事業名稱」。
-# 比對時忽略空白與換行，其餘（含全形括號）逐字相等。
+# 發行機構中英文法人全名（鍵為上手代號小寫）：封面「發行機構」與第二章「發行機構」條的「事業名稱」；
+# 範本另有只寫中文的出處（MS 第一章第 3 項）時只比中文（第一個括號以前）。
+# 比對時忽略空白與換行，其餘（含全形括號）逐字相等；上手另有寫法差異時見 [issuer_name_ignore]。
 barc = "英商巴克萊銀行股份有限公司（Barclays Bank PLC）"
 
 hsbc = "香港商香港上海滙豐銀行股份有限公司（THE HONGKONG AND SHANGHAI BANKING CORPORATION LIMITED）"
+
+ms = "英商摩根士丹利國際股份有限公司(Morgan Stanley & Co. International Plc.)"
+
+# 發行機構全名比對時另外忽略的寫法差異（鍵為上手代號小寫）：brackets 括號（全形／半形）、trailing_period 英文名結尾的句點。
+# MS：第二章中英文之間沒有括號、英文名結尾沒有句點（2026-10-08 確認）。
+[issuer_name_ignore]
+ms = ["brackets", "trailing_period"]
 
 [fees]
 # 第四章「投資人應負擔的各項費用」表的費率區間（鍵為表中費用項目名稱）；忽略空白後逐字相等。
@@ -106,6 +127,21 @@ maxi_en = "Maxi "
 daily_en = "Daily "
 normalize_brackets = true
 # 英文名稱在 PDF 換行處常黏字（例 CouponNotes），比對時忽略所有空白
+ignore_whitespace_en = true
+
+[product_name.ms]
+# 商品名稱格式（依 6 份新版 MS 說明書推得，2026-10-08 確認照此核對）
+# 佔位符同 BARC；{underlying_zh}／{underlying_en} 標的寫法：1 檔填 single_*、2 檔以上填 basket_*；英文沒有記憶式字樣
+zh = "英商摩根士丹利發行{tenor}個月期{ccy_zh}計價連結{underlying_zh}固定配息{memory_zh}結構型商品(無保證機構)(無擔保)(不保本)(下稱「本商品」)"
+en = "Morgan Stanley & Co. International Plc issuance of {tenor} Months {ccy} Fixed Coupon Notes linked to {underlying_en} (non-guaranteed)(unsecured)(non-principal protected)"
+memory_zh = "（記憶式自動提前出場）"
+memory_en = ""
+single_zh = "股票或指數股票型基金"
+single_en = "Shares or ETFs"
+basket_zh = "一籃子股票與/或指數股票型基金"
+basket_en = "Worst of Shares and/or ETFs"
+normalize_brackets = true
+# 英文名稱在 PDF 換行處常黏字（例 Noteslinked），比對時忽略所有空白
 ignore_whitespace_en = true
 
 [currency]
