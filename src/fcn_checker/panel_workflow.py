@@ -120,7 +120,7 @@ class PanelOutcome:
     def detail(result: CheckResult, item: BatchItem) -> str:
         """結果明細：有問題的項目用共用錯訊（不含 rule_id），再列雙方值、來源、容差與 PDF 原文。"""
         if result.status.is_problem:
-            reason = problem_message(result, item.document)
+            reason = problem_message(result)
         else:
             reason = result.message or _DETAIL_DEFAULTS[result.status]
         evidence = (

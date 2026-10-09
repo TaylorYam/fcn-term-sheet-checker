@@ -477,3 +477,30 @@ def test_price_derivation_names_the_underlying_the_same_way_for_both_issuers(tmp
 
     assert any(problem_message(r).startswith("UL_2 KO價：") for r in issues(barc) if r.rule_id == "derive.prices")
     assert any(problem_message(r).startswith("UL_1 執行價：") for r in issues(hsbc) if r.rule_id == "derive.prices")
+
+
+# ---------------------------------------------------------------- 文件那一邊的稱呼（Issue #142）
+
+
+def test_message_names_the_document_recorded_on_the_result():
+    from fcn_checker.schema import DocKind
+
+    pf = not_provided("isin")
+    ts_side = kit.doc_review("field.isin", "isin", pf, item=Item.note("ISIN"))
+    iis_side = kit.doc_review("field.isin", "isin", pf, item=Item.note("ISIN"), document=DocKind.IIS)
+    assert ts_side.document == DocKind.TERM_SHEET and ts_side.message.startswith("說明書抓不到此欄位")
+    assert iis_side.document == DocKind.IIS and iis_side.message.startswith("投資人須知抓不到此欄位")
+
+    mismatch = CheckResult(
+        "iis.isin", "isin", CheckStatus.MISMATCH, "XS1", "XS2", item=Item.term_sheet("ISIN"), document=DocKind.IIS
+    )
+    assert problem_message(mismatch) == "ISIN對不起來：說明書 XS1／投資人須知 XS2"
+    silent = CheckResult(
+        "iis.x",
+        "x",
+        CheckStatus.REVIEW_REQUIRED,
+        reason_code="document_missing",
+        item=Item.note("X"),
+        document=DocKind.IIS,
+    )
+    assert problem_message(silent) == "X：投資人須知抓不到此欄位"

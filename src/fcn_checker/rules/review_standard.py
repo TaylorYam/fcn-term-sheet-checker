@@ -12,8 +12,8 @@ import re
 from collections.abc import Callable
 
 from ..config import ISSUER_NAME_IGNORES, NAME_FLAGS, RISK_LEVEL
-from ..investor_sheet import IisSheet, read_iis
-from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
+from ..investor_sheet import read_iis
+from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import fee_field
 from ..text import full_brackets, squash
@@ -29,7 +29,7 @@ def _approval_date(ctx: Context) -> CheckResult:
     rid, pf, trade = "standard.approval_date", standard_field(ctx, "approval_date"), standard_field(ctx, "trade_date")
     item = Item.standard("受託機構審查通過日期")
     if not pf.ok:
-        return doc_review(rid, "approval_date", pf, item=item)
+        return doc_review(rid, "approval_date", pf, item=item, document=ctx.document)
     if not trade.ok:
         return result(
             rid,
@@ -78,7 +78,7 @@ def _denomination(ctx: Context) -> CheckResult:
     rid, pf, cz = "doc.denomination", standard_field(ctx, "denomination"), standard_field(ctx, "currency_zh")
     item = Item.expected("面額")
     if not pf.ok:
-        return doc_review(rid, "denomination", pf, item=item)
+        return doc_review(rid, "denomination", pf, item=item, document=ctx.document)
     iso = ctx.std.currency_zh_to_iso.get(cz.value) if cz.ok else None
     default = ctx.std.denomination.get(iso) if iso else None
     if default is None:
@@ -117,7 +117,7 @@ def _subscription_dates(ctx: Context) -> list[CheckResult]:
         pf, item = occ.value, Item.expected(occ.name)
         bad = next((x for x in (pf, trade) if not x.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, occ.field, bad, item=item))
+            out.append(doc_review(rid, occ.field, bad, item=item, document=ctx.document))
             continue
         ok = pf.value == trade.value
         out.append(
@@ -148,7 +148,7 @@ def _print_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckRe
         pf, item = occ.value, Item.expected(occ.name)
         bad = next((x for x in (pf, trade) if not x.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, occ.field, bad, item=item))
+            out.append(doc_review(rid, occ.field, bad, item=item, document=ctx.document))
             continue
         gap = (pf.value - trade.value).days
         ok = 0 <= gap <= limit
@@ -177,9 +177,9 @@ def _chairman(ctx: Context) -> CheckResult:
     rid, pf, exp = "standard.chairman", standard_field(ctx, "chairman"), ctx.std.chairman
     item = Item.standard("受託機構負責人")
     if not pf.ok:
-        return doc_review(rid, "chairman", pf, exp, item=item)
+        return doc_review(rid, "chairman", pf, exp, item=item, document=ctx.document)
     ok = pf.value == exp
-    msg = "" if ok else f"須逐字（含字碼）相等：預期 {_codepoints(exp)}；說明書 {_codepoints(pf.value)}"
+    msg = "" if ok else f"須逐字（含字碼）相等：預期 {_codepoints(exp)}；{ctx.document} {_codepoints(pf.value)}"
     return result(
         rid,
         "chairman",
@@ -235,7 +235,7 @@ def _risk_level(ctx: Context) -> CheckResult:
             S.REVIEW_REQUIRED,
             expected=ctx.std.risk_level,
             reason="document_missing",
-            message=f"說明書找不到{shown_formats}風險等級",
+            message=f"{ctx.document}找不到{shown_formats}風險等級",
             item=item,
         )
     bad = [(lv, m) for lv, m in found if lv != ctx.std.risk_level]
@@ -290,11 +290,12 @@ def _fixed_text(
     *,
     norm: Callable[[str], str] = squash,
     tolerance: str | None = None,
+    document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    """說明書文字與審查標準固定值比對；預設忽略空白與換行，其餘逐字相等（`norm` 另給比對前的正規化）。"""
+    """被核對文件的文字與審查標準固定值比對；預設忽略空白與換行，其餘逐字相等（`norm` 另給比對前的正規化）。"""
     item = Item.standard(name)
     if not pf.ok:
-        return doc_review(rid, field, pf, expected, item=item)
+        return doc_review(rid, field, pf, expected, item=item, document=document)
     ok = norm(pf.value) == norm(expected)
     return result(
         rid,
@@ -420,7 +421,7 @@ def _distributor_text(
             tolerance=f"審查標準列出的{listed[1]}等價寫法（{listed[2]}）",
             item=Item.standard(name),
         )
-    return _fixed_text(rid, field, pf, exp, what, name)
+    return _fixed_text(rid, field, pf, exp, what, name, document=ctx.document)
 
 
 def _fees(ctx: Context) -> list[CheckResult]:
@@ -448,7 +449,7 @@ def _issue_price(ctx: Context, *, others: bool = True) -> list[CheckResult]:
 def _issue_price_at(ctx: Context, rid: str, field: str, pf: ParsedField, name: str) -> CheckResult:
     exp, item = ctx.std.issue_price_pct, Item.standard(name)
     if not pf.ok:
-        return doc_review(rid, field, pf, exp, item=item)
+        return doc_review(rid, field, pf, exp, item=item, document=ctx.document)
     ok = pf.value == exp
     return result(
         rid,
@@ -513,7 +514,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         item = items[field]
         bad = next((p for p in (pf, tenor, cz, mem) if not p.ok), None)
         if bad is not None:
-            out.append(doc_review(rid, field, bad, item=item))
+            out.append(doc_review(rid, field, bad, item=item, document=ctx.document))
             continue
         iso = ctx.std.currency_zh_to_iso.get(cz.value)
         if iso is None:
@@ -533,7 +534,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         lang = "zh" if field == "name_zh" else "en"
         flags, bad = _name_flags(ctx, tpl.placeholders(lang))
         if bad is not None:
-            out.append(doc_review(rid, field, bad, item=item))
+            out.append(doc_review(rid, field, bad, item=item, document=ctx.document))
             continue
         flags["memory"] = bool(mem.value)
         values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": iso}
@@ -591,11 +592,15 @@ def _iis_warning(ctx: Context) -> CheckResult:
     return _fixed_warning(ctx, expected)
 
 
-def _iis_risk_summary(ctx: Context, sheet: IisSheet) -> CheckResult:
+def _iis_risk_summary(ctx: Context) -> CheckResult:
     """商品簡介「本商品風險程度：RRn」（沒有【】，全文【RRn】規則抓不到）= 審查標準風險等級。"""
-    rid, pf, item = "standard.risk_level", read_iis(sheet, "risk_level_summary"), Item.standard("風險等級（商品簡介）")
+    rid, pf, item = (
+        "standard.risk_level",
+        read_iis(ctx.sheet, "risk_level_summary"),
+        Item.standard("風險等級（商品簡介）"),
+    )
     if not pf.ok:
-        return doc_review(rid, "risk_level_summary", pf, ctx.std.risk_level, item=item)
+        return doc_review(rid, "risk_level_summary", pf, ctx.std.risk_level, item=item, document=ctx.document)
     ok = pf.value == ctx.std.risk_level
     return result(
         rid,
@@ -610,12 +615,12 @@ def _iis_risk_summary(ctx: Context, sheet: IisSheet) -> CheckResult:
 
 
 def _iis_occurrences(
-    ctx: Context, sheet: IisSheet, rid: str, name: str, expected: str | None, what: str, missing: str, kind: str
+    ctx: Context, rid: str, name: str, expected: str | None, what: str, missing: str, kind: str
 ) -> list[CheckResult]:
     """投資人須知出處清單型欄位（各處受託機構名稱／地址／電話、發行機構名稱）每一處 = 審查標準。"""
-    container = read_iis(sheet, name)
+    container = read_iis(ctx.sheet, name)
     if not container.ok:
-        return [doc_review(rid, name, container, item=Item.standard(what))]
+        return [doc_review(rid, name, container, item=Item.standard(what), document=ctx.document)]
     items = container.value
     if expected is None:
         return [
@@ -636,18 +641,18 @@ def _iis_occurrences(
     ]
 
 
-def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedField) -> list[CheckResult]:
-    """投資人須知的審查標準規則：`sheet`（也是 `ctx.ts`）是投資人須知的讀出結果，只核對範本有的項目。
+def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[CheckResult]:
+    """投資人須知的審查標準規則：`ctx` 帶投資人須知的讀出結果，只核對範本有的項目（`ctx.provides`）。
 
     風險等級、固定警語（次數為投資人須知專屬）、禁用語一律核對；刊印日期的交易日由呼叫端給（參考條件表）。
     只寫中文的發行機構名稱出處（`issuer_names_zh`，例：HSBC 各處、MS 警語與商品簡介）只比全名的中文部分。
     """
-    std, provides = ctx.issuer_std, sheet.provides
+    std, provides = ctx.issuer_std, ctx.provides
     issuer_name = std.issuer_name
     issuer_name_zh = re.split(r"[（(]", issuer_name, maxsplit=1)[0] if issuer_name is not None else None
     out = [_risk_level(ctx), _iis_warning(ctx), _forbidden_wording(ctx)]
     if provides("risk_level_summary"):
-        out.append(_iis_risk_summary(ctx, sheet))
+        out.append(_iis_risk_summary(ctx))
     if provides("print_dates"):
         out.extend(_print_dates(ctx, trade))
     if provides("issue_price_pct"):
@@ -662,7 +667,7 @@ def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedFie
     )
     for name, rid, expected, what, missing, kind in occurrence_checks:
         if provides(name):
-            out.extend(_iis_occurrences(ctx, sheet, rid, name, expected, what, missing, kind))
+            out.extend(_iis_occurrences(ctx, rid, name, expected, what, missing, kind))
     if any(provides(fee_field(label)) for label in ctx.std.fees):
         out.extend(_fees(ctx))
     return out

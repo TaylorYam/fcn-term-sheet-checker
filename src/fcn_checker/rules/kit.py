@@ -15,8 +15,9 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Protocol
 
 from ..config import IssuerStandard, ReferenceFormat, ReviewStandard
+from ..investor_sheet import IisSheet
 from ..orders.reference import OrderRecord
-from ..schema import CheckResult, Evidence, FieldStatus, Item, OrderValue, ParsedField
+from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import Occurrence, TermSheet, is_standard, not_provided
 
@@ -46,13 +47,22 @@ class _IssuerStandardOf:
 
 @dataclass
 class Context(_IssuerStandardOf):
-    """各上手共用的規則（參考條件表欄位、Non-Call、回填、審查標準）的輸入：含參考條件表的列與格式設定。"""
+    """各上手共用的規則（參考條件表欄位、Non-Call、回填、審查標準）與投資人須知規則的輸入：被核對文件的讀出結果、
+    參考條件表的列與格式設定。
 
-    ts: TermSheet
+    被核對的是哪份文件只在這裡講一次（`document`）：規則的訊息提到被核對的文件時用它的稱呼，
+    錯訊的文件那一邊也依結果記下的文件種類組句。投資人須知（ADR 0007）另帶頁數、檔名前 12 碼與同商品說明書。
+    """
+
+    ts: TermSheet  # 被核對文件的讀出結果（投資人須知時是 IisSheet，同樣以 f／full_text 讀欄位）
     order: OrderRecord
     std: ReviewStandard
     fmt: ReferenceFormat
     issuer: str
+    document: DocKind = DocKind.TERM_SHEET
+    pages: int | None = None  # 投資人須知：PDF 頁數
+    file_code: str = ""  # 投資人須知：檔名前 12 碼
+    term_sheet: TermSheet | None = None  # 投資人須知：同商品說明書（這批沒有、讀不到或沒有配對成功時為 None）
 
     @property
     def sheet_source(self) -> str:
@@ -60,6 +70,17 @@ class Context(_IssuerStandardOf):
 
     def sheet_field(self, key: str) -> OrderValue | None:
         return self.order.fields.get(key)
+
+    @property
+    def sheet(self) -> IisSheet:
+        """投資人須知的讀出結果（投資人須知規則用；說明書沒有）。"""
+        if not isinstance(self.ts, IisSheet):
+            raise TypeError("核對的不是投資人須知，沒有投資人須知讀出結果")
+        return self.ts
+
+    def provides(self, name: str) -> bool:
+        """投資人須知範本有沒有這個欄位；不在其中的不核對。"""
+        return self.sheet.provides(name)
 
 
 @dataclass
@@ -147,8 +168,9 @@ def result(
     message: str = "",
     tolerance: str | None = None,
     evidence: list[Evidence] | None = None,
+    document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    """`item` 必填：這筆結果在講哪一項、預期值從哪裡來。"""
+    """`item` 必填：這筆結果在講哪一項、預期值從哪裡來；`document` 是這筆結果屬於哪份文件。"""
     return CheckResult(
         rule_id=rule_id,
         field=field,
@@ -161,13 +183,14 @@ def result(
         document_evidence=list(evidence if evidence is not None else (pf.evidence if pf else [])),
         order_source=[o.source for o in (ov or []) if o is not None],
         item=item,
+        document=document,
     )
 
 
-DOC_REASON = {
-    FieldStatus.MISSING: ("document_missing", "說明書抓不到此欄位"),
-    FieldStatus.AMBIGUOUS: ("document_ambiguous", "說明書出現多個不同的值"),
-    FieldStatus.INVALID: ("document_invalid", "說明書的值無法辨識"),
+DOC_REASON = {  # 說明前面接被核對文件的稱呼（例：說明書抓不到此欄位）
+    FieldStatus.MISSING: ("document_missing", "抓不到此欄位"),
+    FieldStatus.AMBIGUOUS: ("document_ambiguous", "出現多個不同的值"),
+    FieldStatus.INVALID: ("document_invalid", "的值無法辨識"),
 }
 
 
@@ -179,8 +202,10 @@ def doc_review(
     ov: list[OrderValue | None] | None = None,
     *,
     item: Item,
+    document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    reason, msg = DOC_REASON.get(pf.status, ("document_not_applicable", "說明書判定此欄位不適用"))
+    """被核對文件的欄位讀不到、歧義或不合法：轉人工覆核，說明以文件稱呼開頭。"""
+    reason, msg = DOC_REASON.get(pf.status, ("document_not_applicable", "判定此欄位不適用"))
     detail = f"：{pf.note}" if pf.note else ""
     actual = pf.candidates or None
     return result(
@@ -192,15 +217,22 @@ def doc_review(
         pf=pf,
         ov=ov,
         reason=reason,
-        message=msg + detail,
+        message=f"{document}{msg}{detail}",
         item=item,
+        document=document,
     )
 
 
 def doc_not_applicable(
-    rule_id: str, field: str, pf: ParsedField, ov: list[OrderValue | None] | None = None, *, item: Item
+    rule_id: str,
+    field: str,
+    pf: ParsedField,
+    ov: list[OrderValue | None] | None = None,
+    *,
+    item: Item,
+    document: DocKind = DocKind.TERM_SHEET,
 ) -> CheckResult:
-    """說明書明確判定不適用的欄位（例：範本沒有、Non-Call = 天期時沒有 KO 價）：不核對，結果為不適用並附說明。"""
+    """被核對文件明確判定不適用的欄位（例：範本沒有、Non-Call = 天期時沒有 KO 價）：不核對，結果為不適用並附說明。"""
     return result(
         rule_id,
         field,
@@ -208,8 +240,9 @@ def doc_not_applicable(
         expected=ov[0].value if ov and ov[0] is not None else None,
         pf=pf,
         ov=ov,
-        message=pf.note or "說明書判定此欄位不適用",
+        message=pf.note or f"{document}判定此欄位不適用",
         item=item,
+        document=document,
     )
 
 

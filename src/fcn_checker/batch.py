@@ -52,7 +52,7 @@ from .issuers import Issuer, by_code, detect, detect_iis
 from .messages import STATUS_ZH, problem_message
 from .orders.reference import ReferenceRow, ReferenceSheet, load_reference_sheet
 from .rules.kit import doc_review, read_standard
-from .schema import CheckReport, CheckResult, CheckStatus, Evidence, Item, ParsedField, overall_status
+from .schema import CheckReport, CheckResult, CheckStatus, DocKind, Evidence, Item, ParsedField, overall_status
 from .single_check import Paired, PairedIis, check_document, check_investor_sheet
 from .standard_fields import TermSheet
 
@@ -78,13 +78,6 @@ class PairingProblem(StrEnum):
     SHARED_ROW = "reference_row_shared"
     MISSING_IIS = "counterpart_missing_iis"  # 這批有說明書、沒有同商品的投資人須知
     MISSING_TS = "counterpart_missing_ts"  # 這批有投資人須知、沒有同商品的說明書
-
-
-class DocKind(StrEnum):
-    """PDF 的種類，由檔名結尾決定（ADR 0007）；值是錯訊與 PANEL 用的稱呼。"""
-
-    TERM_SHEET = "說明書"
-    IIS = "投資人須知"
 
 
 _SUFFIXES = {"_TS": DocKind.TERM_SHEET, "_IIS": DocKind.IIS}
@@ -248,9 +241,7 @@ class BatchItem:
     @property
     def problem_messages(self) -> tuple[str, ...]:
         """這份說明書的錯訊，同一句只列一次（錯誤清單與 PANEL 放行確認共用）。"""
-        return tuple(
-            dict.fromkeys(problem_message(r, self.document) for r in self.report.results if r.status.is_problem)
-        )
+        return tuple(dict.fromkeys(problem_message(r) for r in self.report.results if r.status.is_problem))
 
     @property
     def release_problem(self) -> str:
