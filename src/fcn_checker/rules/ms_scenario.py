@@ -12,7 +12,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from ..schema import CheckResult, Evidence, Item
 from ..schema import CheckStatus as S
 from . import kit
-from .kit import IssuerContext
+from .kit import Check, IssuerContext
 
 
 def annual_rate(ctx: IssuerContext, rid: str, field: str):
@@ -31,20 +31,15 @@ def _ev(lines) -> list[Evidence]:
 
 def _result(rid, field, item, issues, evidence, *, review=False, expected=None, actual=None, ov=None) -> CheckResult:
     """`item` 為項目（或預期值來自說明書時的項目名稱）；`issues` 為不成立的說明；`review` 表示寫法未知（轉人工覆核）而不是算錯。"""
-    ok = not issues
-    status = S.PASS if ok else (S.REVIEW_REQUIRED if review else S.MISMATCH)
-    reason = "" if ok else ("scenario_unknown_wording" if review else "value_mismatch")
-    return kit.result(
-        rid,
-        field,
-        status,
-        expected=expected,
-        actual=actual,
-        evidence=evidence,
-        reason=reason,
+    item = Item.expected(item) if isinstance(item, str) else item
+    return Check(rid, field, item, ov=tuple(ov or ())).compare(
+        expected,
+        actual,
+        ok=not issues,
+        fail=S.REVIEW_REQUIRED if review else S.MISMATCH,
+        reason="scenario_unknown_wording" if review else "value_mismatch",
         message="；".join(issues),
-        ov=ov,
-        item=Item.expected(item) if isinstance(item, str) else item,
+        evidence=evidence,
     )
 
 
@@ -56,23 +51,16 @@ def reprint(ctx: IssuerContext) -> list[CheckResult]:
         ("doc.scenario_table", "scenario_table", "第 18 項重印價格表", lambda t: t.value["rows"]),
         ("doc.scenario_header_pct", "scenario_headers", "第 18 項重印價格表欄頭百分比", lambda t: t.value["headers"]),
     ):
-        bad = next((p for p in (pt, st) if not p.ok), None)
-        if bad is not None:
-            out.append(kit.doc_review(rid, field, bad, item=Item.expected(name)))
+        check = Check(rid, field, Item.expected(name), ctx.document).needs(pt, st)
+        if (problem := check.blocked) is not None:
+            out.append(problem)
             continue
-        expected, actual = value(pt), value(st)
-        ok = expected == actual
         out.append(
-            kit.result(
-                rid,
-                field,
-                S.PASS if ok else S.MISMATCH,
-                expected=expected,
-                actual=actual,
+            check.compare(
+                value(pt),
+                value(st),
                 evidence=list(st.evidence),
-                reason="" if ok else "value_mismatch",
-                message="" if ok else "第 18 項重印的價格表須與第 16 項逐格相同",
-                item=Item.expected(name),
+                fail_message="第 18 項重印的價格表須與第 16 項逐格相同",
             )
         )
     return out
@@ -89,7 +77,7 @@ def parameters(ctx: IssuerContext) -> list[CheckResult]:
     ):
         item = Item.expected(name)
         if not pf.ok:
-            out.append(kit.doc_review(rid, field, pf, item=item))
+            out.append(Check(rid, field, item, ctx.document).review(pf))
         elif hit is None:
             issues = ["第 18 項假設找不到這個值或出現多次"]
             out.append(_result(rid, field, name, issues, _ev(sec.lines[:1]), review=True))
@@ -124,7 +112,7 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
         if s.kind != "worse":
             continue
         if not pt.ok:
-            out.append(kit.doc_review(rid, "scenario_strike", pt, item=Item.expected(name)))
+            out.append(Check(rid, "scenario_strike", Item.expected(name), ctx.document).review(pt))
             continue
         if len(s.strike) != 1:
             out.append(_result(rid, "scenario_strike", name, ["較差情境找不到執行價"], _ev(s.lines[:1]), review=True))
@@ -162,7 +150,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
         bad = next((p for p in (denom, tenor) if not p.ok), None)
         if bad is not None:
             out.extend(
-                kit.doc_review(rid, field, bad, ov=[ov], item=item)
+                Check(rid, field, item, ctx.document, ov=(ov,)).review(bad)
                 for field, item in ((f"{tag}_coupon", coupon_item), (f"{tag}_pnl", pnl_item))
             )
             continue

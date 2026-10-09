@@ -17,7 +17,7 @@ from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, ParsedFi
 from ..schema import CheckStatus as S
 from ..standard_fields import fee_field
 from ..text import full_brackets, squash
-from .kit import Context, doc_review, occurrences_of, result, standard_field
+from .kit import Check, Context, occurrences_of, standard_field
 
 __all__ = ["iis_review_standard_rules", "review_standard_rules"]
 
@@ -27,46 +27,31 @@ __all__ = ["iis_review_standard_rules", "review_standard_rules"]
 def _approval_date(ctx: Context) -> CheckResult:
     """審查通過日期 = 審查標準中交易日當天或之前最近一次的日期（Issue #120）。"""
     rid, pf, trade = "standard.approval_date", standard_field(ctx, "approval_date"), standard_field(ctx, "trade_date")
-    item = Item.standard("受託機構審查通過日期")
+    check = Check(rid, "approval_date", Item.standard("受託機構審查通過日期"), ctx.document)
     if not pf.ok:
-        return doc_review(rid, "approval_date", pf, item=item, document=ctx.document)
+        return check.review(pf)
     if not trade.ok:
-        return result(
-            rid,
-            "approval_date",
+        return check.needs(pf).result(
             S.REVIEW_REQUIRED,
             actual=pf.value,
-            pf=pf,
             reason="trade_date_unavailable",
             message="讀不到交易日，無法決定適用的審查通過日期",
-            item=item,
         )
+    check = check.needs(pf, trade)
     expected = ctx.std.approval_date_on(trade.value)
-    evidence = pf.evidence + trade.evidence
     if expected is None:
         first = ctx.std.approval_dates[0]
-        return result(
-            rid,
-            "approval_date",
+        return check.result(
             S.REVIEW_REQUIRED,
             actual=pf.value,
-            evidence=evidence,
             reason="approval_date_not_configured",
             message=f"交易日 {trade.value} 早於審查標準最早的審查通過日期 {first}，沒有適用的日期",
-            item=item,
         )
-    ok = pf.value == expected
-    return result(
-        rid,
-        "approval_date",
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=pf.value,
-        evidence=evidence,
-        reason="" if ok else "value_mismatch",
-        message=f"依交易日 {trade.value} 應為當天或之前最近一次的審查通過日期"
-        + ("" if ok else "（可能沿用舊的審查通過日期）"),
-        item=item,
+    return check.compare(
+        expected,
+        pf.value,
+        message=f"依交易日 {trade.value} 應為當天或之前最近一次的審查通過日期",
+        fail_message="（可能沿用舊的審查通過日期）",
     )
 
 
@@ -76,33 +61,21 @@ def _approval_date(ctx: Context) -> CheckResult:
 def _denomination(ctx: Context) -> CheckResult:
     """面額 = 審查標準該幣別的預設值；不同時轉人工覆核（客戶可能要求特殊面額）。"""
     rid, pf, cz = "doc.denomination", standard_field(ctx, "denomination"), standard_field(ctx, "currency_zh")
-    item = Item.expected("面額")
-    if not pf.ok:
-        return doc_review(rid, "denomination", pf, item=item, document=ctx.document)
+    check = Check(rid, "denomination", Item.expected("面額"), ctx.document).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     iso = ctx.std.currency_zh_to_iso.get(cz.value) if cz.ok else None
     default = ctx.std.denomination.get(iso) if iso else None
     if default is None:
-        return result(
-            rid,
-            "denomination",
-            S.REVIEW_REQUIRED,
-            actual=pf.value,
-            pf=pf,
-            reason="currency_unknown",
-            message="無法確認幣別，找不到面額預設值",
-            item=item,
+        return check.result(
+            S.REVIEW_REQUIRED, actual=pf.value, reason="currency_unknown", message="無法確認幣別，找不到面額預設值"
         )
-    ok = pf.value == default
-    return result(
-        rid,
-        "denomination",
-        S.PASS if ok else S.REVIEW_REQUIRED,
-        expected=default,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "denomination_non_default",
-        message="" if ok else f"面額不是 {iso} 預設值；客戶可能要求特殊面額，請人工確認",
-        item=item,
+    return check.compare(
+        default,
+        pf.value,
+        fail=S.REVIEW_REQUIRED,
+        reason="denomination_non_default",
+        fail_message=f"面額不是 {iso} 預設值；客戶可能要求特殊面額，請人工確認",
     )
 
 
@@ -112,28 +85,12 @@ def _subscription_dates(ctx: Context) -> list[CheckResult]:
     items, problem = occurrences_of(ctx, rid, "subscription_dates", Item.expected("受理申購日"))
     if problem:
         return [problem]
-    out = []
-    for occ in items:
-        pf, item = occ.value, Item.expected(occ.name)
-        bad = next((x for x in (pf, trade) if not x.ok), None)
-        if bad is not None:
-            out.append(doc_review(rid, occ.field, bad, item=item, document=ctx.document))
-            continue
-        ok = pf.value == trade.value
-        out.append(
-            result(
-                rid,
-                occ.field,
-                S.PASS if ok else S.MISMATCH,
-                expected=trade.value,
-                actual=pf.value,
-                evidence=pf.evidence + trade.evidence,
-                reason="" if ok else "value_mismatch",
-                message=f"{occ.where}須等於交易日",
-                item=item,
-            )
-        )
-    return out
+    return [
+        Check(rid, occ.field, Item.expected(occ.name), ctx.document)
+        .needs(occ.value, trade)
+        .compare(trade.value, occ.value.value, message=f"{occ.where}須等於交易日")
+        for occ in items
+    ]
 
 
 def _print_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckResult]:
@@ -145,25 +102,19 @@ def _print_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckRe
     limit = ctx.std.print_date_max_days_after_trade
     out = []
     for occ in items:
-        pf, item = occ.value, Item.expected(occ.name)
-        bad = next((x for x in (pf, trade) if not x.ok), None)
-        if bad is not None:
-            out.append(doc_review(rid, occ.field, bad, item=item, document=ctx.document))
+        pf = occ.value
+        check = Check(rid, occ.field, Item.expected(occ.name), ctx.document).needs(pf, trade)
+        if (problem := check.blocked) is not None:
+            out.append(problem)
             continue
         gap = (pf.value - trade.value).days
-        ok = 0 <= gap <= limit
         out.append(
-            result(
-                rid,
-                occ.field,
-                S.PASS if ok else S.MISMATCH,
-                expected=f"{trade.value} ～ {trade.value + dt.timedelta(days=limit)}",
-                actual=pf.value,
-                evidence=pf.evidence + trade.evidence,
-                reason="" if ok else "value_mismatch",
+            check.compare(
+                f"{trade.value} ～ {trade.value + dt.timedelta(days=limit)}",
+                pf.value,
+                ok=0 <= gap <= limit,
                 tolerance=f"交易日當天至交易日後 {limit} 天",
                 message=f"刊印日期為交易日 {gap:+d} 天",
-                item=item,
             )
         )
     return out
@@ -175,21 +126,13 @@ def _codepoints(s: str) -> str:
 
 def _chairman(ctx: Context) -> CheckResult:
     rid, pf, exp = "standard.chairman", standard_field(ctx, "chairman"), ctx.std.chairman
-    item = Item.standard("受託機構負責人")
-    if not pf.ok:
-        return doc_review(rid, "chairman", pf, exp, item=item, document=ctx.document)
-    ok = pf.value == exp
-    msg = "" if ok else f"須逐字（含字碼）相等：預期 {_codepoints(exp)}；{ctx.document} {_codepoints(pf.value)}"
-    return result(
-        rid,
-        "chairman",
-        S.PASS if ok else S.MISMATCH,
-        expected=exp,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "value_mismatch",
-        message=msg,
-        item=item,
+    check = Check(rid, "chairman", Item.standard("受託機構負責人"), ctx.document, expected=exp).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
+    return check.compare(
+        exp,
+        pf.value,
+        fail_message=f"須逐字（含字碼）相等：預期 {_codepoints(exp)}；{ctx.document} {_codepoints(pf.value)}",
     )
 
 
@@ -204,59 +147,46 @@ def _fixed_warning(ctx: Context, expected: int | None = None) -> CheckResult:
     hits = sorted((m for t in targets for m in re.finditer(re.escape(t), ti.text)), key=lambda m: m.start())
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
     expected = std.fixed_warning_occurrences if expected is None else expected
-    ok = len(hits) == expected
-    return result(
-        rid,
-        "fixed_warning",
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=len(hits),
+    return Check(rid, "fixed_warning", Item.standard("固定風險警語"), ctx.document).compare(
+        expected,
+        len(hits),
         evidence=evidence,
-        reason="" if ok else "occurrence_count",
+        reason="occurrence_count",
         tolerance="忽略空白與換行後逐字相等" + ("（另接受審查標準列出的開頭句寫法）" if len(targets) > 1 else ""),
-        message=f"固定風險警語逐字相符 {len(hits)} 次，應為 {expected} 次"
-        + ("" if ok else "（可能被改字、缺漏或多出）"),
-        item=Item.standard("固定風險警語"),
+        message=f"固定風險警語逐字相符 {len(hits)} 次，應為 {expected} 次",
+        fail_message="（可能被改字、缺漏或多出）",
     )
 
 
 def _risk_level(ctx: Context) -> CheckResult:
     """全文每一處風險等級 = 審查標準；寫法依上手（risk.level_formats，沒列出的上手為【RRn】）。"""
-    rid, item = "standard.risk_level", Item.standard("風險等級")
+    check = Check("standard.risk_level", "risk_level", Item.standard("風險等級"), ctx.document)
     ti = ctx.ts.full_text
     formats = ctx.issuer_std.risk_level_formats
     patterns = [re.escape(squash(f)).replace(re.escape(RISK_LEVEL), r"(RR\d)") for f in formats]
     found = sorted(((m.group(1), m) for p in patterns for m in re.finditer(p, ti.text)), key=lambda x: x[1].start())
     shown_formats = "、".join(f.replace(RISK_LEVEL, "RRn") for f in formats)
     if not found:
-        return result(
-            rid,
-            "risk_level",
+        return check.result(
             S.REVIEW_REQUIRED,
             expected=ctx.std.risk_level,
             reason="document_missing",
             message=f"{ctx.document}找不到{shown_formats}風險等級",
-            item=item,
         )
     bad = [(lv, m) for lv, m in found if lv != ctx.std.risk_level]
     shown = bad or found[:1]
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for _, m in shown]
-    ok = not bad
-    return result(
-        rid,
-        "risk_level",
-        S.PASS if ok else S.MISMATCH,
-        expected=ctx.std.risk_level,
-        actual=sorted({lv for lv, _ in found}),
+    return check.compare(
+        ctx.std.risk_level,
+        sorted({lv for lv, _ in found}),
+        ok=not bad,
         evidence=evidence,
-        reason="" if ok else "value_mismatch",
         message=f"全文共 {len(found)} 處{shown_formats}",
-        item=item,
     )
 
 
 def _forbidden_wording(ctx: Context) -> CheckResult:
-    rid = "standard.forbidden_wording"
+    check = Check("standard.forbidden_wording", "forbidden_wording", Item.standard("禁用語「受託投資」"), ctx.document)
     ti = ctx.ts.full_text
     text = ti.text
     for phrase in ctx.std.allowed_phrases:
@@ -264,19 +194,12 @@ def _forbidden_wording(ctx: Context) -> CheckResult:
         text = text.replace(p, "□" * len(p))  # 遮蔽允許片語，保留字元位置
     hits = [m for w in ctx.std.forbidden for m in re.finditer(re.escape(squash(w)), text)]
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
-    ok = not hits
-    return result(
-        rid,
-        "forbidden_wording",
-        S.PASS if ok else S.MISMATCH,
-        expected=0,
-        actual=len(hits),
+    return check.compare(
+        0,
+        len(hits),
         evidence=evidence,
-        reason="" if ok else "forbidden_wording",
-        message=""
-        if ok
-        else f"允許片語以外出現「{'、'.join(ctx.std.forbidden)}」{len(hits)} 處（SOP：須改為「受託買賣」）",
-        item=Item.standard("禁用語「受託投資」"),
+        reason="forbidden_wording",
+        fail_message=f"允許片語以外出現「{'、'.join(ctx.std.forbidden)}」{len(hits)} 處（SOP：須改為「受託買賣」）",
     )
 
 
@@ -293,21 +216,15 @@ def _fixed_text(
     document: DocKind,
 ) -> CheckResult:
     """被核對文件的文字與審查標準固定值比對；預設忽略空白與換行，其餘逐字相等（`norm` 另給比對前的正規化）。"""
-    item = Item.standard(name)
-    if not pf.ok:
-        return doc_review(rid, field, pf, expected, item=item, document=document)
-    ok = norm(pf.value) == norm(expected)
-    return result(
-        rid,
-        field,
-        S.PASS if ok else S.MISMATCH,
-        expected=expected,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "value_mismatch",
+    check = Check(rid, field, Item.standard(name), document, expected=expected).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
+    return check.compare(
+        expected,
+        pf.value,
+        ok=norm(pf.value) == norm(expected),
         tolerance=tolerance or "忽略空白與換行後逐字相等",
-        message="" if ok else f"{what}與審查標準不同",
-        item=item,
+        fail_message=f"{what}與審查標準不同",
     )
 
 
@@ -337,14 +254,12 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
         fields.append(("issuer_name_ch1", "第一章發行機構中文名稱", "第一章發行機構名稱", True))
     if expected is None:
         return [
-            result(
-                rid,
-                name,
+            Check(rid, name, Item.standard(zh), ctx.document)
+            .needs(standard_field(ctx, name))
+            .result(
                 S.REVIEW_REQUIRED,
-                pf=standard_field(ctx, name),
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的發行機構全名（issuer_name.{issuer.lower()}）",
-                item=Item.standard(zh),
             )
             for name, _, zh, _ in fields
         ]
@@ -412,15 +327,15 @@ def _distributor_text(
         "address": (std.distributor_address_equivalents, "地址", "distributor.address_equivalents"),
     }.get(kind)
     if listed is not None and pf.ok and squash(pf.value) in {squash(v) for v in listed[0]}:
-        return result(
-            rid,
-            field,
-            S.PASS,
-            expected=exp,
-            actual=pf.value,
-            pf=pf,
-            tolerance=f"審查標準列出的{listed[1]}等價寫法（{listed[2]}）",
-            item=Item.standard(name),
+        return (
+            Check(rid, field, Item.standard(name), ctx.document)
+            .needs(pf)
+            .result(
+                S.PASS,
+                expected=exp,
+                actual=pf.value,
+                tolerance=f"審查標準列出的{listed[1]}等價寫法（{listed[2]}）",
+            )
         )
     return _fixed_text(rid, field, pf, exp, what, name, document=ctx.document)
 
@@ -450,20 +365,17 @@ def _issue_price(ctx: Context, *, others: bool = True) -> list[CheckResult]:
 
 
 def _issue_price_at(ctx: Context, rid: str, field: str, pf: ParsedField, name: str) -> CheckResult:
-    exp, item = ctx.std.issue_price_pct, Item.standard(name)
-    if not pf.ok:
-        return doc_review(rid, field, pf, exp, item=item, document=ctx.document)
-    ok = pf.value == exp
-    return result(
-        rid,
-        field,
-        S.PASS if ok else S.REVIEW_REQUIRED,
-        expected=exp,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "issue_price_non_standard",
-        message="" if ok else f"發行價格不是商品面額之 {exp}%，請人工確認",
-        item=item,
+    exp = ctx.std.issue_price_pct
+    return (
+        Check(rid, field, Item.standard(name), ctx.document, expected=exp)
+        .needs(pf)
+        .compare(
+            exp,
+            pf.value,
+            fail=S.REVIEW_REQUIRED,
+            reason="issue_price_non_standard",
+            fail_message=f"發行價格不是商品面額之 {exp}%，請人工確認",
+        )
     )
 
 
@@ -492,19 +404,16 @@ def _product_name(ctx: Context) -> list[CheckResult]:
     items = {"name_zh": Item.standard("中文商品名稱"), "name_en": Item.standard("英文商品名稱")}
     tpl = ctx.issuer_std.product_name
     if tpl is None:
-        names = {field: standard_field(ctx, field) for field in ("name_zh", "name_en")}
         return [
-            result(
-                rid,
-                field,
+            Check(rid, field, items[field], ctx.document)
+            .needs(pf)
+            .result(
                 S.REVIEW_REQUIRED,
                 actual=pf.value,
-                pf=pf,
                 reason="standard_missing",
                 message=f"審查標準沒有 {issuer} 的商品名稱樣板（product_name.{issuer.lower()}）",
-                item=items[field],
             )
-            for field, pf in names.items()
+            for field, pf in ((f, standard_field(ctx, f)) for f in ("name_zh", "name_en"))
         ]
     tenor, cz, mem = (
         standard_field(ctx, "tenor_months"),
@@ -514,30 +423,26 @@ def _product_name(ctx: Context) -> list[CheckResult]:
     out = []
     for field in ("name_zh", "name_en"):
         pf = standard_field(ctx, field)
-        item = items[field]
-        bad = next((p for p in (pf, tenor, cz, mem) if not p.ok), None)
-        if bad is not None:
-            out.append(doc_review(rid, field, bad, item=item, document=ctx.document))
+        check = Check(rid, field, items[field], ctx.document).needs(pf)
+        # 組名稱要四個欄位都讀得到；結果的證據只掛名稱那一欄，守門時才把其他三個暫掛上去
+        if (problem := check.needs(tenor, cz, mem).blocked) is not None:
+            out.append(problem)
             continue
         iso = ctx.std.currency_zh_to_iso.get(cz.value)
         if iso is None:
             out.append(
-                result(
-                    rid,
-                    field,
+                check.result(
                     S.REVIEW_REQUIRED,
                     actual=pf.value,
-                    pf=pf,
                     reason="currency_unknown",
                     message="幣別不在審查標準的對照表，無法組出預期名稱",
-                    item=item,
                 )
             )
             continue
         lang = "zh" if field == "name_zh" else "en"
         flags, bad = _name_flags(ctx, tpl.placeholders(lang))
         if bad is not None:
-            out.append(doc_review(rid, field, bad, item=item, document=ctx.document))
+            out.append(check.review(bad))
             continue
         flags["memory"] = bool(mem.value)
         values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": iso}
@@ -557,21 +462,15 @@ def _product_name(ctx: Context) -> list[CheckResult]:
             if tpl.ignore_whitespace_en:
                 norm = squash
                 tol = "忽略所有空白與換行"
-        ok = norm(expected) == norm(pf.value)
         out.append(
-            result(
-                rid,
-                field,
-                S.PASS if ok else S.MISMATCH,
-                expected=expected,
-                actual=pf.value,
-                pf=pf,
-                reason="" if ok else "value_mismatch",
+            check.compare(
+                expected,
+                pf.value,
+                ok=norm(expected) == norm(pf.value),
                 tolerance=tol,
                 message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式"
                 + ("、標的數" if {"underlying_zh", "underlying_en"} & tpl.placeholders(lang) else "")
                 + "組出",
-                item=item,
             )
         )
     return out
@@ -584,13 +483,10 @@ def _iis_warning(ctx: Context) -> CheckResult:
     """固定警語全文同說明書（依上手版本），次數用審查標準的投資人須知專屬值。"""
     expected = ctx.issuer_std.iis_fixed_warning_occurrences
     if expected is None:
-        return result(
-            "standard.fixed_warning",
-            "fixed_warning",
+        return Check("standard.fixed_warning", "fixed_warning", Item.standard("固定風險警語"), ctx.document).result(
             S.REVIEW_REQUIRED,
             reason="standard_missing",
             message=f"審查標準沒有 {ctx.issuer} 投資人須知的固定警語次數（iis.fixed_warning_occurrences.{ctx.issuer.lower()}）",
-            item=Item.standard("固定風險警語"),
         )
     return _fixed_warning(ctx, expected)
 
@@ -602,19 +498,8 @@ def _iis_risk_summary(ctx: Context) -> CheckResult:
         read_iis(ctx.iis, "risk_level_summary"),
         Item.standard("風險等級（商品簡介）"),
     )
-    if not pf.ok:
-        return doc_review(rid, "risk_level_summary", pf, ctx.std.risk_level, item=item, document=ctx.document)
-    ok = pf.value == ctx.std.risk_level
-    return result(
-        rid,
-        "risk_level_summary",
-        S.PASS if ok else S.MISMATCH,
-        expected=ctx.std.risk_level,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "value_mismatch",
-        item=item,
-    )
+    check = Check(rid, "risk_level_summary", item, ctx.document, expected=ctx.std.risk_level).needs(pf)
+    return check.compare(ctx.std.risk_level, pf.value)
 
 
 def _iis_occurrences(
@@ -623,19 +508,13 @@ def _iis_occurrences(
     """投資人須知出處清單型欄位（各處受託機構名稱／地址／電話、發行機構名稱）每一處 = 審查標準。"""
     container = read_iis(ctx.iis, name)
     if not container.ok:
-        return [doc_review(rid, name, container, item=Item.standard(what), document=ctx.document)]
+        return [Check(rid, name, Item.standard(what), ctx.document).review(container)]
     items = container.value
     if expected is None:
         return [
-            result(
-                rid,
-                occ.field,
-                S.REVIEW_REQUIRED,
-                pf=occ.value,
-                reason="standard_missing",
-                message=missing,
-                item=Item.standard(occ.name),
-            )
+            Check(rid, occ.field, Item.standard(occ.name), ctx.document)
+            .needs(occ.value)
+            .result(S.REVIEW_REQUIRED, reason="standard_missing", message=missing)
             for occ in items
         ]
     return [

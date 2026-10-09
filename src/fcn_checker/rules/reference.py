@@ -5,6 +5,7 @@
 空值寫法一律取自參考條件表格式設定（`empty_value`）。回填欄位（TS、IIS、ISIN、發行日、比價日）見 backfill.py。
 說明書明確判定不適用的標準欄位（例：MS 範本沒有年利率、Non-Call = 天期時沒有 KO 價）不核對，結果為不適用並附說明。
 項目名稱：讀到參考條件表某一欄時就是該欄的 Excel 欄名（`Item.column`），沒有這欄時用規則旁寫的中文名稱。
+結果一律經 `kit.Check` 建立：表上的值有問題由 `order_value` 轉人工覆核，說明書的值有問題由 `Check` 轉人工覆核。
 """
 
 from __future__ import annotations
@@ -21,16 +22,14 @@ from ..standard_fields import AutocallSchedule
 from .kit import (
     KI_LABEL,
     Q4,
+    Check,
     Context,
     cmp_pct,
     doc_ki,
-    doc_not_applicable,
-    doc_review,
     occurrences_of,
     order_review,
     order_value,
     price_item,
-    result,
     standard_field,
     to_date,
     to_decimal,
@@ -82,26 +81,15 @@ class FieldCheck:
         pf = standard_field(ctx, key)
         if pf.status == FieldStatus.NOT_APPLICABLE:
             ov = ctx.sheet_field(key)
-            return doc_not_applicable(rule_id, key, pf, [ov], item=Item.column(name, [ov]), document=ctx.document)
+            return Check(rule_id, key, Item.column(name, [ov]), ctx.document, ov=(ov,)).not_applicable(pf)
         v, ov, problem = order_value(ctx, key, rule_id, key, pf, self.convert, self.what, name=name)
         if problem:
             return problem
-        item = Item.column(name, [ov])
-        if not pf.ok:
-            return doc_review(rule_id, key, pf, v, [ov], item=item, document=ctx.document)
+        check = Check(rule_id, key, Item.column(name, [ov]), ctx.document, ov=(ov,), expected=v).needs(pf)
+        if (problem := check.blocked) is not None:
+            return problem
         ok, shown = self.compare(v, pf.value) if self.compare else (v == pf.value, v)
-        return result(
-            rule_id,
-            key,
-            S.PASS if ok else S.MISMATCH,
-            expected=shown,
-            actual=pf.value,
-            pf=pf,
-            ov=[ov],
-            reason="" if ok else "value_mismatch",
-            tolerance=self.tolerance,
-            item=item,
-        )
+        return check.compare(shown, pf.value, ok=ok, tolerance=self.tolerance)
 
 
 def _pct_check(rule_id: str, key: str, name: str) -> FieldCheck:
@@ -130,25 +118,18 @@ FIELD_CHECKS: dict[str, FieldCheck] = {
 # ---------------------------------------------------------------- 表上事先填好的欄位：要看別的欄位或格式設定的規則
 
 
+def _column(ctx: Context, rid: str, field: str, name: str, ov: OrderValue | None, expected: Any = None) -> Check:
+    """項目為參考條件表那一欄（沒有這欄時用 `name`）的結果身分。"""
+    return Check(rid, field, Item.column(name, [ov]), ctx.document, ov=(ov,), expected=expected)
+
+
 def product_code(ctx: Context) -> CheckResult:
     rid, pf, ov, name = "field.product_code", standard_field(ctx, "product_code"), ctx.order.product_code, "商品代號"
     if ov.value is None:
         return order_review(rid, "product_code", ov, pf, "order_missing", f"{ctx.order.source}沒有商品代號", name=name)
-    item = Item.column(name, [ov])
-    if not pf.ok:
-        return doc_review(rid, "product_code", pf, ov.value, [ov], item=item, document=ctx.document)
-    ok = ov.value == pf.value
-    return result(
-        rid,
-        "product_code",
-        S.PASS if ok else S.MISMATCH,
-        expected=ov.value,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message="" if ok else f"{ctx.document}與{ctx.order.source}的商品代號不同，可能拿錯檔案",
-        item=item,
+    check = _column(ctx, rid, "product_code", name, ov, ov.value).needs(pf)
+    return check.compare(
+        ov.value, pf.value, fail_message=f"{ctx.document}與{ctx.order.source}的商品代號不同，可能拿錯檔案"
     )
 
 
@@ -160,36 +141,19 @@ def currency(ctx: Context) -> CheckResult:
     )
     if problem:
         return problem
-    item = Item.column(name, [ov])
-    if not pf.ok:
-        return doc_review(rid, "currency", pf, v, [ov], item=item, document=ctx.document)
+    check = _column(ctx, rid, "currency", name, ov, v).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     iso = ctx.std.currency_zh_to_iso.get(pf.value)
     if iso is None:
-        return result(
-            rid,
-            "currency",
+        return check.result(
             S.REVIEW_REQUIRED,
             expected=v,
             actual=pf.value,
-            pf=pf,
-            ov=[ov],
             reason="currency_unknown",
             message=f"{ctx.document}幣別「{pf.value}」不在審查標準的幣別對照表",
-            item=item,
         )
-    ok = v == iso
-    return result(
-        rid,
-        "currency",
-        S.PASS if ok else S.MISMATCH,
-        expected=v,
-        actual=iso,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message=f"{ctx.document}：{pf.value} → {iso}",
-        item=item,
-    )
+    return check.compare(v, iso, message=f"{ctx.document}：{pf.value} → {iso}")
 
 
 def underlyings(ctx: Context) -> CheckResult:
@@ -202,35 +166,21 @@ def underlyings(ctx: Context) -> CheckResult:
             rid, "underlyings", ovs[0], pf, "order_missing", f"{ctx.order.source}沒有任何標的代號", name=UNDERLYINGS
         )
     if filled != list(range(len(filled))):
-        return result(
-            rid,
-            "underlyings",
-            S.REVIEW_REQUIRED,
-            expected=values,
-            pf=pf,
-            ov=ovs,
-            reason="order_invalid",
-            message=f"{ctx.order.source}的標的代號中間有空白欄",
-            item=Item.group(UNDERLYINGS, ovs),
+        return (
+            Check(rid, "underlyings", Item.group(UNDERLYINGS, ovs), ctx.document, ov=tuple(ovs))
+            .needs(pf)
+            .result(
+                S.REVIEW_REQUIRED,
+                expected=values,
+                reason="order_invalid",
+                message=f"{ctx.order.source}的標的代號中間有空白欄",
+            )
         )
     tickers = [str(values[i]) for i in filled]
     used = [ovs[i] for i in filled]
-    item = Item.group(UNDERLYINGS, used)
-    if not pf.ok:
-        return doc_review(rid, "underlyings", pf, tickers, used, item=item, document=ctx.document)
-    ok = tickers == pf.value
-    msg = "" if ok else "彭博代號須依順序逐字相等（含交易所尾碼），數量也須相同"
-    return result(
-        rid,
-        "underlyings",
-        S.PASS if ok else S.MISMATCH,
-        expected=tickers,
-        actual=pf.value,
-        pf=pf,
-        ov=used,
-        reason="" if ok else "value_mismatch",
-        message=msg,
-        item=item,
+    check = Check(rid, "underlyings", Item.group(UNDERLYINGS, used), ctx.document, ov=tuple(used), expected=tickers)
+    return check.needs(pf).compare(
+        tickers, pf.value, fail_message="彭博代號須依順序逐字相等（含交易所尾碼），數量也須相同"
     )
 
 
@@ -252,21 +202,8 @@ def ko_observation(ctx: Context) -> CheckResult:
     mapped, ov, problem = _mapped(ctx, rid, key, pf, ctx.fmt.ko_observation_values, "KO(Freq)", name)
     if problem:
         return problem
-    item = Item.column(name, [ov])
-    if not pf.ok:
-        return doc_review(rid, key, pf, mapped, [ov], item=item, document=ctx.document)
-    ok = mapped == pf.value
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=f"{ov.value}（{OBS_LABEL[mapped]}）",
-        actual=OBS_LABEL.get(pf.value, pf.value),
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        item=item,
-    )
+    check = _column(ctx, rid, key, name, ov, mapped).needs(pf)
+    return check.compare(f"{ov.value}（{OBS_LABEL[mapped]}）", OBS_LABEL.get(pf.value, pf.value), ok=mapped == pf.value)
 
 
 def ko_memory(ctx: Context) -> CheckResult:
@@ -274,25 +211,12 @@ def ko_memory(ctx: Context) -> CheckResult:
     mapped, ov, problem = _mapped(ctx, rid, key, pf, ctx.fmt.ko_memory_values, "KO(memo)", name)
     if problem:
         return problem
-    item = Item.column(name, [ov])
-    if not pf.ok:
-        return doc_review(rid, key, pf, mapped, [ov], item=item, document=ctx.document)
-    ok = mapped == pf.value
+    check = _column(ctx, rid, key, name, ov, mapped).needs(pf)
 
     def label(m: bool) -> str:
         return "記憶式" if m else "非記憶式"
 
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=f"{ov.value}（{label(mapped)}）",
-        actual=label(pf.value),
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        item=item,
-    )
+    return check.compare(f"{ov.value}（{label(mapped)}）", label(pf.value), ok=mapped == pf.value)
 
 
 def ki_type(ctx: Context) -> CheckResult:
@@ -300,35 +224,20 @@ def ki_type(ctx: Context) -> CheckResult:
     mapped, ov, problem = _mapped(ctx, rid, key, pf, ctx.fmt.ki_type_values, "KI(Freq)", name)
     if problem:
         return problem
-    item = Item.column(name, [ov])
+    check = _column(ctx, rid, key, name, ov, mapped)  # 無 KI 可用不適用狀態交出，不掛成依賴
     doc = doc_ki(pf)
     if doc is None:
-        return doc_review(rid, key, pf, mapped, [ov], item=item, document=ctx.document)
+        return check.review(pf)
     if doc == "M":
-        return result(
-            rid,
-            key,
+        return check.result(
             S.REVIEW_REQUIRED,
             expected=KI_LABEL[mapped],
             actual=KI_LABEL[doc],
-            pf=pf,
-            ov=[ov],
+            evidence=pf.evidence,
             reason="monthly_ki_unsupported",
             message=f"Monthly KI 尚無樣本，{ctx.document}判斷方式未確認，請人工覆核",
-            item=item,
         )
-    ok = mapped == doc
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=f"{ov.value}（{KI_LABEL[mapped]}）",
-        actual=KI_LABEL[doc],
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        item=item,
-    )
+    return check.compare(f"{ov.value}（{KI_LABEL[mapped]}）", KI_LABEL[doc], ok=mapped == doc, evidence=pf.evidence)
 
 
 def ki_pct(ctx: Context) -> CheckResult:
@@ -341,52 +250,33 @@ def ki_pct(ctx: Context) -> CheckResult:
     )
     if problem:
         return problem
-    item = Item.column(name, [ov])
+    check = _column(ctx, rid, key, name, ov, v)
     doc = doc_ki(kt)
     if doc is None:
-        return doc_review(rid, key, kt, v, [ov], item=item, document=ctx.document)
+        return check.review(kt)
     if doc == "none":
         ok = v == empty
-        return result(
-            rid,
-            key,
+        return check.result(
             S.NOT_APPLICABLE if ok else S.MISMATCH,
             expected=v,
             actual=None if ok else KI_LABEL["none"],
             evidence=kt.evidence,
-            ov=[ov],
             reason="" if ok else "value_mismatch",
             message=f"雙方皆無 KI（由{ctx.document}明確判定）" if ok else f"{ctx.document}無 KI；KI(%) 應為 {empty}",
-            item=item,
         )
-    if not pf.ok:
-        return doc_review(rid, key, pf, v, [ov], item=item, document=ctx.document)
+    check = check.needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
     if v == empty:
-        return result(
-            rid,
-            key,
+        return check.result(
             S.MISMATCH,
             expected=v,
             actual=pf.value,
-            pf=pf,
-            ov=[ov],
             reason="value_mismatch",
             message=f"{ctx.document}有 KI，表上 KI(%) 卻是空值",
-            item=item,
         )
     ok, shown = cmp_pct(v, pf.value)
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=shown,
-        actual=pf.value,
-        pf=pf,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        tolerance=PCT_TOLERANCE,
-        item=item,
-    )
+    return check.compare(shown, pf.value, ok=ok, tolerance=PCT_TOLERANCE)
 
 
 def is_vwap(ctx: Context) -> bool:
@@ -405,7 +295,7 @@ def initial_pricing(ctx: Context) -> CheckResult:
         message = "VWAP：期初價格以上手報的為準，表上各標的價格不比對，核對通過後以說明書覆寫"
     else:
         message = "表上各標的價格與說明書比對"
-    return result(rid, key, S.PASS, expected=ov.value, ov=[ov], message=message, item=Item.column(name, [ov]))
+    return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=message)
 
 
 def underlying_prices(ctx: Context) -> list[CheckResult]:
@@ -419,7 +309,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     rid = "field.underlying_prices"
     rows, uls = standard_field(ctx, "underlying_prices"), standard_field(ctx, "underlyings")
     if not rows.ok:
-        return [doc_review(rid, "price_table", rows, item=Item.sheet("價格表"), document=ctx.document)]
+        return [Check(rid, "price_table", Item.sheet("價格表"), ctx.document).review(rows)]
     empty, ko = ctx.fmt.empty_value, standard_field(ctx, "ko_pct")
     out = []
     for i, row in enumerate(rows.value, start=1):
@@ -428,38 +318,29 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
         for col, zh in PRICE_COLUMNS:
             field, name = f"{label} {zh}", price_item(i, col)
             ov = ctx.order.price(i, col)
+            check = _column(ctx, rid, field, name, ov)
             if col == "ko" and "ko" not in row.prices:  # 價格表沒有 KO 價：說明書判定不適用才不比對
-                item = Item.column(name, [ov])
                 if ko.status == FieldStatus.NOT_APPLICABLE:
-                    out.append(doc_not_applicable(rid, field, ko, [ov], item=item, document=ctx.document))
+                    out.append(check.not_applicable(ko))
                 else:
                     missing = ko if not ko.ok else ParsedField.missing("ko_pct", "價格表沒有 KO 價")
-                    out.append(
-                        doc_review(
-                            rid, field, missing, ov.value if ov else None, [ov], item=item, document=ctx.document
-                        )
-                    )
+                    out.append(check.review(missing, expected=ov.value if ov else None))
                 continue
             if ov is None or ov.value is None:
                 message = f"{ctx.order.source}沒有此欄位或值為空白"
                 out.append(order_review(rid, field, ov, None, "order_missing", message, name=name))
                 continue
-            item = Item.column(name, [ov])
             doc_v = row.prices.get(col)
             if doc_v is None:  # 無 KI：價格表沒有下限價欄
                 ok = ov.value == empty
                 out.append(
-                    result(
-                        rid,
-                        field,
+                    check.result(
                         S.NOT_APPLICABLE if ok else S.MISMATCH,
                         expected=ov.value,
                         actual=None if ok else "無下限價（無 KI）",
                         evidence=ev,
-                        ov=[ov],
                         reason="" if ok else "value_mismatch",
                         message=f"{ctx.document}無 KI，沒有下限價" + ("" if ok else f"；表上應為 {empty}"),
-                        item=item,
                     )
                 )
                 continue
@@ -469,21 +350,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
                 out.append(order_review(rid, field, ov, None, "order_invalid", message, name=name))
                 continue
             shown = v.quantize(Q4, ROUND_HALF_UP)
-            ok = shown == doc_v
-            out.append(
-                result(
-                    rid,
-                    field,
-                    S.PASS if ok else S.MISMATCH,
-                    expected=shown,
-                    actual=doc_v,
-                    evidence=ev,
-                    ov=[ov],
-                    reason="" if ok else "value_mismatch",
-                    tolerance="表上值四捨五入（half-up）到 4 位",
-                    item=item,
-                )
-            )
+            out.append(check.compare(shown, doc_v, evidence=ev, tolerance="表上值四捨五入（half-up）到 4 位"))
     return out
 
 
@@ -501,24 +368,8 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
             out.append(problem)
             continue
         item = Item.sheet(occ.name, [ov])  # 各出處分開寫（例：最低申購金額），不寫成「單位面額」
-        if not pf.ok:
-            out.append(doc_review(rid, occ.field, pf, v, [ov], item=item, document=ctx.document))
-            continue
-        ok = pf.value == v
-        out.append(
-            result(
-                rid,
-                occ.field,
-                S.PASS if ok else S.MISMATCH,
-                expected=v,
-                actual=pf.value,
-                pf=pf,
-                ov=[ov],
-                reason="" if ok else "value_mismatch",
-                message=f"{occ.where}須等於參考條件表「單位面額」",
-                item=item,
-            )
-        )
+        check = Check(rid, occ.field, item, ctx.document, ov=(ov,), expected=v).needs(pf)
+        out.append(check.compare(v, pf.value, message=f"{occ.where}須等於參考條件表「單位面額」"))
     return out
 
 
@@ -548,23 +399,11 @@ def first_callable_period(ctx: Context) -> CheckResult:
     v, ov, problem = order_value(ctx, key, rid, key, sched, to_int, "整數", name=name)
     if problem:
         return problem
-    item = Item.column(name, [ov])
-    if not sched.ok:
-        return doc_review(rid, key, sched, v, [ov], item=item, document=ctx.document)
+    check = _column(ctx, rid, key, name, ov, v).needs(sched)
+    if (problem := check.blocked) is not None:
+        return problem
     s: AutocallSchedule = sched.value
-    ok = v == s.first_callable
-    return result(
-        rid,
-        key,
-        S.PASS if ok else S.MISMATCH,
-        expected=v,
-        actual=s.first_callable,
-        pf=sched,
-        ov=[ov],
-        reason="" if ok else "value_mismatch",
-        message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）",
-        item=item,
-    )
+    return check.compare(v, s.first_callable, message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）")
 
 
 # ---------------------------------------------------------------- 表頭欄位
@@ -577,39 +416,26 @@ def column_checks(order: OrderRecord) -> list[CheckResult]:
     out = []
     for col in order.unknown_columns:
         out.append(
-            result(
-                "order.unknown_column",
-                f"{src}欄位",
+            Check("order.unknown_column", f"{src}欄位", item, ov=(col,)).result(
                 S.REVIEW_REQUIRED,
-                expected=None,
-                actual=None,
-                ov=[col],
                 reason="order_unknown_column",
                 message=f"{src}出現格式設定沒有的欄位「{col.value}」，格式可能已改版",
-                item=item,
             )
         )
     for col in order.duplicate_columns:
         out.append(
-            result(
-                "order.duplicate_column",
-                f"{src}欄位",
+            Check("order.duplicate_column", f"{src}欄位", item, ov=(col,)).result(
                 S.REVIEW_REQUIRED,
-                ov=[col],
                 reason="order_duplicate_column",
                 message=f"{src}欄位「{col.value}」重複出現，無法確定以哪一欄為準",
-                item=item,
             )
         )
     for name in order.missing_columns:
         out.append(
-            result(
-                "order.missing_column",
-                f"{src}欄位",
+            Check("order.missing_column", f"{src}欄位", item).result(
                 S.REVIEW_REQUIRED,
                 reason="order_missing_column",
                 message=f"{src}缺少格式設定中的欄位「{name}」",
-                item=item,
             )
         )
     return out
