@@ -18,8 +18,8 @@ NAME_FLAGS = ("memory", "maxi", "daily")
 NAME_PLACEHOLDERS = frozenset(
     {"tenor", "ccy_zh", "ccy"} | {f"{f}_{lang}" for f in (*NAME_FLAGS, "underlying") for lang in ("zh", "en")}
 )
-# 發行機構全名比對時可另外忽略的寫法差異（審查標準 issuer_name_ignore）：括號（全形／半形）、英文名結尾的句點
-ISSUER_NAME_IGNORES = frozenset({"brackets", "trailing_period"})
+# 發行機構全名比對時可另外忽略的寫法差異（審查標準 issuer_name_ignore）→ 結果上的說明
+ISSUER_NAME_IGNORES = {"brackets": "括號（全形／半形）", "trailing_period": "英文名結尾的句點"}
 RISK_LEVEL = "{level}"  # 風險等級寫法（審查標準 risk.level_formats）中填入 RRn 的位置
 
 
@@ -211,10 +211,16 @@ def _risk_extras(risk: dict[str, Any], warnings: dict[str, str]) -> dict[str, An
     """依上手的固定警語開頭句其他寫法與風險等級寫法；寫法有誤時載入就回報。"""
     openings = _per_issuer_lists(risk.get("fixed_warning_openings", {}), "risk.fixed_warning_openings")
     for issuer, values in openings.items():
-        if "。" not in warnings.get(issuer, risk["fixed_warning"]) or any(not v.endswith("。") for v in values):
+        warning = warnings.get(issuer, risk["fixed_warning"])
+        if "。" not in warning or any(not v.endswith("。") for v in values):
             raise IngestionError(
                 "config_invalid",
                 f"審查標準 risk.fixed_warning_openings.{issuer}：固定警語與每個開頭寫法都要有以「。」結尾的開頭句",
+            )
+        own = warning[: warning.index("。") + 1]
+        if len({own, *values}) != len(values) + 1:  # 重複的寫法會讓同一段警語算兩次
+            raise IngestionError(
+                "config_invalid", f"審查標準 risk.fixed_warning_openings.{issuer} 的開頭寫法重複或與原本的開頭相同"
             )
     formats = _per_issuer_lists(risk.get("level_formats", {}), "risk.level_formats")
     for issuer, values in formats.items():
@@ -228,7 +234,7 @@ def _risk_extras(risk: dict[str, Any], warnings: dict[str, str]) -> dict[str, An
 def _issuer_name_ignore(d: dict[str, Any]) -> dict[str, frozenset[str]]:
     lists = _per_issuer_lists(d, "issuer_name_ignore")
     for issuer, values in lists.items():
-        unknown = sorted(set(values) - ISSUER_NAME_IGNORES)
+        unknown = sorted(set(values) - set(ISSUER_NAME_IGNORES))
         if unknown:
             raise IngestionError(
                 "config_invalid",

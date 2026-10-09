@@ -162,7 +162,7 @@ def price_region(lines: list[Line], end_prefixes: tuple[str, ...]) -> tuple[str,
 
 def underlying_table(lines: list[Line]) -> ParsedField:
     """第 11 項標的表的彭博代碼欄（依序）：表頭「彭博代碼」正下方、到「相對權重」之前的代碼。"""
-    name = "underlyings"
+    name = "underlyings_art11"
     headers = [ln for ln in lines if squash(ln.text).startswith("彭博代碼")]
     end = next((ln for ln in lines if squash(ln.text).startswith("相對權重")), None)
     if len(headers) != 1 or end is None:

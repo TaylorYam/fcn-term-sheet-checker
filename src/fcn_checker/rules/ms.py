@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from decimal import ROUND_HALF_UP
 
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from . import kit, ms_scenario
-from .kit import Q4, IssuerContext
+from .kit import IssuerContext
 
 ISSUER = "MS"
 # 本上手規則可讀的參考條件表欄位（ADR 0005 的例外：說明書沒有年利率，月配息率與年化報酬率依表上年利率核對）
@@ -44,8 +43,8 @@ def _bad(deps: list[ParsedField]) -> ParsedField | None:
     return next((p for p in deps if not p.ok), None)
 
 
-def check(rid, field, name, deps, expected, actual, ok=None, *, bad=S.MISMATCH, reason="value_mismatch", message=""):
-    """說明書內部比對：依賴欄位有問題轉人工覆核；`name` 為項目名稱（預期值來自說明書其他位置）。"""
+def check(rid, field, name, deps, expected, actual, ok=None, *, fail=S.MISMATCH, reason="value_mismatch", message=""):
+    """說明書內部比對：依賴欄位有問題轉人工覆核；`name` 為項目名稱（預期值來自說明書其他位置），`fail` 為不成立時的狀態。"""
     item = Item.expected(name)
     problem = _bad(deps)
     if problem is not None:
@@ -54,7 +53,7 @@ def check(rid, field, name, deps, expected, actual, ok=None, *, bad=S.MISMATCH, 
     return kit.result(
         rid,
         field,
-        S.PASS if good else bad,
+        S.PASS if good else fail,
         expected=expected,
         actual=actual,
         evidence=[e for p in deps for e in p.evidence],
@@ -67,79 +66,32 @@ def check(rid, field, name, deps, expected, actual, ok=None, *, bad=S.MISMATCH, 
 # ---------------------------------------------------------------- 年利率與月配息率（核對規則 §3.3，讀參考條件表）
 
 
-def _annual(ctx: IssuerContext, rid: str, field: str, name: str):
-    return kit.order_value(ctx, "coupon_pa_pct", rid, field, None, kit.to_decimal, "數字", name=name)
+def _rate_mentions(ctx: IssuerContext, rid, field, what, mentions, compare, tolerance, message) -> list[CheckResult]:
+    """說明書每個出處一筆，與參考條件表年利率推得的值比對；讀不到或出現多個轉人工覆核。
 
-
-def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項、第 18 項假設與各情境算式的每個月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位。"""
-    rid, field = "derive.monthly_coupon", "monthly_coupon_pct"
-    annual, ov, problem = _annual(ctx, rid, field, "年利率 %")
+    `compare(年利率, 說明書值)` 回傳（是否一致, 顯示的預期值）；`message(年利率)` 為推算說明。
+    """
+    annual, ov, problem = ms_scenario.annual_rate(ctx, rid, field)
     if problem:
         return [problem]
-    expected = (annual / 12).quantize(Q4, ROUND_HALF_UP)
     out = []
-    for m in ctx.ts.coupon_mentions:
-        item = Item.derived(f"月配息率 %（{m.where}）", [ov])
+    for m in mentions:
+        item = Item.derived(f"{what} %（{m.where}）", [ov])
         if m.value is None:
             out.append(
                 kit.result(
                     rid,
                     field,
                     S.REVIEW_REQUIRED,
-                    expected=expected,
                     evidence=list(m.evidence),
                     ov=[ov],
                     reason="document_missing",
-                    message=f"說明書{m.where}找不到月配息率（或出現多個）",
+                    message=f"說明書{m.where}找不到{what}或出現多個",
                     item=item,
                 )
             )
             continue
-        ok = m.value == expected
-        out.append(
-            kit.result(
-                rid,
-                field,
-                S.PASS if ok else S.MISMATCH,
-                expected=expected,
-                actual=m.value,
-                evidence=list(m.evidence),
-                ov=[ov],
-                reason="" if ok else "value_mismatch",
-                tolerance="四捨五入（half-up）到 4 位",
-                message=f"推算：年利率 {annual}% ÷ 12",
-                item=item,
-            )
-        )
-    return out
-
-
-def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
-    """第 18 項獲利情境（標題不含「較差」）每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
-    rid, field = "derive.annualized_return", "annualized_return_pct"
-    annual, ov, problem = _annual(ctx, rid, field, "年利率 %")
-    if problem:
-        return [problem]
-    out = []
-    for m in ctx.ts.annualized_mentions:
-        item = Item.derived(f"年化報酬率 %（{m.where}）", [ov])
-        if m.value is None:
-            out.append(
-                kit.result(
-                    rid,
-                    field,
-                    S.REVIEW_REQUIRED,
-                    expected=annual,
-                    evidence=list(m.evidence),
-                    ov=[ov],
-                    reason="document_missing",
-                    message=f"說明書{m.where}找不到年化報酬率",
-                    item=item,
-                )
-            )
-            continue
-        ok, shown = kit.cmp_pct(annual, m.value)
+        ok, shown = compare(annual, m.value)
         out.append(
             kit.result(
                 rid,
@@ -150,12 +102,40 @@ def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
                 evidence=list(m.evidence),
                 ov=[ov],
                 reason="" if ok else "value_mismatch",
-                tolerance="依說明書顯示位數四捨五入後比對",
-                message="獲利情境的年化報酬率應等於年利率",
+                tolerance=tolerance,
+                message=message(annual),
                 item=item,
             )
         )
     return out
+
+
+def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
+    """第 15 項、第 18 項假設與各情境算式的每個月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位。"""
+    return _rate_mentions(
+        ctx,
+        "derive.monthly_coupon",
+        "monthly_coupon_pct",
+        "月配息率",
+        ctx.ts.coupon_mentions,
+        lambda annual, value: (ms_scenario.monthly_rate(annual) == value, ms_scenario.monthly_rate(annual)),
+        "四捨五入（half-up）到 4 位",
+        lambda annual: f"推算：年利率 {annual}% ÷ 12",
+    )
+
+
+def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
+    """第 18 項獲利情境（標題不含「較差」）每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
+    return _rate_mentions(
+        ctx,
+        "derive.annualized_return",
+        "annualized_return_pct",
+        "年化報酬率",
+        ctx.ts.annualized_mentions,
+        kit.cmp_pct,
+        "依說明書顯示位數四捨五入後比對",
+        lambda annual: "獲利情境的年化報酬率應等於年利率",
+    )
 
 
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.4、§3.5）
@@ -267,7 +247,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             [table, obs],
             table.value["type"] if table.ok else None,
             obs.value["type"] if obs.ok else None,
-            bad=S.REVIEW_REQUIRED,
+            fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             message="第 14 項(6) 日期表型與第 17 項觀察日寫法不一致",
         )
@@ -281,7 +261,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             [named, mem],
             named.value,
             mem.value,
-            bad=S.REVIEW_REQUIRED,
+            fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             message="商品名稱有無「（記憶式自動提前出場）」與第 17 項記憶事件寫法不一致",
         )
@@ -295,21 +275,21 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
             [pt, k, tenor],
             "有" if k.ok and tenor.ok and k.value < tenor.value else "無",
             "有" if pt.ok and "ko" in pt.value["columns"] else "無",
-            bad=S.REVIEW_REQUIRED,
+            fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             message="第一個可提前出場期早於到期時價格表要有自動提前出場價欄，Non-Call = 天期時不會有",
         )
     )
-    uls = f("underlyings")
+    uls, art11 = f("underlyings"), f("underlyings_art11")
     out.append(
         check(
             "doc.underlying_tickers",
-            "underlyings",
-            "價格表彭博代碼",
-            [uls, pt],
+            "underlyings_art11",
+            "第 11 項標的彭博代碼",
+            [uls, art11],
             uls.value,
-            [r["ticker"] for r in pt.value["rows"]] if pt.ok else None,
-            message="第 16 項價格表的彭博代碼須依序等於第 11 項標的表",
+            art11.value,
+            message="第 11 項標的表的彭博代碼須依序等於第 16 項價格表",
         )
     )
     return out
@@ -351,7 +331,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
             issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
         if rows[-1][observed] != final.value:
             issues.append(f"末期{label} {rows[-1][observed]} 不等於期末定價日 {final.value}")
-    out.append(_structure("schedule.coupon_dates", "dates", names["schedule.coupon_dates"], deps, issues))
+    out.append(_structure("schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], deps, issues))
 
     if kind == "D":  # 第 1 期起始日 = 發行日；前期終止日 < 起始日 ≤ 前期終止日 + 4 個日曆天
         issues = []
@@ -365,7 +345,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
         out.append(
             _structure(
                 "schedule.period_starts",
-                "starts",
+                "period_starts",
                 names["schedule.period_starts"],
                 [table, issue],
                 issues,
@@ -393,7 +373,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
                 if r["autocall"] != want:
                     shown = want or "無"
                     issues.append(f"第 {r['period']} 期自動提前出場日應為 {shown}，說明書為 {r['autocall'] or '無'}")
-    out.append(_structure("schedule.autocall_dates", kind, names["schedule.autocall_dates"], deps, issues))
+    out.append(_structure("schedule.autocall_dates", "autocall_dates", names["schedule.autocall_dates"], deps, issues))
     return out
 
 
@@ -429,26 +409,6 @@ def redemption_start(ctx: IssuerContext) -> CheckResult:
     )
 
 
-def issue_price_ch4(ctx: IssuerContext) -> CheckResult:
-    """第四章第 5 項申購價金的發行價格 = 審查標準（第一章第 7 項由共用規則核對）；不同時轉人工覆核。"""
-    rid, pf, exp = "standard.issue_price", ctx.ts.f("issue_price_ch4"), ctx.std.issue_price_pct
-    item = Item.standard("發行價格（第四章申購價金）")
-    if not pf.ok:
-        return kit.doc_review(rid, "issue_price_ch4", pf, exp, item=item)
-    ok = pf.value == exp
-    return kit.result(
-        rid,
-        "issue_price_ch4",
-        S.PASS if ok else S.REVIEW_REQUIRED,
-        expected=exp,
-        actual=pf.value,
-        pf=pf,
-        reason="" if ok else "issue_price_non_standard",
-        message="" if ok else f"發行價格不是商品面額之 {exp}%，請人工確認",
-        item=item,
-    )
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果、審查標準與宣告的參考條件表欄位（年利率）。"""
     return [
@@ -459,6 +419,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ko_terms(ctx),
         *schedule(ctx),
         redemption_start(ctx),
-        issue_price_ch4(ctx),
         *ms_scenario.run(ctx),
     ]

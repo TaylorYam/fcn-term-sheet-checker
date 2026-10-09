@@ -11,7 +11,7 @@ import datetime as dt
 import re
 from collections.abc import Callable
 
-from ..config import NAME_FLAGS, RISK_LEVEL
+from ..config import ISSUER_NAME_IGNORES, NAME_FLAGS, RISK_LEVEL
 from ..investor_sheet import IisSheet, read_iis
 from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
@@ -320,13 +320,6 @@ def _issuer_name_text(s: str, ignore: frozenset[str]) -> str:
     return s
 
 
-_IGNORE_TOLERANCE = {
-    frozenset({"brackets", "trailing_period"}): "忽略空白、換行、括號（全形／半形）與英文名結尾的句點後逐字相等",
-    frozenset({"brackets"}): "忽略空白、換行與括號（全形／半形）後逐字相等",
-    frozenset({"trailing_period"}): "忽略空白、換行與英文名結尾的句點後逐字相等",
-}
-
-
 def _issuer_name(ctx: Context) -> list[CheckResult]:
     """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。
 
@@ -364,7 +357,9 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
             what,
             zh,
             norm=lambda s: _issuer_name_text(s, std.issuer_name_ignore),
-            tolerance=_IGNORE_TOLERANCE.get(std.issuer_name_ignore),
+            tolerance="忽略空白、換行"
+            + "".join(f"、{ISSUER_NAME_IGNORES[k]}" for k in sorted(std.issuer_name_ignore))
+            + "後逐字相等",
         )
         for name, what, zh, zh_only in fields
     ]
@@ -421,16 +416,27 @@ def _fees(ctx: Context) -> list[CheckResult]:
     ]
 
 
-def _issue_price(ctx: Context) -> CheckResult:
-    """發行價格 = 商品面額之 N%（審查標準）；不同時轉人工覆核（可能為特殊條件），不判為錯誤。"""
-    rid, pf, exp = "standard.issue_price", standard_field(ctx, "issue_price_pct"), ctx.std.issue_price_pct
-    item = Item.standard("發行價格")
+def _issue_price(ctx: Context, *, others: bool = True) -> list[CheckResult]:
+    """發行價格 = 商品面額之 N%（審查標準）；不同時轉人工覆核（可能為特殊條件），不判為錯誤。
+
+    `others` 時另核對範本的其他出處（標準欄位 `issue_price_others`，例：MS 第四章申購價金；範本沒有時不產生結果）。
+    """
+    rid = "standard.issue_price"
+    out = [_issue_price_at(ctx, rid, "issue_price_pct", standard_field(ctx, "issue_price_pct"), "發行價格")]
+    if others:
+        items, problem = occurrences_of(ctx, rid, "issue_price_others", Item.standard("發行價格"))
+        out.extend([problem] if problem else (_issue_price_at(ctx, rid, o.field, o.value, o.name) for o in items))
+    return out
+
+
+def _issue_price_at(ctx: Context, rid: str, field: str, pf: ParsedField, name: str) -> CheckResult:
+    exp, item = ctx.std.issue_price_pct, Item.standard(name)
     if not pf.ok:
-        return doc_review(rid, "issue_price_pct", pf, exp, item=item)
+        return doc_review(rid, field, pf, exp, item=item)
     ok = pf.value == exp
     return result(
         rid,
-        "issue_price_pct",
+        field,
         S.PASS if ok else S.REVIEW_REQUIRED,
         expected=exp,
         actual=pf.value,
@@ -442,15 +448,14 @@ def _issue_price(ctx: Context) -> CheckResult:
 
 
 def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
-    """名稱樣板的 maxi（標的數 ≥ 2）、daily（KO 每日觀察）、underlying（標的寫法：2 檔以上為 True）旗標；
+    """名稱樣板的 maxi（標的數 ≥ 2；{underlying_*} 也依它選 1 檔或 2 檔以上的寫法）、daily（KO 每日觀察）旗標；
     只讀樣板用到的說明書欄位。不依上手分支。"""
     flags: dict[str, bool] = {}
-    for flag, field, test in (
-        ("maxi", "underlyings", lambda v: len(v) >= 2),
-        ("daily", "ko_observation", lambda v: v == "D"),
-        ("underlying", "underlyings", lambda v: len(v) >= 2),
+    for flag, field, test, names in (
+        ("maxi", "underlyings", lambda v: len(v) >= 2, {"maxi_zh", "maxi_en", "underlying_zh", "underlying_en"}),
+        ("daily", "ko_observation", lambda v: v == "D", {"daily_zh", "daily_en"}),
     ):
-        if used & {f"{flag}_zh", f"{flag}_en"}:
+        if used & names:
             pf = standard_field(ctx, field)
             if not pf.ok:
                 return flags, pf
@@ -519,9 +524,9 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         for flag in NAME_FLAGS:
             for code in ("zh", "en"):
                 values[f"{flag}_{code}"] = tpl.flag_text(flag, code) if flags.get(flag) else ""
-        if "underlying" in flags:
+        if "maxi" in flags:
             for code in ("zh", "en"):
-                values[f"underlying_{code}"] = tpl.underlying_text(flags["underlying"], code)
+                values[f"underlying_{code}"] = tpl.underlying_text(flags["maxi"], code)
         expected = getattr(tpl, lang).format(**values)
         if lang == "zh":
             norm = (lambda s: full_brackets(squash(s))) if tpl.normalize_brackets else squash
@@ -544,7 +549,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 reason="" if ok else "value_mismatch",
                 tolerance=tol,
                 message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式"
-                + ("、標的數" if "underlying" in flags else "")
+                + ("、標的數" if {"underlying_zh", "underlying_en"} & tpl.placeholders(lang) else "")
                 + "組出",
                 item=item,
             )
@@ -631,7 +636,7 @@ def iis_review_standard_rules(ctx: Context, sheet: IisSheet, *, trade: ParsedFie
     if provides("print_dates"):
         out.extend(_print_dates(ctx, trade))
     if provides("issue_price_pct"):
-        out.append(_issue_price(ctx))
+        out.extend(_issue_price(ctx, others=False))
     no_issuer = f"審查標準沒有 {ctx.issuer} 的發行機構全名（issuer_name.{ctx.issuer.lower()}）"
     occurrence_checks = (  # 欄位、rule_id、審查標準值、說明用名稱、審查標準沒有值時的說明、是否電話
         ("issuer_names", "standard.issuer_name", issuer_name, "發行機構名稱", no_issuer, False),
@@ -665,5 +670,5 @@ def review_standard_rules(ctx: Context) -> list[CheckResult]:
         *_issuer_name(ctx),
         *_distributor_info(ctx),
         *_fees(ctx),
-        _issue_price(ctx),
+        *_issue_price(ctx),
     ]

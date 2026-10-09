@@ -76,6 +76,7 @@ def test_monthly_kept_annual_and_scenario_annualized_follow_the_sheet(tmp_path):
     [
         ("Coupon p.a. (%)", 12.12, "derive.monthly_coupon"),
         ("Coupon p.a. (%)", 12.12, "derive.annualized_return"),
+        ("Coupon p.a. (%)", 12.12, "doc.scenario_calculations"),  # 每期配息依表上年利率推得的月配息率
         ("KO(%)", 101, "field.ko_pct"),
         ("K(%)", 71, "field.strike_pct"),
         ("KI(%)", 61, "field.ki_pct"),
@@ -159,6 +160,7 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
         (("scen.四", "=-3,600.00 美元", "=-3,500.00 美元"), "doc.scenario_calculations", S.MISMATCH),
         (("scen.四", "100.00 美元×4+", "100.00 美元×3+"), "doc.scenario_calculations", S.MISMATCH),
         (("scen.四", "較差情況", "保守情況"), "doc.scenario_parameters", S.REVIEW_REQUIRED),
+        (("scen.二", "%=100.00 美元", "%=100.0 美元"), "doc.scenario_calculations", S.REVIEW_REQUIRED),  # 算式讀不出來
         # 第四章
         (
             ("ch四", "受理贖回日期：2030 年1 月15 日", "受理贖回日期：2030 年1 月16 日"),

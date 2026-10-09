@@ -1,7 +1,7 @@
 """MS 第一章第 18 項情境分析（核對規則 §3.5 價格表重印、§3.7）：假設、重印價格表、較差情境執行價、各情境金額。
 
 MS 的總配息是「已進位的每期配息 × 期數」（文件算式 `A 美元×k`），與 HSBC 用未進位年利率推算不同。
-月配息率與獲利情境年化報酬率由 rules/ms.py 依參考條件表核對；這裡只用說明書。
+月配息率與獲利情境年化報酬率由 rules/ms.py 依參考條件表核對；每期配息的預期值也用表上年利率推得的月配息率（§3.7）。
 情境標題、期數寫法未知或算式找不到時轉人工覆核，不跳過後宣稱通過。
 """
 
@@ -9,20 +9,28 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..schema import CheckResult, Evidence, Item, ParsedField
+from ..schema import CheckResult, Evidence, Item
 from ..schema import CheckStatus as S
 from . import kit
 from .kit import IssuerContext
 
-Q2 = Decimal("0.01")  # 每期配息四捨五入到 2 位
+
+def annual_rate(ctx: IssuerContext, rid: str, field: str):
+    """參考條件表年利率（MS 宣告的 reference_fields）；（值, 儲存格, 有問題時的人工覆核結果）。"""
+    return kit.order_value(ctx, "coupon_pa_pct", rid, field, None, kit.to_decimal, "數字", name="年利率 %")
+
+
+def monthly_rate(annual: Decimal) -> Decimal:
+    """月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（核對規則 §3.3）。"""
+    return (annual / 12).quantize(kit.Q4, ROUND_HALF_UP)
 
 
 def _ev(lines) -> list[Evidence]:
     return [Evidence.of(ln) for ln in lines]
 
 
-def _result(rid, field, name, issues, evidence, *, review=False, expected=None, actual=None) -> CheckResult:
-    """`issues` 為不成立的說明；`review` 表示寫法未知（轉人工覆核）而不是算錯。"""
+def _result(rid, field, item, issues, evidence, *, review=False, expected=None, actual=None, ov=None) -> CheckResult:
+    """`item` 為項目（或預期值來自說明書時的項目名稱）；`issues` 為不成立的說明；`review` 表示寫法未知（轉人工覆核）而不是算錯。"""
     ok = not issues
     status = S.PASS if ok else (S.REVIEW_REQUIRED if review else S.MISMATCH)
     reason = "" if ok else ("scenario_unknown_wording" if review else "value_mismatch")
@@ -35,12 +43,9 @@ def _result(rid, field, name, issues, evidence, *, review=False, expected=None, 
         evidence=evidence,
         reason=reason,
         message="；".join(issues),
-        item=Item.expected(name),
+        ov=ov,
+        item=Item.expected(item) if isinstance(item, str) else item,
     )
-
-
-def _rows(table: ParsedField) -> list[dict]:
-    return [{"ticker": r["ticker"], "prices": r["prices"]} for r in table.value["rows"]]
 
 
 def reprint(ctx: IssuerContext) -> list[CheckResult]:
@@ -48,7 +53,7 @@ def reprint(ctx: IssuerContext) -> list[CheckResult]:
     pt, st = ctx.ts.f("price_table"), ctx.ts.scenarios.table
     out = []
     for rid, field, name, value in (
-        ("doc.scenario_table", "scenario_table", "第 18 項重印價格表", _rows),
+        ("doc.scenario_table", "scenario_table", "第 18 項重印價格表", lambda t: t.value["rows"]),
         ("doc.scenario_header_pct", "scenario_headers", "第 18 項重印價格表欄頭百分比", lambda t: t.value["headers"]),
     ):
         bad = next((p for p in (pt, st) if not p.ok), None)
@@ -86,7 +91,8 @@ def parameters(ctx: IssuerContext) -> list[CheckResult]:
         if not pf.ok:
             out.append(kit.doc_review(rid, field, pf, item=item))
         elif hit is None:
-            out.append(_result(rid, field, name, ["第 18 項假設找不到這個值或出現多次"], [], review=True))
+            issues = ["第 18 項假設找不到這個值或出現多次"]
+            out.append(_result(rid, field, name, issues, _ev(sec.lines[:1]), review=True))
         else:
             ok = hit.values[0] == pf.value
             out.append(
@@ -139,53 +145,57 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def calculations(ctx: IssuerContext) -> list[CheckResult]:
-    """各情境：每期配息 = 面額 × 月配息率（half-up 到 2 位）；獲利情境損益 = 每期配息 × 假設的配息次數；
-    較差情境總配息 = 每期配息 × 天期，損益 = 總配息 + 文件寫的到期贖回價值 − 面額。"""
+    """各情境：每期配息 = 面額 × 月配息率（年利率 ÷ 12，四捨五入到 4 位），half-up 到 2 位；
+    獲利情境損益 = 每期配息 × 假設的配息次數；較差情境總配息 = 每期配息 × 天期，
+    損益 = 總配息 + 文件寫的到期贖回價值 − 面額。每期配息算式要全部讀得出來，讀不出來的轉人工覆核。"""
     f, rid = ctx.ts.f, "doc.scenario_calculations"
-    denom, monthly, tenor = f("denomination"), f("monthly_coupon_pct"), f("tenor_months")
+    denom, tenor = f("denomination"), f("tenor_months")
+    annual, ov, problem = annual_rate(ctx, rid, "scenario_calculations")
+    if problem:
+        return [problem]
     out = []
     for s in ctx.ts.scenarios.scenarios:
         if s.kind == "default":
             continue
         tag = f"情境{s.number}"
-        coupon_name, pnl_name = f"{tag}每期配息", f"{tag}損益"
-        bad = next((p for p in (denom, monthly, tenor) if not p.ok), None)
+        coupon_item, pnl_item = Item.derived(f"{tag}每期配息", [ov]), Item.derived(f"{tag}損益", [ov])
+        bad = next((p for p in (denom, tenor) if not p.ok), None)
         if bad is not None:
             out.extend(
-                kit.doc_review(rid, field, bad, item=Item.expected(name))
-                for field, name in ((f"{tag}_coupon", coupon_name), (f"{tag}_pnl", pnl_name))
+                kit.doc_review(rid, field, bad, ov=[ov], item=item)
+                for field, item in ((f"{tag}_coupon", coupon_item), (f"{tag}_pnl", pnl_item))
             )
             continue
-        a = (Decimal(denom.value) * monthly.value / 100).quantize(Q2, ROUND_HALF_UP)
+        monthly = monthly_rate(annual)
+        a = (Decimal(denom.value) * monthly / 100).quantize(kit.Q2, ROUND_HALF_UP)
         issues = []
         for h in s.coupons:
             d, rate, amount = h.values
             if d != denom.value:
                 issues.append(f"算式中的面額 {d} 不等於第一章面額 {denom.value}")
-            if amount != (d * rate / 100).quantize(Q2, ROUND_HALF_UP) or amount != a:
-                issues.append(f"每期配息 {amount} 應為 {a}（面額 × 月配息率 {monthly.value}%，四捨五入到 2 位）")
+            if amount != (d * rate / 100).quantize(kit.Q2, ROUND_HALF_UP) or amount != a:
+                issues.append(f"每期配息 {amount} 應為 {a}（面額 × 月配息率 {monthly}%，四捨五入到 2 位）")
         evidence = [e for h in s.coupons for e in _ev(h.lines)]
-        if s.coupons:
-            out.append(_result(rid, f"{tag}_coupon", coupon_name, issues, evidence, expected=a))
+        if not s.coupons or len(s.coupons) != s.coupon_formulas:
+            unread = "找不到每期配息算式" if not s.coupons else "有每期配息算式的寫法無法辨識"
+            out.append(_result(rid, f"{tag}_coupon", coupon_item, [unread], _ev(s.lines[:1]), review=True, ov=[ov]))
         else:
-            out.append(
-                _result(rid, f"{tag}_coupon", coupon_name, ["找不到每期配息算式"], _ev(s.lines[:1]), review=True)
-            )
-        out.append(_pnl(rid, s, tag, pnl_name, a, denom.value, tenor.value))
+            out.append(_result(rid, f"{tag}_coupon", coupon_item, issues, evidence, expected=a, ov=[ov]))
+        out.append(_pnl(rid, s, tag, pnl_item, a, denom.value, tenor.value, ov))
     return out
 
 
-def _pnl(rid, s, tag, name, a, denom, tenor) -> CheckResult:
+def _pnl(rid, s, tag, item, a, denom, tenor, ov) -> CheckResult:
     field = f"{tag}_pnl"
     if len(s.pnl) != 1 or s.assumed is None:
         missing = "損益算式" if len(s.pnl) != 1 else "假設的配息次數（「假設在第 k 個…」）"
-        return _result(rid, field, name, [f"找不到{missing}或出現多次"], _ev(s.lines[:1]), review=True)
+        return _result(rid, field, item, [f"找不到{missing}或出現多次"], _ev(s.lines[:1]), review=True, ov=[ov])
     h, (assumed,) = s.pnl[0], s.assumed.values
     issues = []
     if s.kind == "profit":
         d1, amount, k, d2, pnl = h.values
         if assumed is None:
-            return _result(rid, field, name, ["獲利情境的假設期數寫法未知"], _ev(s.lines[:1]), review=True)
+            return _result(rid, field, item, ["獲利情境的假設期數寫法未知"], _ev(s.lines[:1]), review=True, ov=[ov])
         if d1 != denom or d2 != denom:
             issues.append(f"算式中的面額不等於第一章面額 {denom}")
         if amount != a:
@@ -198,7 +208,7 @@ def _pnl(rid, s, tag, name, a, denom, tenor) -> CheckResult:
     else:
         amount, k, value, d, pnl = h.values
         if assumed is not None:
-            return _result(rid, field, name, ["較差情境的假設期數寫法未知"], _ev(s.lines[:1]), review=True)
+            return _result(rid, field, item, ["較差情境的假設期數寫法未知"], _ev(s.lines[:1]), review=True, ov=[ov])
         if amount != a:
             issues.append(f"每期配息 {amount} 應為 {a}")
         if k != tenor:
@@ -208,7 +218,7 @@ def _pnl(rid, s, tag, name, a, denom, tenor) -> CheckResult:
         if pnl != amount * k + value - d:
             issues.append(f"損益 {pnl} 應為 {amount} × {k} + {value} − {d} = {amount * k + value - d}")
         expected = a * tenor + value - denom
-    return _result(rid, field, name, issues, _ev(h.lines), expected=expected, actual=h.values[-1])
+    return _result(rid, field, item, issues, _ev(h.lines), expected=expected, actual=h.values[-1], ov=[ov])
 
 
 def run(ctx: IssuerContext) -> list[CheckResult]:

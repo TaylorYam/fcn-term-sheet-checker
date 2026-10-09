@@ -14,7 +14,7 @@ from ..schema import Evidence, Item
 from . import kit
 
 N = r"([\d,]+(?:\.\d+)?)"
-Q2, Q4 = Decimal("0.01"), kit.Q4
+Q2, Q4 = kit.Q2, kit.Q4
 # Issuers may sum unrounded coupons, so only the printed profit total may differ from its printed items.
 PROFIT_TOLERANCE = Decimal("0.01")
 

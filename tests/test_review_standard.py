@@ -142,6 +142,7 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
         ('ms = ["風險程度等級為{level}"', 'ms = ["風險程度等級為RRn"', "risk.level_formats.ms"),
         ('ms = ["brackets", "trailing_period"]', 'ms = ["brackets", "commas"]', "issuer_name_ignore.ms"),
         ('ms = ["本商品風險程度為RR4。"]', 'ms = ["本商品風險程度為RR4"]', "risk.fixed_warning_openings.ms"),
+        ('ms = ["本商品風險程度為RR4。"]', 'ms = ["本商品風險程度等級為RR4。"]', "risk.fixed_warning_openings.ms"),
     ],
 )
 def test_invalid_ms_review_standard_is_a_batch_config_error(tmp_path, old, new, where):

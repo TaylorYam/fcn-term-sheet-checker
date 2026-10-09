@@ -299,7 +299,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     put("currency_art5", article(5), r"計價幣別：(.+?)（[A-Z]{3}）")
     put("denomination", article(6), r"每單位商品面額：\D*?" + NUM + r"元", _number)
     put("issue_price_pct", article(7), r"發行價格：商品面額之(\d+(?:\.\d+)?)%", Decimal)
-    fields["underlyings"] = ms_tables.underlying_table(article(11))
+    fields["underlyings_art11"] = ms_tables.underlying_table(article(11))
     put("tenor_months", sub(14, 1), r"商品年期：(\d+)個月期", int)
     put("trade_date", sub(14, 2), r"交易日：" + D, parse_date)
     put("issue_date", sub(14, 3), r"發行日：" + D, parse_date)
@@ -353,6 +353,10 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
             occ("redemption_increment", "累加贖回單位", "第四章第 8 項累加贖回單位", fields["redemption_increment"]),
         ],
     )
+    fields["issue_price_others"] = standard_fields.occurrences(
+        "issue_price_others",
+        [occ("issue_price_ch4", "發行價格（第四章申購價金）", "第四章第 5 項申購價金", fields["issue_price_ch4"])],
+    )
     fields["print_dates"] = standard_fields.occurrences(
         "print_dates", [occ("print_date", "刊印日期", "封面刊印日期", fields["print_date"])]
     )
@@ -402,12 +406,13 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 
 
 def _prices(fields: dict[str, ParsedField]) -> None:
-    """價格表 → 標準欄位：各標的價格列與執行／下限／KO 百分比（範本規格 §4.6）。"""
+    """價格表 → 標準欄位：標的（彭博代碼）、各標的價格列與執行／下限／KO 百分比（範本規格 §4.6；第 11 項標的表為交叉驗證）。"""
     pt, ki, k, tenor = (fields[x] for x in ("price_table", "ki_type", "first_callable_period", "tenor_months"))
     if not pt.ok:
-        for key in ("underlying_prices", "strike_pct", "ko_pct", "ki_pct"):
+        for key in ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct"):
             fields[key] = _derived(key, pt)
         return
+    fields["underlyings"] = _derived("underlyings", pt, [r["ticker"] for r in pt.value["rows"]])
     fields["underlying_prices"] = ParsedField(
         "underlying_prices",
         FieldStatus.PRESENT,

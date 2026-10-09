@@ -50,6 +50,7 @@ class Scenario:
     lines: list[Line]
     assumed: Hit | None = None  # 假設的配息次數：(k,)；「所有配息觀察期間」為 (None,)
     coupons: list[Hit] = field(default_factory=list)  # 每期配息算式：(面額, 月配息率, 每期配息)
+    coupon_formulas: int = 0  # 文件上「N 美元×X%」的處數（讀得出的每期配息算式應與它一樣多）
     rates: list[Hit] = field(default_factory=list)  # 算式中的每個 ×X%：(X,)
     # 損益算式；獲利：(面額, 每期配息, k, 面額, 損益)；較差：(每期配息, k, 贖回價值, 面額, 損益)
     pnl: list[Hit] = field(default_factory=list)
@@ -92,6 +93,7 @@ def _scenario(number: str, title: str, lines: list[Line], unit: str) -> Scenario
     s.coupons = _hits(
         ti, rf"{N}{unit}×(\d+(?:\.\d+)?)%(?:×100%)?={N}{unit}", lambda m: (_dec(m[1]), Decimal(m[2]), _dec(m[3]))
     )
+    s.coupon_formulas = len(list(ti.finditer(rf"\d{unit}×\d+(?:\.\d+)?%")))
     s.rates = _hits(ti, r"(?<!%)×(\d+(?:\.\d+)?)%", lambda m: (Decimal(m[1]),))
     if kind == "profit":
         s.pnl = _hits(

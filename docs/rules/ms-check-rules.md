@@ -201,12 +201,12 @@
 | §3.1 年利率 | `field.coupon_pa_pct` | `coupon_pa_pct` | 不適用（範本沒有年利率） |
 | §3.1 KO %、各標的 KO 價（Non-Call = 天期且沒有 KO 欄） | `field.ko_pct`、`field.underlying_prices` | `ko_pct`、`UL_n KO 價` | 不適用（說明書沒有自動提前出場價） |
 | §3.2 受理申購日 | `doc.subscription_start_date` | — | 不產生結果（範本沒有） |
-| §3.2 發行價格（第四章 §5） | `standard.issue_price` | `issue_price_ch4` | 人工覆核 |
+| §3.2 發行價格（第四章 §5） | `standard.issue_price`（共用規則；MS 以出處清單 `issue_price_others` 交出） | `issue_price_ch4` | 人工覆核 |
 | §3.2 發行機構全名（第一章 §3 只比中文） | `standard.issuer_name` | `issuer_name_ch1` | 不一致 |
 | §3.3 月配息率（每個出處一筆） | `derive.monthly_coupon` | `monthly_coupon_pct` | 不一致；找不到 → 人工覆核 |
 | §3.3 獲利情境年化報酬率 | `derive.annualized_return` | `annualized_return_pct` | 不一致；找不到 → 人工覆核 |
 | §3.4 有 KO 欄 ⇔ Non-Call < 天期 | `doc.ko_column` | `ko_column` | 人工覆核 |
-| §3.4 價格表彭博代碼 = 第 11 項 | `doc.underlying_tickers` | `underlyings` | 不一致 |
+| §3.4 價格表彭博代碼 = 第 11 項（標準欄位 `underlyings` 取 §16 價格表） | `doc.underlying_tickers` | `underlyings_art11` | 不一致 |
 | §3.5 受託機構商品代號 | `doc.trustee_product_code` | `trustee_product_code` | 不一致（空白也是） |
 | §3.5 名稱 | `doc.name_consistency` | `name_art1` | 不一致 |
 | §3.5 幣別 | `doc.currency_consistency` | `currency_art5` | 不一致 |
@@ -214,14 +214,14 @@
 | §3.5 期數 | `doc.coupon_periods` | `date_table`、`name_months`、`coupon_range` | 不一致 |
 | §3.5 KO 觀察方式 | `doc.ko_observation` | `ko_observation` | 人工覆核 |
 | §3.5 記憶式 | `doc.ko_memory` | `ko_memory` | 人工覆核 |
-| §3.5 日期表：配息日遞增、終止日／定價日 < 配息日、末期 = 期末定價日／到期日 | `schedule.coupon_dates` | `dates` | 不一致 |
-| §3.5 D 型起始日 | `schedule.period_starts` | `starts` | 不一致 |
-| §3.5 D 型觀察起訖日、P 型自動提前出場日 | `schedule.autocall_dates` | `D`／`P` | 不一致 |
+| §3.5 日期表：配息日遞增、終止日／定價日 < 配息日、末期 = 期末定價日／到期日 | `schedule.coupon_dates` | `coupon_dates` | 不一致 |
+| §3.5 D 型起始日 | `schedule.period_starts` | `period_starts` | 不一致 |
+| §3.5 D 型觀察起訖日、P 型自動提前出場日 | `schedule.autocall_dates` | `autocall_dates` | 不一致 |
 | §3.5 價格表重印 | `doc.scenario_table`、`doc.scenario_header_pct` | `scenario_table`、`scenario_headers` | 不一致 |
 | §3.5 較差情境執行價 | `doc.scenario_strike` | `scenario_strike` | 不一致 |
 | §3.5 開始受理贖回日期 | `doc.redemption_start_date` | `redemption_start` | 不一致 |
 | §3.7 假設、情境標題 | `doc.scenario_parameters` | `scenario_denomination`、`scenario_tenor`、`scenario_titles` | 不一致；標題未知 → 人工覆核 |
-| §3.7 每期配息、損益 | `doc.scenario_calculations` | `情境X_coupon`、`情境X_pnl` | 不一致；算式找不到 → 人工覆核 |
+| §3.7 每期配息、損益（每期配息的預期值 = 面額 × 表上年利率 ÷ 12） | `doc.scenario_calculations` | `情境X_coupon`、`情境X_pnl` | 不一致；算式找不到或有算式讀不出來 → 人工覆核 |
 
 審查標準的 MS 設定（[審查標準](review-standard.md) §2.6）：`risk.fixed_warning_by_issuer.ms`、`risk.fixed_warning_openings.ms`（第一章 §2 開頭）、`risk.level_formats.ms`（沒有【】的風險等級）、`issuer_name.ms`、`issuer_name_ignore.ms`（括號、英文名結尾句點）、`product_name.ms`（`{underlying_zh}`／`{underlying_en}`）、`distributor.phone_equivalents`（`+886 2 5556 1313`）。
 
