@@ -17,11 +17,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from . import backfill
 from .check_config import CheckConfig
 from .config import ReviewStandard
+from .identification import Identification
 from .investor_sheet import IisSheet
 from .issuers import Issuer
 from .orders.reference import OrderRecord
@@ -34,11 +36,18 @@ from .standard_fields import TermSheet
 
 @dataclass(frozen=True)
 class Paired:
-    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、對到的參考條件表列。"""
+    """配對成功的說明書：上手、讀出結果（同一份只讀一次）、對到的參考條件表列；由辨識結果建立。"""
 
     issuer: Issuer
     ts: TermSheet
     row: OrderRecord
+
+    @classmethod
+    def of(cls, ident: Identification) -> Paired | None:
+        """有上手、讀出結果、對到的列且規則會跑才算配對成功；否則 None（不執行任何條件規則）。"""
+        if ident.adapter is None or ident.term_sheet is None or ident.row is None or not ident.checked:
+            return None
+        return cls(ident.adapter, ident.term_sheet, ident.row)
 
 
 def _issuer_context(paired: Paired, std: ReviewStandard) -> IssuerContext:
@@ -48,7 +57,7 @@ def _issuer_context(paired: Paired, std: ReviewStandard) -> IssuerContext:
     return IssuerContext(paired.ts, std, paired.issuer.code, declared, row.source)
 
 
-def check_document(pairing: list[CheckResult], paired: Paired | None, config: CheckConfig) -> CheckReport:
+def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config: CheckConfig) -> CheckReport:
     """`pairing` 為辨識與配對的結果；配對失敗（`paired` 為 None）時不執行任何條件規則。
 
     回傳的報告不含範本 ID 與記錄資料（metadata），由批量入口補上。
@@ -96,8 +105,19 @@ class PairedIis:
     pages: int
     file_code: str  # 檔名前 12 碼
 
+    @classmethod
+    def of(cls, ident: Identification) -> PairedIis | None:
+        """配對成功的投資人須知；同商品說明書配對成功（規則有跑）才拿它的讀出結果來比對。"""
+        if ident.adapter is None or ident.investor_sheet is None or ident.row is None or ident.pages is None:
+            return None
+        if not ident.checked:
+            return None
+        partner = ident.partner
+        term_sheet = partner.term_sheet if partner is not None and partner.checked else None
+        return cls(ident.adapter, ident.investor_sheet, ident.row, term_sheet, ident.pages, ident.product_code or "")
 
-def check_investor_sheet(pairing: list[CheckResult], paired: PairedIis | None, config: CheckConfig) -> CheckReport:
+
+def check_investor_sheet(pairing: Sequence[CheckResult], paired: PairedIis | None, config: CheckConfig) -> CheckReport:
     """投資人須知的單份核對；配對失敗（`paired` 為 None）時不執行任何條件規則。不回填。"""
     results = list(pairing)
     report = CheckReport(CheckStatus.ERROR, None, results, [])

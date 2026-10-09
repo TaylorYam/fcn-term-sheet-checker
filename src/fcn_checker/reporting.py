@@ -23,6 +23,7 @@ from .version import program_commit
 
 if TYPE_CHECKING:
     from .backfill import CellDecision
+    from .identification import Identification
 
 RECORD_DIR = Path("runtime") / "核對紀錄"
 RECORD_VERSION = 2
@@ -30,17 +31,12 @@ RECORD_VERSION = 2
 
 @dataclass(frozen=True)
 class RecordItem:
-    """核對紀錄的一份 PDF（說明書或投資人須知，由儲存流程交來）。"""
+    """核對紀錄的一份 PDF（說明書或投資人須知，由儲存流程交來）：辨識結果、核對報告與這次儲存的決定。"""
 
-    pdf: str  # PDF 檔名
-    issuer: str | None
-    product_code: str | None
-    reference_row: int | None
+    identification: Identification  # 檔名、文件種類、上手、商品代號、對到的列、同商品另一份都從這裡讀
+    report: CheckReport
     filled: bool
     manual_release: bool
-    report: CheckReport
-    document: str | None = None  # 說明書／投資人須知；None → 檔名無法辨識
-    partner: str | None = None  # 同商品另一份的 PDF 檔名
     not_filled_reason: str = ""  # 說明書本身通過或放行、卻沒有回填的原因（同商品投資人須知沒過或這批沒有）
 
 
@@ -130,19 +126,21 @@ def _record(batch: BatchRecord, root: Path, now: dt.datetime) -> dict[str, Any]:
         "result_file": str(batch.result_file) if batch.result_file else None,
         "metadata": _plain({**batch.metadata, "program_commit": program_commit(root)}),
         "errors": [_result_dict(e) for e in batch.errors],
-        "items": [
-            {
-                "pdf": i.pdf,
-                "document": i.document,
-                "partner": i.partner,
-                "not_filled_reason": i.not_filled_reason,
-                "issuer": i.issuer,
-                "product_code": i.product_code,
-                "reference_row": i.reference_row,
-                "filled": i.filled,
-                "manual_release": i.manual_release,
-                **to_json(i.report),
-            }
-            for i in batch.items
-        ],
+        "items": [_item_dict(i) for i in batch.items],
+    }
+
+
+def _item_dict(i: RecordItem) -> dict[str, Any]:
+    ident = i.identification
+    return {
+        "pdf": ident.pdf.name,
+        "document": ident.kind.value if ident.kind else None,  # None → 檔名無法辨識
+        "partner": ident.partner.pdf.name if ident.partner else None,
+        "not_filled_reason": i.not_filled_reason,
+        "issuer": ident.issuer,
+        "product_code": ident.product_code,
+        "reference_row": ident.reference_row,
+        "filled": i.filled,
+        "manual_release": i.manual_release,
+        **to_json(i.report),
     }
