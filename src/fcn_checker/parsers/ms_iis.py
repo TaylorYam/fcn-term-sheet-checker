@@ -12,8 +12,8 @@ import re
 from collections.abc import Sequence
 
 from ..schema import DetectionResult, Evidence, Line, ParsedField
-from ..text import full_brackets, squash
-from . import iis
+from ..text import squash
+from . import iis, ms_wording
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "ms-zh-iis"
@@ -33,24 +33,6 @@ PRINT_DATE = "中文投資人須知刊印日期"
 NAME_EN = "MorganStanley&Co.InternationalPlcissuanceof"  # 新版（舊版為 plc）
 REDEMPTION_SECTION = ("贖回價金之計算：", "發行不成立之處理")  # KO／KI 寫法所在的段落（開頭、結尾錨點）
 COUPON_SECTION = ("收益分配事項：", "贖回價金之計算：")  # 月配息率所在的段落（開頭、結尾錨點）
-# KO 觀察寫法（括號統一全形、去空白後）：表型、第一個可提前出場期 k，D 型另有觀察起訖日（範本規格 §4.1）
-KO_WORDINGS = (
-    (
-        rf"(?:記憶事件)?觀察日：每日觀察，為自第(\d+)個配息週期終止日（{iis.DATE}）（包含）至期末定價日（{iis.DATE}）（包含）",
-        "D",
-    ),
-    (r"記憶事件觀察日：每一個定價日自第(\d+)(?:期|個)定價日（含）開始觀察", "P"),
-    (r"自動提前出場事件：自第(\d+)(?:期|個)定價日（含）開始，若於任一定價日", "P"),
-)
-# 非記憶式的提前出場條件寫法（多標的兩種、單一標的一種）
-NON_MEMORY_KO = ("所有連結標的皆等於或高於", "所有連結標的之收盤價皆等於或高於", "該連結標的之收盤價大於或等於")
-KI_WORDINGS = {  # 「觸及下限事件」：若在…， → KI 型態（同 MS 說明書第 16 項，範本規格 §4.3）
-    "期末定價日": "AM",
-    "交易日（含）至期末定價日（含）間的任一共同預定交易日": "D",
-    "交易日（含）至期末定價日（含）間的任一預定交易日": "D",
-    "任一配息週期終止日（含期末定價日）": "P",
-}
-
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -137,20 +119,18 @@ def _underlying_names(ti: TextIndex) -> ParsedField:
 
 
 def _ko_terms(sec: TextIndex | None) -> dict[str, ParsedField]:
-    """KO 觀察方式、第一個可提前出場期、記憶式，D 型另有觀察起訖日（範本規格 §4.1、§4.2）。"""
+    """KO 觀察方式、第一個可提前出場期、記憶式，D 型另有觀察起訖日（範本規格 §4.1、§4.2；句型見 ms_wording.py）。
+
+    記憶式只看有沒有記憶事件觀察日（S04-IIS 沒有記憶事件定義句）。
+    """
     names = ("ko_observation", "first_callable_period", "ko_memory")
     if sec is None:
         return {n: ParsedField.missing(n, "找不到「贖回價金之計算」段落") for n in names}
-    text, lns = full_brackets(sec.text), sec.lines
+    lns = sec.lines
     out: dict[str, ParsedField] = {}
-    memory = "記憶事件觀察日：" in text
-    plain = "記憶事件" not in text and any(p in text for p in NON_MEMORY_KO)
-    out["ko_memory"] = (
-        ParsedField.present("ko_memory", memory, lns)
-        if memory != plain
-        else ParsedField.invalid("ko_memory", lns, "記憶事件寫法缺漏或不在範本規格內")
-    )
-    found = [(m, kind) for pattern, kind in KO_WORDINGS for m in re.finditer(pattern, text)]
+    note = "記憶事件寫法缺漏或不在範本規格內"
+    out["ko_memory"] = ms_wording.ko_memory(sec, definition_required=False, note=note)
+    found = ms_wording.ko_observations(sec)
     if len(found) != 1:
         note = "自動提前出場的觀察日寫法缺漏、重複或不在範本規格內"
         out.update({n: ParsedField.invalid(n, lns, note) for n in ("ko_observation", "first_callable_period")})
@@ -172,21 +152,9 @@ def _ko_terms(sec: TextIndex | None) -> dict[str, ParsedField]:
 
 def _ki_type(sec: TextIndex | None) -> ParsedField:
     """「觸及下限事件」的觀察寫法；沒有這句且到期贖回只有 ≥／< 執行價兩種寫法時為無 KI（範本規格 §4.3）。"""
-    name = "ki_type"
     if sec is None:
-        return ParsedField.missing(name, "找不到「贖回價金之計算」段落")
-    text = full_brackets(sec.text)
-    hits = []
-    for m in re.finditer(r"「觸及下限事件」：若在([^，]*?)，", text):
-        lns = sec.lines_for(m.start(), m.end())
-        if m[1] not in KI_WORDINGS:
-            return ParsedField.invalid(name, lns, "觸及下限事件的觀察寫法不在範本規格內")
-        hits.append((KI_WORDINGS[m[1]], lns))
-    if hits:
-        return ParsedField.from_hits(name, hits)
-    if "觸及下限" not in text and "收盤價高於或等於其執行價" in text and "收盤價低於其執行價" in text:
-        return ParsedField.present(name, "none", sec.lines)
-    return ParsedField.invalid(name, sec.lines, "找不到觸及下限事件，也不是無 KI 的到期贖回寫法")
+        return ParsedField.missing("ki_type", "找不到「贖回價金之計算」段落")
+    return ms_wording.ki_type(sec, missing_note="找不到觸及下限事件，也不是無 KI 的到期贖回寫法")
 
 
 def _monthly_coupons(sec: TextIndex | None, ko: ParsedField) -> ParsedField:

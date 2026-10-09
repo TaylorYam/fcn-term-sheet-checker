@@ -5,13 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import hsbc_tables as tables
-from .layout import Document, LayoutSpec, TextIndex, parse_date
+from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
 PARSER_VERSION = "1"
@@ -25,23 +25,9 @@ def document(lines: Sequence[Line]) -> Document:
     return Document(clean, LAYOUT)
 
 
-def capture(name: str, lines: list[Line], pattern: str, convert: Callable = lambda x: x) -> ParsedField:
-    ti = TextIndex(lines)
-    hits = []
-    for m in ti.finditer(pattern):
-        lns = ti.lines_for(m.start(), m.end())
-        try:
-            value = convert(m[1])
-        except (ValueError, TypeError, InvalidOperation):
-            return ParsedField.invalid(name, lns)
-        if value is None:
-            return ParsedField.invalid(name, lns)
-        hits.append((value, lns))
-    return ParsedField.from_hits(name, hits, missing_note="找不到欄位標籤或已知寫法")
-
-
 def product_code(lines: Sequence[Line]) -> ParsedField:
-    return capture("product_code", document(lines).before_chapter1(), r"商品代號/商品中文名稱[:：](\d{12})/")
+    cover = TextIndex(document(lines).before_chapter1())
+    return capture("product_code", cover, r"商品代號/商品中文名稱[:：](\d{12})/", whole_match=True)
 
 
 def detect(lines: Sequence[Line]) -> DetectionResult:
@@ -114,7 +100,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     fields = {}
 
     def put(name, lns, pattern, convert=lambda x: x):
-        fields[name] = capture(name, lns, pattern, convert)
+        fields[name] = capture(name, TextIndex(lns), pattern, convert, whole_match=True)
 
     def article(n):
         return doc.span_lines(art.get(n))

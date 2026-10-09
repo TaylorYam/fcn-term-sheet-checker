@@ -1,16 +1,19 @@
-"""投資人須知（IIS）各上手共用的擷取工具；讀出結果的型別 `IisSheet` 在 investor_sheet.py（ADR 0007）。"""
+"""投資人須知（IIS）各上手共用的擷取工具；讀出結果的型別 `IisSheet` 在 investor_sheet.py（ADR 0007）。
+
+欄位擷取 `capture` 與說明書 parser 共用，定義在 layout.py（這裡只是轉出）。
+"""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
-from decimal import Decimal, InvalidOperation
+from collections.abc import Sequence
+from decimal import Decimal
 
 from .. import standard_fields
 from ..investor_sheet import IisSheet
 from ..schema import Line, ParsedField
 from ..standard_fields import Occurrence
-from .layout import TextIndex, join_text
+from .layout import TextIndex, capture, join_text
 
 __all__ = [
     "DATE",
@@ -50,21 +53,6 @@ def in_order(text: str, anchors: Sequence[str]) -> bool:
         if pos < 0:
             return False
     return True
-
-
-def capture(name: str, ti: TextIndex, pattern: str, convert: Callable = lambda x: x) -> ParsedField:
-    """全文（已去空白）中 `pattern` 第 1 組的每一處；不同值 → 歧義，沒有 → 缺漏。"""
-    hits = []
-    for m in ti.finditer(pattern):
-        lns = ti.lines_for(m.start(1), m.end(1))
-        try:
-            value = convert(m[1])
-        except (ValueError, TypeError, InvalidOperation):
-            return ParsedField.invalid(name, lns, f"「{m[1]}」無法辨識")
-        if value is None:
-            return ParsedField.invalid(name, lns, f"「{m[1]}」無法辨識")
-        hits.append((value, lns))
-    return ParsedField.from_hits(name, hits, missing_note="找不到欄位標籤或已知寫法")
 
 
 def raw(ti: TextIndex, pattern: str) -> tuple[str, list[Line]] | None:

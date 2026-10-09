@@ -36,6 +36,13 @@ PRODUCT_TYPES = {  # 封面第 6 項商品種類：依標的數（範本規格 �
     False: "股票或指數股票型基金連結結構型債券",
     True: "股票與/或指數股票型基金連結結構型債券",
 }
+
+
+def product_type_for(underlying_count: int) -> str:
+    """商品種類依標的數：1 檔與 2 檔以上寫法不同（說明書封面第 6 項與投資人須知封面同一套，範本規格 §4.5）。"""
+    return PRODUCT_TYPES[underlying_count >= 2]
+
+
 START_GAP = dt.timedelta(days=4)  # D 型配息週期起始日最晚在前期終止日後 4 個日曆天（遇美國假日順延，工具沒有假日曆）
 
 
@@ -145,7 +152,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     uls, kind = f("underlyings"), f("product_type")
     out.append(
         _doc(ctx, "doc.product_type", "product_type", "商品種類", uls, kind).compare(
-            PRODUCT_TYPES[len(uls.value) >= 2] if uls.ok else None,
+            product_type_for(len(uls.value)) if uls.ok else None,
             squash(kind.value) if kind.ok else None,
             fail_message="封面第 6 項商品種類依標的數：1 檔與 2 檔以上寫法不同",
         )
