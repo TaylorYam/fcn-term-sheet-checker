@@ -22,7 +22,7 @@ from fcn_checker.rules import kit
 from fcn_checker.schema import CheckResult, CheckStatus, DocKind, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
 from harness import CONFIG, check_all
-from reference_synth import COLUMN_OF, DEFAULT_ULS, REFERENCE_HEADERS, build_reference_sheet, reference_row
+from reference_synth import DEFAULT_ULS, REFERENCE_HEADERS, as_headers, build_reference_sheet, reference_row
 from synth import Spec, build_pdf, check, check_rows
 
 # 程式代碼：小寫英文以 . 或 _ 串接（例：doc.scenario_calculations、s1.profit.17、value_mismatch）
@@ -47,7 +47,7 @@ def hsbc_check(tmp_path, spec=None, overrides=None):
     """HSBC 合成說明書 × 與之一致的參考條件表（正式版面）；overrides 以標準欄位名覆寫。"""
     s = spec or hsbc_synth.Spec()
     pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
-    row = reference_row(s, **{COLUMN_OF[k]: v for k, v in (overrides or {}).items()})
+    row = reference_row(s, **as_headers(overrides or {}))
     return check_all(build_reference_sheet(tmp_path / "order.xlsx", [row]), [pdf]).items[0].report
 
 

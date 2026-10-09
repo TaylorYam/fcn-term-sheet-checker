@@ -17,9 +17,9 @@ from fcn_checker.issuers import HSBC, REGISTRY
 from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
-from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, load_record, with_iis
+from harness import CONFIG, REVIEW_STANDARD, ROOT, STANDARD, check_all, cli_root, load_record, with_iis
 from hsbc_synth import Spec, build_pdf
-from reference_synth import COLUMN_OF, REFERENCE_HEADERS, build_reference_sheet, reference_row
+from reference_synth import REFERENCE_HEADERS, as_headers, build_reference_sheet, reference_row
 
 
 def run_check(pdf, excel, registry=REGISTRY):
@@ -39,8 +39,7 @@ def only(report, rule_id, field=None):
 
 def sheet_for(tmp_path, s, overrides=None):
     """與 `s` 一致的參考條件表（正式版面，一列）；overrides 以標準欄位名覆寫。"""
-    row = reference_row(s, **{COLUMN_OF[k]: v for k, v in (overrides or {}).items()})
-    return build_reference_sheet(tmp_path / "order.xlsx", [row])
+    return build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s, **as_headers(overrides or {}))])
 
 
 def check(tmp_path, spec=None, overrides=None):
@@ -271,13 +270,12 @@ def test_encrypted_pdf_is_not_checked(tmp_path):
     ],
 )
 def test_distributor_standard_difference(tmp_path, field, new, rule):
-    from hsbc_synth import STD
 
-    old = STD["distributor"][field]
+    old = STANDARD["distributor"][field]
     # Change all places containing this value, including longer labels.
     s = Spec()
     if field == "chairman":
-        oldline = "(c)營業所在地：" + STD["distributor"]["address"] + "(d)負責人姓名：" + old
+        oldline = "(c)營業所在地：" + STANDARD["distributor"]["address"] + "(d)負責人姓名：" + old
     elif field == "name":
         oldline = "受託或銷售機構之名稱、電話及地址：" + old
     else:
@@ -288,9 +286,8 @@ def test_distributor_standard_difference(tmp_path, field, new, rule):
 
 
 def test_warning_risk_wording_and_name_rules(tmp_path):
-    from hsbc_synth import STD
 
-    warning = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
+    warning = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
     s = Spec(replacements={warning: warning.replace("RR4", "RR3")})
     r = check(tmp_path, s)
     assert any(x.rule_id == "standard.fixed_warning" and x.status == S.MISMATCH for x in r.results)
@@ -582,6 +579,16 @@ def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
         if c.value in ("ISIN Code", "發行日") or str(c.value).startswith("比價日_")
     )
     wb.close()
+
+
+def test_prefilled_backfill_columns_that_match_pass_and_stay(tmp_path):
+    """回填欄位（ISIN、發行日、比價日）事先填好且與說明書相同：全部 MATCH，整份通過。"""
+    s = Spec()
+    dates = {f"autocall_date_{i}": s.ends[i - 1] if i in (2, 6) else "-" for i in range(1, 13)}
+    r = check(tmp_path, s, overrides={"isin": "XS1999900001", "issue_date": dt.date(2030, 1, 14), **dates})
+
+    assert r.status == S.PASS, [(x.rule_id, x.field, x.reason_code) for x in r.results if x.status != S.PASS]
+    assert {d.action for d in r.backfill if d.column not in ("TS", "IIS")} == {BackfillAction.MATCH}, "TS、IIS 打勾另填"
 
 
 @pytest.mark.parametrize(

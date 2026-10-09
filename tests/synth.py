@@ -30,11 +30,12 @@ SYNTH_ISIN = "XS0000000000"  # 合成說明書封面的 ISIN
 class Spec(ProductSpec):
     """BARC 合成說明書的規格：商品規格加上說明書專用的改字旋鈕。預設值下說明書、投資人須知與參考條件表列完全一致。
 
-    Non-Call 由保證配息期 G 推得（D 型 = G；P 型 = G + 1），不直接給 `first_callable`。
+    Non-Call 由保證配息期 G 推得（D 型 = G；P 型 = G + 1）；`first_callable` 不能直接給。
     """
 
     issuer: str = "BARC"
     product_code: str = "029199990001"
+    first_callable: int = field(init=False, default=1)
     monthly: Decimal | None = None  # None → 由年利率推算
     # ---- 說明書專用的變化 ----
     price_overrides: dict[tuple[int, str], str] = field(default_factory=dict)  # (標的序, 欄) → 文字

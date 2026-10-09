@@ -20,12 +20,11 @@ from harness import CONFIG, STANDARD, check_all, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
 
-STD = STANDARD
-NAME = STD["product_name"]["ms"]
-WARNING = STD["risk"]["fixed_warning_by_issuer"]["ms"]
-WARNING_CH1 = STD["risk"]["fixed_warning_openings"]["ms"][0] + WARNING[WARNING.index("。") + 1 :] + "。"
-ISSUER = STD["issuer_name"]["ms"]
-DIST = STD["distributor"]
+NAME = STANDARD["product_name"]["ms"]
+WARNING = STANDARD["risk"]["fixed_warning_by_issuer"]["ms"]
+WARNING_CH1 = STANDARD["risk"]["fixed_warning_openings"]["ms"][0] + WARNING[WARNING.index("。") + 1 :] + "。"
+ISSUER = STANDARD["issuer_name"]["ms"]
+DIST = STANDARD["distributor"]
 TRADE, ISSUE, APPROVAL = dt.date(2030, 1, 7), dt.date(2030, 1, 14), dt.date(2026, 6, 11)
 NUMERIC = set("0123456789,.")
 
@@ -56,7 +55,7 @@ def underlyings(count: int) -> tuple[UL, ...]:
 class Spec(ProductSpec):
     """MS 合成說明書與投資人須知的規格：商品規格加上改字旋鈕。預設值下兩份文件與參考條件表列完全一致。
 
-    標的以 `count` 為主（給了就依它產生）；最終比價日與到期日由配息排程推得，不直接給。
+    標的由 `count` 產生、最終比價日與到期日由配息排程推得：`underlyings`、`final_date`、`maturity_date` 不能直接給。
     """
 
     issuer: str = "MS"
@@ -64,8 +63,10 @@ class Spec(ProductSpec):
     ki: str = "AM"  # none／AM／D／P
     tenor: int = 4
     annual: Decimal = Decimal("12")  # 參考條件表年利率；說明書月配息率 = 年利率 ÷ 12
-    underlyings: tuple[UL, ...] = underlyings(2)
-    count: int | None = None  # 標的數；None → 依 underlyings
+    final_date: dt.date = field(init=False)
+    maturity_date: dt.date = field(init=False)
+    underlyings: tuple[UL, ...] = field(init=False)
+    count: int = 2  # 標的數
     trustee_code: str | None = None  # 受託機構商品代號；None 同商品代號，"" 空白
     ko_column: bool | None = None  # 價格表有無自動提前出場價欄；None 依 Non-Call < 天期
     replace: list[tuple[str, str, str]] = field(default_factory=list)  # (段落代號前綴, 原文, 新文字)
@@ -75,10 +76,7 @@ class Spec(ProductSpec):
     iis_page_total: int | None = None  # 投資人須知頁底「共 M頁」的 M；None 同實際頁數
 
     def __post_init__(self) -> None:
-        if self.count is None:
-            self.count = len(self.underlyings)
-        else:
-            self.underlyings = underlyings(self.count)
+        self.underlyings = underlyings(self.count)
         self.final_date, self.maturity_date = self.ends[-1], self.payments[-1]
 
     @property
@@ -123,14 +121,16 @@ class Spec(ProductSpec):
         return NAME["zh"].format(
             tenor=self.tenor,
             ccy_zh="美元",
-            underlying_zh=NAME["basket_zh"] if self.count > 1 else NAME["single_zh"],
+            underlying_zh=NAME["basket_zh"] if len(self.underlyings) > 1 else NAME["single_zh"],
             memory_zh=NAME["memory_zh"] if self.memory else "",
         )
 
     @property
     def name_en(self) -> str:
         return NAME["en"].format(
-            tenor=self.tenor, ccy="USD", underlying_en=NAME["basket_en"] if self.count > 1 else NAME["single_en"]
+            tenor=self.tenor,
+            ccy="USD",
+            underlying_en=NAME["basket_en"] if len(self.underlyings) > 1 else NAME["single_en"],
         )
 
 

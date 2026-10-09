@@ -3,7 +3,8 @@
 
 版面文字大多寫死（期初價 100、執行價 70%、KO 100%、KI 60%、每月 7 日六期、面額 10,000、交易日 2030-01-07），
 與 `Spec` 的預設值一致；畫進 PDF 的規格值只有商品代號、KO 觀察方式、記憶式、KI 型態、標的數與年利率，
-其餘改字用 `replacements`／`scenario_replacements`（整份旋鈕統一留第二個 PR）。
+其他規格值改了 PDF 不會跟著變，`Spec` 直接拒絕（NotImplementedError）；改字用 `replacements`／`scenario_replacements`
+（整份旋鈕統一留第二個 PR）。
 """
 
 from __future__ import annotations
@@ -17,8 +18,6 @@ from harness import STANDARD, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
 from reference_synth import UL, ProductSpec
 
-STD = STANDARD
-
 
 def underlyings(count: int) -> tuple[UL, ...]:
     """HSBC 合成文件的標的：ZZn UW、虛構標的n、期初價 100。"""
@@ -27,29 +26,42 @@ def underlyings(count: int) -> tuple[UL, ...]:
 
 @dataclass
 class Spec(ProductSpec):
-    """HSBC 合成文件的規格：商品規格加上改字旋鈕。標的以 `count` 為主；最終比價日與到期日由排程推得。"""
+    """HSBC 合成文件的規格：商品規格加上改字旋鈕。標的由 `count` 產生；最終比價日與到期日由排程推得（不能直接給）。"""
 
     issuer: str = "HSBC"
     product_code: str = "325199990001"
     ki: str = "AM"
     annual: Decimal = Decimal("12")
     first_callable: int = 2
-    underlyings: tuple[UL, ...] = underlyings(2)
-    count: int | None = None  # 標的數；None → 依 underlyings
+    final_date: dt.date = field(init=False)
+    maturity_date: dt.date = field(init=False)
+    underlyings: tuple[UL, ...] = field(init=False)
+    count: int = 2  # 標的數
     partial_coupon: bool = False
     replacements: dict[str, str] = field(default_factory=dict)
     scenario_replacements: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.count is None:
-            self.count = len(self.underlyings)
-        else:
-            self.underlyings = underlyings(self.count)
+        fixed = (
+            "currency_zh",
+            "tenor",
+            "strike",
+            "ko",
+            "ki_pct",
+            "first_callable",
+            "trade_date",
+            "issue_date",
+            "denomination",
+        )
+        changed = [k for k in fixed if getattr(self, k) != getattr(Spec, k)]
+        if changed:
+            raise NotImplementedError(f"HSBC 合成器的版面文字寫死，這些規格值還畫不進 PDF：{'、'.join(changed)}")
+        self.underlyings = underlyings(self.count)
         self.final_date, self.maturity_date = self.ends[-1], self.payments[-1]
 
     @property
     def ends(self):
-        return [dt.date(2030, 1 + j, 7) for j in range(1, self.tenor + 1)]
+        return [dt.date(2030, 1 + j, 7) for j in range(1, self.tenor + 1)]  # 六期：2 月到 7 月
 
     @property
     def payments(self):
@@ -57,14 +69,14 @@ class Spec(ProductSpec):
 
     @property
     def name(self):
-        return STD["product_name"]["hsbc"]["zh"].format(
+        return STANDARD["product_name"]["hsbc"]["zh"].format(
             tenor=6, ccy_zh="美元", memory_zh="記憶式" if self.memory else ""
         )
 
     @property
     def en(self):
-        return STD["product_name"]["hsbc"]["en"].format(
-            maxi_en="Maxi " if self.count > 1 else "",
+        return STANDARD["product_name"]["hsbc"]["en"].format(
+            maxi_en="Maxi " if len(self.underlyings) > 1 else "",
             daily_en="Daily " if self.ko_obs == "D" else "",
             memory_en="Memory " if self.memory else "",
         )
@@ -117,16 +129,16 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
     line(f"商品英文名稱：{s.en}")
     line("商品種類：股權連結商品")
     line("計價幣別：美元")
-    line("發行機構：" + STD["issuer_name"]["hsbc"])
+    line("發行機構：" + STANDARD["issuer_name"]["hsbc"])
     line("電話：+852-0000-0000")
     line("[受託或銷售機構]審查通過之日期：2026年6月11日")
     line("(參考性審閱版)內容，刊印日期：2030年1月7日")
     line("(最終版)刊印日期：2030年1月7日")
-    line("受託或銷售機構之名稱、電話及地址：" + STD["distributor"]["name"])
+    line("受託或銷售機構之名稱、電話及地址：" + STANDARD["distributor"]["name"])
     line("電話：+886-2-5556-1313")
-    line(STD["distributor"]["address"])
+    line(STANDARD["distributor"]["address"])
     line("公會審查")
-    warning = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
+    warning = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
     line(warning)
     chapter("一", "商品基本資料")
     for n in range(1, 32):
@@ -234,9 +246,11 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
                     if i > 0:
                         line("平均年化報酬率(以簡單平均年化報酬率之方式計算)為12.00%")
     chapter("二", "相關機構事業概況")
-    line("發行機構：(1)事業名稱：" + STD["issuer_name"]["hsbc"].replace("（", "(").replace("）", ")"))
-    line("受託或銷售機構：(a)事業名稱：" + STD["distributor"]["name"] + "(b)電話：02-5556-1313")
-    line("(c)營業所在地：" + STD["distributor"]["address"] + "(d)負責人姓名：" + STD["distributor"]["chairman"])
+    line("發行機構：(1)事業名稱：" + STANDARD["issuer_name"]["hsbc"].replace("（", "(").replace("）", ")"))
+    line("受託或銷售機構：(a)事業名稱：" + STANDARD["distributor"]["name"] + "(b)電話：02-5556-1313")
+    line(
+        "(c)營業所在地：" + STANDARD["distributor"]["address"] + "(d)負責人姓名：" + STANDARD["distributor"]["chairman"]
+    )
     line("結算機構")
     chapter("三", "商品風險揭露")
     line(warning)
@@ -271,9 +285,9 @@ def build_iis_pdf(
     `page_total` 改頁首「共 M 頁」的 M。"""
     w = PdfWriter()
     replace = replace or {}
-    dist, addr = STD["distributor"]["name"], STD["distributor"]["address"]
-    warning = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
-    issuer = STD["issuer_name"]["hsbc"].split("（")[0]
+    dist, addr = STANDARD["distributor"]["name"], STANDARD["distributor"]["address"]
+    warning = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
+    issuer = STANDARD["issuer_name"]["hsbc"].split("（")[0]
     short = s.name.replace("（以下簡稱「本商品」）", "").replace("（", "(").replace("）", ")")
     names = [f"虛構標的{i + 1}" for i in range(len(s.underlyings))]
     tickers = [f"ZZ{i + 1} UW" for i in range(len(s.underlyings))]

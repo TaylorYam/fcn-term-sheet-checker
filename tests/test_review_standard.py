@@ -16,10 +16,9 @@ from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, STANDARD, check_she
 from reference_synth import build_reference_sheet, reference_row
 from synth import Spec, build_pdf, check
 
-STD = STANDARD
-BARC_WARNING = STD["risk"]["fixed_warning"]
-HSBC_WARNING = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
-NAME, PHONE, ADDRESS = (STD["distributor"][k] for k in ("name", "phone", "address"))
+BARC_WARNING = STANDARD["risk"]["fixed_warning"]
+HSBC_WARNING = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
+NAME, PHONE, ADDRESS = (STANDARD["distributor"][k] for k in ("name", "phone", "address"))
 
 
 def sub(tmp_path: Path, name: str) -> Path:
@@ -154,7 +153,7 @@ def test_invalid_ms_review_standard_is_a_batch_config_error(tmp_path, old, new, 
 
 def test_issuer_name_ignores_apply_only_to_the_configured_issuer(tmp_path):
     """BARC 沒有設定 issuer_name_ignore：第二章少了括號仍是不一致。"""
-    plain = STD["issuer_name"]["barc"].replace("（", "").replace("）", "")
+    plain = STANDARD["issuer_name"]["barc"].replace("（", "").replace("）", "")
     r = results(check(tmp_path, Spec(issuer_ch2=plain)), "standard.issuer_name", "issuer_name_ch2")[0]
     assert r.status == MISMATCH
 

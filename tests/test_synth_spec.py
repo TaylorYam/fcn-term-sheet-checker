@@ -8,10 +8,12 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+import pytest
+
 import hsbc_synth
 import ms_synth
 import synth
-from reference_synth import ProductSpec, issuer_value, reference_row
+from reference_synth import ProductSpec, as_headers, issuer_value, reference_row
 
 
 def test_each_issuer_spec_is_a_product_spec_with_its_own_defaults():
@@ -39,6 +41,7 @@ def test_reference_row_follows_the_spec_values_and_excel_overrides():
     assert row["K(%)"] == 71 and row["UL_1_執行價"] == 86.415, "123.45 × 70%，四位小數"
     assert row["UL_1_下限價"] == 67.8975 and reference_row(synth.Spec())["UL_1_下限價"] == "-"
     assert row["UL_4"] == "-" and row["UL_4_進場價"] == "-"
+    assert reference_row(spec, **as_headers({"isin": "XS1"}))["ISIN Code"] == "XS1", "也可以用標準欄位名覆寫"
 
 
 def test_barc_non_call_is_derived_from_the_guaranteed_coupon_periods():
@@ -46,6 +49,10 @@ def test_barc_non_call_is_derived_from_the_guaranteed_coupon_periods():
     assert synth.Spec(guaranteed=6).first_callable == 6, "D 型：第 G 期期末日起可提前出場"
     assert synth.Spec(ko_obs="P", guaranteed=2).first_callable == 3, "P 型：前 G 期不可提前出場"
     assert synth.Spec(guaranteed=2).with_(guaranteed=3).first_callable == 3
+    with pytest.raises(TypeError):
+        synth.Spec(first_callable=3)  # 推得的欄位不能直接給
+    with pytest.raises((TypeError, ValueError)):  # init=False 欄位：3.13 為 TypeError、3.11 為 ValueError
+        synth.Spec().with_(first_callable=3)
 
 
 def test_ms_and_hsbc_dates_and_underlyings_follow_their_schedules():
@@ -57,3 +64,15 @@ def test_ms_and_hsbc_dates_and_underlyings_follow_their_schedules():
     assert (hsbc.final_date, hsbc.maturity_date) == (dt.date(2030, 7, 7), dt.date(2030, 7, 10))
     assert len(hsbc.underlyings) == 1 and hsbc.first_callable == 2
     assert reference_row(hsbc)["UL_1_進場價"] == 100.0 and reference_row(hsbc)["UL_2"] == "-"
+    with pytest.raises(TypeError):
+        ms_synth.Spec(underlyings=())  # 標的由 count 產生，不能直接給
+    with pytest.raises((TypeError, ValueError)):
+        hsbc_synth.Spec().with_(final_date=dt.date(2030, 7, 8))
+
+
+def test_hsbc_refuses_spec_values_its_fixed_wording_cannot_draw():
+    with pytest.raises(NotImplementedError, match="strike"):
+        hsbc_synth.Spec(strike=Decimal("65.00"))
+    with pytest.raises(NotImplementedError, match="tenor"):
+        hsbc_synth.Spec(tenor=12)
+    assert hsbc_synth.Spec(count=1, ko_obs="P", memory=False, ki="none").count == 1, "畫得進 PDF 的規格值照常"

@@ -13,7 +13,7 @@ import tomllib
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import openpyxl
 
@@ -22,7 +22,7 @@ from harness import CURRENCY_ISO, REFERENCE_FORMAT
 _FORMAT = tomllib.loads(REFERENCE_FORMAT.read_text(encoding="utf-8"))
 # Excel 欄名 → 標準欄位（[columns] 內的 ignored 清單不是欄名）
 REFERENCE_COLUMNS: dict[str, str] = {h: f for h, f in _FORMAT["columns"].items() if isinstance(f, str)}
-COLUMN_OF: dict[str, str] = {f: h for h, f in REFERENCE_COLUMNS.items()}  # 標準欄位 → Excel 欄名
+_COLUMN_OF = {f: h for h, f in REFERENCE_COLUMNS.items()}  # 標準欄位 → Excel 欄名
 
 REFERENCE_HEADERS = [
     "TS",
@@ -85,7 +85,9 @@ DEFAULT_ULS = (
 class ProductSpec:
     """一檔 FCN 商品的規格（上手中立）：參考條件表一列的內容，也是各上手合成說明書與投資人須知的依據。
 
-    各上手的合成器以子類別補上預設商品代號與該上手的改字旋鈕；預設值下說明書、投資人須知與參考條件表列完全一致。
+    `issuer` 與 `product_code` 沒有預設值：由各上手合成器的子類別補上，並加該上手的改字旋鈕；子類別由其他欄位推得的
+    規格（例：BARC 的 Non-Call、MS／HSBC 的標的與日期）改宣告 `init=False`，建構或 `with_` 時給了會直接報錯。
+    預設值下說明書、投資人須知與參考條件表列完全一致。
     """
 
     issuer: str  # 上手代號（參考條件表「發行機構」欄的寫法由它查格式設定；檔名前三碼也依它）
@@ -94,7 +96,7 @@ class ProductSpec:
     tenor: int = 6  # 天期（月）
     memory: bool = True  # 記憶式提前出場
     ko_obs: str = "D"  # KO 觀察方式：D 期間每日／P 期末定日
-    ki: str = "none"  # KI 型態：none／AM／D／M／P
+    ki: str = "none"  # KI 型態：none／AM／D，BARC 另有 M、MS 另有 P
     strike: Decimal = Decimal("70.00")  # 執行價 %
     ko: Decimal = Decimal("100.00")  # 自動提前出場價 %
     ki_pct: Decimal = Decimal("60.00")  # 下限價 %（ki 為 none 時不用）
@@ -107,7 +109,7 @@ class ProductSpec:
     denomination: int | None = None  # None → 幣別預設面額
     underlyings: tuple[UL, ...] = DEFAULT_ULS
 
-    def with_(self, **kw: Any) -> ProductSpec:
+    def with_(self, **kw: Any) -> Self:
         return replace(self, **kw)
 
     @property
@@ -122,6 +124,11 @@ class ProductSpec:
 def issuer_value(issuer: str) -> str:
     """上手代號 → 該上手在參考條件表「發行機構」欄的寫法。"""
     return _FORMAT["issuer_values"][issuer]
+
+
+def as_headers(fields: dict[str, Any]) -> dict[str, Any]:
+    """標準欄位名 → Excel 欄名，給 `reference_row(spec, **as_headers({...}))` 以標準欄位名覆寫。"""
+    return {_COLUMN_OF[k]: v for k, v in fields.items()}
 
 
 def make_row(issuer: str, fields: dict[str, Any], **overrides: Any) -> dict[str, Any]:
