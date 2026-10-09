@@ -156,6 +156,13 @@ class OrderValue:
     column: str = ""  # 來源 Excel 欄名（例：UL_2_進場價）；核對結果的項目用
 
 
+class DocKind(StrEnum):
+    """被核對的文件種類，由檔名結尾決定（ADR 0007）；值是錯訊與 PANEL 用的稱呼。"""
+
+    TERM_SHEET = "說明書"
+    IIS = "投資人須知"
+
+
 class ItemSource(StrEnum):
     """核對結果的預期值從哪裡來；錯訊依此決定句型。"""
 
@@ -250,6 +257,7 @@ class CheckResult:
     order_source: list[str] = field(default_factory=list)
     rule_version: str = "1"
     item: Item = field(kw_only=True)  # 必填：沒給項目就建立不了結果
+    document: DocKind = field(default=DocKind.TERM_SHEET, kw_only=True)  # 這條結果屬於哪份文件（錯訊的文件那一邊）
 
 
 @dataclass

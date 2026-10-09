@@ -454,3 +454,75 @@ def test_cli_exit_code_and_not_filled_reason_when_the_iis_fails(tmp_path, monkey
     out = capsys.readouterr().out
     assert f"通過  {ts.name}  同商品的投資人須知尚未通過或人工放行，不回填。" in out
     assert f"不一致  {iis.name}" in out
+
+
+# ---------------------------------------------------------------- 文件身分（Issue #142）
+
+
+def test_iis_rule_message_naming_the_term_sheet_is_kept_as_written(tmp_path):
+    """投資人須知規則描述同商品說明書的值、訊息以「說明書」開頭時，不被改寫成「投資人須知」。"""
+    import dataclasses
+
+    from fcn_checker.rules.kit import result
+    from fcn_checker.schema import Item
+
+    message = "說明書第 3 期比價日 2030-04-09，投資人須知要和它相同"
+    rule = lambda ctx: [  # noqa: E731
+        result("iis.fake", "fake", REVIEW, reason="value_mismatch", message=message, item=Item.term_sheet("比價日"))
+    ]
+    barc = dataclasses.replace(BARC, iis=dataclasses.replace(BARC.iis, rules=rule))
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec)
+    sheet_ref = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    _, sheet = check_all(sheet_ref, [ts, iis], CONFIG.with_registry((barc,))).items
+
+    (r,) = [r for r in sheet.report.results if r.rule_id == "iis.fake"]
+    assert r.message == message and r.document == DocKind.IIS
+    assert problems(sheet) == [f"比價日：{message}"]
+
+
+def test_every_iis_result_records_its_document(tmp_path):
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec, pages=5)
+    item, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
+
+    assert {r.document for r in sheet.report.results} == {DocKind.IIS}
+    assert {r.document for r in item.report.results} == {DocKind.TERM_SHEET}
+
+
+def test_iis_review_standard_messages_name_the_iis_when_fields_are_unreadable():
+    """審查標準規則（刊印日期、費用）讀不到投資人須知欄位時，說明以「投資人須知」開頭，不寫成說明書。"""
+    from fcn_checker.investor_sheet import IisSheet
+    from fcn_checker.orders.reference import OrderRecord
+    from fcn_checker.parsers.layout import TextIndex
+    from fcn_checker.rules.kit import Context
+    from fcn_checker.rules.review_standard import iis_review_standard_rules
+    from fcn_checker.schema import OrderValue, ParsedField
+    from fcn_checker.standard_fields import fee_field
+
+    std = CONFIG.review_standard
+    provided = frozenset({"print_dates", *(fee_field(label) for label in std.fees)})
+    sheet = IisSheet({}, TextIndex([]), provided)
+    order = OrderRecord(OrderValue("029199990001", "參考條件表!B4"), {})
+    ctx = Context(sheet, order, std, CONFIG.reference_format, "BARC", document=DocKind.IIS)
+
+    results = iis_review_standard_rules(ctx, trade=ParsedField.present("trade_date", dt.date(2030, 1, 7), []))
+
+    unreadable = [r for r in results if r.reason_code == "document_missing"]
+    assert {r.field for r in unreadable} >= {"print_dates", *std.fees}
+    assert all(r.message.startswith("投資人須知") for r in unreadable), [r.message for r in unreadable]
+
+
+def test_unexpected_error_while_reading_the_iis_names_the_iis(tmp_path):
+    import dataclasses
+
+    def broken(lines):
+        raise ValueError("讀出失敗")
+
+    barc = dataclasses.replace(BARC, iis=dataclasses.replace(BARC.iis, read=broken))
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec)
+    sheet_ref = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    _, sheet = check_all(sheet_ref, [ts, iis], CONFIG.with_registry((barc,))).items
+
+    assert problems(sheet) == ["投資人須知：ValueError: 讀出失敗"]
