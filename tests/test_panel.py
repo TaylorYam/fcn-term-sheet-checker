@@ -388,6 +388,23 @@ def test_changing_a_release_after_saving_says_to_save_again(tmp_path):
     assert "上一次儲存的核對結果檔已不是目前的結果，請再儲存一次" in session.message
 
 
+def test_release_prompt_lists_every_problem_of_the_document(tmp_path):
+    spec = Spec()
+    _, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71, "UL_2_進場價": 123.45})])
+    term_sheet, iis = outcome.batch.items
+    prompt = PanelOutcome.release_prompt(term_sheet)
+    head, problems, tail = prompt.split("\n\n")
+    assert head == "029199990001_TS.pdf"
+    assert tail == "確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
+    lines = problems.split("\n")
+    assert lines[:2] == ["這份說明書的問題：", "・K(%)對不起來：參考條件表 71.00／說明書 70.00"]
+    assert any(line.startswith("・UL_2 進場價") for line in lines[2:]), lines
+    assert lines[1:] == [f"・{m}" for m in term_sheet.problem_messages]
+    assert PanelOutcome.release_prompt(iis).startswith(
+        "029199990001_IIS.pdf\n\n這份投資人須知的問題：\n・K(%)對不起來：參考條件表 71.00／投資人須知 "
+    )
+
+
 def test_release_button_state_hides_the_reason_for_passed_term_sheets(tmp_path):
     ok, bad = Spec(), Spec(product_code="029199990002")
     session, outcome = checked(tmp_path, ok, bad, rows=[reference_row(ok), reference_row(bad, **{"K(%)": 71})])

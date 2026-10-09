@@ -151,6 +151,15 @@ class PanelOutcome:
         ]
         return "\n".join([head, *lines])
 
+    @staticmethod
+    def release_prompt(item: BatchItem) -> str:
+        """人工放行確認視窗內文：PDF 檔名、這份的全部錯訊，再請操作員確認。"""
+        return (
+            f"{item.term_sheet.name}\n\n這份{item.document}的問題：\n"
+            + "\n".join(f"・{m}" for m in item.problem_messages)
+            + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
+        )
+
     @property
     def not_covered(self) -> tuple[NotCoveredGroup, ...]:
         """待處理：依上手分組（依說明書順序），組內同一 rule_id 只列一次；不同上手的同一 rule_id 各自保留說明。"""
