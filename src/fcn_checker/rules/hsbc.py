@@ -117,6 +117,10 @@ def schedules(ctx):
         )
     else:
         ko = ctx.ts.f("ko_table")
+        ko_deps = [c, ko, first, final]
+        if not ko.ok:
+            out.append(check("schedule.autocall_dates", "periodic", "定期觀察的提前出場表", ko_deps, final.value, None))
+            return out
         mapped = []
         valid = True
         for row in ko.value:
@@ -133,7 +137,7 @@ def schedules(ctx):
                 "schedule.autocall_dates",
                 "periodic",
                 "定期觀察的提前出場表",
-                [c, ko, first, final],
+                ko_deps,
                 final.value,
                 ko.value[-1]["decision"],
                 ok=valid and final.ok and ko.value[-1]["decision"] == final.value,
