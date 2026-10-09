@@ -616,16 +616,16 @@ def preview_batch(config: CheckConfig, reference_sheet: Path, term_sheets: Seque
     rows = []
     for found in identified:
         problems = [r for r in found.results if r.status != CheckStatus.PASS]
-        pc = found.product_code
+        pc, ident = found.product_code, found.identification
         rows.append(
             PreviewRow(
                 found.pdf,
-                found.kind,
-                found.issuer_code,
-                found.problem == PairingProblem.UNSUPPORTED,
-                pc.value if pc is not None and pc.ok else None,
+                ident.kind,
+                ident.issuer,
+                ident.problem == PairingProblem.UNSUPPORTED,
+                ident.product_code,
                 tuple(pc.evidence) if pc is not None else (),
-                found.row_no,
+                ident.reference_row,
                 "；".join(r.message for r in problems),
             )
         )
