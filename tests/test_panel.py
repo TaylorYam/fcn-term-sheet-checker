@@ -14,7 +14,7 @@ import pytest
 
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel import parse_args, session_from_args
-from fcn_checker.panel_workflow import PanelSession
+from fcn_checker.panel_workflow import PanelOutcome, PanelSession
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT, with_iis
 from reference_synth import REFERENCE_FORMAT, build_reference_sheet
 from synth import SYNTH_ISIN, Spec, build_pdf, reference_row
@@ -145,6 +145,33 @@ def test_check_requires_preview_and_writes_nothing(tmp_path):
     first = outcome.ordered_results(outcome.ordered_items[0])
     assert first[0].status.value == "MISMATCH"
     assert session.receipt is None, "還沒儲存，沒有收據"
+
+
+def test_outcome_gives_the_text_shown_in_the_panel_tables(tmp_path):
+    ok, bad = Spec(), Spec(product_code="029199990002")
+    sheet, pdfs = inputs(tmp_path, ok, bad, rows=[reference_row(ok), reference_row(bad, **{"K(%)": 71})])
+    unknown = build_pdf(tmp_path / "weird.pdf", Spec(product_code="029199990005"))
+    session = session_for(tmp_path, sheet, pdfs)
+    session.select(sheet, [*with_iis(pdfs), unknown])
+    first, *_, last = session.load_preview().rows
+    assert PanelOutcome.preview_row(first) == (
+        "029199990001_TS.pdf",
+        "說明書",
+        "BARC",
+        "029199990001",
+        "第 4 列",
+        "可以核對",
+    )
+    assert PanelOutcome.preview_row(last)[:5] == ("weird.pdf", "檔名無法辨識", "未提供", "未提供", "—")
+
+    outcome = session.start_check()
+    item = outcome.ordered_items[0]
+    assert item.term_sheet == pdfs[1]
+    assert outcome.item_row(item) == ("不一致", "說明書", "029199990002_TS.pdf", "1")
+    [row, *_] = outcome.result_rows(item)
+    assert row.values == ("不一致", "K(%)", "71.00", "70.00", "第 4 頁")
+    assert row.detail.startswith("K(%)｜不一致\n原因：K(%)對不起來：參考條件表 71.00／說明書 70.00\n")
+    assert "\n參考條件表／標準值：71.00\nPDF 值：70.00\n" in row.detail
 
 
 @pytest.mark.parametrize("changed", ["selection", "pdf", "sheet", "standard", "config"])
