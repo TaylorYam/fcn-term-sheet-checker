@@ -290,7 +290,7 @@ def _fixed_text(
     *,
     norm: Callable[[str], str] = squash,
     tolerance: str | None = None,
-    document: DocKind = DocKind.TERM_SHEET,
+    document: DocKind,
 ) -> CheckResult:
     """被核對文件的文字與審查標準固定值比對；預設忽略空白與換行，其餘逐字相等（`norm` 另給比對前的正規化）。"""
     item = Item.standard(name)
@@ -361,6 +361,7 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
             tolerance="忽略空白、換行"
             + "".join(f"、{ISSUER_NAME_IGNORES[k]}" for k in sorted(std.issuer_name_ignore))
             + "後逐字相等",
+            document=ctx.document,
         )
         for name, what, zh, zh_only in fields
     ]
@@ -428,7 +429,9 @@ def _fees(ctx: Context) -> list[CheckResult]:
     """第四章費用表：審查標準列出的各費用項目費率區間逐字相等。"""
     rid = "standard.fees"
     return [
-        _fixed_text(rid, label, standard_field(ctx, fee_field(label)), exp, f"「{label}」費率", label)
+        _fixed_text(
+            rid, label, standard_field(ctx, fee_field(label)), exp, f"「{label}」費率", label, document=ctx.document
+        )
         for label, exp in ctx.std.fees.items()
     ]
 
@@ -596,7 +599,7 @@ def _iis_risk_summary(ctx: Context) -> CheckResult:
     """商品簡介「本商品風險程度：RRn」（沒有【】，全文【RRn】規則抓不到）= 審查標準風險等級。"""
     rid, pf, item = (
         "standard.risk_level",
-        read_iis(ctx.sheet, "risk_level_summary"),
+        read_iis(ctx.iis, "risk_level_summary"),
         Item.standard("風險等級（商品簡介）"),
     )
     if not pf.ok:
@@ -618,7 +621,7 @@ def _iis_occurrences(
     ctx: Context, rid: str, name: str, expected: str | None, what: str, missing: str, kind: str
 ) -> list[CheckResult]:
     """投資人須知出處清單型欄位（各處受託機構名稱／地址／電話、發行機構名稱）每一處 = 審查標準。"""
-    container = read_iis(ctx.sheet, name)
+    container = read_iis(ctx.iis, name)
     if not container.ok:
         return [doc_review(rid, name, container, item=Item.standard(what), document=ctx.document)]
     items = container.value

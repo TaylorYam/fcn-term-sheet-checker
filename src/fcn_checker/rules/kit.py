@@ -23,9 +23,10 @@ from ..standard_fields import Occurrence, TermSheet, is_standard, not_provided
 
 
 class RuleContext(Protocol):
-    """兩種規則輸入共同的部分：結果工具（`standard_field`、`order_value`）只依賴這些。"""
+    """兩種規則輸入共同的部分：結果工具（`standard_field`、`order_value`、`occurrences_of`）只依賴這些。"""
 
     ts: TermSheet
+    document: DocKind  # 被核對的文件，訊息提到它時用它的稱呼
 
     @property
     def issuer_std(self) -> IssuerStandard: ...
@@ -72,7 +73,7 @@ class Context(_IssuerStandardOf):
         return self.order.fields.get(key)
 
     @property
-    def sheet(self) -> IisSheet:
+    def iis(self) -> IisSheet:
         """投資人須知的讀出結果（投資人須知規則用；說明書沒有）。"""
         if not isinstance(self.ts, IisSheet):
             raise TypeError("核對的不是投資人須知，沒有投資人須知讀出結果")
@@ -80,7 +81,7 @@ class Context(_IssuerStandardOf):
 
     def provides(self, name: str) -> bool:
         """投資人須知範本有沒有這個欄位；不在其中的不核對。"""
-        return self.sheet.provides(name)
+        return self.iis.provides(name)
 
 
 @dataclass
@@ -95,6 +96,7 @@ class IssuerContext(_IssuerStandardOf):
     issuer: str
     declared: Mapping[str, OrderValue | None]  # 上手宣告的參考條件表欄位 → 該列的值
     sheet_source: str
+    document: DocKind = DocKind.TERM_SHEET  # 上手說明書內部規則只核對說明書
 
     def sheet_field(self, key: str) -> OrderValue | None:
         if key not in self.declared:
@@ -336,5 +338,5 @@ def occurrences_of(
     if container.status == FieldStatus.NOT_APPLICABLE:
         return (), None
     if not container.ok:
-        return (), doc_review(rid, name, container, item=item)
+        return (), doc_review(rid, name, container, item=item, document=ctx.document)
     return container.value, None

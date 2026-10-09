@@ -73,7 +73,7 @@ def pages(ctx: Context) -> CheckResult:
 
 
 def page_totals(ctx: Context) -> CheckResult:
-    rid, pf, item = "iis.page_totals", read_iis(ctx.sheet, "page_totals"), Item.expected("頁首總頁數")
+    rid, pf, item = "iis.page_totals", read_iis(ctx.iis, "page_totals"), Item.expected("頁首總頁數")
     if not pf.ok:
         return doc_review(rid, "page_totals", pf, ctx.pages, item=item, document=ctx.document)
     bad = sorted({m for m in pf.value if m != ctx.pages})
@@ -91,7 +91,7 @@ def page_totals(ctx: Context) -> CheckResult:
 
 
 def product_codes(ctx: Context) -> list[CheckResult]:
-    rid, container = "iis.product_code", read_iis(ctx.sheet, "product_codes")
+    rid, container = "iis.product_code", read_iis(ctx.iis, "product_codes")
     if not container.ok:
         return [doc_review(rid, "product_codes", container, item=Item.expected("封面商品代號"), document=ctx.document)]
     out = []
@@ -122,10 +122,10 @@ def product_codes(ctx: Context) -> list[CheckResult]:
 
 def _prices(ctx: Context) -> list[CheckResult]:
     """各標的期初價格、執行價、KO 價：表上值四捨五入到 4 位後相等；VWAP 時改和說明書價格表同一列比。"""
-    rid, rows = "iis.underlying_prices", read_iis(ctx.sheet, "underlying_prices")
+    rid, rows = "iis.underlying_prices", read_iis(ctx.iis, "underlying_prices")
     if not rows.ok:
         return [doc_review(rid, "price_table", rows, item=Item.sheet("價格表"), document=ctx.document)]
-    uls = read_iis(ctx.sheet, "underlyings")
+    uls = read_iis(ctx.iis, "underlyings")
     if uls.ok and len(uls.value) != len(rows.value):
         return [
             result(
@@ -190,7 +190,7 @@ def _prices(ctx: Context) -> list[CheckResult]:
 
 def _monthly_coupon(ctx: Context) -> CheckResult:
     """月配息率 = 參考條件表年利率 ÷ 12（差 ≤ 0.0001 視為一致，同 BARC 說明書規則）。"""
-    rid, pf = "iis.monthly_coupon", read_iis(ctx.sheet, "monthly_coupon_pct")
+    rid, pf = "iis.monthly_coupon", read_iis(ctx.iis, "monthly_coupon_pct")
     annual, ov, problem = order_value(
         ctx, "coupon_pa_pct", rid, "monthly_coupon_pct", pf, to_decimal, "數字", name="月配息率"
     )
@@ -218,7 +218,7 @@ def _monthly_coupon(ctx: Context) -> CheckResult:
 
 def _monthly_coupons(ctx: Context) -> list[CheckResult]:
     """月配息率的每一處（MS）= 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位後相等（同 MS 說明書 §3.3）。"""
-    rid, container = "iis.monthly_coupon", read_iis(ctx.sheet, "monthly_coupons")
+    rid, container = "iis.monthly_coupon", read_iis(ctx.iis, "monthly_coupons")
     if not container.ok:
         return [doc_review(rid, "monthly_coupons", container, item=Item.expected("月配息率"), document=ctx.document)]
     annual, ov, problem = order_value(
@@ -255,7 +255,7 @@ def _monthly_coupons(ctx: Context) -> list[CheckResult]:
 def _first_callable(ctx: Context) -> CheckResult:
     """「自第 k 個…開始」的 k = 參考條件表 Non-Call(月)（第一個可以提前出場的期別）。"""
     rid, key, name = "field.first_callable_period", "first_callable_period", "第一個可提前出場期"
-    pf = read_iis(ctx.sheet, key)
+    pf = read_iis(ctx.iis, key)
     v, ov, problem = order_value(ctx, key, rid, key, pf, to_int, "整數", name=name)
     if problem:
         return problem
@@ -280,7 +280,7 @@ def _first_callable(ctx: Context) -> CheckResult:
 def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
     """期間每日觀察的觀察起日 = 同商品說明書提前出場排程第 k 期的比價日（k 取投資人須知）；迄日 = 參考條件表最終比價日。"""
     rid = "iis.ko_observation_dates"
-    start, k = read_iis(ctx.sheet, "ko_observation_start"), read_iis(ctx.sheet, "first_callable_period")
+    start, k = read_iis(ctx.iis, "ko_observation_start"), read_iis(ctx.iis, "first_callable_period")
     item = Item.term_sheet("KO 觀察起日")
     if not (start.ok and k.ok):
         out = [doc_review(rid, "ko_observation_start", start if not start.ok else k, item=item, document=ctx.document)]
@@ -305,7 +305,7 @@ def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
                     item=item,
                 )
             ]
-    end, name = read_iis(ctx.sheet, "ko_observation_end"), "KO 觀察迄日"
+    end, name = read_iis(ctx.iis, "ko_observation_end"), "KO 觀察迄日"
     v, ov, problem = order_value(
         ctx, "final_valuation_date", rid, "ko_observation_end", end, to_date, "日期", name=name
     )
@@ -428,7 +428,7 @@ def _vs_term_sheet(
     normalize: Callable[[Any], Any],
     tolerance: str | None,
 ) -> CheckResult:
-    pf, item = read_iis(ctx.sheet, field), Item.term_sheet(name)
+    pf, item = read_iis(ctx.iis, field), Item.term_sheet(name)
     if not pf.ok:
         return doc_review(rid, field, pf, item=item, document=ctx.document)
     expected, why = found

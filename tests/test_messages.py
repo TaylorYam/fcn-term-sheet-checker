@@ -19,7 +19,7 @@ from fcn_checker.issuers import by_code
 from fcn_checker.messages import problem_message
 from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.rules import kit
-from fcn_checker.schema import CheckResult, CheckStatus, Item, ItemSource
+from fcn_checker.schema import CheckResult, CheckStatus, DocKind, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
 from harness import CONFIG, check_all, check_rows
 from reference_synth import REFERENCE_HEADERS, build_reference_sheet
@@ -483,8 +483,6 @@ def test_price_derivation_names_the_underlying_the_same_way_for_both_issuers(tmp
 
 
 def test_message_names_the_document_recorded_on_the_result():
-    from fcn_checker.schema import DocKind
-
     pf = not_provided("isin")
     ts_side = kit.doc_review("field.isin", "isin", pf, item=Item.note("ISIN"))
     iis_side = kit.doc_review("field.isin", "isin", pf, item=Item.note("ISIN"), document=DocKind.IIS)

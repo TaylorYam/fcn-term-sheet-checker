@@ -488,3 +488,41 @@ def test_every_iis_result_records_its_document(tmp_path):
 
     assert {r.document for r in sheet.report.results} == {DocKind.IIS}
     assert {r.document for r in item.report.results} == {DocKind.TERM_SHEET}
+
+
+def test_iis_review_standard_messages_name_the_iis_when_fields_are_unreadable():
+    """審查標準規則（刊印日期、費用）讀不到投資人須知欄位時，說明以「投資人須知」開頭，不寫成說明書。"""
+    from fcn_checker.investor_sheet import IisSheet
+    from fcn_checker.orders.reference import OrderRecord
+    from fcn_checker.parsers.layout import TextIndex
+    from fcn_checker.rules.kit import Context
+    from fcn_checker.rules.review_standard import iis_review_standard_rules
+    from fcn_checker.schema import OrderValue, ParsedField
+    from fcn_checker.standard_fields import fee_field
+
+    std = CONFIG.review_standard
+    provided = frozenset({"print_dates", *(fee_field(label) for label in std.fees)})
+    sheet = IisSheet({}, TextIndex([]), provided)
+    order = OrderRecord(OrderValue("029199990001", "參考條件表!B4"), {})
+    ctx = Context(sheet, order, std, CONFIG.reference_format, "BARC", document=DocKind.IIS)
+
+    results = iis_review_standard_rules(ctx, trade=ParsedField.present("trade_date", dt.date(2030, 1, 7), []))
+
+    unreadable = [r for r in results if r.reason_code == "document_missing"]
+    assert {r.field for r in unreadable} >= {"print_dates", *std.fees}
+    assert all(r.message.startswith("投資人須知") for r in unreadable), [r.message for r in unreadable]
+
+
+def test_unexpected_error_while_reading_the_iis_names_the_iis(tmp_path):
+    import dataclasses
+
+    def broken(lines):
+        raise ValueError("讀出失敗")
+
+    barc = dataclasses.replace(BARC, iis=dataclasses.replace(BARC.iis, read=broken))
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec)
+    sheet_ref = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)])
+    _, sheet = check_all(sheet_ref, [ts, iis], CONFIG.with_registry((barc,))).items
+
+    assert problems(sheet) == ["投資人須知：ValueError: 讀出失敗"]

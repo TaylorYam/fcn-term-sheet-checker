@@ -408,14 +408,17 @@ class _Identified:
 ISSUER_ITEM, PRODUCT_CODE_ITEM, FILE_NAME_ITEM = Item.note("上手"), Item.note("商品代號"), Item.note("檔名")
 
 
-def _unexpected(e: Exception) -> CheckResult:
+def _unexpected(e: Exception, kind: DocKind | None) -> CheckResult:
+    """這份 PDF 的非預期錯誤；項目是文件本身（檔名無法辨識時以說明書稱呼）。"""
+    document = kind or DocKind.TERM_SHEET
     return CheckResult(
         rule_id="batch.unexpected",
-        field="說明書",
+        field=document.value,
         status=CheckStatus.ERROR,
         reason_code="unexpected_error",
         message=f"{type(e).__name__}: {e}",
-        item=Item.note("說明書"),
+        item=Item.note(document.value),
+        document=document,
     )
 
 
@@ -481,7 +484,7 @@ def _identify(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Identif
         else:
             out.ts = issuer.read(lines)
     except Exception as e:  # 上手讀出失敗：這份轉執行錯誤，不中斷整批（預覽也一樣）
-        return out.stop(PairingProblem.UNEXPECTED, _unexpected(e))
+        return out.stop(PairingProblem.UNEXPECTED, _unexpected(e, out.kind))
 
     if out.kind == DocKind.IIS:  # 投資人須知以檔名前 12 碼配對（HSBC 範本沒有商品代號；封面有的另由規則核對）
         pc = out.product_code = ParsedField.present("product_code", file_code(pdf), [])
@@ -567,7 +570,8 @@ def _identify_all(term_sheets: Sequence[Path], sheet: ReferenceSheet, config: Ch
         try:
             found = _identify(pdf, sheet, config)
         except Exception as e:
-            found = _Identified(pdf, [_unexpected(e)], kind=doc_kind(pdf), problem=PairingProblem.UNEXPECTED)
+            kind = doc_kind(pdf)
+            found = _Identified(pdf, [_unexpected(e, kind)], kind=kind, problem=PairingProblem.UNEXPECTED)
         identified.append(found)
     by_code: dict[str, list[_Identified]] = {}
     for found in identified:
@@ -685,7 +689,9 @@ def check_batch(preview: BatchPreview) -> BatchOutcome:
             pdf = found.pdf
             item = BatchItem(
                 pdf,
-                CheckReport(CheckStatus.ERROR, None, [_unexpected(e)], [], _item_metadata(pdf, meta, snapshot)),
+                CheckReport(
+                    CheckStatus.ERROR, None, [_unexpected(e, found.kind)], [], _item_metadata(pdf, meta, snapshot)
+                ),
                 found.identification,
             )
         items.append(item)
