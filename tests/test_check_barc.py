@@ -11,8 +11,8 @@ from decimal import Decimal
 import pytest
 
 from harness import ERROR, MISMATCH, NA, PASS, REVIEW, check_sheet, problems, results
-from reference_synth import REFERENCE_HEADERS, build_reference_sheet
-from synth import UL, Spec, build_not_barc_pdf, build_pdf, check, check_pdf, reference_row
+from reference_synth import REFERENCE_HEADERS, UL, build_reference_sheet, reference_row
+from synth import Spec, build_not_barc_pdf, build_pdf, check, check_pdf
 
 # ---------------------------------------------------------------- 全部一致
 

@@ -1,38 +1,55 @@
-"""HSBC 合成 PDF／整理表；商品、標的與價格皆虛構。"""
+"""HSBC 合成說明書與投資人須知 PDF：把商品規格（tests/reference_synth.py 的 `ProductSpec`）畫成仿 HSBC 版面；
+商品、標的與價格皆虛構。參考條件表列不在這裡產生（`reference_synth.reference_row`）。
+
+版面文字大多寫死（期初價 100、執行價 70%、KO 100%、KI 60%、每月 7 日六期、面額 10,000、交易日 2030-01-07），
+與 `Spec` 的預設值一致；畫進 PDF 的規格值只有商品代號、KO 觀察方式、記憶式、KI 型態、標的數與年利率，
+其餘改字用 `replacements`／`scenario_replacements`（整份旋鈕統一留第二個 PR）。
+"""
 
 from __future__ import annotations
 
 import datetime as dt
-import tomllib
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
-import openpyxl
-
-from harness import REVIEW_STANDARD, iis_path
+from harness import STANDARD, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
-from reference_synth import REFERENCE_FORMAT, issuer_value
+from reference_synth import UL, ProductSpec
 
-ORDER_FORMAT = REFERENCE_FORMAT
-STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
+STD = STANDARD
+
+
+def underlyings(count: int) -> tuple[UL, ...]:
+    """HSBC 合成文件的標的：ZZn UW、虛構標的n、期初價 100。"""
+    return tuple(UL(f"虛構標的{i}", "NASDAQ", f"ZZ{i} UW", Decimal("100.0000")) for i in range(1, count + 1))
 
 
 @dataclass
-class Spec:
-    obs: str = "D"
-    memory: bool = True
+class Spec(ProductSpec):
+    """HSBC 合成文件的規格：商品規格加上改字旋鈕。標的以 `count` 為主；最終比價日與到期日由排程推得。"""
+
+    issuer: str = "HSBC"
+    product_code: str = "325199990001"
     ki: str = "AM"
-    count: int = 2
-    partial_coupon: bool = False
     annual: Decimal = Decimal("12")
+    first_callable: int = 2
+    underlyings: tuple[UL, ...] = underlyings(2)
+    count: int | None = None  # 標的數；None → 依 underlyings
+    partial_coupon: bool = False
     replacements: dict[str, str] = field(default_factory=dict)
     scenario_replacements: dict[str, str] = field(default_factory=dict)
-    code: str = "325199990001"
+
+    def __post_init__(self) -> None:
+        if self.count is None:
+            self.count = len(self.underlyings)
+        else:
+            self.underlyings = underlyings(self.count)
+        self.final_date, self.maturity_date = self.ends[-1], self.payments[-1]
 
     @property
     def ends(self):
-        return [dt.date(2030, m, 7) for m in range(2, 8)]
+        return [dt.date(2030, 1 + j, 7) for j in range(1, self.tenor + 1)]
 
     @property
     def payments(self):
@@ -48,7 +65,7 @@ class Spec:
     def en(self):
         return STD["product_name"]["hsbc"]["en"].format(
             maxi_en="Maxi " if self.count > 1 else "",
-            daily_en="Daily " if self.obs == "D" else "",
+            daily_en="Daily " if self.ko_obs == "D" else "",
             memory_en="Memory " if self.memory else "",
         )
 
@@ -86,7 +103,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
             ["觸及不保本價格(即期初股價的60%)"] if s.ki != "none" else []
         ):
             line(s.scenario_replacements.get(t, t) if scenario else t)
-        for i in range(s.count):
+        for i in range(len(s.underlyings)):
             for t in [f"ZZ{i + 1} UW", f"虛構標的{i + 1}", "USD", "NASDAQ", "100.0000", "70.0000", "100.0000"] + (
                 ["60.0000"] if s.ki != "none" else []
             ):
@@ -96,7 +113,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
     line(short, 60)
     line(s.en, 60)
     line("中文產品說明書(最終版)")
-    line(f"商品代號/商品中文名稱：{s.code}/{s.name}")
+    line(f"商品代號/商品中文名稱：{s.product_code}/{s.name}")
     line(f"商品英文名稱：{s.en}")
     line("商品種類：股權連結商品")
     line("計價幣別：美元")
@@ -133,10 +150,10 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
             sub(1)
             line(f"固定配息率={s.annual}%×1/12")
             line("配息期數=6")
-            line("Nt" if s.obs == "D" else "付息日(如未在該計息期間自動提前到期)")
+            line("Nt" if s.ko_obs == "D" else "付息日(如未在該計息期間自動提前到期)")
             for i, (end, pay) in enumerate(zip(s.ends, s.payments, strict=True), 1):
                 vals = [str(i)]
-                if s.obs == "D":
+                if s.ko_obs == "D":
                     start = s.ends[i - 2] + dt.timedelta(days=1) if i > 2 else None
                     if start:
                         while start.weekday() >= 5:
@@ -150,7 +167,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
             sub(2)
             line("自動提前到期價格為期初股價×100%")
             line("所有連結標的皆已成為鎖定股票" if s.memory else "評價等於或大於其自動提前到期價格")
-            if s.obs == "D":
+            if s.ko_obs == "D":
                 line("自動提前到期決定日為自" + zh_date(s.ends[1]) + "(含)起每個預定交易日")
             else:
                 line("自動提前到期決定日")
@@ -237,51 +254,6 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True):
     return w.save(path)
 
 
-def build_inquiry(path: Path, s: Spec, overrides=None):
-    cfg = tomllib.loads(ORDER_FORMAT.read_text(encoding="utf-8"))
-    vals = {
-        "product_code": s.code,
-        "isin": "XS1999900001",
-        "currency": "USD",
-        "denomination": 10000,
-        "trade_date": dt.date(2030, 1, 7),
-        "issue_date": dt.date(2030, 1, 14),
-        "final_valuation_date": s.ends[-1],
-        "maturity_date": s.payments[-1],
-        "ko_pct": 100,
-        "strike_pct": 70,
-        "ki_pct": 60 if s.ki != "none" else "-",
-        "ki_type": s.ki if s.ki != "none" else "-",
-        "ko_observation": s.obs,
-        "ko_memory": "Y" if s.memory else "N",
-        "coupon_pa_pct": float(s.annual),
-        "tenor_months": 6,
-        "first_callable_period": 2,
-        "initial_pricing": "收盤價",
-        "checked_term_sheet": None,  # TS、IIS：回填欄位，預設空白
-        "checked_iis": None,
-    }
-    for i in range(1, 13):
-        vals[f"autocall_date_{i}"] = (
-            s.ends[i - 1] if (s.obs == "P" and 2 <= i <= 6) or (s.obs == "D" and i in (2, 6)) else "-"
-        )
-    for i in range(1, 6):
-        vals[f"underlying_{i}"] = f"ZZ{i} UW" if i <= s.count else "-"
-        for k, v in [("initial", 100), ("strike", 70), ("ko", 100), ("ki", 60)]:
-            vals[f"underlying_{i}_{k}_price"] = v if i <= s.count and (k != "ki" or s.ki != "none") else "-"
-    vals.update(overrides or {})
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "樣本清單"
-    headers = [h for h, v in cfg["columns"].items() if isinstance(v, str)] + ["發行機構"]
-    for i, h in enumerate(headers, 1):
-        ws.cell(3, i, h)
-        ws.cell(4, i, issuer_value("HSBC") if h == "發行機構" else vals[cfg["columns"][h]])
-    wb.save(path)
-    wb.close()
-    return path
-
-
 # ---------------------------------------------------------------- 投資人須知（docs/templates/hsbc-zh-iis.md）
 
 IIS_PAGES = 4  # 審查標準 iis.pages
@@ -303,8 +275,8 @@ def build_iis_pdf(
     warning = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
     issuer = STD["issuer_name"]["hsbc"].split("（")[0]
     short = s.name.replace("（以下簡稱「本商品」）", "").replace("（", "(").replace("）", ")")
-    names = [f"虛構標的{i + 1}" for i in range(s.count)]
-    tickers = [f"ZZ{i + 1} UW" for i in range(s.count)]
+    names = [f"虛構標的{i + 1}" for i in range(len(s.underlyings))]
+    tickers = [f"ZZ{i + 1} UW" for i in range(len(s.underlyings))]
 
     def line(t: str, x: float = 60) -> None:
         for old, new in replace.items():

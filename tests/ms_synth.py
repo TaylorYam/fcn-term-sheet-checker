@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import tomllib
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -17,19 +16,17 @@ from typing import Any
 
 import fitz
 
-from harness import CONFIG, REVIEW_STANDARD, check_all, iis_path
+from harness import CONFIG, STANDARD, check_all, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
-from reference_synth import build_reference_sheet, make_row
+from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
 
-STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
+STD = STANDARD
 NAME = STD["product_name"]["ms"]
 WARNING = STD["risk"]["fixed_warning_by_issuer"]["ms"]
 WARNING_CH1 = STD["risk"]["fixed_warning_openings"]["ms"][0] + WARNING[WARNING.index("。") + 1 :] + "。"
 ISSUER = STD["issuer_name"]["ms"]
 DIST = STD["distributor"]
 TRADE, ISSUE, APPROVAL = dt.date(2030, 1, 7), dt.date(2030, 1, 14), dt.date(2026, 6, 11)
-DENOM = 10000
-STRIKE, KI, KO = Decimal("70.00"), Decimal("60.00"), Decimal("100.00")
 NUMERIC = set("0123456789,.")
 
 
@@ -43,16 +40,32 @@ def money(x: Decimal | int) -> str:
     return f"{Decimal(x):,.2f}"
 
 
+def underlying_name(i: int) -> str:
+    """第 i 檔標的的名稱（說明書第 11 項標的表與投資人須知連結標的資產同一寫法）。"""
+    return f"虛構標的{i}公司(FICTIONAL {i})"
+
+
+def underlyings(count: int) -> tuple[UL, ...]:
+    """MS 合成文件的標的：ZZn UW、期初價 100n。"""
+    return tuple(
+        UL(underlying_name(i), "那斯達克證券交易所", f"ZZ{i} UW", Decimal(100 * i)) for i in range(1, count + 1)
+    )
+
+
 @dataclass
-class Spec:
-    code: str = "147199990001"
-    obs: str = "D"  # KO 觀察方式：D 每日／P 每期定價日
-    memory: bool = True
+class Spec(ProductSpec):
+    """MS 合成說明書與投資人須知的規格：商品規格加上改字旋鈕。預設值下兩份文件與參考條件表列完全一致。
+
+    標的以 `count` 為主（給了就依它產生）；最終比價日與到期日由配息排程推得，不直接給。
+    """
+
+    issuer: str = "MS"
+    product_code: str = "147199990001"
     ki: str = "AM"  # none／AM／D／P
-    count: int = 2  # 標的數
     tenor: int = 4
-    non_call: int = 1  # 第一個可提前出場期
     annual: Decimal = Decimal("12")  # 參考條件表年利率；說明書月配息率 = 年利率 ÷ 12
+    underlyings: tuple[UL, ...] = underlyings(2)
+    count: int | None = None  # 標的數；None → 依 underlyings
     trustee_code: str | None = None  # 受託機構商品代號；None 同商品代號，"" 空白
     ko_column: bool | None = None  # 價格表有無自動提前出場價欄；None 依 Non-Call < 天期
     replace: list[tuple[str, str, str]] = field(default_factory=list)  # (段落代號前綴, 原文, 新文字)
@@ -60,6 +73,13 @@ class Spec:
     iis_replace: list[tuple[str, str, str]] = field(default_factory=list)  # 投資人須知的 (段落代號前綴, 原文, 新文字)
     iis_pages: int = 4  # 投資人須知頁數（多的頁只有頁底）
     iis_page_total: int | None = None  # 投資人須知頁底「共 M頁」的 M；None 同實際頁數
+
+    def __post_init__(self) -> None:
+        if self.count is None:
+            self.count = len(self.underlyings)
+        else:
+            self.underlyings = underlyings(self.count)
+        self.final_date, self.maturity_date = self.ends[-1], self.payments[-1]
 
     @property
     def ends(self) -> list[dt.date]:
@@ -76,15 +96,15 @@ class Spec:
 
     @property
     def starts(self) -> list[dt.date]:
-        return [ISSUE] + [_weekday(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
+        return [self.issue_date] + [_weekday(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
 
     @property
     def tickers(self) -> list[str]:
-        return [f"ZZ{i + 1} UW" for i in range(self.count)]
+        return [u.ticker for u in self.underlyings]
 
     @property
     def initials(self) -> list[Decimal]:
-        return [Decimal(100 * (i + 1)) for i in range(self.count)]
+        return [u.initial for u in self.underlyings]
 
     @property
     def monthly(self) -> Decimal:
@@ -92,11 +112,11 @@ class Spec:
 
     @property
     def coupon(self) -> Decimal:
-        return (DENOM * self.monthly / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+        return (self.denom * self.monthly / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
     @property
     def has_ko(self) -> bool:
-        return self.non_call < self.tenor if self.ko_column is None else self.ko_column
+        return self.first_callable < self.tenor if self.ko_column is None else self.ko_column
 
     @property
     def name_zh(self) -> str:
@@ -112,15 +132,6 @@ class Spec:
         return NAME["en"].format(
             tenor=self.tenor, ccy="USD", underlying_en=NAME["basket_en"] if self.count > 1 else NAME["single_en"]
         )
-
-
-def underlying_name(i: int) -> str:
-    """第 i 檔標的的名稱（說明書第 11 項標的表與投資人須知連結標的資產同一寫法）。"""
-    return f"虛構標的{i}公司(FICTIONAL {i})"
-
-
-def price(initial: Decimal, pct: Decimal) -> Decimal:
-    return (initial * pct / 100).quantize(Decimal("0.0001"), ROUND_HALF_UP)
 
 
 class _Doc:
@@ -170,23 +181,33 @@ class _Doc:
 
 def _price_table(d: _Doc, s: Spec, section: str) -> None:
     d.section = section
-    for t in ["連結", "標的", "(k)", "彭博代碼", "(Bloomberg)", "期初價格", "執行價 （期", "初價格的", f"{STRIKE}%）"]:
+    for t in [
+        "連結",
+        "標的",
+        "(k)",
+        "彭博代碼",
+        "(Bloomberg)",
+        "期初價格",
+        "執行價 （期",
+        "初價格的",
+        f"{s.strike}%）",
+    ]:
         d.cell(96, t)
     if s.ki != "none":
-        for t in ["下限價格", "（期初價格的", f"{KI}%）"]:
+        for t in ["下限價格", "（期初價格的", f"{s.ki_pct}%）"]:
             d.cell(371, t)
     if s.has_ko:
-        for t in ["自動提前出場", "價 （期初價", "格的", f"{KO}%）"]:
+        for t in ["自動提前出場", "價 （期初價", "格的", f"{s.ko}%）"]:
             d.cell(437, t)
     for i, (ticker, initial) in enumerate(zip(s.tickers, s.initials, strict=True), 1):
         d.cell(96, f"k={i}")
         d.cell(141, ticker)
         d.cell(216, f"{initial:.4f}")
-        d.cell(293, f"{price(initial, STRIKE):.4f}")
+        d.cell(293, f"{price(initial, s.strike):.4f}")
         if s.ki != "none":
-            d.cell(371, f"{price(initial, KI):.4f}")
+            d.cell(371, f"{price(initial, s.ki_pct):.4f}")
         if s.has_ko:
-            d.cell(448, f"{price(initial, KO):.4f}")
+            d.cell(448, f"{price(initial, s.ko):.4f}")
         if section == "art16.table" and s.breaks.get("price") == i:
             d.w.new_page()
 
@@ -194,13 +215,13 @@ def _price_table(d: _Doc, s: Spec, section: str) -> None:
 def _scenarios(d: _Doc, s: Spec) -> None:
     unit, a, n = "美元", s.coupon, s.tenor
     profit = []
-    if s.non_call < n:
-        profit.append(("較佳情況 A" if s.non_call + 1 < n else "較佳情況", s.non_call))
-        if s.non_call + 1 < n:
-            profit.append(("較佳情況B", s.non_call + 1))
-    profit.append(("一般情況" if s.non_call < n else "較佳情況", n))
+    if s.first_callable < n:
+        profit.append(("較佳情況 A" if s.first_callable + 1 < n else "較佳情況", s.first_callable))
+        if s.first_callable + 1 < n:
+            profit.append(("較佳情況B", s.first_callable + 1))
+    profit.append(("一般情況" if s.first_callable < n else "較佳情況", n))
     zh = "一二三四五六"
-    period = "配息週期終止日" if s.obs == "D" else "定價日"
+    period = "配息週期終止日" if s.ko_obs == "D" else "定價日"
     for idx, (title, k) in enumerate(profit):
         d.section = f"scen.{zh[idx]}"
         d.text(72, f"情境{zh[idx]}：{title}")
@@ -210,31 +231,31 @@ def _scenarios(d: _Doc, s: Spec) -> None:
                 f"假設在第{k} 個{period}，所有連結標的之收盤價皆大於或等於其自動提前出場價，即發生自動提前出場事件：",
             )
         else:
-            span = "配息觀察期間" if s.obs == "D" else "定價日"
+            span = "配息觀察期間" if s.ko_obs == "D" else "定價日"
             d.text(72, f"假設在第1 至第{n} 個{span}，不曾發生任何自動提前出場事件，到期日以現金結算收益：")
         d.text(72, "每單位商品面額×固定配息率")
-        d.text(72, f"= 每單位商品面額×{s.monthly}%={money(DENOM)} {unit}×{s.monthly}%={money(a)} {unit}")
-        if s.obs == "D" and 1 < k < n:
+        d.text(72, f"= 每單位商品面額×{s.monthly}%={money(s.denom)} {unit}×{s.monthly}%={money(a)} {unit}")
+        if s.ko_obs == "D" and 1 < k < n:
             d.text(
-                72, f"第{k} 個配息觀察期間配息觀察日總數 ={money(DENOM)} {unit}×{s.monthly}%×100% ={money(a)} {unit}"
+                72, f"第{k} 個配息觀察期間配息觀察日總數 ={money(s.denom)} {unit}×{s.monthly}%×100% ={money(a)} {unit}"
             )
         times = f"×{k}" if k > 1 else ""
-        d.text(72, f"={money(DENOM)} {unit}+{money(a)} {unit}{times}-{money(DENOM)} {unit}={money(a * k)} {unit}")
+        d.text(72, f"={money(s.denom)} {unit}+{money(a)} {unit}{times}-{money(s.denom)} {unit}={money(a * k)} {unit}")
         d.text(72, f"以簡單平均計算報酬率之方式以計算年化報酬率為{s.annual:.2f}%（四捨五入至百分位後第二位)")
     worse, fail = zh[len(profit)], zh[len(profit) + 1]
     d.section = f"scen.{worse}"
     d.text(72, f"情境{worse}：較差情況")
     d.text(72, "假設在所有配息觀察期間內，不曾發生任何自動提前出場事件。")
-    strike = price(s.initials[0], STRIKE)
+    strike = price(s.initials[0], s.strike)
     d.text(
         72,
         f"於期末定價日籃子中表現最差之連結標的（{s.tickers[0]})的收盤價=42.0000 {unit}小於其執行價={strike:.4f} {unit}，"
         "到期日以實物交割結算收益：",
     )
-    d.text(72, f"= 每單位商品面額×{s.monthly}%={money(DENOM)} {unit}×{s.monthly}%={money(a)} {unit}")
+    d.text(72, f"= 每單位商品面額×{s.monthly}%={money(s.denom)} {unit}×{s.monthly}%={money(a)} {unit}")
     d.text(72, f"=42.0000 {unit}×142 股/1+36.00 {unit}=6,000.00 {unit}")
-    pnl = a * n + 6000 - DENOM
-    d.text(72, f"= {money(a)} {unit}×{n}+6,000.00 {unit}-{money(DENOM)} {unit}={money(pnl)} {unit}")
+    pnl = a * n + 6000 - s.denom
+    d.text(72, f"= {money(a)} {unit}×{n}+6,000.00 {unit}-{money(s.denom)} {unit}={money(pnl)} {unit}")
     d.text(72, "以簡單平均計算報酬率之方式以計算年化報酬率為-40.00%（四捨五入至百分位後第二位)")
     d.section = f"scen.{fail}"
     d.text(72, f"情境{fail}：發行機構無法履約")
@@ -248,17 +269,21 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
     d = _Doc(s)
     w = d.w
     ends, payments, starts = s.ends, s.payments, s.starts
-    trustee = s.code if s.trustee_code is None else s.trustee_code
+    trustee = s.product_code if s.trustee_code is None else s.trustee_code
     w.line(258, "中文產品說明書", gap=16)
     for n, t in enumerate(
         [
-            f"商品代號：{s.code}",
+            f"商品代號：{s.product_code}",
             f"受託機構商品代號：{trustee}",
             "國際證券編碼ISIN：XS1999900001",
             f"商品中文名稱：{s.name_zh}",
             f"商品英文名稱：{s.name_en}",
             "商品種類："
-            + ("股票與/或指數股票型基金連結結構型債券" if s.count > 1 else "股票或指數股票型基金連結結構型債券"),
+            + (
+                "股票與/或指數股票型基金連結結構型債券"
+                if len(s.underlyings) > 1
+                else "股票或指數股票型基金連結結構型債券"
+            ),
             "發行機構註冊地：英國",
             "商品註冊地：專業投資人與OSU 客戶不適用",
             "商品計價幣別：美元 (USD)",
@@ -275,7 +300,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
         d.text(36, f"{n}. {t}", 54)
     d.text(54, "1) " + WARNING, 71)
     d.text(54, "2) 本商品係複雜的金融商品，必須經過符合資格的人員解說後再進行投資。", 71)
-    d.text(72, f"中文產品說明書刊印日期：{zh_date(TRADE)}")
+    d.text(72, f"中文產品說明書刊印日期：{zh_date(s.trade_date)}")
 
     d.chapter("一", "商品基本資料")
     short = s.name_zh.replace("(下稱「本商品」)", "")
@@ -284,7 +309,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
         2: WARNING_CH1,
         3: f"發行機構名稱及其長期債務信用評等：本商品發行機構為{ISSUER.split('(')[0]}，截至刊印日期之信用評等不核對。",
         5: "計價幣別：美元 (USD)",
-        6: f"每單位商品面額：美元 {money(DENOM)} 元",
+        6: f"每單位商品面額：美元 {money(s.denom)} 元",
         7: "發行價格：商品面額之100%",
         11: "連結標的資產，及其相對權重、與投資績效之關連情形：",
         14: "商品年期、發行日、到期日及其他依個別商品性質而定之日期：",
@@ -297,13 +322,13 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
         d.article(n, titles.get(n, "範本說明。"))
         if n == 11:
             d.text(72, "連結標的資產：")
-            if s.count > 1:  # 多標的另有列號欄
+            if len(s.underlyings) > 1:  # 多標的另有列號欄
                 d.cell(40, "連結標的")
             d.cell(85, "股票 / 指數股票型基金")
             d.cell(250, "彭博代碼(Bloomberg)")
             d.cell(441, "交易所")
             for i, ticker in enumerate(s.tickers, 1):
-                if s.count > 1:
+                if len(s.underlyings) > 1:
                     d.cell(44, str(i))
                 d.cell(66, underlying_name(i))
                 d.cell(283, ticker)
@@ -311,11 +336,11 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
             d.text(72, "相對權重：不適用。")
         elif n == 14:
             d.sub(1, f"商品年期：{s.tenor} 個月期")
-            d.sub(2, f"交易日：{zh_date(TRADE)}")
-            d.sub(3, f"發行日：{zh_date(ISSUE)}")
+            d.sub(2, f"交易日：{zh_date(s.trade_date)}")
+            d.sub(3, f"發行日：{zh_date(s.issue_date)}")
             d.sub(4, f"到期日：{zh_date(payments[-1])}。到期日為期末定價日後至少第三個營業日之日。")
             d.sub(5, f"期末定價日*：{zh_date(ends[-1])}，如當日非預定交易日，次一預定交易日為之。")
-            if s.obs == "D":
+            if s.ko_obs == "D":
                 d.sub(6, "配息週期起始日、配息週期終止日與配息日：依下表所示")
                 header = ["配息觀察期間(j)", "配息週期起始日（含）", "配息週期終止日（含）", "配息日"]
             else:
@@ -325,11 +350,11 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
             for x, t in zip((62, 175, 305, 473), header, strict=True):
                 d.cell(x, t)
             for j in range(1, s.tenor + 1):
-                if s.obs == "D":
+                if s.ko_obs == "D":
                     cells = [starts[j - 1], ends[j - 1], payments[j - 1]]
                 else:
                     # 自動提前出場日：第 Non-Call 期起 = 配息日；Non-Call = 天期時全部「無」
-                    auto = payments[j - 1] if s.non_call <= j and s.non_call < s.tenor else None
+                    auto = payments[j - 1] if s.first_callable <= j and s.first_callable < s.tenor else None
                     cells = [ends[j - 1], payments[j - 1], auto]
                 d.cell(98, str(j))
                 for x, c in zip((188, 318, 450), cells, strict=True):
@@ -341,7 +366,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
             d.sub(7, "次級市場投資人提前贖回日：自開始受理贖回日期至結束受理贖回日期止。")
         elif n == 15:
             d.sub(1, "配息頻率：每月，金額將根據以下條款所計算")
-            if s.obs == "D":
+            if s.ko_obs == "D":
                 d.sub(
                     2,
                     f"於每月配息日，每單位配息金額 = 每單位商品面額 × 固定配息率 ({s.monthly}%) ，但如發生自動提前出場事件：",
@@ -380,15 +405,15 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
             d.sub(1, "最低保證贖回率：本商品不適用。")
             d.sub(2, "參與率：不適用。")
         elif n == 17:
-            k, final = s.non_call, ends[-1]
-            cond = "所有連結標的之收盤價皆等於或高於" if s.count > 1 else "該連結標的之收盤價大於或等於"
+            k, final = s.first_callable, ends[-1]
+            cond = "所有連結標的之收盤價皆等於或高於" if len(s.underlyings) > 1 else "該連結標的之收盤價大於或等於"
             if s.memory:
                 d.text(
                     72,
                     "自動提前出場事件：若於記憶事件觀察日所有連結標的皆發生記憶事件成為自動提前出場標的，則發生自動提前出場事件。",
                 )
                 d.text(72, "記憶事件：任何連結標的於記憶事件觀察日之收盤價大於或等於其自動提前出場價，則發生記憶事件。")
-                if s.obs == "D":
+                if s.ko_obs == "D":
                     d.text(
                         72,
                         f"記憶事件觀察日：每日觀察，為自第{k} 個配息週期終止日（{zh_date(ends[k - 1])}）（包含）至"
@@ -399,7 +424,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
                         72,
                         f"記憶事件觀察日：每一個定價日自第{k} 個定價日開始觀察，如當日非預定交易日，次一預定交易日為之。",
                     )
-            elif s.obs == "D":
+            elif s.ko_obs == "D":
                 d.text(72, f"自動提前出場事件：若於任一觀察日{cond}其自動提前出場價，則發生自動提前出場事件。")
                 d.text(
                     72,
@@ -414,7 +439,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
         elif n == 18:
             d.sub(3, "以情境分析解說最大可能獲利、損失及其他狀況之平均年化報酬率：")
             d.text(72, "假設：")
-            d.text(72, f"▪ 總投資金額 = 1 單位商品面額 = {money(DENOM)} 美元")
+            d.text(72, f"▪ 總投資金額 = 1 單位商品面額 = {money(s.denom)} 美元")
             d.text(72, f"▪ 年期：{s.tenor} 個月")
             d.text(72, f"▪ 月配息率={s.monthly}%")
             _price_table(d, s, "art18.table")
@@ -450,7 +475,7 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
 
     d.chapter("四", "一般交易事項")
     d.text(36, "1. 商品開始受理贖回日期及後續受理贖回日期，每營業日受理申購、贖回申請截止時間：")
-    d.text(54, f"(1) 開始受理贖回日期：{zh_date(_weekday(ISSUE + dt.timedelta(days=1)))}")
+    d.text(54, f"(1) 開始受理贖回日期：{zh_date(_weekday(s.issue_date + dt.timedelta(days=1)))}")
     d.text(54, "(2) 結束受理贖回日期：期末定價日前三個營業日")
     d.text(36, "2. 投資人應負擔的各項費用及金額或計算基準之表列：")
     w.need(260)
@@ -471,15 +496,15 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
     d.text(36, "3. 商品交易架構：參閱以上第二章。")
     d.text(
         36,
-        f"4. 最低申購金額及最低加購金額：最低申購金額為 1 單位商品面額，即美元{DENOM:,} 元，並以美元"
-        f"{money(DENOM)} 元(1 單位商品面額)為最低加購單位。",
+        f"4. 最低申購金額及最低加購金額：最低申購金額為 1 單位商品面額，即美元{s.denom:,} 元，並以美元"
+        f"{money(s.denom)} 元(1 單位商品面額)為最低加購單位。",
     )
     d.text(36, "5. 申購價金之計算：申購價金＝投資人總申購單位數×每單位商品面額×發行價格(商品面額的 100%)+ 申購費用。")
     for n in (6, 7):
         d.text(36, f"{n}. 範本說明。")
     d.text(
         36,
-        f"8. 最低贖回金額或單位數：最低贖回金額為1 單位商品面額，即美元{DENOM:,} 元，並以美元{money(DENOM)}"
+        f"8. 最低贖回金額或單位數：最低贖回金額為1 單位商品面額，即美元{s.denom:,} 元，並以美元{money(s.denom)}"
         "元(1 單位商品面額)為累加贖回單位。",
     )
     d.chapter("五", "定義及其他條款")
@@ -495,9 +520,9 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
     """MS 中文投資人須知（新版，docs/templates/ms-zh-iis.md）：與 `s` 的說明書、參考條件表列一致，預設 4 頁。"""
     d = _Doc(s, s.iis_replace)
     w = d.w
-    ends, payments, k, final = s.ends, s.payments, s.non_call, s.ends[-1]
+    ends, payments, k, final = s.ends, s.payments, s.first_callable, s.ends[-1]
     dist, zh_issuer = DIST["name"], ISSUER.split("(")[0]
-    kind = "股票與/或指數股票型基金連結結構型債券" if s.count > 1 else "股票或指數股票型基金連結結構型債券"
+    kind = "股票與/或指數股票型基金連結結構型債券" if len(s.underlyings) > 1 else "股票或指數股票型基金連結結構型債券"
     w.line(130, "中文投資人須知(專業投資人/國際證券業務分公司受託買賣客戶)")
     d.text(18, f"商品中文名稱：{s.name_zh} 商品英文名稱：{s.name_en} (ISIN:XS1999900001)")
     d.text(18, f"商品種類：{kind}")
@@ -522,9 +547,9 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
     d.section = "summary"
     d.text(18, "二、 境外結構型商品事項：")
     d.text(18, "1. 商品簡介：")
-    label = (lambda i: f"連結標的{i}") if s.count > 1 else (lambda i: "連結標的")
-    uls = " ".join(f"({i}) {label(i)}: {underlying_name(i)}" for i in range(1, s.count + 1))
-    redeem_from = _weekday(ISSUE + dt.timedelta(days=1))
+    label = (lambda i: f"連結標的{i}") if len(s.underlyings) > 1 else (lambda i: "連結標的")
+    uls = " ".join(f"({i}) {label(i)}: {underlying_name(i)}" for i in range(1, len(s.underlyings) + 1))
+    redeem_from = _weekday(s.issue_date + dt.timedelta(days=1))
     for n, t in enumerate(
         [
             "受託對象：專業投資人及OSU 客戶",
@@ -536,7 +561,7 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
             "計價貨幣本金保本率：無。",
             "投資本金達成100%保本率之各項條件：不適用。",
             f"連結標的資產：{uls}",
-            f"商品年期：{s.tenor} 個月期；交易日：{zh_date(TRADE)}；發行日: {zh_date(ISSUE)}；到期日："
+            f"商品年期：{s.tenor} 個月期；交易日：{zh_date(s.trade_date)}；發行日: {zh_date(s.issue_date)}；到期日："
             f"{zh_date(payments[-1])}；期末定價日：{zh_date(final)} ，如當日非預定交易日，次一預定交易日為之。",
             "配息： 於存續期間每月配息。",
             f"開始受理贖回日期：{zh_date(redeem_from)}",
@@ -548,7 +573,7 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
     w.new_page()
     d.section = "coupon"
     d.text(18, "2. 收益分配事項：於每月配息日，發行機構將依下列計算公式以美元為計價單位給付配息金額：")
-    if s.obs == "D":
+    if s.ko_obs == "D":
         d.text(
             49,
             "若於相對應配息觀察期間內未發生自動提前出場事件，則每單位配息金額 = 每單位商品面額 × 固定配息率 "
@@ -579,8 +604,8 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
             "低於其下限價格，則觸及下限事件視同發生。",
             47,
         )
-    plain = "所有連結標的之收盤價皆等於或高於" if s.count > 1 else "該連結標的之收盤價大於或等於"
-    if s.obs == "D":
+    plain = "所有連結標的之收盤價皆等於或高於" if len(s.underlyings) > 1 else "該連結標的之收盤價大於或等於"
+    if s.ko_obs == "D":
         observed = (
             f"觀察日：每日觀察，為自第{k} 個配息週期終止日（{zh_date(ends[k - 1])}）（包含）至期末定價日"
             f"（{zh_date(final)}）（包含）的任一" + ("共同預定交易日。" if s.memory else "預定交易日。")
@@ -599,7 +624,7 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
             f"記憶事件觀察日：每一個定價日自第{k} 期定價日（含）開始觀察，如當日非預定交易日，次一預定交易日為之。"
         )
     else:
-        plain = "所有連結標的皆等於或高於" if s.count > 1 else plain
+        plain = "所有連結標的皆等於或高於" if len(s.underlyings) > 1 else plain
         ko = f"自動提前出場事件：自第{k} 個定價日（含）開始，若於任一定價日{plain}其自動提前出場價，則視同發生。"
     d.text(18, "2) 自動提前出場給付：自動提前出場贖回金額＝持有之商品單位數×每單位商品面額×100%。" + ko, 47)
     d.text(18, "4. 發行不成立之處理：範本說明。")
@@ -641,45 +666,13 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
         w.doc.delete_page(-1)
     d.section = "cover"
     # 第 1 頁右上角的刊印日期寫在最後：擷取順序同真實樣本，排在第 1 頁最後
-    w.doc[0].insert_text((374, 21), d.edit(f"中文投資人須知刊印日期:{zh_date(TRADE)}"), fontname=FONT, fontsize=8)
+    w.doc[0].insert_text(
+        (374, 21), d.edit(f"中文投資人須知刊印日期:{zh_date(s.trade_date)}"), fontname=FONT, fontsize=8
+    )
     total = s.iis_page_total or len(w.doc)
     for i, page in enumerate(w.doc):
         page.insert_text((262, 826), f"第{i + 1} 頁，共 {total}頁", fontname=FONT, fontsize=8)
     return w.save(path)
-
-
-def _xl(d: dt.date) -> dt.datetime:
-    return dt.datetime.combine(d, dt.time())
-
-
-def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
-    """與合成說明書一致的 MS 參考條件表列；回填欄位（TS、IIS、ISIN、發行日、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
-    fields: dict[str, Any] = {
-        "product_code": s.code,
-        "denomination": DENOM,
-        "currency": "USD",
-        "trade_date": _xl(TRADE),
-        "final_valuation_date": _xl(s.ends[-1]),
-        "maturity_date": _xl(s.payments[-1]),
-        "ko_pct": float(KO),
-        "ko_observation": s.obs,
-        "ko_memory": "Y" if s.memory else "N",
-        "strike_pct": float(STRIKE),
-        "ki_pct": float(KI) if s.ki != "none" else "-",
-        "ki_type": s.ki if s.ki != "none" else "-",
-        "coupon_pa_pct": float(s.annual),
-        "tenor_months": s.tenor,
-        "first_callable_period": s.non_call,
-    }
-    for i in range(1, 6):
-        has = i <= s.count
-        initial = s.initials[i - 1] if has else None
-        fields[f"underlying_{i}"] = s.tickers[i - 1] if has else "-"
-        fields[f"underlying_{i}_initial_price"] = float(initial) if has else "-"
-        fields[f"underlying_{i}_strike_price"] = float(price(initial, STRIKE)) if has else "-"
-        fields[f"underlying_{i}_ki_price"] = float(price(initial, KI)) if has and s.ki != "none" else "-"
-        fields[f"underlying_{i}_ko_price"] = float(price(initial, KO)) if has else "-"
-    return make_row("MS", fields, **overrides)
 
 
 def check_pair(
@@ -687,7 +680,7 @@ def check_pair(
 ):
     """同 `check`，回傳（說明書, 投資人須知）兩份的批量核對項目（BatchItem）。"""
     spec = spec or Spec()
-    pdf = build_pdf(tmp_path / f"{spec.code}_TS.pdf", pdf_spec or spec)
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
     outcome = check_all(sheet, [pdf, iis_path(pdf)], config)
     ts = next(i for i in outcome.items if i.term_sheet == pdf)
@@ -700,7 +693,7 @@ def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = N
     `config` 換核對設定（例：改過的審查標準）。
     """
     spec = spec or Spec()
-    pdf = build_pdf(tmp_path / f"{spec.code}_TS.pdf", pdf_spec or spec)
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
     outcome = check_all(sheet, [pdf], config)
     return next(i.report for i in outcome.items if i.term_sheet == pdf)

@@ -1,70 +1,41 @@
-"""BARC 說明書合成器：仿 BARC 中文產品說明書版面的 PDF，以及與之一致的參考條件表列。
+"""BARC 說明書合成器：把商品規格（tests/reference_synth.py 的 `ProductSpec`）畫成仿 BARC 中文產品說明書版面的 PDF。
 
 所有數值、代號、名稱皆為虛構；不含任何真實交易資料。版面座標依範本規格
 docs/templates/barc-zh-product-description.md 觀察值設定。PDF 排版用 tests/pdf_writer.py，
-參考條件表與單份核對用 tests/reference_synth.py、tests/harness.py。
+參考條件表列用 tests/reference_synth.py、單份核對用 tests/harness.py。
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import tomllib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
 from fcn_checker.issuers import BARC, Issuer
-from harness import REVIEW_STANDARD, check_rows, iis_path
+from fcn_checker.schema import CheckReport
+from harness import STANDARD, check_sheet, iis_path
 from pdf_writer import FONT, PdfWriter, zh_date
-from reference_synth import make_row
+from reference_synth import Q4, ProductSpec, build_reference_sheet, price, reference_row
 
-_STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
-FIXED_WARNING = _STD["risk"]["fixed_warning"]
-DISTRIBUTOR = _STD["distributor"]
-ISSUER_NAME = _STD["issuer_name"]["barc"]
-FEES = dict(_STD["fees"])
-CURRENCY_ISO = dict(_STD["currency"])
-Q4 = Decimal("0.0001")
+FIXED_WARNING = STANDARD["risk"]["fixed_warning"]
+DISTRIBUTOR = STANDARD["distributor"]
+ISSUER_NAME = STANDARD["issuer_name"]["barc"]
+FEES = dict(STANDARD["fees"])
 SYNTH_ISIN = "XS0000000000"  # 合成說明書封面的 ISIN
 
 
 @dataclass
-class UL:
-    name: str
-    exchange: str
-    ticker: str
-    initial: Decimal
+class Spec(ProductSpec):
+    """BARC 合成說明書的規格：商品規格加上說明書專用的改字旋鈕。預設值下說明書、投資人須知與參考條件表列完全一致。
 
+    Non-Call 由保證配息期 G 推得（D 型 = G；P 型 = G + 1），不直接給 `first_callable`。
+    """
 
-DEFAULT_ULS = (
-    UL("甲乙丙科技股份有限公司ADR", "紐約證券交易所", "ZZA UN", Decimal("123.4500")),
-    UL("Zeta Quantum Holdings Inc", "那斯達克證券交易所", "ZQH UW", Decimal("87.2000")),
-    UL("丁戊電子公司", "那斯達克證券交易所", "DWE UW", Decimal("1234.5600")),
-)
-
-
-@dataclass
-class Spec:
-    """合成說明書與參考條件表的共同參數。預設兩者完全一致。"""
-
+    issuer: str = "BARC"
     product_code: str = "029199990001"
-    currency_zh: str = "美元"
-    tenor: int = 6
-    memory: bool = True
-    ko_obs: str = "D"  # D 期間每日／P 期末定日
-    ki: str = "none"  # none／AM／D／M
-    strike: Decimal = Decimal("70.00")
-    ko: Decimal = Decimal("100.00")
-    ki_pct: Decimal = Decimal("60.00")
-    annual: Decimal = Decimal("12.00")
     monthly: Decimal | None = None  # None → 由年利率推算
-    trade_date: dt.date = dt.date(2030, 1, 7)
-    issue_date: dt.date = dt.date(2030, 1, 14)
-    final_date: dt.date = dt.date(2030, 7, 8)
-    maturity_date: dt.date = dt.date(2030, 7, 11)
-    denomination: int | None = None  # None → 幣別預設值
-    underlyings: tuple[UL, ...] = DEFAULT_ULS
     # ---- 說明書專用的變化 ----
     price_overrides: dict[tuple[int, str], str] = field(default_factory=dict)  # (標的序, 欄) → 文字
     approval_date: dt.date = dt.date(2026, 6, 11)
@@ -111,12 +82,8 @@ class Spec:
     distributor_address_ch2: str | None = None
     fees: dict[str, str] = field(default_factory=dict)  # 費用項目 → 費率區間（覆寫審查標準值）
 
-    def with_(self, **kw: Any) -> Spec:
-        return replace(self, **kw)
-
-    @property
-    def ccy(self) -> str:
-        return CURRENCY_ISO[self.currency_zh]
+    def __post_init__(self) -> None:
+        self.first_callable = self.guaranteed_value if self.ko_obs == "D" else self.guaranteed_value + 1
 
     @property
     def monthly_value(self) -> Decimal:
@@ -129,10 +96,6 @@ class Spec:
         if self.guaranteed is not None:
             return self.guaranteed
         return 1 if self.ko_obs == "D" else 0
-
-    @property
-    def denom(self) -> int:
-        return self.denomination or {"USD": 10000, "JPY": 1000000, "CNH": 100000}[self.ccy]
 
     def expected_name_zh(self) -> str:
         mem = "記憶式" if self.memory else ""
@@ -151,10 +114,6 @@ class Spec:
 
 def fmt_price(v: Decimal) -> str:
     return f"{v:,.4f}"
-
-
-def price(initial: Decimal, pct: Decimal) -> Decimal:
-    return (initial * pct / 100).quantize(Q4, ROUND_HALF_UP)
 
 
 def _finish(w: PdfWriter, path: Path) -> Path:
@@ -629,42 +588,12 @@ def build_not_barc_pdf(path: Path) -> Path:
 # ---------------------------------------------------------------- 參考條件表與單份核對
 
 
-def _xl_date(d: dt.date) -> dt.datetime:
-    return dt.datetime.combine(d, dt.time())
-
-
-def first_callable(s: Spec) -> int:
-    """Non-Call(月)：D 型 = 保證配息期 G（第 G 期期末日起可提前出場）；P 型 = G + 1。"""
-    return s.guaranteed_value if s.ko_obs == "D" else s.guaranteed_value + 1
-
-
-def reference_row(s: Spec, **overrides: Any) -> dict[str, Any]:
-    """與合成說明書一致的 BARC 參考條件表列；回填欄位（TS、IIS、ISIN、發行日、比價日）預設空白。overrides 以 Excel 欄名覆寫。"""
-    fields: dict[str, Any] = {
-        "product_code": s.product_code,
-        "denomination": s.denom,
-        "currency": s.ccy,
-        "trade_date": _xl_date(s.trade_date),
-        "final_valuation_date": _xl_date(s.final_date),
-        "maturity_date": _xl_date(s.maturity_date),
-        "ko_pct": float(s.ko),
-        "ko_observation": s.ko_obs,
-        "ko_memory": "Y" if s.memory else "N",
-        "strike_pct": float(s.strike),
-        "ki_pct": float(s.ki_pct) if s.ki != "none" else "-",
-        "ki_type": {"none": "-", "AM": "AM", "D": "D", "M": "M"}[s.ki],
-        "coupon_pa_pct": float(s.annual),
-        "tenor_months": s.tenor,
-        "first_callable_period": first_callable(s),
-    }
-    for i in range(1, 6):
-        u = s.underlyings[i - 1] if i <= len(s.underlyings) else None
-        fields[f"underlying_{i}"] = u.ticker if u else "-"
-        fields[f"underlying_{i}_initial_price"] = float(u.initial) if u else "-"
-        fields[f"underlying_{i}_strike_price"] = float(price(u.initial, s.strike)) if u else "-"
-        fields[f"underlying_{i}_ki_price"] = float(price(u.initial, s.ki_pct)) if u and s.ki != "none" else "-"
-        fields[f"underlying_{i}_ko_price"] = float(price(u.initial, s.ko)) if u else "-"
-    return make_row("BARC", fields, **overrides)
+def check_rows(
+    tmp_path: Path, pdf: Path, rows: list[dict[str, Any]], *, headers: list[str] | None = None
+) -> CheckReport:
+    """以合成參考條件表（rows）核對一份說明書，回傳該份的 CheckReport。"""
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows, headers)
+    return check_sheet(pdf, sheet)
 
 
 def check_pdf(tmp_path: Path, pdf: Path, spec: Spec | None = None, *, overrides=None, headers=None):

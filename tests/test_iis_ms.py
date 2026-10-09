@@ -39,8 +39,8 @@ def lines_of(path) -> list:
 VARIANTS = {
     "D 記憶式、到期 KI、2 檔": Spec(),
     "D 非記憶式、單一標的": Spec(count=1, memory=False),
-    "P 記憶式、每日 KI": Spec(obs="P", ki="D"),
-    "P 非記憶式、Non-Call = 天期、無 KI": Spec(obs="P", memory=False, ki="none", non_call=4),
+    "P 記憶式、每日 KI": Spec(ko_obs="P", ki="D"),
+    "P 非記憶式、Non-Call = 天期、無 KI": Spec(ko_obs="P", memory=False, ki="none", first_callable=4),
     "D 記憶式、無 KI": Spec(ki="none"),
     "每期觀察 KI": Spec(ki="P"),
 }
@@ -85,7 +85,7 @@ def test_consistent_ms_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tmp_
     ]:
         assert (rule, field) in checked, (rule, field)
     daily = {("iis.ko_observation_dates", "ko_observation_start"), ("iis.monthly_coupon", "monthly_coupon_formula")}
-    assert daily <= checked if spec.obs == "D" else not daily & {(r.rule_id, r.field) for r in iis.report.results}
+    assert daily <= checked if spec.ko_obs == "D" else not daily & {(r.rule_id, r.field) for r in iis.report.results}
     # 範本沒有的項目不核對、不報缺漏
     rules = {r.rule_id for r in iis.report.results}
     assert not rules & {"iis.product_code", "field.denomination", "field.underlyings", "iis.underlying_prices"}
@@ -329,7 +329,7 @@ def test_term_sheet_values_unavailable_require_review_on_the_iis(tmp_path):
 
 def test_ms_iis_template_is_not_confused_with_other_templates(tmp_path):
     spec = Spec()
-    ts = build_pdf(tmp_path / f"{spec.code}_TS.pdf", spec)
+    ts = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     ms_iis_lines = lines_of(iis_path(ts))
     issuer, r = detect_iis(ms_iis_lines)
     assert issuer is MS and r.actual == "ms-zh-iis"

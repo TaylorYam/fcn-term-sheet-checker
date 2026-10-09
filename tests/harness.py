@@ -4,15 +4,17 @@
 一起選取（ADR 0007），只給說明書會因「這批缺投資人須知」轉人工覆核。
 
 `CONFIG` 是以 repo config 載入一次的核對設定 fixture；要換某個設定檔或上手註冊表時用 `load_config`／
-`CheckConfig.with_registry`。
+`CheckConfig.with_registry`。審查標準的原始內容 `STANDARD` 也只在這裡讀一次，三家合成器都從這裡取固定文字。
 
-說明書與參考條件表列由各上手的合成器產生；這裡不引用任何上手的版面或預設值。
+說明書與參考條件表列由各上手的合成器產生（商品規格與參考條件表列在 tests/reference_synth.py）；
+這裡不引用任何上手的版面或預設值，也不 import 合成器。
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -21,11 +23,13 @@ from fcn_checker.batch import BatchOutcome, check_batch, preview_batch
 from fcn_checker.check_config import CheckConfig, ConfigPaths
 from fcn_checker.issuers import REGISTRY, Issuer
 from fcn_checker.schema import CheckReport, CheckStatus
-from reference_synth import REFERENCE_FORMAT, build_reference_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_STANDARD = ROOT / "config" / "review_standard.toml"
+REFERENCE_FORMAT = ROOT / "config" / "reference_sheet.toml"
 ISSUER_PREFIXES = ROOT / "config" / "issuer_prefixes.toml"
+STANDARD: dict[str, Any] = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))  # 審查標準原文，只讀這一次
+CURRENCY_ISO: dict[str, str] = dict(STANDARD["currency"])  # 幣別中文 → ISO 代碼
 
 
 def load_config(
@@ -86,14 +90,6 @@ def check_all(sheet: Path, pdfs: Sequence[Path], config: CheckConfig = CONFIG) -
 def check_sheet(pdf: Path, sheet: Path, config: CheckConfig = CONFIG) -> CheckReport:
     """以既有的參考條件表核對一份說明書，回傳該份的 CheckReport。"""
     return check_all(sheet, [pdf], config).items[0].report
-
-
-def check_rows(
-    tmp_path: Path, pdf: Path, rows: list[dict[str, Any]], *, headers: list[str] | None = None
-) -> CheckReport:
-    """以合成參考條件表（rows）核對一份說明書，回傳該份的 CheckReport。"""
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows, headers)
-    return check_sheet(pdf, sheet)
 
 
 def problems(report: CheckReport) -> set[tuple[str, CheckStatus]]:

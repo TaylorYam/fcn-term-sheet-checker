@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -13,11 +12,11 @@ import pytest
 import hsbc_synth
 import ms_synth
 from fcn_checker.ingestion import IngestionError
-from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, check_sheet, load_config, results
-from reference_synth import build_reference_sheet
-from synth import Spec, build_pdf, check, reference_row
+from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, STANDARD, check_sheet, load_config, results
+from reference_synth import build_reference_sheet, reference_row
+from synth import Spec, build_pdf, check
 
-STD = tomllib.loads(REVIEW_STANDARD.read_text(encoding="utf-8"))
+STD = STANDARD
 BARC_WARNING = STD["risk"]["fixed_warning"]
 HSBC_WARNING = STD["risk"]["fixed_warning_by_issuer"]["hsbc"]
 NAME, PHONE, ADDRESS = (STD["distributor"][k] for k in ("name", "phone", "address"))
@@ -38,8 +37,9 @@ def standard_with(tmp_path: Path, old: str, new: str) -> Path:
 
 def check_hsbc(tmp_path: Path, spec: hsbc_synth.Spec | None = None, standard: Path = REVIEW_STANDARD):
     s = spec or hsbc_synth.Spec()
-    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    return check_sheet(pdf, hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s), load_config(review_standard=standard))
+    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
+    return check_sheet(pdf, sheet, load_config(review_standard=standard))
 
 
 def check_barc(tmp_path: Path, spec: Spec, standard: Path):

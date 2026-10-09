@@ -10,7 +10,8 @@ from decimal import Decimal
 import pytest
 
 from harness import MISMATCH, NA, PASS, REVIEW, problems, results
-from synth import UL, Spec, check
+from reference_synth import UL
+from synth import Spec, check
 
 NEW_RULES = (
     "doc.name_consistency",

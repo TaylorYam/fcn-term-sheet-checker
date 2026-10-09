@@ -21,9 +21,9 @@ from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.rules import kit
 from fcn_checker.schema import CheckResult, CheckStatus, DocKind, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
-from harness import CONFIG, check_all, check_rows
-from reference_synth import REFERENCE_HEADERS, build_reference_sheet
-from synth import DEFAULT_ULS, Spec, build_pdf, check, reference_row
+from harness import CONFIG, check_all
+from reference_synth import COLUMN_OF, DEFAULT_ULS, REFERENCE_HEADERS, build_reference_sheet, reference_row
+from synth import Spec, build_pdf, check, check_rows
 
 # 程式代碼：小寫英文以 . 或 _ 串接（例：doc.scenario_calculations、s1.profit.17、value_mismatch）
 CODE = re.compile(r"(?<![A-Za-z0-9])[a-z][a-z0-9]*(?:[._][a-z0-9]+)+")
@@ -44,10 +44,11 @@ def assert_plain_chinese(report) -> None:
 
 
 def hsbc_check(tmp_path, spec=None, overrides=None):
+    """HSBC 合成說明書 × 與之一致的參考條件表（正式版面）；overrides 以標準欄位名覆寫。"""
     s = spec or hsbc_synth.Spec()
-    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s, overrides)
-    return check_all(sheet, [pdf]).items[0].report
+    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    row = reference_row(s, **{COLUMN_OF[k]: v for k, v in (overrides or {}).items()})
+    return check_all(build_reference_sheet(tmp_path / "order.xlsx", [row]), [pdf]).items[0].report
 
 
 # ---------------------------------------------------------------- 參考條件表欄位：欄名＋雙方值
@@ -384,8 +385,8 @@ def test_term_sheet_missing_every_field_messages_name_their_items(tmp_path, issu
         sheet = _barc_sheet(tmp_path, spec, {})
     else:
         s = hsbc_synth.Spec()
-        pdf = hsbc_synth.build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-        sheet = hsbc_synth.build_inquiry(tmp_path / "order.xlsx", s)
+        pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+        sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     report = _run(pdf, sheet, registry=(adapter,))
     assert report.status == CheckStatus.REVIEW_REQUIRED, "缺欄位轉人工覆核，不是執行錯誤"
     # 上手沒交出欄位是 adapter 的問題，說明刻意寫出標準欄位名稱供維護人員追查；這裡只看項目名稱
@@ -447,7 +448,7 @@ def test_hsbc_broken_term_sheet_messages_name_their_items(tmp_path, obs):
         "發行價格：100%": "發行價格：99%",
         "0%~5%": "0%~6%",
     }
-    report = hsbc_check(tmp_path, hsbc_synth.Spec(obs=obs, replacements=replacements))
+    report = hsbc_check(tmp_path, hsbc_synth.Spec(ko_obs=obs, replacements=replacements))
     assert_every_problem_names_its_item(report)
 
 

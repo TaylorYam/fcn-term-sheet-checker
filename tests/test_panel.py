@@ -16,8 +16,8 @@ from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel import parse_args, session_from_args
 from fcn_checker.panel_workflow import PanelOutcome, PanelSession
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT, with_iis
-from reference_synth import REFERENCE_FORMAT, build_reference_sheet
-from synth import SYNTH_ISIN, Spec, build_pdf, reference_row
+from reference_synth import REFERENCE_FORMAT, build_reference_sheet, reference_row
+from synth import SYNTH_ISIN, Spec, build_pdf
 
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 
@@ -482,12 +482,10 @@ def test_not_covered_is_grouped_by_issuer_without_overwriting(tmp_path):
     barc, hsbc = Spec(), hsbc_synth.Spec()
     pdfs = [
         build_pdf(tmp_path / f"{barc.product_code}_TS.pdf", barc),
-        hsbc_synth.build_pdf(tmp_path / f"{hsbc.code}_TS.pdf", hsbc),
+        hsbc_synth.build_pdf(tmp_path / f"{hsbc.product_code}_TS.pdf", hsbc),
         build_pdf(tmp_path / "029199990002_TS.pdf", Spec(product_code="029199990002")),
     ]
-    inquiry = openpyxl.load_workbook(hsbc_synth.build_inquiry(tmp_path / "hsbc.xlsx", hsbc))["樣本清單"]
-    hsbc_row = {c.value: inquiry.cell(4, c.column).value for c in inquiry[3]}
-    rows = [reference_row(barc), hsbc_row, reference_row(Spec(product_code="029199990002"))]
+    rows = [reference_row(barc), reference_row(hsbc), reference_row(Spec(product_code="029199990002"))]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
     session = session_for(tmp_path, sheet, pdfs)
     session.load_preview()

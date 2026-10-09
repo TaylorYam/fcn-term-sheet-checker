@@ -18,7 +18,8 @@ from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
 from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, load_record, with_iis
-from hsbc_synth import Spec, build_inquiry, build_pdf
+from hsbc_synth import Spec, build_pdf
+from reference_synth import COLUMN_OF, REFERENCE_HEADERS, build_reference_sheet, reference_row
 
 
 def run_check(pdf, excel, registry=REGISTRY):
@@ -36,12 +37,15 @@ def only(report, rule_id, field=None):
     return out[0]
 
 
+def sheet_for(tmp_path, s, overrides=None):
+    """與 `s` 一致的參考條件表（正式版面，一列）；overrides 以標準欄位名覆寫。"""
+    row = reference_row(s, **{COLUMN_OF[k]: v for k, v in (overrides or {}).items()})
+    return build_reference_sheet(tmp_path / "order.xlsx", [row])
+
+
 def check(tmp_path, spec=None, overrides=None):
     s = spec or Spec()
-    return run_check(
-        build_pdf(tmp_path / f"{s.code}_TS.pdf", s),
-        build_inquiry(tmp_path / "order.xlsx", s, overrides),
-    )
+    return run_check(build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s), sheet_for(tmp_path, s, overrides))
 
 
 @pytest.mark.parametrize(
@@ -57,7 +61,7 @@ def check(tmp_path, spec=None, overrides=None):
     ],
 )
 def test_supported_types_pass(tmp_path, obs, memory, ki, count):
-    r = check(tmp_path, Spec(obs=obs, memory=memory, ki=ki, count=count))
+    r = check(tmp_path, Spec(ko_obs=obs, memory=memory, ki=ki, count=count))
     assert r.template == HSBC.template_id
     assert r.status == S.PASS, [
         (x.rule_id, x.field, x.reason_code) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)
@@ -172,28 +176,23 @@ def test_unknown_or_missing_order_value_requires_review(tmp_path, field, value):
 )
 def test_table_pairing_failures_stop_rules(tmp_path, change, reason):
     s = Spec()
-    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
-    wb = openpyxl.load_workbook(excel)
-    ws = wb.active
-    key = next(c.column for c in ws[3] if c.value == "TDCC Code")
+    pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    rows, headers = [reference_row(s)], None
     if change == "missing_row":
-        ws.cell(4, key, "325199990002")
+        rows = [reference_row(s, **{"TDCC Code": "325199990002"})]
     elif change == "duplicate_row":
-        ws.append([c.value for c in ws[4]])
+        rows = [reference_row(s), reference_row(s)]
     elif change == "issuer":
-        ws.cell(4, ws.max_column, "BARC")
+        rows = [reference_row(s, 發行機構="BARC")]
     else:
-        ws.cell(3, key, "不存在的欄位")
-    wb.save(excel)
-    wb.close()
-    r = run_check(pdf, excel)
+        headers = ["不存在的欄位" if h == "TDCC Code" else h for h in REFERENCE_HEADERS]
+    r = run_check(pdf, build_reference_sheet(tmp_path / "order.xlsx", rows, headers))
     assert any(x.reason_code == reason for x in r.results), [(x.reason_code, x.message) for x in r.results]
     assert not any(x.rule_id.startswith("field.") for x in r.results)
 
 
 def test_wrong_prefix_and_unknown_template_require_review(tmp_path):
-    r = check(tmp_path, Spec(code="029199990001"))
+    r = check(tmp_path, Spec(product_code="029199990001"))
     assert any(x.reason_code == "issuer_prefix_mismatch" for x in r.results)
     other = tmp_path / "other"
     other.mkdir()
@@ -217,8 +216,8 @@ def test_partial_coupon_and_unrounded_total(tmp_path):
 
 def test_cli_and_panel_select_hsbc(tmp_path, monkeypatch):
     s = Spec()
-    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
+    pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    excel = sheet_for(tmp_path, s)
     cli_root(tmp_path, monkeypatch)
     assert main([str(excel), *map(str, with_iis([pdf])), "--out", str(tmp_path / "reports")]) == 0
     assert load_record(tmp_path)["items"][0]["template"] == HSBC.template_id
@@ -231,8 +230,8 @@ def test_cli_and_panel_select_hsbc(tmp_path, monkeypatch):
 
 def test_ambiguous_registry_and_damaged_pdf(tmp_path):
     s = Spec()
-    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
+    pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    excel = sheet_for(tmp_path, s)
     from fcn_checker.issuers import Issuer
     from fcn_checker.parsers import hsbc as parser
 
@@ -254,10 +253,10 @@ def test_ambiguous_registry_and_damaged_pdf(tmp_path):
 
 def test_encrypted_pdf_is_not_checked(tmp_path):
     s = Spec()
-    plain = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
+    plain = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    excel = sheet_for(tmp_path, s)
     (tmp_path / "locked").mkdir()
-    encrypted = tmp_path / "locked" / f"{s.code}_TS.pdf"
+    encrypted = tmp_path / "locked" / f"{s.product_code}_TS.pdf"
     with fitz.open(plain) as d:
         d.save(encrypted, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="fake-owner", user_pw="fake-user")
     assert run_check(encrypted, excel).status == S.ERROR
@@ -349,8 +348,8 @@ def test_missing_ambiguous_or_unknown_document_requires_review(tmp_path, old, ne
 )
 def test_header_validation(tmp_path, mode, rule):
     s = Spec()
-    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
+    pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    excel = sheet_for(tmp_path, s)
     wb = openpyxl.load_workbook(excel)
     ws = wb.active
     if mode == "missing":
@@ -370,19 +369,13 @@ def test_header_validation(tmp_path, mode, rule):
 
 def test_panel_preview_selects_the_matching_table_row(tmp_path):
     s = Spec()
-    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
-    wb = openpyxl.load_workbook(excel)
-    ws = wb.active
-    ws.insert_rows(4)
-    ws.cell(4, 1, "325199990002")
-    ws.cell(4, ws.max_column, "HSBC")
-    wb.save(excel)
-    wb.close()
+    pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    other = Spec(product_code="325199990002")  # 前面多一列別的商品，這份對到第 5 列
+    excel = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(other), reference_row(s)])
     session = PanelSession(REVIEW_STANDARD, ROOT / "config")
     session.select(excel, with_iis([pdf]))
     preview = session.load_preview()
-    assert preview.rows[0].product_code == s.code
+    assert preview.rows[0].product_code == s.product_code
     assert preview.rows[0].reference_row == 5
     assert session.start_check().batch.status == S.PASS
 
@@ -508,7 +501,7 @@ def test_daily_schedule_end_must_not_precede_start(tmp_path):
 )
 def test_periodic_ko_table_unreadable_requires_review_not_unexpected(tmp_path, replacements, reason):
     """定期觀察的提前出場表讀不到：schedule.autocall_dates 轉人工覆核，整份不能記成非預期錯誤。"""
-    r = check(tmp_path, Spec(obs="P", memory=False, ki="none", count=1, replacements=replacements))
+    r = check(tmp_path, Spec(ko_obs="P", memory=False, ki="none", count=1, replacements=replacements))
     assert not any(x.rule_id == "batch.unexpected" for x in r.results), [(x.rule_id, x.message) for x in r.results]
     autocall = only(r, "schedule.autocall_dates")
     assert (autocall.status, autocall.reason_code) == (S.REVIEW_REQUIRED, reason)
@@ -561,16 +554,9 @@ def test_profit_total_allows_rounding_difference_only(tmp_path, items, total, st
 def test_hsbc_batch_backfills_shared_reference_sheet(tmp_path, obs):
     from fcn_checker.saving import run_batch
 
-    s = Spec(obs=obs, ki="none")
-    pdf = build_pdf(tmp_path / f"{s.code}_TS.pdf", s)
-    excel = build_inquiry(tmp_path / "order.xlsx", s)
-    wb = openpyxl.load_workbook(excel)
-    ws = wb.active
-    for c in ws[3]:
-        if c.value in ("ISIN Code", "發行日") or str(c.value).startswith("比價日_"):
-            ws.cell(4, c.column).value = None
-    wb.save(excel)
-    wb.close()
+    s = Spec(ko_obs=obs, ki="none")
+    pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    excel = sheet_for(tmp_path, s)  # 回填欄位（ISIN、發行日、比價日）預設空白
     r, receipt = run_batch(CONFIG, excel, with_iis([pdf]), tmp_path / "reports", root=tmp_path)
     assert receipt.status == S.PASS, [
         (x.rule_id, x.field, x.status, x.reason_code)
@@ -612,8 +598,8 @@ def test_hsbc_issue_date_is_a_backfill_column(tmp_path, sheet_value, action, sta
     s = Spec()
     r, receipt = run_batch(
         CONFIG,
-        build_inquiry(tmp_path / "order.xlsx", s, {"issue_date": sheet_value}),
-        with_iis([build_pdf(tmp_path / f"{s.code}_TS.pdf", s)]),
+        sheet_for(tmp_path, s, {"issue_date": sheet_value}),
+        with_iis([build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)]),
         tmp_path / "reports",
         root=tmp_path,
     )
@@ -651,7 +637,7 @@ def _check_replaced(tmp_path, **fields):
 
     adapter = dataclasses.replace(HSBC, read=lambda lines: _Replaced(HSBC.read(lines), **fields))
     s = Spec()
-    return run_check(build_pdf(tmp_path / f"{s.code}_TS.pdf", s), build_inquiry(tmp_path / "order.xlsx", s), (adapter,))
+    return run_check(build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s), sheet_for(tmp_path, s), (adapter,))
 
 
 def test_hsbc_price_rows_fewer_than_underlyings_require_review(tmp_path):
