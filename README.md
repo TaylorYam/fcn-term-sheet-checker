@@ -2,7 +2,7 @@
 
 FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料轉成相同資料結構，以可追溯規則產生差異與人工覆核清單。
 
-**目前狀態：可用——BARC／HSBC 中文產品說明書與中文投資人須知（文字型 PDF）× 參考條件表的本機批量核對（PANEL 與 CLI），並回填 ISIN 與比價日**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、最初價格外部正確性與部分情境試算會列在 PANEL 的「待處理」分頁與核對紀錄的「未涵蓋」清單。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
+**目前狀態：可用——BARC／HSBC 中文產品說明書與中文投資人須知、MS 中文產品說明書（文字型 PDF）× 參考條件表的本機批量核對（PANEL 與 CLI），並回填 ISIN 與比價日**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、最初價格外部正確性與部分情境試算會列在 PANEL 的「待處理」分頁與核對紀錄的「未涵蓋」清單。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
 
 ## 運作說明
 
@@ -62,7 +62,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
 - 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`）。PANEL 與 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[核對規則](docs/rules/barc-check-rules.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表流程已刪除（Issue #46）。
 - 第二家上手（已實作 Issue #34）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。H02 為唯一作業螢光樣本；其他樣本驗證不同型態，已支援參考條件表、價格／日期及情境簡單算式核對。
-- 第三家上手（規格已定、尚未實作，Issue #132）：摩根士丹利（MS，`147`）中文產品說明書，只支援新版範本（以 2026 年後的文件為準）：[MS 範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)。投資人須知另開 Issue。
+- 第三家上手（已實作 Issue #135）：摩根士丹利（MS，`147`）中文產品說明書，只支援新版範本（以 2026 年後的文件為準；舊版範本辨識失敗轉人工覆核）：[MS 範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)。說明書沒有年利率，改核對月配息率（年利率 ÷ 12）與情境年化報酬率；另核對日期表結構、第 18 項情境金額與 MS 版本的固定警語、名稱樣板。投資人須知另開 Issue：在那之前 MS 的投資人須知是未支援上手，MS 商品不打 `TS`／`IIS` 的 `V`、不回填。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
 ## 安裝
@@ -153,7 +153,7 @@ ruff check src tests
 - [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
 - [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
 - [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- MS（規格已定、尚未實作）：[範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)
+- MS（已實作說明書，投資人須知另開 Issue）：[範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)
 - 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)
 - ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)、[0007 投資人須知與說明書成對核對](docs/adr/0007-iis-paired-with-term-sheet.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。

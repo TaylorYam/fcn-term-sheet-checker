@@ -50,8 +50,10 @@ def outcome(saved):
 
 def test_other_issuers_are_unsupported(saved):
     outcome, receipt = saved
-    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325"))]
+    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147"))]
     assert others and all(i.unsupported and not receipt.filled(i) for i in others)
+    ms = [i for i in outcome.items if i.term_sheet.name.startswith("147")]  # MS 投資人須知未支援，說明書不回填
+    assert ms and not any(receipt.filled(i) for i in ms)
 
 
 def term_sheets(outcome):

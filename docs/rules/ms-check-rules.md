@@ -3,7 +3,7 @@
 - 文件側：[MS 範本規格](../templates/ms-zh-product-description.md)
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [MS 下單資料格式](../order-formats/ms-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-08，Issue #132）；尚未實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-08，Issue #132）；已實作（Issue #135，`src/fcn_checker/parsers/ms*.py`、`src/fcn_checker/rules/ms*.py`），rule_id 對照見 §9
 - 本文件只寫與 [BARC 核對規則](barc-check-rules.md)、[HSBC 核對規則](hsbc-check-rules.md)不同或 MS 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -152,6 +152,7 @@
 | 獲利情境總配息與「未進位年利率推算」差 0.01 | 5 份 | MS 以已進位的每期配息 × 期數計算；規則照 MS 寫法（§3.7） |
 | 價格表沒有 KO 欄 | S05 | Non-Call = 天期；KO 欄位不核對（§2） |
 | 審查通過日期為 2025 年的舊日期 | S03–S05（2025 年交易） | 只以 2026 年後為準（§3.2）；本機真實樣本測試中這 3 份會轉人工覆核或判不一致，屬預期 |
+| 第二章受託機構「◎ 營業所在地」少「松山區」 | S03–S08（6 份） | 實作時發現（2026-10-09，探勘未比對這處）：封面地址有「松山區」，第二章寫「台北市民生東路三段158號6樓」。目前照共用規則判不一致；待作業人員確認（§6） |
 
 其餘全部成立：參考條件表欄位（含比價日填法、期初 × % 推算）、月配息率、獲利情境年化 = 年利率、日期表結構、Non-Call 與觀察日、開始受理贖回日期、最低金額、費率、警語 3 處、名稱樣板、商品種類、刊印日期（皆 = 交易日）、「受託投資」0 次。
 
@@ -160,6 +161,7 @@
 - 沒有非美元的 MS 說明書樣本（參考條件表有 JPY、AUD、ZAR 的 MS 商品）：幣別名稱、面額預設值、名稱樣板依規則推得，待樣本驗證；遇到審查標準幣別表沒有的幣別照共用規則轉人工覆核。
 - 新版每期觀察 KI（`P`）、P 型非記憶式且 Non-Call < 天期、D 型 Non-Call > 1、5 檔標的：沒有樣本，依規則推得。
 - MS 投資人須知：另開 Issue（本規格合併後）。
+- 第二章受託機構營業所在地少「松山區」（§5，6 份皆同）：若確認視為正確，在審查標準加地址的等價寫法（同 `distributor.phone_equivalents` 的做法，只改設定）；在那之前每份 MS 說明書都會有這筆不一致，需人工放行。
 
 ## 7. 建議實作方式
 
@@ -189,3 +191,38 @@
 | 2026-10-08 | 封面 6 商品種類依標的數核對 |
 | 2026-10-08 | 受託機構設立日期不核對 |
 | 2026-10-08 | 第四章最低贖回金額與累加贖回單位納入 `field.min_amounts` |
+
+## 9. 實作對照（Issue #135）
+
+共用規則（`rules/reference.py`、`rules/derivation.py`、`rules/review_standard.py`、`backfill.py`）的 rule_id 同 BARC；下表只列 MS 專屬規則與 MS 才有的寫法。
+
+| 核對規則 | rule_id | 欄位（`field`） | 不成立時 |
+|---|---|---|---|
+| §3.1 年利率 | `field.coupon_pa_pct` | `coupon_pa_pct` | 不適用（範本沒有年利率） |
+| §3.1 KO %、各標的 KO 價（Non-Call = 天期且沒有 KO 欄） | `field.ko_pct`、`field.underlying_prices` | `ko_pct`、`UL_n KO 價` | 不適用（說明書沒有自動提前出場價） |
+| §3.2 受理申購日 | `doc.subscription_start_date` | — | 不產生結果（範本沒有） |
+| §3.2 發行價格（第四章 §5） | `standard.issue_price` | `issue_price_ch4` | 人工覆核 |
+| §3.2 發行機構全名（第一章 §3 只比中文） | `standard.issuer_name` | `issuer_name_ch1` | 不一致 |
+| §3.3 月配息率（每個出處一筆） | `derive.monthly_coupon` | `monthly_coupon_pct` | 不一致；找不到 → 人工覆核 |
+| §3.3 獲利情境年化報酬率 | `derive.annualized_return` | `annualized_return_pct` | 不一致；找不到 → 人工覆核 |
+| §3.4 有 KO 欄 ⇔ Non-Call < 天期 | `doc.ko_column` | `ko_column` | 人工覆核 |
+| §3.4 價格表彭博代碼 = 第 11 項 | `doc.underlying_tickers` | `underlyings` | 不一致 |
+| §3.5 受託機構商品代號 | `doc.trustee_product_code` | `trustee_product_code` | 不一致（空白也是） |
+| §3.5 名稱 | `doc.name_consistency` | `name_art1` | 不一致 |
+| §3.5 幣別 | `doc.currency_consistency` | `currency_art5` | 不一致 |
+| §3.5 商品種類 | `doc.product_type` | `product_type` | 不一致 |
+| §3.5 期數 | `doc.coupon_periods` | `date_table`、`name_months`、`coupon_range` | 不一致 |
+| §3.5 KO 觀察方式 | `doc.ko_observation` | `ko_observation` | 人工覆核 |
+| §3.5 記憶式 | `doc.ko_memory` | `ko_memory` | 人工覆核 |
+| §3.5 日期表：配息日遞增、終止日／定價日 < 配息日、末期 = 期末定價日／到期日 | `schedule.coupon_dates` | `dates` | 不一致 |
+| §3.5 D 型起始日 | `schedule.period_starts` | `starts` | 不一致 |
+| §3.5 D 型觀察起訖日、P 型自動提前出場日 | `schedule.autocall_dates` | `D`／`P` | 不一致 |
+| §3.5 價格表重印 | `doc.scenario_table`、`doc.scenario_header_pct` | `scenario_table`、`scenario_headers` | 不一致 |
+| §3.5 較差情境執行價 | `doc.scenario_strike` | `scenario_strike` | 不一致 |
+| §3.5 開始受理贖回日期 | `doc.redemption_start_date` | `redemption_start` | 不一致 |
+| §3.7 假設、情境標題 | `doc.scenario_parameters` | `scenario_denomination`、`scenario_tenor`、`scenario_titles` | 不一致；標題未知 → 人工覆核 |
+| §3.7 每期配息、損益 | `doc.scenario_calculations` | `情境X_coupon`、`情境X_pnl` | 不一致；算式找不到 → 人工覆核 |
+
+審查標準的 MS 設定（[審查標準](review-standard.md) §2.6）：`risk.fixed_warning_by_issuer.ms`、`risk.fixed_warning_openings.ms`（第一章 §2 開頭）、`risk.level_formats.ms`（沒有【】的風險等級）、`issuer_name.ms`、`issuer_name_ignore.ms`（括號、英文名結尾句點）、`product_name.ms`（`{underlying_zh}`／`{underlying_en}`）、`distributor.phone_equivalents`（`+886 2 5556 1313`）。
+
+未涵蓋清單（PANEL「待處理」）：`doc.underlying_names`、`doc.initial_prices`、`doc.scenario_worse_details`、`doc.template_variants`（§6 的樣本缺口）。

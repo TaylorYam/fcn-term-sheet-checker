@@ -15,8 +15,10 @@ from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
 from .parsers import barc_iis, hsbc_iis
 from .parsers import hsbc as hsbc_parser
+from .parsers import ms as ms_parser
 from .rules import barc as barc_rules
 from .rules import hsbc as hsbc_rules
+from .rules import ms as ms_rules
 from .rules.kit import IssuerContext
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Item, Line
 from .standard_fields import TermSheet
@@ -48,7 +50,8 @@ class Issuer:
     read: Callable[[Sequence[Line]], TermSheet]
     # 說明書內部規則：只用讀出結果與審查標準，拿不到參考條件表的列與格式設定
     rules: Callable[[IssuerContext], list[CheckResult]]
-    # 說明書內部規則可讀的參考條件表欄位（ADR 0005 的例外，須逐一宣告；目前只有 BARC 月配息率推算的年利率與天期，Issue #54）
+    # 說明書內部規則可讀的參考條件表欄位（ADR 0005 的例外，須逐一宣告：BARC 月配息率推算的年利率與天期（Issue #54）、
+    # MS 月配息率與年化報酬率的年利率（說明書沒有年利率，Issue #135））
     reference_fields: tuple[str, ...] = ()
     # 投資人須知範本；None → 這家上手的投資人須知是未支援上手
     iis: IisTemplate | None = None
@@ -99,7 +102,20 @@ HSBC = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC)
+# MS 只有說明書範本；投資人須知另開 Issue，在那之前 MS 的投資人須知是未支援上手（ADR 0007）
+MS = Issuer(
+    code=ms_rules.ISSUER,
+    template_id=ms_parser.TEMPLATE_ID,
+    label="MS 中文產品說明書",
+    parser_version=ms_parser.PARSER_VERSION,
+    not_covered=tuple(ms_rules.NOT_COVERED),
+    detect=ms_parser.detect,
+    read=ms_parser.read,
+    rules=ms_rules.run_all,
+    reference_fields=ms_rules.REFERENCE_FIELDS,
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

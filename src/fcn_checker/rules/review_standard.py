@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Callable
 
-from ..config import NAME_FLAGS
+from ..config import NAME_FLAGS, RISK_LEVEL
 from ..investor_sheet import IisSheet, read_iis
-from ..schema import CheckResult, Evidence, Item, ParsedField
+from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import fee_field
 from ..text import full_brackets, squash
@@ -193,11 +194,14 @@ def _chairman(ctx: Context) -> CheckResult:
 
 
 def _fixed_warning(ctx: Context, expected: int | None = None) -> CheckResult:
-    """該上手適用的固定風險警語（有上手版本就用，否則用預設）逐字出現的次數 = 審查標準（`expected` 另給時用它）。"""
+    """該上手適用的固定風險警語（有上手版本就用，否則用預設）逐字出現的次數 = 審查標準（`expected` 另給時用它）。
+
+    上手另有允許的開頭句寫法（risk.fixed_warning_openings）時，只換開頭句的版本也算一次。
+    """
     rid, std = "standard.fixed_warning", ctx.issuer_std
     ti = ctx.ts.full_text
-    target = squash(std.fixed_warning)
-    hits = [m for m in re.finditer(re.escape(target), ti.text)]
+    targets = [squash(w) for w in std.fixed_warnings]
+    hits = sorted((m for t in targets for m in re.finditer(re.escape(t), ti.text)), key=lambda m: m.start())
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
     expected = std.fixed_warning_occurrences if expected is None else expected
     ok = len(hits) == expected
@@ -209,7 +213,7 @@ def _fixed_warning(ctx: Context, expected: int | None = None) -> CheckResult:
         actual=len(hits),
         evidence=evidence,
         reason="" if ok else "occurrence_count",
-        tolerance="忽略空白與換行後逐字相等",
+        tolerance="忽略空白與換行後逐字相等" + ("（另接受審查標準列出的開頭句寫法）" if len(targets) > 1 else ""),
         message=f"固定風險警語逐字相符 {len(hits)} 次，應為 {expected} 次"
         + ("" if ok else "（可能被改字、缺漏或多出）"),
         item=Item.standard("固定風險警語"),
@@ -217,9 +221,13 @@ def _fixed_warning(ctx: Context, expected: int | None = None) -> CheckResult:
 
 
 def _risk_level(ctx: Context) -> CheckResult:
+    """全文每一處風險等級 = 審查標準；寫法依上手（risk.level_formats，沒列出的上手為【RRn】）。"""
     rid, item = "standard.risk_level", Item.standard("風險等級")
     ti = ctx.ts.full_text
-    found = [(m.group(1), m) for m in re.finditer(r"【(RR\d)】", ti.text)]
+    formats = ctx.issuer_std.risk_level_formats
+    patterns = [re.escape(squash(f)).replace(re.escape(RISK_LEVEL), r"(RR\d)") for f in formats]
+    found = sorted(((m.group(1), m) for p in patterns for m in re.finditer(p, ti.text)), key=lambda x: x[1].start())
+    shown_formats = "、".join(f.replace(RISK_LEVEL, "RRn") for f in formats)
     if not found:
         return result(
             rid,
@@ -227,7 +235,7 @@ def _risk_level(ctx: Context) -> CheckResult:
             S.REVIEW_REQUIRED,
             expected=ctx.std.risk_level,
             reason="document_missing",
-            message="說明書找不到【RRn】風險等級",
+            message=f"說明書找不到{shown_formats}風險等級",
             item=item,
         )
     bad = [(lv, m) for lv, m in found if lv != ctx.std.risk_level]
@@ -242,7 +250,7 @@ def _risk_level(ctx: Context) -> CheckResult:
         actual=sorted({lv for lv, _ in found}),
         evidence=evidence,
         reason="" if ok else "value_mismatch",
-        message=f"全文共 {len(found)} 處【RRn】",
+        message=f"全文共 {len(found)} 處{shown_formats}",
         item=item,
     )
 
@@ -272,12 +280,22 @@ def _forbidden_wording(ctx: Context) -> CheckResult:
     )
 
 
-def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str, name: str) -> CheckResult:
-    """說明書文字（已去空白）與審查標準固定值比對；忽略空白與換行，其餘逐字相等。"""
+def _fixed_text(
+    rid: str,
+    field: str,
+    pf: ParsedField,
+    expected: str,
+    what: str,
+    name: str,
+    *,
+    norm: Callable[[str], str] = squash,
+    tolerance: str | None = None,
+) -> CheckResult:
+    """說明書文字與審查標準固定值比對；預設忽略空白與換行，其餘逐字相等（`norm` 另給比對前的正規化）。"""
     item = Item.standard(name)
     if not pf.ok:
         return doc_review(rid, field, pf, expected, item=item)
-    ok = squash(pf.value) == squash(expected)
+    ok = norm(pf.value) == norm(expected)
     return result(
         rid,
         field,
@@ -286,20 +304,43 @@ def _fixed_text(rid: str, field: str, pf: ParsedField, expected: str, what: str,
         actual=pf.value,
         pf=pf,
         reason="" if ok else "value_mismatch",
-        tolerance="忽略空白與換行後逐字相等",
+        tolerance=tolerance or "忽略空白與換行後逐字相等",
         message="" if ok else f"{what}與審查標準不同",
         item=item,
     )
 
 
+def _issuer_name_text(s: str, ignore: frozenset[str]) -> str:
+    """發行機構全名比對前的正規化：忽略空白與換行，另依上手忽略括號（全形／半形）、英文名結尾的句點。"""
+    s = squash(s)
+    if "brackets" in ignore:
+        s = re.sub(r"[()（）]", "", s)
+    if "trailing_period" in ignore:
+        s = re.sub(r"\.(?=[)）]?$)", "", s)
+    return s
+
+
+_IGNORE_TOLERANCE = {
+    frozenset({"brackets", "trailing_period"}): "忽略空白、換行、括號（全形／半形）與英文名結尾的句點後逐字相等",
+    frozenset({"brackets"}): "忽略空白、換行與括號（全形／半形）後逐字相等",
+    frozenset({"trailing_period"}): "忽略空白、換行與英文名結尾的句點後逐字相等",
+}
+
+
 def _issuer_name(ctx: Context) -> list[CheckResult]:
-    """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。"""
-    rid, issuer = "standard.issuer_name", ctx.issuer
-    expected = ctx.issuer_std.issuer_name
-    fields = (
-        ("issuer_name_cover", "封面「發行機構」", "封面發行機構名稱"),
-        ("issuer_name_ch2", "第二章「發行機構」事業名稱", "第二章發行機構名稱"),
-    )
+    """發行機構中英文法人全名：封面「發行機構」與第二章「發行機構」條事業名稱 = 審查標準 issuer_name.<上手>。
+
+    範本另有只寫中文的出處（`issuer_name_ch1`）時那一處只比中文；範本沒有的出處（不適用）不核對。
+    上手另有寫法差異時依審查標準 issuer_name_ignore 忽略。
+    """
+    rid, issuer, std = "standard.issuer_name", ctx.issuer, ctx.issuer_std
+    expected = std.issuer_name
+    fields = [  # 標準欄位、說明的開頭、項目名稱、是否只比中文
+        ("issuer_name_cover", "封面「發行機構」", "封面發行機構名稱", False),
+        ("issuer_name_ch2", "第二章「發行機構」事業名稱", "第二章發行機構名稱", False),
+    ]
+    if standard_field(ctx, "issuer_name_ch1").status != FieldStatus.NOT_APPLICABLE:
+        fields.append(("issuer_name_ch1", "第一章發行機構中文名稱", "第一章發行機構名稱", True))
     if expected is None:
         return [
             result(
@@ -311,9 +352,22 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
                 message=f"審查標準沒有 {issuer} 的發行機構全名（issuer_name.{issuer.lower()}）",
                 item=Item.standard(zh),
             )
-            for name, _, zh in fields
+            for name, _, zh, _ in fields
         ]
-    return [_fixed_text(rid, name, standard_field(ctx, name), expected, what, zh) for name, what, zh in fields]
+    zh_name = re.split(r"[（(]", expected, maxsplit=1)[0]
+    return [
+        _fixed_text(
+            rid,
+            name,
+            standard_field(ctx, name),
+            zh_name if zh_only else expected,
+            what,
+            zh,
+            norm=lambda s: _issuer_name_text(s, std.issuer_name_ignore),
+            tolerance=_IGNORE_TOLERANCE.get(std.issuer_name_ignore),
+        )
+        for name, what, zh, zh_only in fields
+    ]
 
 
 def _distributor_info(ctx: Context) -> list[CheckResult]:
@@ -388,11 +442,13 @@ def _issue_price(ctx: Context) -> CheckResult:
 
 
 def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
-    """名稱樣板的 maxi（標的數 ≥ 2）、daily（KO 每日觀察）旗標；只讀樣板用到的說明書欄位。不依上手分支。"""
+    """名稱樣板的 maxi（標的數 ≥ 2）、daily（KO 每日觀察）、underlying（標的寫法：2 檔以上為 True）旗標；
+    只讀樣板用到的說明書欄位。不依上手分支。"""
     flags: dict[str, bool] = {}
     for flag, field, test in (
         ("maxi", "underlyings", lambda v: len(v) >= 2),
         ("daily", "ko_observation", lambda v: v == "D"),
+        ("underlying", "underlyings", lambda v: len(v) >= 2),
     ):
         if used & {f"{flag}_zh", f"{flag}_en"}:
             pf = standard_field(ctx, field)
@@ -463,6 +519,9 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         for flag in NAME_FLAGS:
             for code in ("zh", "en"):
                 values[f"{flag}_{code}"] = tpl.flag_text(flag, code) if flags.get(flag) else ""
+        if "underlying" in flags:
+            for code in ("zh", "en"):
+                values[f"underlying_{code}"] = tpl.underlying_text(flags["underlying"], code)
         expected = getattr(tpl, lang).format(**values)
         if lang == "zh":
             norm = (lambda s: full_brackets(squash(s))) if tpl.normalize_brackets else squash
@@ -484,7 +543,9 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 pf=pf,
                 reason="" if ok else "value_mismatch",
                 tolerance=tol,
-                message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式組出",
+                message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式"
+                + ("、標的數" if "underlying" in flags else "")
+                + "組出",
                 item=item,
             )
         )

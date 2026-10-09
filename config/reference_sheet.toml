@@ -7,8 +7,8 @@
 # 期初定價為 VWAP 的商品，UL_n 四個價格欄不比對，核對通過後以說明書價格覆寫（Issue #122）。
 # 規則說明見 docs/order-formats/reference-sheet.md。
 
-version = 3
-effective_date = 2026-10-08
+version = 4
+effective_date = 2026-10-09
 
 [layout]
 sheet = "樣本清單"
@@ -23,6 +23,7 @@ checked_value = "V"       # TS、IIS 欄的打勾寫法（半形英文字母 V�
 [issuer_values]
 BARC = "Barclays"
 HSBC = "HSBC"
+MS = "MS"
 
 # Excel 欄名 → 標準欄位
 [columns]
@@ -99,11 +100,12 @@ ignored = ["庫存狀態", "當日比價", "Product", "發行機構", "私銀註
 "Y" = true
 "N" = false
 
-# KI(Freq)：none 無／AM 到期觀察／D 每日觀察
+# KI(Freq)：none 無／AM 到期觀察／D 每日觀察／P 每期觀察（每個配息週期終止日，含期末定價日；2026-10-08 確認新增）
 [values.ki_type]
 "-" = "none"
 "AM" = "AM"
 "D" = "D"
+"P" = "P"
 
 # 期初定價：說明書不寫，由作業人員標示；只有 VWAP 會改變價格欄的處理
 [values.initial_pricing]

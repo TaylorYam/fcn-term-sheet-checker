@@ -123,8 +123,35 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
     r = results(check(sub(tmp_path, "barc"), spec), "standard.distributor", "distributor_phone_cover")[0]
     assert r.status == MISMATCH
 
-    standard = standard_with(tmp_path, 'phone_equivalents = ["+886-2-5556-1313"]', "phone_equivalents = []")
+    standard = standard_with(
+        tmp_path, 'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313"]', "phone_equivalents = []"
+    )
     r = results(
         check_hsbc(sub(tmp_path, "hsbc"), standard=standard), "standard.distributor", "distributor_phone_cover"
     )[0]
+    assert r.status == MISMATCH
+
+
+# ---------------------------------------------------------------- MS 分節的設定檢查（Issue #135）
+
+
+@pytest.mark.parametrize(
+    "old,new,where",
+    [
+        ('basket_en = "Worst of Shares and/or ETFs"\n', "", "basket_en"),
+        ('ms = ["風險程度等級為{level}"', 'ms = ["風險程度等級為RRn"', "risk.level_formats.ms"),
+        ('ms = ["brackets", "trailing_period"]', 'ms = ["brackets", "commas"]', "issuer_name_ignore.ms"),
+        ('ms = ["本商品風險程度為RR4。"]', 'ms = ["本商品風險程度為RR4"]', "risk.fixed_warning_openings.ms"),
+    ],
+)
+def test_invalid_ms_review_standard_is_a_batch_config_error(tmp_path, old, new, where):
+    with pytest.raises(IngestionError) as raised:
+        load_config(review_standard=standard_with(tmp_path, old, new))
+    assert raised.value.reason_code == "config_invalid" and where in str(raised.value)
+
+
+def test_issuer_name_ignores_apply_only_to_the_configured_issuer(tmp_path):
+    """BARC 沒有設定 issuer_name_ignore：第二章少了括號仍是不一致。"""
+    plain = STD["issuer_name"]["barc"].replace("（", "").replace("）", "")
+    r = results(check(tmp_path, Spec(issuer_ch2=plain)), "standard.issuer_name", "issuer_name_ch2")[0]
     assert r.status == MISMATCH

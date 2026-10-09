@@ -787,6 +787,7 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["chairman"] = _chairman(doc)
     sq = lambda s: squash(s)  # noqa: E731
     flds["issuer_name_ch2"] = _ch2_item(doc, "發行機構", "事業名稱", "issuer_name_ch2", sq)
+    flds["issuer_name_ch1"] = standard_fields.absent("issuer_name_ch1", "第一章只寫中文的發行機構名稱")
     flds["distributor_name_ch2"] = _ch2_item(doc, "受託或銷售機構", "事業名稱", "distributor_name_ch2", sq)
     flds["distributor_address_ch2"] = _ch2_item(doc, "受託或銷售機構", "營業所在地", "distributor_address_ch2", sq)
     ch4 = doc.chapter_lines(4)
