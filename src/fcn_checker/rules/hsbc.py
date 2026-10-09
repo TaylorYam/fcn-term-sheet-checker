@@ -12,7 +12,7 @@ from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
 from ..text import full_brackets, squash
 from . import hsbc_scenario, kit
-from .kit import IssuerContext
+from .kit import Check, IssuerContext
 
 ISSUER = "HSBC"
 NOT_COVERED = [
@@ -30,25 +30,6 @@ NOT_COVERED = [
 PRICE_TABLE = Item.expected("價格表")
 
 
-def check(rid, field, name, deps, expected, actual, ok=None, reason="value_mismatch"):
-    """`name` 為項目名稱。"""
-    item = Item.expected(name)
-    bad = next((p for p in deps if not p.ok), None)
-    if bad is not None:
-        return kit.doc_review(rid, field, bad, expected, item=item)
-    good = expected == actual if ok is None else ok
-    return kit.result(
-        rid,
-        field,
-        S.PASS if good else S.MISMATCH,
-        expected=expected,
-        actual=actual,
-        evidence=[e for p in deps for e in p.evidence],
-        reason="" if good else reason,
-        item=item,
-    )
-
-
 def schedules(ctx):
     c, obs, first = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation"), ctx.ts.f("first_callable_period")
     deps = [c, obs, first]
@@ -56,7 +37,7 @@ def schedules(ctx):
     if any(not p.ok for p in deps):
         bad = next(p for p in deps if not p.ok)
         return [
-            kit.doc_review(rid, "schedule", bad, item=Item.expected("配息表與提前出場表"))
+            Check(rid, "schedule", Item.expected("配息表與提前出場表"), ctx.document).review(bad)
             for rid in [
                 "schedule.coupon_dates",
                 "schedule.autocall_dates",
@@ -71,22 +52,18 @@ def schedules(ctx):
     maturity = ctx.ts.f("maturity_date")
     final = ctx.ts.f("final_valuation_date")
     out.append(
-        check(
-            "doc.coupon_periods",
-            "coupon_periods",
-            "配息期數",
-            [c, tenor, n],
+        Check("doc.coupon_periods", "coupon_periods", Item.expected("配息期數"), ctx.document, expected=tenor.value)
+        .needs(c, tenor, n)
+        .compare(
             tenor.value,
             [n.value, len(rows)],
             ok=n.ok and tenor.ok and n.value == tenor.value == len(rows) and periods == list(range(1, len(rows) + 1)),
         )
     )
     out.append(
-        check(
-            "schedule.coupon_dates",
-            "payment",
-            "配息支付日",
-            [c, maturity],
+        Check("schedule.coupon_dates", "payment", Item.expected("配息支付日"), ctx.document, expected=maturity.value)
+        .needs(c, maturity)
+        .compare(
             maturity.value,
             payments[-1],
             ok=maturity.ok
@@ -105,15 +82,9 @@ def schedules(ctx):
                 valid &= row["start"] == kit.next_weekday(rows[i - 1]["end"]) and row["nt"] is not None
                 valid &= row["start"] is not None and row["start"] <= row["end"]
         out.append(
-            check(
-                "schedule.autocall_dates",
-                "daily",
-                "期間每日觀察的提前出場表",
-                [c, first, final],
-                final.value,
-                rows[-1]["end"],
-                ok=valid and final.ok and rows[-1]["end"] == final.value,
-            )
+            Check("schedule.autocall_dates", "daily", Item.expected("期間每日觀察的提前出場表"), ctx.document)
+            .needs(c, first, final, expected=final.value)
+            .compare(final.value, rows[-1]["end"], ok=valid and final.ok and rows[-1]["end"] == final.value)
         )
     else:
         ko = ctx.ts.f("ko_table")
@@ -129,14 +100,10 @@ def schedules(ctx):
         valid &= mapped == list(range(first.value, len(rows) + 1))
         valid &= all(a["decision"] < b["decision"] for a, b in zip(ko.value, ko.value[1:], strict=False))
         out.append(
-            check(
-                "schedule.autocall_dates",
-                "periodic",
-                "定期觀察的提前出場表",
-                [c, ko, first, final],
-                final.value,
-                ko.value[-1]["decision"],
-                ok=valid and final.ok and ko.value[-1]["decision"] == final.value,
+            Check("schedule.autocall_dates", "periodic", Item.expected("定期觀察的提前出場表"), ctx.document)
+            .needs(c, ko, first, final, expected=final.value)
+            .compare(
+                final.value, ko.value[-1]["decision"], ok=valid and final.ok and ko.value[-1]["decision"] == final.value
             )
         )
     return out
@@ -148,39 +115,42 @@ def price_headers(ctx):
     scenario = ctx.ts.f("scenario_table")
     if not pf.ok:
         return [
-            kit.doc_review(rid, "prices", pf, item=PRICE_TABLE)
+            Check(rid, "prices", PRICE_TABLE, ctx.document).review(pf)
             for rid in ["doc.price_header_pct", "doc.scenario_table"]
         ]
     out = []
     headers = pf.value["headers"]
     for col in ["strike", "ko", "ki"]:
         pct = ctx.ts.f(col + "_pct")
+        header = Check("doc.price_header_pct", col, Item.expected(kit.HEADER_PCT_ITEM[col]), ctx.document)
         if pct.status == FieldStatus.NOT_APPLICABLE:
             out.append(
-                kit.result(
-                    "doc.price_header_pct",
-                    col,
-                    S.PASS if col not in headers else S.MISMATCH,
-                    expected=None,
-                    actual=headers.get(col),
-                    pf=pf,
-                    item=Item.expected(kit.HEADER_PCT_ITEM[col]),
+                header.needs(pf).result(
+                    S.PASS if col not in headers else S.MISMATCH, expected=None, actual=headers.get(col)
                 )
             )
             continue
-        out.append(check("doc.price_header_pct", col, kit.HEADER_PCT_ITEM[col], [pf, pct], pct.value, headers.get(col)))
+        out.append(header.needs(pf, pct, expected=pct.value).compare(pct.value, headers.get(col)))
     if not scenario.ok:
-        out.append(kit.doc_review("doc.scenario_table", "prices", scenario, item=Item.expected("情境試算價格表")))
+        out.append(
+            Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document).review(scenario)
+        )
     else:
         # Chinese label is deliberately excluded; currency and exchange are internal consistency only.
         def normalized(table):
             return [{k: v for k, v in row.items() if k != "label"} for row in table["rows"]]
 
         table, header = normalized(pf.value), normalized(scenario.value)
-        out.append(check("doc.scenario_table", "prices", "情境試算價格表", [pf, scenario], table, header))
+        out.append(
+            Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document)
+            .needs(pf, scenario, expected=table)
+            .compare(table, header)
+        )
         scenario_headers = scenario.value["headers"]
         out.append(
-            check("doc.scenario_header_pct", "headers", "情境試算價格表欄頭", [pf, scenario], headers, scenario_headers)
+            Check("doc.scenario_header_pct", "headers", Item.expected("情境試算價格表欄頭"), ctx.document)
+            .needs(pf, scenario, expected=headers)
+            .compare(headers, scenario_headers)
         )
     return out
 
@@ -188,15 +158,11 @@ def price_headers(ctx):
 def document_info(ctx):
     f = ctx.ts.f
     out = []
+    cz, c5 = f("currency_zh"), f("currency_art5")
     out.append(
-        check(
-            "doc.currency_consistency",
-            "currency",
-            "第一章第 5 條計價幣別",
-            [f("currency_zh"), f("currency_art5")],
-            f("currency_zh").value,
-            f("currency_art5").value,
-        )
+        Check("doc.currency_consistency", "currency", Item.expected("第一章第 5 條計價幣別"), ctx.document)
+        .needs(cz, c5, expected=cz.value)
+        .compare(cz.value, c5.value)
     )
 
     def norm(s):
@@ -212,7 +178,11 @@ def document_info(ctx):
     ]:
         pf = f(key)
         actual = norm(pf.value) if pf.ok else None
-        out.append(check("doc.name_consistency", key, name, [zh, en, pf], expected, actual))
+        out.append(
+            Check("doc.name_consistency", key, Item.expected(name), ctx.document)
+            .needs(zh, en, pf, expected=expected)
+            .compare(expected, actual)
+        )
     return out
 
 
