@@ -32,6 +32,7 @@
 | 年利率 `coupon_pa_pct` | 共用規則不適用 | 說明書沒有年利率，`read` 交出「範本沒有」；改由 §3.3 的 MS 專屬規則核對 |
 | KO %、各標的 KO 價 | 共用 | Non-Call = 天期且價格表沒有 KO 欄時不核對（不適用）；Non-Call < 天期卻沒有 KO 欄 → 轉人工覆核 |
 | 最低金額 `min_amounts` | 共用 `field.min_amounts`（= 參考條件表單位面額） | MS 出處 4 處：第四章 §4 最低申購金額、最低加購單位；§8 最低贖回金額、累加贖回單位（2026-10-08 確認納入最低贖回） |
+| 金額旁的幣別 `currency_others` | 共用 `field.currency`（= 參考條件表承作幣別，每處各一筆；Issue #170） | 第一章 §6 面額、第四章 §4、§8 四個最低金額、§18 假設總投資金額各一筆；§18 每個情境一筆（列出該情境裡幣別不符的金額）。商品幣別不必等於標的幣別：承作幣別只影響面額、配息、本金，較差情境的收盤價、執行價與含「股」的實物交割算式跟著標的走，不列入（2026-10-10 使用者確認） |
 
 ### 3.2 審查標準規則（共用 `rules/review_standard.py`）
 
@@ -158,7 +159,7 @@
 
 ## 6. 待確認事項與樣本缺口
 
-- 沒有非美元的 MS 說明書樣本（參考條件表有 JPY、AUD、ZAR 的 MS 商品）：幣別名稱、面額預設值、名稱樣板依規則推得，待樣本驗證；遇到審查標準幣別表沒有的幣別照共用規則轉人工覆核。
+- 沒有非美元的 MS 說明書樣本（參考條件表有 JPY、AUD、ZAR 的 MS 商品）：幣別名稱、面額預設值、名稱樣板依規則推得，待樣本驗證；遇到審查標準幣別表沒有的幣別照共用規則轉人工覆核。合成器已可做非美元商品（`tests/ms_synth.py` 照規格的承作幣別畫），CI 以日圓計價＋美股驗證規則（Issue #170）。
 - 新版每期觀察 KI（`P`）、P 型非記憶式且 Non-Call < 天期、D 型 Non-Call > 1、5 檔標的：沒有樣本，依規則推得。
 - MS 投資人須知：Issue #137。
 
@@ -191,6 +192,7 @@
 | 2026-10-08 | 受託機構設立日期不核對 |
 | 2026-10-08 | 第四章最低贖回金額與累加贖回單位納入 `field.min_amounts` |
 | 2026-10-09 | 第二章受託機構營業所在地沒有「松山區」的寫法視為正確（審查標準 `distributor.address_equivalents`） |
+| 2026-10-10 | 商品幣別不必等於標的幣別（FCN 高度客製化，例：連結日股、美元計價）；說明書與投資人須知金額旁的幣別字逐處 = 參考條件表承作幣別（Issue #170） |
 
 ## 9. 實作對照（Issue #135）
 
@@ -210,6 +212,7 @@
 | §3.5 受託機構商品代號 | `doc.trustee_product_code` | `trustee_product_code` | 不一致（空白也是） |
 | §3.5 名稱 | `doc.name_consistency` | `name_art1` | 不一致 |
 | §3.5 幣別 | `doc.currency_consistency` | `currency_art5` | 不一致 |
+| §3.1 金額旁的幣別（共用規則） | `field.currency` | `denomination_currency`、`minimum_subscription_currency`、`minimum_additional_currency`、`minimum_redemption_currency`、`redemption_increment_currency`、`scenario_denomination_currency`、`情境X_currency` | 不一致；幣別字不在審查標準對照表 → 人工覆核（和封面同一個字時只由封面那筆報） |
 | §3.5 商品種類 | `doc.product_type` | `product_type` | 不一致 |
 | §3.5 期數 | `doc.coupon_periods` | `date_table`、`name_months`、`coupon_range` | 不一致 |
 | §3.5 KO 觀察方式 | `doc.ko_observation` | `ko_observation` | 人工覆核 |

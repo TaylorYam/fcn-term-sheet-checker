@@ -16,7 +16,8 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import barc_schedule as schedule
-from .layout import Document, LayoutSpec, Span, TextIndex, join_text, parse_date
+from . import money
+from .layout import Document, LayoutSpec, Span, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "barc-zh-pd"
 PARSER_VERSION = "2"
@@ -636,6 +637,55 @@ def _scenario_notional(ti: TextIndex) -> ParsedField:
     return _distinct("scenario_notional", hits, "第 16 條找不到情境假設「每單位商品面額 =」")
 
 
+_CASE_IDS = ("i", "ii", "iii")
+
+
+def _currency_occurrences(
+    doc: Document, art6: Span | None, s16: TextIndex, ch4: Sequence[Line]
+) -> list[standard_fields.Occurrence]:
+    """金額旁的幣別字（標準欄位 `currency_others`，Issue #170）：§6 面額、第四章最低申購／贖回金額、§16 情境假設面額
+    各一處，§16 情境 (i)～(iii) 每個情境一處（該情境裡每一處「金額 幣別」；股價與含「股」的實物交割算式不算）。"""
+    occ, ccy = standard_fields.Occurrence, money.CURRENCY
+    art6_ti, ch4_ti = TextIndex(doc.span_lines(art6)), TextIndex(ch4)
+    out = [
+        occ(
+            "denomination_currency",
+            "每單位商品面額幣別",
+            "第 6 條每單位商品面額",
+            capture("denomination_currency", art6_ti, rf"面額為[\d,]+\s*({ccy})", whole_match=True),
+        ),
+        occ(
+            "min_subscription_currency",
+            "最低申購金額幣別",
+            "第四章最低申購金額",
+            capture("min_subscription_currency", ch4_ti, rf"至少為[\d,]+\s*({ccy})", whole_match=True),
+        ),
+        occ(
+            "min_redemption_currency",
+            "最低贖回商品面額幣別",
+            "第四章最低贖回商品面額",
+            capture("min_redemption_currency", ch4_ti, rf"最低贖回商品面額為[\d,]+\s*({ccy})", whole_match=True),
+        ),
+        occ(
+            "scenario_notional_currency",
+            "情境假設面額幣別",
+            "第 16 條情境假設每單位商品面額",
+            capture("scenario_notional_currency", s16, rf"每單位商品面額=[\d,]+\s*({ccy})", whole_match=True),
+        ),
+    ]
+    pos = [s16.text.find(c) for c in _CASES]
+    for k, case in enumerate(_CASES):
+        field, name, where = f"scenario_{_CASE_IDS[k]}_currency", f"情境 ({_CASE_IDS[k]}) 金額幣別", f"第 16 條{case}"
+        if pos[k] < 0 or (k + 1 < len(pos) and pos[k + 1] < pos[k]):
+            gone = case if pos[k] < 0 else _CASES[k + 1]
+            out.append(occ(field, name, where, ParsedField.missing(field, f"第 16 條找不到「{gone}」")))
+            continue
+        end = pos[k + 1] if k + 1 < len(pos) else None
+        found = money.amounts(s16, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=pos[k], end=end)
+        out.append(money.scenario_occurrence(field, name, where, found, s16.lines_for(pos[k], pos[k] + len(case))))
+    return out
+
+
 _HEADER_PCT = re.compile(r"(執行價格|觸及生效價格|觸發水準)（為最初價格的([\d.]+)%")
 _HEADER_FIELD = {"執行價格": "strike_pct", "觸及生效價格": "ki_pct", "觸發水準": "ko_pct"}
 
@@ -789,10 +839,12 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["issuer_name_ch2"] = _ch2_item(doc, "發行機構", "事業名稱", "issuer_name_ch2", sq)
     flds["issuer_name_ch1"] = standard_fields.absent("issuer_name_ch1", "第一章只寫中文的發行機構名稱")
     flds["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
-    flds["currency_others"] = standard_fields.absent("currency_others", "承作幣別的其他出處")
     flds["distributor_name_ch2"] = _ch2_item(doc, "受託或銷售機構", "事業名稱", "distributor_name_ch2", sq)
     flds["distributor_address_ch2"] = _ch2_item(doc, "受託或銷售機構", "營業所在地", "distributor_address_ch2", sq)
     ch4 = doc.chapter_lines(4)
+    flds["currency_others"] = standard_fields.occurrences(
+        "currency_others", _currency_occurrences(doc, arts.get(6), s16, ch4)
+    )
     flds.update(_fees(ch4))
     flds["min_subscription"] = _amount(ch4, r"最低申購金額依受託或銷售機構規定，至少為([\d,]+)", "min_subscription")
     flds["min_redemption"] = _amount(ch4, r"最低贖回商品面額為([\d,]+)", "min_redemption")

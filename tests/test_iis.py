@@ -527,3 +527,43 @@ def test_unexpected_error_while_reading_the_iis_names_the_iis(tmp_path):
     _, sheet = check_all(sheet_ref, [ts, iis], CONFIG.with_registry((barc,))).items
 
     assert problems(sheet) == ["投資人須知：ValueError: 讀出失敗"]
+
+
+# ---------------------------------------------------------------- 金額旁的幣別（Issue #170）
+
+
+@pytest.mark.parametrize(
+    ("edit", "field", "name"),
+    [
+        (
+            Edit("每單位商品面額為10,000 美元，", "每單位商品面額為10,000 日幣，", "iis"),
+            "denomination_currency",
+            "每單位商品面額",
+        ),
+        (
+            Edit("最低申購金額為10,000 美元。", "最低申購金額為10,000 日幣。", "iis"),
+            "min_subscription_currency",
+            "最低申購金額",
+        ),
+    ],
+    ids=["denomination", "min-subscription"],
+)
+def test_barc_iis_currency_next_to_an_amount_is_checked(tmp_path, edit, field, name):
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec, edits=[edit])
+    outcome, _ = run(tmp_path, [ts, iis], [reference_row(spec)])
+    item, sheet = outcome.items
+    assert item.report.status == PASS
+    [r] = [r for r in sheet.report.results if r.rule_id == "field.currency" and r.field == field]
+    assert (r.status, r.expected, r.actual) == (MISMATCH, "USD", "JPY")
+    assert problems(sheet) == [f"{name}幣別對不起來：參考條件表 USD／投資人須知 JPY"]
+
+
+def test_hsbc_iis_denomination_currency_is_checked(tmp_path):
+    s = hsbc_synth.Spec()
+    ts = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, iis=False)
+    edit = Edit("每單位面額：10,000 美元", "每單位面額：10,000 日幣", "iis")
+    iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, edits=[edit])
+    sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
+    _, item = check_all(sheet, [ts, iis]).items
+    assert problems(item) == ["每單位面額幣別對不起來：參考條件表 USD／投資人須知 JPY"]

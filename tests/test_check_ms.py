@@ -345,3 +345,96 @@ def test_ms_term_sheet_is_filled_when_the_investor_sheet_passes_too(tmp_path):
     assert ts.report.status == S.PASS and iis.report.status == S.PASS and not iis.unsupported
     assert ts.fills_sheet and ts.partner is iis
     assert all(d.action in (BackfillAction.FILL, BackfillAction.MATCH) for d in ts.report.backfill)
+
+
+# ---------------------------------------------------------------- 金額旁的幣別（Issue #170）
+
+
+def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
+    """商品幣別不必等於標的幣別：日圓計價、連結美股，全部通過（合成器照規格畫幣別，不再寫死美元）。"""
+    r = check(tmp_path, Spec(currency_zh="日幣"))
+    assert r.status == S.PASS, problems(r)
+    currency = rule(r, "field.currency")
+    assert {x.field for x in currency} == {
+        "currency",
+        "denomination_currency",
+        "minimum_subscription_currency",
+        "minimum_additional_currency",
+        "minimum_redemption_currency",
+        "redemption_increment_currency",
+        "scenario_denomination_currency",
+        "情境一_currency",
+        "情境二_currency",
+        "情境三_currency",
+        "情境四_currency",
+    }
+    assert all(x.expected == "JPY" and x.document_evidence for x in currency)
+    assert rule(r, "doc.denomination")[0].status == S.PASS, "面額依日圓預設值"
+
+
+@pytest.mark.parametrize(
+    ("section", "old", "new", "field"),
+    [
+        ("art6", "每單位商品面額：美元 10,000.00 元", "每單位商品面額：日幣 10,000.00 元", "denomination_currency"),
+        (
+            "ch四",
+            "即美元10,000 元，並以美元10,000.00 元(1",
+            "即日幣10,000 元，並以美元10,000.00 元(1",
+            "minimum_subscription_currency",
+        ),
+        (
+            "ch四",
+            "並以美元10,000.00 元(1 單位商品面額)為最低加購單位",
+            "並以日幣10,000.00 元(1 單位商品面額)為最低加購單位",
+            "minimum_additional_currency",
+        ),
+        (
+            "ch四",
+            "最低贖回金額為1 單位商品面額，即美元10,000 元",
+            "最低贖回金額為1 單位商品面額，即日幣10,000 元",
+            "minimum_redemption_currency",
+        ),
+        (
+            "ch四",
+            "並以美元10,000.00元(1 單位商品面額)為累加贖回單位",
+            "並以日幣10,000.00元(1 單位商品面額)為累加贖回單位",
+            "redemption_increment_currency",
+        ),
+        (
+            "art18",
+            "總投資金額 = 1 單位商品面額 = 10,000.00 美元",
+            "總投資金額 = 1 單位商品面額 = 10,000.00 日幣",
+            "scenario_denomination_currency",
+        ),
+        ("scen.一", "-10,000.00 美元=100.00 美元", "-10,000.00 美元=100.00 日幣", "情境一_currency"),
+        (
+            "scen.四",
+            "+6,000.00 美元-10,000.00 美元=-3,600.00 美元",
+            "+6,000.00 美元-10,000.00 美元=-3,600.00 日幣",
+            "情境四_currency",
+        ),
+    ],
+    ids=lambda x: x if x.endswith("_currency") else "",
+)
+def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, section, old, new, field):
+    r = check(tmp_path, edits=[Edit(old, new, f"ts.{section}")])
+    assert problems(r) == [("field.currency", field, S.MISMATCH)]
+    [x] = rule(r, "field.currency", field)
+    assert x.expected == "USD" and x.document_evidence
+    assert x.actual == "JPY" or "日幣" in str(x.actual), "單一出處顯示 ISO 代碼，情境列出不符的金額"
+
+
+def test_stock_prices_in_the_worse_scenario_are_not_product_currency(tmp_path):
+    """較差情境的收盤價、執行價與實物交割算式用標的幣別，不核對。"""
+    edits = [
+        Edit(
+            "收盤價=42.0000 美元小於其執行價=70.0000 美元", "收盤價=42.0000 日幣小於其執行價=70.0000 日幣", "ts.scen.四"
+        ),
+        Edit(
+            "=42.0000 美元×142 股/1+36.00 美元=6,000.00 美元",
+            "=42.0000 日幣×142 股/1+36.00 日幣=6,000.00 日幣",
+            "ts.scen.四",
+        ),
+    ]
+    r = check(tmp_path, edits=edits)
+    assert r.status == S.PASS, problems(r)

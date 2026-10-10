@@ -9,10 +9,12 @@ from decimal import Decimal
 
 import pytest
 
+from fcn_checker import standard_fields
 from fcn_checker.rules import barc, reference
 from fcn_checker.rules.kit import Check
 from fcn_checker.rules.review_standard import review_standard_rules
-from fcn_checker.schema import Item, ParsedField
+from fcn_checker.schema import Evidence, Item, ParsedField
+from fcn_checker.standard_fields import Money, Occurrence, occurrences
 from harness import CONFIG, MISMATCH, NA, PASS, REVIEW
 from rule_fixtures import context, issuer_context, term_sheet
 
@@ -131,3 +133,61 @@ def test_check_compare_writes_the_failure_text_only_when_it_fails():
 def test_check_carries_the_expected_value_into_the_review():
     r = Check("x.y", "f", Item.expected("項目"), expected="預期").needs(ParsedField.missing("a")).compare("預期", None)
     assert (r.status, r.expected) == (REVIEW, "預期")
+
+
+# ---------------------------------------------------------------- 參考條件表欄位：金額旁的幣別（Issue #170）
+
+
+def _currency_others(cover, items, **row):
+    occs = [
+        Occurrence(
+            field,
+            f"{field} 名稱",
+            f"{field} 位置",
+            v if isinstance(v, ParsedField) else ParsedField.present(field, v, []),
+        )
+        for field, v in items.items()
+    ]
+    ts = term_sheet(currency_zh=cover, currency_others=occurrences("currency_others", occs))
+    return reference.currency_others(context(ts, **row))
+
+
+def test_currency_occurrences_map_chinese_words_and_iso_codes_to_the_sheet():
+    out = _currency_others("美元", {"a": "美元", "b": "USD", "c": "日幣", "d": "JPY"}, currency="USD")
+    assert [(r.field, r.status, r.actual) for r in out] == [
+        ("a", PASS, "USD"),
+        ("b", PASS, "USD"),
+        ("c", MISMATCH, "JPY"),
+        ("d", MISMATCH, "JPY"),
+    ]
+    assert out[2].message == "c 位置須等於參考條件表「承作幣別」（日幣 → JPY）" and out[2].item.name == "c 名稱"
+
+
+def test_currency_word_outside_the_table_is_reported_once_at_the_cover():
+    """封面幣別不在對照表時封面那筆已轉人工覆核；寫同一個字的出處不重複，寫別的字才各自報。"""
+    assert _currency_others("澳幣", {"a": "澳幣"}, currency="AUD") == []
+    [r] = _currency_others("澳幣", {"a": "歐元"}, currency="AUD")
+    assert (r.status, r.reason_code, r.actual) == (REVIEW, "currency_unknown", "歐元")
+    [r] = _currency_others("美元", {"a": "歐元"}, currency="USD")
+    assert (r.status, r.reason_code) == (REVIEW, "currency_unknown") and "「歐元」" in r.message
+
+
+def test_scenario_currency_lists_only_the_amounts_that_do_not_match():
+    ev = Evidence(1, (0.0, 0.0, 1.0, 1.0), "x")
+    good = Money("100.00美元", "美元", (ev,))
+    bad, odd = Money("10,100.00日幣", "日幣", (ev,)), Money("1.00歐元", "歐元", ())
+    [r] = _currency_others("美元", {"s": (good, good)}, currency="USD")
+    assert (r.status, r.expected, r.actual) == (PASS, "USD", "USD")
+    [r] = _currency_others("美元", {"s": (good, bad, odd)}, currency="USD")
+    assert (r.status, r.actual, r.document_evidence) == (MISMATCH, ["10,100.00日幣"], [ev])
+    [r] = _currency_others("美元", {"s": (good, odd)}, currency="USD")
+    assert (r.status, r.reason_code, r.actual) == (REVIEW, "currency_unknown", "歐元")
+    assert _currency_others("澳幣", {"s": (Money("1澳幣", "澳幣", ()),)}, currency="AUD") == []
+
+
+def test_currency_occurrences_are_silent_when_the_sheet_currency_is_blank_or_absent():
+    assert _currency_others("美元", {"a": "美元"}) == []
+    ts = term_sheet(currency_zh="美元", currency_others=standard_fields.absent("currency_others", "其他出處"))
+    assert reference.currency_others(context(ts, currency="USD")) == []
+    [r] = _currency_others("美元", {"a": ParsedField.missing("a", "找不到")}, currency="USD")
+    assert (r.status, r.reason_code) == (REVIEW, "document_missing")

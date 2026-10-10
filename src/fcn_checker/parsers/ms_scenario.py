@@ -10,11 +10,13 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from ..schema import Line, ParsedField
+from ..standard_fields import Money
 from ..text import squash
-from . import ms_tables
+from . import money, ms_tables
 from .layout import TextIndex
 
 N = r"([\d,]+\.\d{2})"  # 金額（2 位小數）
+UNIT = money.CURRENCY  # 金額後的幣別字（任一已知寫法；寫哪一個才對由共用規則核對，Issue #170）
 SCENARIO_HEAD = re.compile(r"^情境([一二三四五六七八九十]+)[:：](.*)$")
 
 
@@ -56,12 +58,15 @@ class Scenario:
     pnl: list[Hit] = field(default_factory=list)
     annualized: list[Hit] = field(default_factory=list)  # 年化報酬率：(Y,)
     strike: list[Hit] = field(default_factory=list)  # 較差情境：(彭博代碼去空白, 執行價)
+    # 各金額旁的幣別字（商品幣別的出處）；股價與實物交割算式所在的行跟著標的走，不列入（money.stock_price_line）
+    money: tuple[Money, ...] = ()
 
 
 @dataclass
 class ScenarioSection:
     lines: list[Line]
     denomination: Hit | None  # 總投資金額 = 1 單位商品面額 = N
+    denomination_currency: Hit | None  # 總投資金額旁的幣別字：(幣別,)
     tenor: Hit | None  # 年期：N 個月
     monthly: list[Hit]  # 月配息率=X%
     table: ParsedField  # 重印價格表
@@ -80,10 +85,12 @@ def _one(hits: list[Hit]) -> Hit | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def _scenario(number: str, title: str, lines: list[Line], unit: str) -> Scenario:
+def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
+    unit = UNIT
     kind = "default" if "無法履約" in title else "worse" if "較差" in title else "profit"
     s = Scenario(number, title, kind, lines)
     ti = ScenarioText(lines)
+    s.money = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2)
     assumed = [
         *_hits(ti, r"假設在第(\d+)個(?:配息週期終止日|定價日)", lambda m: (int(m[1]),)),
         *_hits(ti, r"假設在第1至第(\d+)個(?:配息觀察期間|定價日)", lambda m: (int(m[1]),)),
@@ -116,9 +123,9 @@ def _scenario(number: str, title: str, lines: list[Line], unit: str) -> Scenario
     return s
 
 
-def section(lines: list[Line], unit: str) -> ScenarioSection:
+def section(lines: list[Line]) -> ScenarioSection:
     """第 18 項：假設（到第一個情境前）、重印價格表（月配息率之後到情境一）、各情境（依「情境X：」切開）。"""
-    unit = re.escape(unit)
+    unit = UNIT
     heads = [i for i, ln in enumerate(lines) if SCENARIO_HEAD.match(squash(ln.text))]
     head_end = heads[0] if heads else len(lines)
     ti = TextIndex(lines[:head_end])
@@ -133,10 +140,12 @@ def section(lines: list[Line], unit: str) -> ScenarioSection:
     for k, i in enumerate(heads):
         m = SCENARIO_HEAD.match(squash(lines[i].text))
         end = heads[k + 1] if k + 1 < len(heads) else len(lines)
-        scenarios.append(_scenario(m[1], m[2], lines[i:end], unit))
+        scenarios.append(_scenario(m[1], m[2], lines[i:end]))
+    notional = rf"總投資金額=1單位商品面額=([\d,]+(?:\.\d+)?)({unit})"
     return ScenarioSection(
         lines=lines,
-        denomination=_one(_hits(ti, rf"總投資金額=1單位商品面額=([\d,]+(?:\.\d+)?){unit}", lambda m: (_dec(m[1]),))),
+        denomination=_one(_hits(ti, notional, lambda m: (_dec(m[1]),))),
+        denomination_currency=_one(_hits(ti, notional, lambda m: (m[2],))),
         tenor=_one(_hits(ti, r"年期[:：](\d+)個月", lambda m: (int(m[1]),))),
         monthly=monthly,
         table=table,

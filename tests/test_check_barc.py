@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import pytest
 
+from fcn_checker.messages import problem_message, show
 from harness import ERROR, MISMATCH, NA, PASS, REVIEW, check_sheet, problems, results
 from pdf_writer import Edit, zh_date
 from reference_synth import REFERENCE_HEADERS, UL, build_reference_sheet, reference_row
@@ -31,7 +32,7 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
     meta = report.metadata
     assert len(meta["inputs"]["term_sheet"]["sha256"]) == 64
     assert len(meta["inputs"]["reference_sheet"]["sha256"]) == 64
-    assert meta["review_standard"]["version"] == 9
+    assert meta["review_standard"]["version"] == 10
     assert meta["reference_format"]["version"] == 4
     assert meta["program_version"] and meta["extractor"].startswith("PyMuPDF")
     assert report.not_covered, "第二階段規則應列在未涵蓋清單"
@@ -51,8 +52,9 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
         ),
         Spec(currency_zh="日幣", tenor=7, annual=Decimal("9.00")),
         Spec(currency_zh="人民幣", tenor=12, annual=Decimal("10.00"), monthly=Decimal("0.8333")),
+        Spec(currency_zh="港幣"),
     ],
-    ids=["daily-memory-noKI", "daily-EKI", "periodend-memory-AKI", "periodend-single", "JPY", "CNH"],
+    ids=["daily-memory-noKI", "daily-EKI", "periodend-memory-AKI", "periodend-single", "JPY", "CNH", "HKD"],
 )
 def test_supported_variants_pass(tmp_path, spec):
     report = check(tmp_path, spec)
@@ -341,3 +343,111 @@ def test_same_input_gives_same_result_except_time(tmp_path):
     a["metadata"].pop("generated_at")
     b["metadata"].pop("generated_at")
     assert a == b
+
+
+# ---------------------------------------------------------------- 金額旁的幣別（Issue #170）
+
+
+def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
+    """商品幣別不必等於標的幣別（FCN 高度客製化）：美元計價、連結日股，全部通過。"""
+    spec = Spec(underlyings=(UL("虛構日本株式會社", "東京證券交易所", "ZZJ JT", Decimal("1234.0000")),))
+    report = check(tmp_path, spec)
+    assert problems(report) == set() and report.status == PASS
+    currency = results(report, "field.currency")
+    assert {r.field for r in currency} >= {
+        "currency",
+        "denomination_currency",
+        "min_subscription_currency",
+        "min_redemption_currency",
+        "scenario_notional_currency",
+        "scenario_i_currency",
+        "scenario_ii_currency",
+        "scenario_iii_currency",
+    }
+    assert all(r.expected == "USD" and r.document_evidence for r in currency)
+
+
+S0 = Spec()
+COUPON = (Decimal(S0.denom) * S0.monthly_value / 100).quantize(Decimal("0.01"))
+
+
+@pytest.mark.parametrize(
+    ("edit", "field", "shown"),
+    [
+        (
+            Edit("每單位商品面額為10,000 美元。", "每單位商品面額為10,000 日幣。", "ts.art6"),
+            "denomination_currency",
+            "JPY",
+        ),
+        (Edit("至少為10,000 美元，", "至少為10,000 日幣，", "ts.ch四"), "min_subscription_currency", "JPY"),
+        (
+            Edit("美元，且須為商品面額之整數倍", "日幣，且須為商品面額之整數倍", "ts.ch四"),
+            "min_redemption_currency",
+            "JPY",
+        ),
+        (
+            Edit("每單位商品面額 = 10,000 美元", "每單位商品面額 = 10,000 日幣", "ts.art16"),
+            "scenario_notional_currency",
+            "JPY",
+        ),
+        (
+            Edit("每單位累積配息金額 = 0.00 美元", "每單位累積配息金額 = 0.00 日幣", "ts.art16.i"),
+            "scenario_i_currency",
+            "0.00日幣",
+        ),
+        (
+            Edit(
+                f"× {S0.tenor} = {COUPON * S0.tenor:,.2f} 美元",
+                f"× {S0.tenor} = {COUPON * S0.tenor:,.2f} 日幣",
+                "ts.art16.ii",
+            ),
+            "scenario_ii_currency",
+            f"{COUPON * S0.tenor:,.2f}日幣",
+        ),
+        (Edit("[(5,000.00 美元)", "[(5,000.00 日幣)", "ts.art16.iii"), "scenario_iii_currency", "5,000.00日幣"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else "",
+)
+def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, edit, field, shown):
+    report = check(tmp_path, edits=[edit])
+    assert problems(report) == {("field.currency", MISMATCH)}
+    [r] = results(report, "field.currency", field)
+    assert r.status == MISMATCH and r.expected == "USD" and r.document_evidence
+    assert show(r.actual) == shown and r.order_source == ["樣本清單!K4"]
+    assert results(report, "field.currency", "currency")[0].status == PASS, "封面那筆照常通過"
+
+
+def test_wrong_currency_message_names_the_place(tmp_path):
+    report = check(tmp_path, edits=[Edit("每單位商品面額為10,000 美元。", "每單位商品面額為10,000 日幣。", "ts.art6")])
+    [r] = results(report, "field.currency", "denomination_currency")
+    assert problem_message(r) == "每單位商品面額幣別對不起來：參考條件表 USD／說明書 JPY"
+    report = check(tmp_path, edits=[Edit("[(5,000.00 美元)", "[(5,000.00 日幣)", "ts.art16.iii")])
+    [r] = results(report, "field.currency", "scenario_iii_currency")
+    assert problem_message(r) == "情境 (iii) 金額幣別對不起來：參考條件表 USD／說明書 5,000.00日幣"
+
+
+def test_currency_word_outside_the_review_standard_table_requires_review(tmp_path):
+    report = check(tmp_path, edits=[Edit("每單位商品面額為10,000 美元。", "每單位商品面額為10,000 歐元。", "ts.art6")])
+    assert problems(report) == {("field.currency", REVIEW)}
+    [r] = results(report, "field.currency", "denomination_currency")
+    assert r.reason_code == "currency_unknown" and "「歐元」" in r.message
+
+
+def test_underlying_currency_in_the_physical_settlement_formula_is_not_checked(tmp_path):
+    """最差情況實物交割算式裡的股價用標的幣別：含「股」的行不當成商品幣別的出處。"""
+    edit = Edit("[(5,000.00 美元)", "[(5,000.00 美元 = 1.00 日幣 × 41 股 ÷ 1.0000)", "ts.art16.iii")
+    report = check(tmp_path, edits=[edit])
+    assert problems(report) == set()
+
+
+def test_currency_without_a_sample_is_reviewed_once_at_the_cover(tmp_path):
+    """可承作但沒有說明書樣本的幣別（例：AUD）：對照表沒有，封面幣別轉人工覆核一次；其他出處寫同一個字不重複報。"""
+    report = check(tmp_path, Spec(currency_zh="澳幣", currency_iso="AUD"))
+    [cover] = results(report, "field.currency")
+    assert (cover.field, cover.status, cover.reason_code) == ("currency", REVIEW, "currency_unknown")
+    assert results(report, "doc.denomination")[0].reason_code == "currency_unknown"
+    assert problems(report) == {
+        ("field.currency", REVIEW),
+        ("doc.denomination", REVIEW),
+        ("standard.product_name", REVIEW),
+    }

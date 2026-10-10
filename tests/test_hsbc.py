@@ -218,24 +218,23 @@ def test_spec_value_differing_from_the_reference_row_is_reported(tmp_path):
     assert only(r, "field.strike_pct").status == S.MISMATCH
 
 
-def test_price_table_currency_is_the_trade_currency_on_the_sheet(tmp_path):
-    """第 12 條價格表每列的幣別格是承作幣別：逐列和參考條件表「承作幣別」比（Issue #167）。"""
-    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table")])  # 例：連結日股、美元計價卻寫成標的的幣別
-    rows = {x.field: x for x in r.results if x.rule_id == "field.currency"}
-    assert rows["currency"].status == S.PASS, "封面計價幣別正確"
-    assert {f: x.status for f, x in rows.items() if f != "currency"} == {
-        "price_table_currency_1": S.MISMATCH,
-        "price_table_currency_2": S.MISMATCH,
-    }
-    bad = rows["price_table_currency_1"]
-    assert (bad.expected, bad.actual) == ("USD", "JPY") and bad.document_evidence
-    assert bad.item.name == "ZZ1 UW 幣別"
+def test_price_table_currency_follows_the_underlying_and_is_not_checked(tmp_path):
+    """第 12 條價格表每列的幣別格跟著標的走（例：連結日股、美元計價寫 JPY），不和承作幣別比；
+    只核對情境價格表和正式價格表逐列一致（2026-10-10 使用者決定，取代 Issue #167）。"""
+    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table"), Edit("USD", "JPY", "ts.art18.table")])
+    assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
+    assert not [x for x in r.results if x.field.startswith("price_table_currency")]
+    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table")])
+    assert only(r, "doc.scenario_table").status == S.MISMATCH, "情境表與正式表的幣別格仍要一致"
 
 
-def test_price_table_currency_follows_a_non_usd_trade_currency(tmp_path):
+def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
+    """商品幣別不必等於標的幣別：人民幣計價、連結美股，每一處幣別都 = 參考條件表承作幣別（Issue #170）。"""
     r = check(tmp_path, Spec(currency_zh="人民幣"))
     rows = [x for x in r.results if x.rule_id == "field.currency"]
-    assert len(rows) == 3 and all(x.status == S.PASS for x in rows)
+    assert len(rows) > 1 and all(x.status == S.PASS and x.expected == "CNH" for x in rows), [
+        (x.field, x.status) for x in rows
+    ]
 
 
 def test_blank_trade_currency_on_the_sheet_is_reported_once(tmp_path):
@@ -707,3 +706,56 @@ def test_hsbc_price_table_without_ki_column_for_a_ki_product_requires_review(tmp
     r = _check_replaced(tmp_path, underlying_prices=drop_ki)
     x = only(r, "derive.prices")
     assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "price_table_ki_column")
+
+
+# ---------------------------------------------------------------- 金額旁的幣別（Issue #170）
+
+
+@pytest.mark.parametrize(
+    ("section", "old", "new", "field"),
+    [
+        ("art6", "每單位面額：美元10,000元", "每單位面額：日幣10,000元", "denomination_currency"),
+        ("art7", "最低交易金額：美元10,000元", "最低交易金額：日幣10,000元", "minimum_trade_currency"),
+        ("ch四", "最低申購金額：美元10,000元", "最低申購金額：日幣10,000元", "minimum_subscription_currency"),
+        ("ch四", "最低加購金額：美元10,000元", "最低加購金額：日幣10,000元", "minimum_additional_currency"),
+        ("art18", "每單位面額為美元10,000元", "每單位面額為日幣10,000元", "scenario_assumption_currency"),
+        ("art18", "-美元10,000.00=美元200.00", "-美元10,000.00=日幣200.00", "scenario_1_currency"),
+    ],
+    ids=lambda x: (
+        (x if isinstance(x, str) else "+".join(x))
+        if isinstance(x, (str, tuple)) and str(x).endswith(("_currency", "')"))
+        else ""
+    ),
+)
+def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, section, old, new, field):
+    fields = field if isinstance(field, tuple) else (field,)
+    r = check(tmp_path, edits=[Edit(old, new, f"ts.{section}")])
+    bad = [(x.rule_id, x.field, x.status) for x in r.results if x.status in (S.MISMATCH, S.REVIEW_REQUIRED)]
+    assert bad == [("field.currency", f, S.MISMATCH) for f in fields]
+    for x in [x for x in r.results if x.rule_id == "field.currency" and x.field in fields]:
+        assert x.expected == "USD" and x.document_evidence
+        assert x.actual == "JPY" or "日幣" in str(x.actual), "單一出處顯示 ISO 代碼，情境列出不符的金額"
+
+
+def test_every_scenario_has_its_own_currency_result(tmp_path):
+    r = check(tmp_path)
+    fields = [x.field for x in r.results if x.rule_id == "field.currency" and x.field.startswith("scenario_")]
+    assert fields == [
+        "scenario_assumption_currency",
+        "scenario_1_currency",
+        "scenario_2_currency",
+        "scenario_3_currency",
+        "scenario_4_currency",
+    ]
+
+
+def test_strike_and_ki_prices_in_the_scenarios_follow_the_underlying(tmp_path):
+    """執行價、觸及不保本價格跟著標的走，不是承作幣別的出處（2026-10-10 使用者確認）；數字仍和價格表比。"""
+    edits = [
+        Edit("執行價美元70.0000", "執行價日幣70.0000", "ts.art18"),
+        Edit("觸及不保本價格美元60.0000", "觸及不保本價格日幣60.0000", "ts.art18"),
+    ]
+    r = check(tmp_path, edits=edits)
+    assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
+    r = check(tmp_path, edits=[Edit("執行價美元70.0000", "執行價日幣71.0000", "ts.art18")])
+    assert any(x.rule_id == "doc.scenario_parameters" and x.status == S.MISMATCH for x in r.results)

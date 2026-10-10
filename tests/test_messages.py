@@ -94,6 +94,14 @@ def test_barc_reference_fields_use_column_name_and_both_values(tmp_path, column,
     report = check(tmp_path, overrides={column: value})
 
     sheet_side = [r for r in issues(report) if r.rule_id.startswith("field.")]
+    if column == "承作幣別":  # 金額旁每一處幣別字也和承作幣別比（Issue #170）：封面那筆之外各處也都對不起來
+        others = [r for r in sheet_side if r.field != "currency"]
+        assert others and all(r.rule_id == "field.currency" and r.status == CheckStatus.MISMATCH for r in others)
+        for r in others:  # 單一出處顯示 ISO 代碼；情境列出該情境裡每一處不符的金額
+            assert re.search(r"幣別對不起來：參考條件表 JPY／說明書 (USD|.*美元.*)$", problem_message(r)), (
+                problem_message(r)
+            )
+        sheet_side = [r for r in sheet_side if r.field == "currency"]
     assert len(sheet_side) == 1, [(r.rule_id, r.field) for r in sheet_side]
     msg = problem_message(sheet_side[0])
     label = {"UL_1": "標的", "UL_1_KO價": "UL_1 KO價"}.get(column, column)

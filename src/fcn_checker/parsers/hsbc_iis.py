@@ -10,7 +10,7 @@ import re
 from collections.abc import Sequence
 
 from ..schema import DetectionResult, Evidence, Line, ParsedField
-from . import iis
+from . import iis, money
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "hsbc-zh-iis"
@@ -24,6 +24,7 @@ PROVIDED = frozenset(
         "name_zh",
         "name_en",
         "currency_zh",
+        "currency_others",
         "denomination",
         "underlyings",
         "underlying_names",
@@ -81,6 +82,18 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("name_en", r"中文投資人須知(?:\([^)]*\))?香港上海滙豐銀行.+?結構型商品(.+?)本商品之投資風險警語")
     put("currency_zh", r"6\.計價幣別[:：](.+?)7\.每單位面額")
     put("denomination", r"7\.每單位面額[:：]([\d,]+)", iis.integer)
+    fields["currency_others"] = iis.occurrences(  # 金額旁的幣別字 = 參考條件表承作幣別（Issue #170）
+        "currency_others",
+        ti,
+        (
+            (
+                "denomination_currency",
+                "每單位面額幣別",
+                "第一商品簡介第 7 點每單位面額",
+                rf"7\.每單位面額[:：][\d,]+\s*({money.CURRENCY})",
+            ),
+        ),
+    )
     fields["underlyings"] = _underlyings(ti)
     put("underlying_names", r"10\.連結標的資產[:：](.+?)\(彭博代碼", lambda x: x.split(","))
     put("tenor_months", r"11\.本商品年期[:：].*?為(\d+)個月12\.", int)

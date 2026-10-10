@@ -17,7 +17,7 @@ from typing import Any, Self
 
 import openpyxl
 
-from harness import CURRENCY_ISO, REFERENCE_FORMAT
+from harness import CURRENCY_ISO, REFERENCE_FORMAT, STANDARD
 
 _FORMAT = tomllib.loads(REFERENCE_FORMAT.read_text(encoding="utf-8"))
 # Excel 欄名 → 標準欄位（[columns] 內的 ignored 清單不是欄名）
@@ -56,7 +56,7 @@ REFERENCE_HEADERS = [
 ]
 DATE_FORMAT = "mm-dd-yy"
 Q4 = Decimal("0.0001")
-DEFAULT_DENOMINATION = {"USD": 10000, "JPY": 1000000, "CNH": 100000}  # 幣別預設面額
+DEFAULT_DENOMINATION = {k: int(v) for k, v in STANDARD["denomination"].items()}  # 幣別預設面額（審查標準）
 
 
 def price(initial: Decimal, pct: Decimal) -> Decimal:
@@ -107,6 +107,7 @@ class ProductSpec:
     final_date: dt.date = dt.date(2030, 7, 8)  # 最終比價日
     maturity_date: dt.date = dt.date(2030, 7, 11)
     denomination: int | None = None  # None → 幣別預設面額
+    currency_iso: str | None = None  # 承作幣別 ISO 代碼；None → 依審查標準對照 `currency_zh`（對照表沒有的幣別要給）
     underlyings: tuple[UL, ...] = DEFAULT_ULS
 
     def with_(self, **kw: Any) -> Self:
@@ -114,7 +115,7 @@ class ProductSpec:
 
     @property
     def ccy(self) -> str:
-        return CURRENCY_ISO[self.currency_zh]
+        return self.currency_iso or CURRENCY_ISO[self.currency_zh]
 
     @property
     def denom(self) -> int:

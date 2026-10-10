@@ -10,20 +10,22 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP
 from typing import Any
 
 from ..orders.reference import UNDERLYING_SLOTS, OrderRecord
-from ..schema import CheckResult, FieldStatus, Item, OrderValue, ParsedField
+from ..schema import CheckResult, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import AutocallSchedule
+from ..standard_fields import AutocallSchedule, Occurrence
 from .kit import (
     KI_LABEL,
     Q4,
     Check,
     Context,
+    RuleContext,
     cmp_pct,
     doc_ki,
     occurrences_of,
@@ -156,26 +158,92 @@ def currency(ctx: Context) -> CheckResult:
     return check.compare(v, iso, message=f"{ctx.document}：{pf.value} → {iso}")
 
 
-def currency_others(ctx: Context) -> list[CheckResult]:
-    """說明書承作幣別的其他出處（HSBC 價格表各列幣別格）= 參考條件表「承作幣別」（Issue #167）。
+def currency_iso(ctx: RuleContext, word: str) -> str | None:
+    """說明書上的幣別字 → ISO 代碼：3 碼 ISO 代碼照用，中文幣別依審查標準對照；對照表沒有時為 None。"""
+    if re.fullmatch(r"[A-Z]{3}", word):
+        return word
+    return ctx.std.currency_zh_to_iso.get(word)
 
-    表上承作幣別空白或格式不對時只由 `currency` 報一筆，這裡不逐列重複。
+
+def currency_others(ctx: Context) -> list[CheckResult]:
+    """說明書金額旁的幣別與承作幣別的其他出處 = 參考條件表「承作幣別」（Issue #167、#170）。
+
+    出處由各上手交出（標準欄位 `currency_others`）：面額、最低金額、情境假設等單一金額旁的幣別字各一筆，
+    情境試算每個情境一筆（列出該情境裡幣別不符的金額）。
+    商品幣別不必等於標的幣別：承作幣別只影響面額、配息、本金，各上手不交出股價、價格表幣別格與實物交割算式。
+    表上承作幣別空白或格式不對時只由 `currency` 報一筆，這裡不逐處重複；說明書的幣別字不在審查標準對照表時也
+    只由封面那筆報，和封面寫同一個字的出處不重複，寫別的字才各自轉人工覆核。
     """
     rid = "field.currency"
-    items, problem = occurrences_of(ctx, rid, "currency_others", Item.sheet("價格表幣別"))
+    items, problem = occurrences_of(ctx, rid, "currency_others", Item.sheet("幣別（其他出處）"))
     if problem:
         return [problem]
+    if not items:
+        return []
     v, ov, problem = order_value(
         ctx, "currency", rid, "currency", None, lambda x: x if isinstance(x, str) else None, "文字", name="幣別"
     )
     if problem:
         return []
+    cover = standard_field(ctx, "currency_zh")
+    cover_word = cover.value if cover.ok else None
     out = []
     for occ in items:
         pf = occ.value
         check = Check(rid, occ.field, Item.sheet(occ.name, [ov]), ctx.document, ov=(ov,), expected=v).needs(pf)
-        out.append(check.compare(v, pf.value, message=f"{occ.where}須等於參考條件表「承作幣別」"))
+        if (problem := check.blocked) is not None:
+            out.append(problem)
+            continue
+        result = _currency_occurrence(ctx, check, occ, v, cover_word)
+        if result is not None:
+            out.append(result)
     return out
+
+
+def _currency_occurrence(
+    ctx: Context, check: Check, occ: Occurrence, expected: str, cover_word: str | None
+) -> CheckResult | None:
+    """一處出處的結果：單一幣別字（str）或一個情境裡各金額的幣別（tuple[Money, ...]）；不報時為 None。"""
+    where = f"{occ.where}須等於參考條件表「承作幣別」"
+    value = occ.value.value
+    if isinstance(value, str):
+        iso = currency_iso(ctx, value)
+        if iso is None:
+            return None if value == cover_word else _unknown_currency(ctx, check, [value])
+        shown = f"（{value} → {iso}）" if value != iso else ""
+        return check.compare(expected, iso, message=where + shown)
+    mapped = [(m, currency_iso(ctx, m.currency)) for m in value]
+    bad = [m for m, iso in mapped if iso is not None and iso != expected]
+    unknown = [m for m, iso in mapped if iso is None and m.currency != cover_word]
+    if bad:
+        return check.compare(
+            expected,
+            [m.text for m in bad],
+            ok=False,
+            message=where,
+            evidence=[e for m in bad for e in m.evidence],
+        )
+    if unknown:
+        return _unknown_currency(
+            ctx, check, sorted({m.currency for m in unknown}), [e for m in unknown for e in m.evidence]
+        )
+    if all(iso is None for _, iso in mapped):
+        return None  # 全部和封面寫同一個不在對照表的字：封面那筆已轉人工覆核
+    return check.compare(expected, expected, message=where)
+
+
+def _unknown_currency(
+    ctx: Context, check: Check, words: list[str], evidence: list[Evidence] | None = None
+) -> CheckResult:
+    shown = "、".join(f"「{w}」" for w in words)
+    return check.result(
+        S.REVIEW_REQUIRED,
+        expected=check.expected,
+        actual=words if len(words) > 1 else words[0],
+        reason="currency_unknown",
+        message=f"{ctx.document}幣別{shown}不在審查標準的幣別對照表",
+        evidence=evidence,
+    )
 
 
 def underlyings(ctx: Context) -> CheckResult:
