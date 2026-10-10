@@ -644,7 +644,7 @@ def _currency_occurrences(
     doc: Document, art6: Span | None, s16: TextIndex, ch4: Sequence[Line]
 ) -> list[standard_fields.Occurrence]:
     """金額旁的幣別字（標準欄位 `currency_others`，Issue #170）：§6 面額、第四章最低申購／贖回金額、§16 情境假設面額
-    各一處，§16 情境 (i)～(iii) 每個情境一處（該情境裡每一處「金額 幣別」；含「股」的實物交割算式不算）。"""
+    各一處，§16 情境 (i)～(iii) 每個情境一處（該情境裡每一處「金額 幣別」；股價與含「股」的實物交割算式不算）。"""
     occ, ccy = standard_fields.Occurrence, money.CURRENCY
     art6_ti, ch4_ti = TextIndex(doc.span_lines(art6)), TextIndex(ch4)
     out = [

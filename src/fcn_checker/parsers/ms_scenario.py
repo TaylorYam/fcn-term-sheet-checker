@@ -58,7 +58,7 @@ class Scenario:
     pnl: list[Hit] = field(default_factory=list)
     annualized: list[Hit] = field(default_factory=list)  # 年化報酬率：(Y,)
     strike: list[Hit] = field(default_factory=list)  # 較差情境：(彭博代碼去空白, 執行價)
-    # 各金額旁的幣別字（商品幣別的出處）；股價（收盤價、執行價）與含「股」的實物交割算式用標的幣別，不列入
+    # 各金額旁的幣別字（商品幣別的出處）；股價與實物交割算式所在的行跟著標的走，不列入（money.stock_price_line）
     money: tuple[Money, ...] = ()
 
 
@@ -85,17 +85,12 @@ def _one(hits: list[Hit]) -> Hit | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def _stock_price_line(text: str) -> bool:
-    """股價與實物交割算式所在的行（標的幣別）：含「股」、「收盤價」或「執行價」。"""
-    return money.shares_line(text) or "收盤價" in text or "執行價" in text
-
-
 def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
     unit = UNIT
     kind = "default" if "無法履約" in title else "worse" if "較差" in title else "profit"
     s = Scenario(number, title, kind, lines)
     ti = ScenarioText(lines)
-    s.money = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=_stock_price_line)
+    s.money = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2)
     assumed = [
         *_hits(ti, r"假設在第(\d+)個(?:配息週期終止日|定價日)", lambda m: (int(m[1]),)),
         *_hits(ti, r"假設在第1至第(\d+)個(?:配息觀察期間|定價日)", lambda m: (int(m[1]),)),

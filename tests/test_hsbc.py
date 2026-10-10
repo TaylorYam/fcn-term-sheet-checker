@@ -724,8 +724,6 @@ def test_hsbc_price_table_without_ki_column_for_a_ki_product_requires_review(tmp
         ("ch四", "最低加購金額：美元10,000元", "最低加購金額：日幣10,000元", "minimum_additional_currency"),
         ("art18", "每單位面額為美元10,000元", "每單位面額為日幣10,000元", "scenario_assumption_currency"),
         ("art18", "-美元10,000.00=美元200.00", "-美元10,000.00=日幣200.00", "scenario_1_currency"),
-        # 情境三、四都寫執行價（價格表幣別格是承作幣別，Issue #167）：每個情境各一筆
-        ("art18", "執行價美元70.0000", "執行價日幣70.0000", ("scenario_3_currency", "scenario_4_currency")),
     ],
     ids=lambda x: (
         (x if isinstance(x, str) else "+".join(x))
@@ -753,3 +751,15 @@ def test_every_scenario_has_its_own_currency_result(tmp_path):
         "scenario_3_currency",
         "scenario_4_currency",
     ]
+
+
+def test_strike_and_ki_prices_in_the_scenarios_follow_the_underlying(tmp_path):
+    """執行價、觸及不保本價格跟著標的走，不是承作幣別的出處（2026-10-10 使用者確認）；數字仍和價格表比。"""
+    edits = [
+        Edit("執行價美元70.0000", "執行價日幣70.0000", "ts.art18"),
+        Edit("觸及不保本價格美元60.0000", "觸及不保本價格日幣60.0000", "ts.art18"),
+    ]
+    r = check(tmp_path, edits=edits)
+    assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
+    r = check(tmp_path, edits=[Edit("執行價美元70.0000", "執行價日幣71.0000", "ts.art18")])
+    assert any(x.rule_id == "doc.scenario_parameters" and x.status == S.MISMATCH for x in r.results)

@@ -101,8 +101,8 @@ STANDARD_FIELDS: dict[str, str] = {
     "currency_zh": "str：中文幣別（例：美元），由審查標準對照 ISO 代碼",
     "currency_others": "tuple[Occurrence, ...]：承作幣別的其他出處，須等於參考條件表承作幣別：面額、最低金額、情境假設等"
     "單一金額旁的幣別字（值為 str：中文幣別或 ISO 代碼，由規則依審查標準對照）、HSBC 價格表各列幣別格（ISO 代碼）、"
-    "情境試算每個情境一處（值為 tuple[Money, ...]：該情境各金額旁的幣別）；商品幣別不必等於標的幣別，實物交割算式裡的"
-    "股價不列入；範本沒有時交出 absent",
+    "情境試算每個情境一處（值為 tuple[Money, ...]：該情境各金額旁的幣別）；商品幣別不必等於標的幣別，承作幣別只影響"
+    "面額、配息、本金，股價（執行價等）與實物交割算式不列入；範本沒有時交出 absent",
     "underlyings": "list[str]：標的彭博代號，依說明書順序",
     "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據、標的名稱）",
     "strike_pct": "Decimal：執行價為最初價格的 N%，保留說明書顯示位數",

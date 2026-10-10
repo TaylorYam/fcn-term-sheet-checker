@@ -117,7 +117,7 @@ SCENARIO_HEADING = r"情境分析([一二三四五六])\)"
 
 def _scenario_currencies(scenarios: Sequence[Line]) -> list[standard_fields.Occurrence]:
     """`currency_others` 的第 18 條出處（Issue #170）：情境假設一處、每個情境一處（該情境裡每一處「幣別 金額」；
-    含「股」的實物交割算式不算）。找不到情境標題時沒有出處（情境規則另轉人工覆核）。"""
+    執行價、觸及不保本價格與含「股」的實物交割算式跟著標的走，不算）。找不到情境標題時沒有出處（情境規則另轉人工覆核）。"""
     ti = ScenarioIndex(scenarios)
     headings = list(ti.finditer(SCENARIO_HEADING))
     if not headings:

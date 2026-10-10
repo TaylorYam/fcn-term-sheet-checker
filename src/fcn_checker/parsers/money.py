@@ -4,8 +4,8 @@ parser 只認得這裡列的幣別寫法（中文幣別或 3 碼 ISO 代碼）�
 （`[currency]`），比對在 rules/reference.py `currency_others`。新幣別要兩邊都加：這裡讓 parser 讀得到，審查標準讓規則對得上。
 寫法分兩種：BARC 金額在前（`10,000 美元`）、MS 與 HSBC 幣別在前（`美元10,000`）。
 
-商品幣別不必等於標的幣別（FCN 高度客製化，例：連結日股、美元計價），所以實物交割算式裡的股價（含「股」的行）
-一律不當成商品幣別的出處。
+商品幣別不必等於標的幣別（FCN 高度客製化，例：連結日股、美元計價）：承作幣別影響的是面額、配息、本金這類金額，
+執行價、收盤價等股價跟著標的走，所以股價與實物交割算式所在的行（`stock_price_line`）一律不當成商品幣別的出處。
 """
 
 from __future__ import annotations
@@ -45,9 +45,15 @@ AMOUNT_THEN_CURRENCY = rf"({NUMBER})\s*({CURRENCY})"  # BARC：10,000 美元
 CURRENCY_THEN_AMOUNT = rf"({CURRENCY})\s*({NUMBER})"  # MS、HSBC：美元10,000
 
 
-def shares_line(text: str) -> bool:
-    """含「股」的行是實物交割算式（股數、股價用標的幣別），裡面的金額不當成商品幣別的出處。"""
-    return "股" in text
+STOCK_PRICE_WORDS = ("股", "收盤價", "執行價", "觸及不保本價格", "下限價")
+
+
+def stock_price_line(text: str) -> bool:
+    """跟著標的走的價格所在的行：股價（收盤價、執行價、觸及不保本價格、下限價）與含「股」的實物交割算式。
+
+    承作幣別影響的是面額、配息、本金這類金額；這些行裡的金額不當成商品幣別的出處（2026-10-10 使用者決定）。
+    """
+    return any(w in text for w in STOCK_PRICE_WORDS)
 
 
 def amounts(
@@ -55,11 +61,11 @@ def amounts(
     pattern: str,
     *,
     currency_group: int,
-    skip: Callable[[str], bool] = shares_line,
+    skip: Callable[[str], bool] = stock_price_line,
     start: int = 0,
     end: int | None = None,
 ) -> tuple[Money, ...]:
-    """`ti.text[start:end]` 內每一處金額旁的幣別字；所在行有 `skip` 成立的（預設：含「股」）不算。"""
+    """`ti.text[start:end]` 內每一處金額旁的幣別字；所在行有 `skip` 成立的（預設：股價與實物交割算式）不算。"""
     end = len(ti.text) if end is None else end
     out = []
     for m in ti.finditer(pattern):
