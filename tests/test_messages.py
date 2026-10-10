@@ -437,7 +437,7 @@ BARC_BROKEN_DOCUMENTS = {  # 說明書規格與改字
         ],
     ),
     "omitted": (Spec(omit=frozenset({"trade_date", "issue_date"}), extra_strike_def="71.00"), []),
-    "periodic": (Spec(ko_obs="P", memory=False, ki="AM"), [Edit("100.00%", "99.00%", "ts.art13.ko.3.trigger")]),
+    "periodic": (Spec(ko_obs="P", memory=False, ki="AM"), []),  # 定期非記憶式沒有提前出場表，原本的改字不曾生效
 }
 
 

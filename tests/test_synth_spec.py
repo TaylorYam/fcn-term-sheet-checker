@@ -1,6 +1,7 @@
-"""測試切點：三家合成器共用的商品規格 `ProductSpec` 與唯一的參考條件表列 `reference_row`（Issue #145）。
+"""測試切點：三家合成器共用的商品規格 `ProductSpec`、唯一的參考條件表列 `reference_row`（Issue #145），
+以及共用的改字 `Edit`（Issue #166）。
 
-只看規格與列的對應，不寫 PDF、不核對；各上手畫出的說明書與列一致另由各上手的黑箱測試保證。
+只看規格與列的對應、改字有沒有換到文字，不核對；各上手畫出的說明書與列一致另由各上手的黑箱測試保證。
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import pytest
 import hsbc_synth
 import ms_synth
 import synth
+from pdf_writer import Edit
 from reference_synth import ProductSpec, as_headers, issuer_value, reference_row
 
 
@@ -78,3 +80,21 @@ def test_hsbc_schedule_follows_the_trade_date_and_tenor():
     assert hsbc_synth.Spec().ends[0] == dt.date(2030, 2, 7), "預設值同原本的版面：每月 7 日"
     row = reference_row(hsbc_synth.Spec(strike=Decimal("65.00")))
     assert row["K(%)"] == 65.0 and row["UL_1_執行價"] == 65.0, "規格值不再被拒絕"
+
+
+@pytest.mark.parametrize(
+    ("synth_module", "missed", "iis_only"),
+    [
+        # 段落代號打錯：負責人在第二章第 5 條
+        (synth, Edit("林晋輝", "林晉輝", "ts.ch二.6"), Edit("風險程度：RR4", "風險程度：RR5", "iis.p2")),
+        (ms_synth, Edit("不存在的原文", "改後", "ts"), Edit("International Plc", "International plc", "iis.cover")),
+        (hsbc_synth, Edit("0%~5%", "0%~6%", "iis.p9"), Edit("0%~5%", "0%~6%", "iis.p3")),
+    ],
+    ids=["barc", "ms", "hsbc"],
+)
+def test_an_edit_that_replaces_nothing_is_an_error(tmp_path, synth_module, missed, iis_only):
+    s = synth_module.Spec()
+    pdf = tmp_path / f"{s.product_code}_TS.pdf"
+    with pytest.raises(ValueError, match="改字沒有換到任何文字"):
+        synth_module.build_pdf(pdf, s, edits=[missed])
+    synth_module.build_pdf(pdf, s, edits=[iis_only])  # 只換到旁邊那份投資人須知也算

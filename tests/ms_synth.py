@@ -19,7 +19,7 @@ from typing import Any
 import fitz
 
 from harness import CONFIG, STANDARD, check_all, iis_path
-from pdf_writer import FONT, Edit, PdfWriter, zh_date
+from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
 from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
 
 NAME = STANDARD["product_name"]["ms"]
@@ -55,7 +55,7 @@ def underlyings(count: int) -> tuple[UL, ...]:
 
 @dataclass
 class Spec(ProductSpec):
-    """MS 合成說明書與投資人須知的規格：商品規格加上 MS 的版面選項。預設值下兩份文件與參考條件表列完全一致。
+    """MS 合成說明書與投資人須知的規格：商品規格加上 MS 專屬的文件選項（受託機構商品代號、價格表欄、換頁、投資人須知頁數）。預設值下兩份文件與參考條件表列完全一致。
 
     標的由 `count` 產生、最終比價日與到期日由配息排程推得：`underlyings`、`final_date`、`maturity_date` 不能直接給。
     """
@@ -137,8 +137,8 @@ class Spec(ProductSpec):
 class _Doc:
     """逐行排版；文字依目前段落代號（`section`）套用改字，超過寬度時在非數字處換行。"""
 
-    def __init__(self, edits: Sequence[Edit], kind: str):
-        self.w = PdfWriter(edits, kind)
+    def __init__(self, edits: Sequence[Edit], kind: str, used: set[Edit] | None = None):
+        self.w = PdfWriter(edits, kind, used)
         self.section = "cover"
 
     @property
@@ -268,9 +268,10 @@ def _scenarios(d: _Doc, s: Spec) -> None:
 
 def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
     """合成 MS 說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時旁邊另寫一份投資人須知，`edits` 兩份都套用（依段落代號）。"""
+    used: set[Edit] = set()  # 說明書與投資人須知共用：改字換到哪一份都算
     if iis and path.stem.endswith("_TS"):
-        build_iis_pdf(iis_path(path), s, edits=edits)
-    d = _Doc(edits, "ts")
+        build_iis_pdf(iis_path(path), s, edits=edits, used=used)
+    d = _Doc(edits, "ts", used)
     w = d.w
     ends, payments, starts = s.ends, s.payments, s.starts
     trustee = s.product_code if s.trustee_code is None else s.trustee_code
@@ -517,12 +518,13 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.text(54, "範本說明。")
     for i, page in enumerate(w.doc):
         page.insert_text((261, 818), f"第 {i + 1} 頁，共 {len(w.doc)}頁", fontname=FONT, fontsize=8)
+    require_used(edits, used)
     return w.save(path)
 
 
-def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = ()) -> Path:
+def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[Edit] | None = None) -> Path:
     """MS 中文投資人須知（新版，docs/templates/ms-zh-iis.md）：與 `s` 的說明書、參考條件表列一致，預設 4 頁；`edits` 改字。"""
-    d = _Doc(edits, "iis")
+    d = _Doc(edits, "iis", used)
     w = d.w
     ends, payments, k, final = s.ends, s.payments, s.first_callable, s.ends[-1]
     dist, zh_issuer = DIST["name"], ISSUER.split("(")[0]
@@ -676,6 +678,8 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = ()) -> Path:
     total = s.iis_page_total or len(w.doc)
     for i, page in enumerate(w.doc):
         page.insert_text((262, 826), f"第{i + 1} 頁，共 {total}頁", fontname=FONT, fontsize=8)
+    if used is None:
+        require_used(edits, w.used)
     return w.save(path)
 
 

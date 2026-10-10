@@ -28,7 +28,7 @@ from typing import Any
 from fcn_checker.issuers import BARC, Issuer
 from fcn_checker.schema import CheckReport
 from harness import STANDARD, check_sheet, iis_path
-from pdf_writer import FONT, Edit, PdfWriter, zh_date
+from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
 from reference_synth import Q4, ProductSpec, build_reference_sheet, price, reference_row
 
 FIXED_WARNING = STANDARD["risk"]["fixed_warning"]
@@ -41,12 +41,12 @@ APPROVAL_DATE = dt.date(2026, 6, 11)  # 封面受託或銷售機構審查通過�
 
 @dataclass
 class Spec(ProductSpec):
-    """BARC 合成說明書的規格：商品規格加上 BARC 專屬的版面結構旋鈕。預設值下說明書、投資人須知與參考條件表列完全一致。
+    """BARC 合成說明書的規格：商品規格加上 BARC 專屬的文件選項。預設值下說明書、投資人須知與參考條件表列完全一致。
 
     Non-Call 由保證配息期 G 推得（D 型 = G；P 型 = G + 1）；`first_callable` 不能直接給。
     只是改字的錯誤（名稱、日期、警語、費率、表格某一格、重複出現處的數值…）一律用 `build_pdf(..., edits=...)`；
-    這裡只留改變版面結構的旋鈕：`guaranteed_text`、`omit`、`extra_strike_def`、`extra_text`、
-    `cross_page_price_table`、`break_coupon_after`。
+    這裡只留改變版面結構的選項（`omit`、`extra_strike_def`、`extra_text`、`cross_page_price_table`、
+    `break_coupon_after`），以及一次連動 §13(7) 定義句多處數字的 `guaranteed_text`。
     """
 
     issuer: str = "BARC"
@@ -54,7 +54,7 @@ class Spec(ProductSpec):
     first_callable: int = field(init=False, default=1)
     monthly: Decimal | None = None  # 月配息率；None → 由年利率推算
     guaranteed: int | None = None  # 保證配息期；None → Daily 為 1、Period End 為 0
-    # ---- 版面結構旋鈕 ----
+    # ---- BARC 專屬的文件選項 ----
     guaranteed_text: int | None = None  # §13(7) 定義句的期數；None → 同 guaranteed
     omit: frozenset[str] = frozenset()  # 不畫的項目："trade_date"／"issue_date"（改寫另行公告）、"strike_def"
     extra_strike_def: str | None = None  # 第二個執行價格定義（歧義）
@@ -160,9 +160,10 @@ def schedule_rows(s: Spec) -> list[dict[str, Any]]:
 def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
     """合成說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時，旁邊另寫一份同商品投資人須知（ADR 0007：兩份一起核對），
     `edits` 兩份都套用（依段落代號）。"""
+    used: set[Edit] = set()  # 說明書與投資人須知共用：改字換到哪一份都算
     if iis and path.stem.endswith("_TS"):
-        build_iis_pdf(iis_path(path), s, edits=edits)
-    w = PdfWriter(edits)
+        build_iis_pdf(iis_path(path), s, edits=edits, used=used)
+    w = PdfWriter(edits, used=used)
     name_zh = s.expected_name_zh()
     name_en = s.expected_name_en()
     monthly = s.monthly_value
@@ -540,6 +541,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     w.line(41.0, "本商品之其他事項依銷售說明書辦理。")
     if s.extra_text:
         w.para(41.0, s.extra_text)
+    require_used(edits, used)
     return _finish(w, path)
 
 
@@ -655,9 +657,14 @@ def barc_adapter(**overrides: Any) -> Issuer:
 IIS_PAGES = 4  # 審查標準 iis.pages
 
 
-def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), pages: int = IIS_PAGES) -> Path:
-    """仿 BARC 中文投資人須知（4 頁）；值與 `s` 的說明書一致。`edits` 改字（製造錯誤）、`pages` 改頁數。"""
-    w = PdfWriter(edits, kind="iis")
+def build_iis_pdf(
+    path: Path, s: Spec, *, edits: Sequence[Edit] = (), pages: int = IIS_PAGES, used: set[Edit] | None = None
+) -> Path:
+    """仿 BARC 中文投資人須知（4 頁）；值與 `s` 的說明書一致。`edits` 改字（製造錯誤）、`pages` 改頁數。
+
+    `used` 給 `build_pdf` 用：換到的改字記在呼叫端的 set，由它檢查；省略時這裡自己檢查。
+    """
+    w = PdfWriter(edits, kind="iis", used=used)
     dist = DISTRIBUTOR["name"]
     name_zh = s.expected_name_zh().replace("（下稱「本商品」）", "")
     name_en = s.expected_name_en()
@@ -789,4 +796,6 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), pages: int
     for _ in range(pages - len(builders)):
         w.new_page()
         w.line(20.0, "（續）")
+    if used is None:
+        require_used(edits, w.used)
     return _finish(w, path)

@@ -47,6 +47,7 @@ class Edit:
     段落代號是以「.」分層的路徑，第一層是文件：說明書 `ts`、投資人須知 `iis`（例：`ts.art17`、`iis.warn`）。
     `where` 以整層比對前綴：`ts.art1` 含 `ts.art1.x`，不含 `ts.art17`；空白表示兩份文件全文。
     各上手的段落代號見各合成器的模組說明。一行文字整個被換成空字串時，那一行不畫（不佔行距）。
+    每個 `Edit` 至少要換到一處，否則合成器報錯（`require_used`），以免段落代號或原文打錯時測試白白通過。
     """
 
     old: str
@@ -57,12 +58,11 @@ class Edit:
         return not self.where or path == self.where or path.startswith(self.where + ".")
 
 
-def apply_edits(edits: Sequence[Edit], path: str, text: str) -> str:
-    """依序套用段落 `path` 之內的改字。"""
-    for e in edits:
-        if e.covers(path):
-            text = text.replace(e.old, e.new)
-    return text
+def require_used(edits: Sequence[Edit], used: set[Edit]) -> None:
+    """合成完一份（或成對的兩份）文件後檢查：每個改字都至少換到一處。"""
+    missing = [e for e in edits if e not in used]
+    if missing:
+        raise ValueError(f"改字沒有換到任何文字（原文或段落代號有誤）：{missing}")
 
 
 class PdfWriter:
@@ -74,12 +74,13 @@ class PdfWriter:
 
     TOP, BOTTOM = 80.0, 770.0
 
-    def __init__(self, edits: Sequence[Edit] = (), kind: str = "ts") -> None:
+    def __init__(self, edits: Sequence[Edit] = (), kind: str = "ts", used: set[Edit] | None = None) -> None:
         self.doc = fitz.open()
         self.page: fitz.Page
         self.y = 0.0
         self.edits, self.kind = tuple(edits), kind  # kind：文件層段落代號（ts／iis）
         self.section = ""  # 目前段落代號（不含文件層）
+        self.used = set() if used is None else used  # 換到過文字的改字（成對文件可共用同一個 set）
         self._verbatim = False
         self.new_page()
 
@@ -89,7 +90,14 @@ class PdfWriter:
 
     def edit(self, text: str, section: str | None = None) -> str:
         """套用涵蓋段落 `section`（省略為目前段落）的改字；`verbatim()` 內不改。"""
-        return text if self._verbatim else apply_edits(self.edits, self.path(section), text)
+        if self._verbatim:
+            return text
+        path = self.path(section)
+        for e in self.edits:
+            if e.covers(path) and e.old in text:
+                text = text.replace(e.old, e.new)
+                self.used.add(e)
+        return text
 
     @contextmanager
     def verbatim(self) -> Iterator[None]:

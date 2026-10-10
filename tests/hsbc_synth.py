@@ -17,7 +17,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from harness import STANDARD, iis_path
-from pdf_writer import FONT, Edit, PdfWriter, zh_date
+from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
 from reference_synth import UL, ProductSpec, price
 
 CENT = Decimal("0.01")
@@ -47,7 +47,7 @@ def pct(x: Decimal) -> str:
 
 @dataclass
 class Spec(ProductSpec):
-    """HSBC 合成文件的規格：商品規格加上 HSBC 的版面選項。標的由 `count` 產生；最終比價日與到期日由排程推得（不能直接給）。"""
+    """HSBC 合成文件的規格：商品規格加上 HSBC 專屬的文件選項（情境一不足一期的配息）。標的由 `count` 產生；最終比價日與到期日由排程推得（不能直接給）。"""
 
     issuer: str = "HSBC"
     product_code: str = "325199990001"
@@ -104,9 +104,10 @@ class Spec(ProductSpec):
 def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
     """合成說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時，旁邊另寫一份同商品投資人須知（ADR 0007：兩份一起核對），
     `edits` 兩份都套用（依段落代號）。"""
+    used: set[Edit] = set()  # 說明書與投資人須知共用：改字換到哪一份都算
     if iis and path.stem.endswith("_TS"):
-        build_iis_pdf(iis_path(path), s, edits=edits)
-    w = PdfWriter(edits)
+        build_iis_pdf(iis_path(path), s, edits=edits, used=used)
+    w = PdfWriter(edits, used=used)
     ccy, denom, monthly, n = s.currency_zh, f"{s.denom:,}", s.monthly, s.tenor
     first = s.first_callable
 
@@ -298,6 +299,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     line("其他說明")
     for i, page in enumerate(w.doc):
         page.insert_text((270, 806), f"第{i + 1}頁，共{len(w.doc)}頁", fontname=FONT, fontsize=8)
+    require_used(edits, used)
     return w.save(path)
 
 
@@ -313,10 +315,11 @@ def build_iis_pdf(
     edits: Sequence[Edit] = (),
     pages: int = IIS_PAGES,
     page_total: int | None = None,
+    used: set[Edit] | None = None,
 ) -> Path:
     """仿 HSBC 中文投資人須知（4 頁）；值與 `s` 的說明書一致。`edits` 改字（製造錯誤）、`pages` 改頁數、
-    `page_total` 改頁首「共 M 頁」的 M。"""
-    w = PdfWriter(edits, kind="iis")
+    `page_total` 改頁首「共 M 頁」的 M。`used` 給 `build_pdf` 用：換到的改字記在呼叫端的 set，由它檢查；省略時這裡自己檢查。"""
+    w = PdfWriter(edits, kind="iis", used=used)
     dist, addr = STANDARD["distributor"]["name"], STANDARD["distributor"]["address"]
     warning = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
     issuer = STANDARD["issuer_name"]["hsbc"].split("（")[0]
@@ -387,4 +390,6 @@ def build_iis_pdf(
     for i, page in enumerate(w.doc):
         page.insert_text((250, 30), f"第 {i + 1} 頁，共 {page_total or len(w.doc)} 頁", fontname=FONT, fontsize=8)
         page.insert_text((60, 45), "PUBLIC", fontname="helv", fontsize=8)
+    if used is None:
+        require_used(edits, w.used)
     return w.save(path)
