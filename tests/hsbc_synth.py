@@ -145,7 +145,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             line(t)
         for u in s.underlyings:
             prices = [price(u.initial, p) for p in (s.strike, s.ko) + ((s.ki_pct,) if s.ki != "none" else ())]
-            for t in [u.ticker, u.name, "USD", u.exchange, f"{u.initial:.4f}", *(f"{p:.4f}" for p in prices)]:
+            # 幣別格是商品的承作幣別（不是標的自己的交易幣別，Issue #167）
+            for t in [u.ticker, u.name, s.ccy, u.exchange, f"{u.initial:.4f}", *(f"{p:.4f}" for p in prices)]:
                 line(t)
 
     w.section = "cover"

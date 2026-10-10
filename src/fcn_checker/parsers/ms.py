@@ -307,6 +307,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
             occ("redemption_increment", "累加贖回單位", "第四章第 8 項累加贖回單位", fields["redemption_increment"]),
         ],
     )
+    fields["currency_others"] = standard_fields.absent("currency_others", "承作幣別的其他出處")
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
         [occ("issue_price_ch4", "發行價格（第四章申購價金）", "第四章第 5 項申購價金", fields["issue_price_ch4"])],

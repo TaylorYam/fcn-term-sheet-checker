@@ -156,6 +156,28 @@ def currency(ctx: Context) -> CheckResult:
     return check.compare(v, iso, message=f"{ctx.document}：{pf.value} → {iso}")
 
 
+def currency_others(ctx: Context) -> list[CheckResult]:
+    """說明書承作幣別的其他出處（HSBC 價格表各列幣別格）= 參考條件表「承作幣別」（Issue #167）。
+
+    表上承作幣別空白或格式不對時只由 `currency` 報一筆，這裡不逐列重複。
+    """
+    rid = "field.currency"
+    items, problem = occurrences_of(ctx, rid, "currency_others", Item.sheet("價格表幣別"))
+    if problem:
+        return [problem]
+    v, ov, problem = order_value(
+        ctx, "currency", rid, "currency", None, lambda x: x if isinstance(x, str) else None, "文字", name="幣別"
+    )
+    if problem:
+        return []
+    out = []
+    for occ in items:
+        pf = occ.value
+        check = Check(rid, occ.field, Item.sheet(occ.name, [ov]), ctx.document, ov=(ov,), expected=v).needs(pf)
+        out.append(check.compare(v, pf.value, message=f"{occ.where}須等於參考條件表「承作幣別」"))
+    return out
+
+
 def underlyings(ctx: Context) -> CheckResult:
     rid, pf, empty = "field.underlyings", standard_field(ctx, "underlyings"), ctx.fmt.empty_value
     ovs = [ctx.order.underlying(i) for i in range(1, UNDERLYING_SLOTS + 1)]
@@ -378,6 +400,7 @@ def field_rules(ctx: Context) -> list[CheckResult]:
     return [
         product_code(ctx),
         currency(ctx),
+        *currency_others(ctx),
         underlyings(ctx),
         *(check.check(ctx) for check in FIELD_CHECKS.values()),
         *min_amounts(ctx),

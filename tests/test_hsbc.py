@@ -218,6 +218,32 @@ def test_spec_value_differing_from_the_reference_row_is_reported(tmp_path):
     assert only(r, "field.strike_pct").status == S.MISMATCH
 
 
+def test_price_table_currency_is_the_trade_currency_on_the_sheet(tmp_path):
+    """第 12 條價格表每列的幣別格是承作幣別：逐列和參考條件表「承作幣別」比（Issue #167）。"""
+    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table")])  # 例：連結日股、美元計價卻寫成標的的幣別
+    rows = {x.field: x for x in r.results if x.rule_id == "field.currency"}
+    assert rows["currency"].status == S.PASS, "封面計價幣別正確"
+    assert {f: x.status for f, x in rows.items() if f != "currency"} == {
+        "price_table_currency_1": S.MISMATCH,
+        "price_table_currency_2": S.MISMATCH,
+    }
+    bad = rows["price_table_currency_1"]
+    assert (bad.expected, bad.actual) == ("USD", "JPY") and bad.document_evidence
+    assert bad.item.name == "ZZ1 UW 幣別"
+
+
+def test_price_table_currency_follows_a_non_usd_trade_currency(tmp_path):
+    r = check(tmp_path, Spec(currency_zh="人民幣"))
+    rows = [x for x in r.results if x.rule_id == "field.currency"]
+    assert len(rows) == 3 and all(x.status == S.PASS for x in rows)
+
+
+def test_blank_trade_currency_on_the_sheet_is_reported_once(tmp_path):
+    r = check(tmp_path, overrides={"currency": None})
+    [x] = [x for x in r.results if x.rule_id == "field.currency"]
+    assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "order_missing"), "價格表各列不重複報同一格"
+
+
 def test_wrong_prefix_and_unknown_template_require_review(tmp_path):
     r = check(tmp_path, Spec(product_code="029199990001"))
     assert any(x.reason_code == "issuer_prefix_mismatch" for x in r.results)
