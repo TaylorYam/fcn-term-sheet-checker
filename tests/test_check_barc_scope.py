@@ -10,6 +10,7 @@ from decimal import Decimal
 import pytest
 
 from harness import MISMATCH, NA, PASS, REVIEW, problems, results
+from pdf_writer import Edit
 from reference_synth import UL
 from synth import Spec, check
 
@@ -69,39 +70,43 @@ def test_t_range_without_guaranteed_period(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("pdf_kw", "rule_id"),
+    ("edits", "rule_id"),
     [
         # 正式月配息率（第 9、14、15(2)、17 條）全部正確，只有重複出現處其中一處錯
-        ({"repeat_overrides": {"§9(3)": "1.0100"}}, "doc.coupon_repeats"),
-        ({"repeat_overrides": {"§16(i)": "1.0100"}}, "doc.coupon_repeats"),
-        ({"repeat_overrides": {"§16(ii)": "1.0100"}}, "doc.coupon_repeats"),
-        ({"repeat_overrides": {"§16(iii)": "0.1000"}}, "doc.coupon_repeats"),
+        ([Edit("相關配息率為1.0000%", "相關配息率為1.0100%", "ts.art9")], "doc.coupon_repeats"),
+        ([Edit("(100% + 1.0000%)", "(100% + 1.0100%)", "ts.art16.i")], "doc.coupon_repeats"),
+        ([Edit("1.0000%", "1.0100%", "ts.art16.ii")], "doc.coupon_repeats"),
+        ([Edit("1.0000%", "0.1000%", "ts.art16.iii")], "doc.coupon_repeats"),
         # 定義句正確，只有價格表或情境表欄頭的執行比例錯
-        ({"strike_headers": {"§15": "71.00"}}, "doc.price_header_pct"),
-        ({"strike_headers": {"§16": "71.00"}}, "doc.price_header_pct"),
-        ({"strike_headers": {"§16(ii)": "71.00"}}, "doc.price_header_pct"),
+        ([Edit("格的70.00%", "格的71.00%", "ts.art15.price")], "doc.price_header_pct"),
+        ([Edit("格的70.00%", "格的71.00%", "ts.art16.price")], "doc.price_header_pct"),
+        ([Edit("最初價格的70.00%", "最初價格的71.00%", "ts.art16.ii")], "doc.price_header_pct"),
         # 情境試算的總報酬與年化率
-        ({"general_total": "6.10"}, "doc.scenario_returns"),
-        ({"general_annualized": "12.50"}, "doc.scenario_returns"),
-        ({"favourable_total": "1.1000"}, "doc.scenario_returns"),
+        ([Edit("= 6.0000%", "= 6.10%", "ts.art16.ii")], "doc.scenario_returns"),
+        ([Edit("報酬率：12.00%", "報酬率：12.50%", "ts.art16.ii")], "doc.scenario_returns"),
+        ([Edit("- 1 = 1.0000%", "- 1 = 1.1000%", "ts.art16.i")], "doc.scenario_returns"),
         # 其他重複出現處
-        ({"scenario_notional": 5000}, "doc.scenario_notional"),
-        ({"t_range_end": 5}, "doc.observation_t_range"),
-        ({"distributor_code": "029199990002"}, "doc.distributor_product_code"),
-        ({"art5_currency": "日幣"}, "doc.currency_consistency"),
+        ([Edit("10,000 美元", "5,000 美元", "ts.art16")], "doc.scenario_notional"),
+        ([Edit("至6 的情況", "至5 的情況", "ts.art13")], "doc.observation_t_range"),
+        (
+            [
+                Edit("029199990001", "029199990002", "ts.cover.distributor_code"),
+                Edit("受託或銷售機構商品代號:029199990001", "受託或銷售機構商品代號:029199990002", "iis.p1"),
+            ],
+            "doc.distributor_product_code",
+        ),
+        ([Edit("計價幣別：美元", "計價幣別：日幣", "ts.art5")], "doc.currency_consistency"),
     ],
 )
-def test_repeated_value_wrong_while_formal_terms_are_right(tmp_path, pdf_kw, rule_id):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(**pdf_kw))
+def test_repeated_value_wrong_while_formal_terms_are_right(tmp_path, edits, rule_id):
+    report = check(tmp_path, edits=edits)
     assert problems(report) == {(rule_id, MISMATCH)}
     bad = [r for r in results(report, rule_id) if r.status == MISMATCH]
     assert bad and all(r.document_evidence for r in bad)
 
 
 def test_repeated_coupon_mismatch_points_to_the_wrong_place(tmp_path):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(repeat_overrides={"§16(ii)": "1.0100"}))
+    report = check(tmp_path, edits=[Edit("1.0000%", "1.0100%", "ts.art16.ii")])
     r = {x.field: x for x in results(report, "doc.coupon_repeats")}
     assert r["第9條(3)"].status == PASS
     assert r["第16條"].status == MISMATCH and r["第16條"].actual == ["1.0100"]
@@ -110,8 +115,7 @@ def test_repeated_coupon_mismatch_points_to_the_wrong_place(tmp_path):
 
 
 def test_strike_header_mismatch_while_definition_matches_reference_k(tmp_path):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(strike_headers={"§15": "71.00"}))
+    report = check(tmp_path, edits=[Edit("格的70.00%", "格的71.00%", "ts.art15.price")])
     assert results(report, "field.strike_pct")[0].status == PASS
     assert {r.status for r in results(report, "derive.prices")} == {PASS}
     r = results(report, "doc.price_header_pct", "strike_pct")[0]
@@ -119,41 +123,33 @@ def test_strike_header_mismatch_while_definition_matches_reference_k(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "pdf_kw",
+    "edits",
     [
-        {
-            "title_name": "英商巴克萊銀行7個月美元計價連結股權記憶式自動提前出場結構型商品（不保本）（無擔保及無保證機構）"
-        },
-        {"art1_name": "英商巴克萊銀行6個月美元計價連結股權自動提前出場結構型商品（不保本）（無擔保及無保證機構）"},
+        [Edit("6個月", "7個月", "ts.title")],
+        [Edit("記憶式", "", "ts.art1"), Edit("（下稱「本商品」）", "", "ts.art1")],
     ],
     ids=["title", "article1"],
 )
-def test_product_name_repeated_elsewhere_must_match_cover(tmp_path, pdf_kw):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(**pdf_kw))
+def test_product_name_repeated_elsewhere_must_match_cover(tmp_path, edits):
+    report = check(tmp_path, edits=edits)
     assert problems(report) == {("doc.name_consistency", MISMATCH)}
 
 
 def test_half_width_name_suffix_is_stripped_for_title(tmp_path):
-    spec = Spec()
-    name = spec.expected_name_zh().replace("（下稱「本商品」）", "(下稱「本商品」)")
-    title = spec.expected_name_zh().replace("（下稱「本商品」）", "")
-    report = check(tmp_path, spec, pdf_spec=spec.with_(name_zh=name, title_name=title))
+    report = check(tmp_path, edits=[Edit("（下稱「本商品」）", "(下稱「本商品」)", "ts")])  # 標題本來就不含後綴
     assert problems(report) == set()
     assert {r.status for r in results(report, "doc.name_consistency")} == {PASS}
 
 
 def test_daily_related_coupon_in_unknown_wording_requires_review(tmp_path):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(repeat_overrides={"§9(3)": "約1.0000"}))
+    report = check(tmp_path, edits=[Edit("相關配息率為1.0000%", "相關配息率為約1.0000%", "ts.art9")])
     assert problems(report) == {("doc.coupon_repeats", REVIEW)}
     r = results(report, "doc.coupon_repeats", "第9條(3)")[0]
     assert r.reason_code == "document_missing"
 
 
 def test_scenario_return_unreadable_requires_review(tmp_path):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(favourable_total="約1"))
+    report = check(tmp_path, edits=[Edit("- 1 = 1.0000%", "- 1 = 約1%", "ts.art16.i")])
     r = results(report, "doc.scenario_returns", "scenario_favourable_total")[0]
     assert r.status == REVIEW and r.reason_code == "document_missing"
 
@@ -162,44 +158,45 @@ def test_scenario_return_unreadable_requires_review(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("pdf_kw", "rule_id", "field"),
+    ("edits", "rule_id", "field"),
     [
-        ({"issuer_cover": "英商巴克萊銀行有限公司（Barclays Bank PLC）"}, "standard.issuer_name", "issuer_name_cover"),
-        ({"issuer_ch2": "英商巴克萊銀行股份有限公司"}, "standard.issuer_name", "issuer_name_ch2"),
         (
-            {"distributor_cover": ("玉山綜合證券股份有限公司", "02-5556-1314", "台北市松山區民生東路三段158號6樓")},
+            [Edit("巴克萊銀行股份有限公司", "巴克萊銀行有限公司", "ts.cover.issuer")],
+            "standard.issuer_name",
+            "issuer_name_cover",
+        ),
+        ([Edit("（Barclays Bank PLC）", "", "ts.ch二.1")], "standard.issuer_name", "issuer_name_ch2"),
+        (
+            [Edit("02-5556-1313", "02-5556-1314", "ts.cover.distributor")],
             "standard.distributor",
             "distributor_phone_cover",
         ),
         (
-            {"distributor_cover": ("玉山證券股份有限公司", "02-5556-1313", "台北市松山區民生東路三段158號6樓")},
+            [Edit("玉山綜合證券股份有限公司", "玉山證券股份有限公司", "ts.cover.distributor")],
             "standard.distributor",
             "distributor_name_cover",
         ),
+        ([Edit("158號6樓", "158號7樓", "ts.ch二.5")], "standard.distributor", "distributor_address_ch2"),
         (
-            {"distributor_address_ch2": "台北市松山區民生東路三段158號7樓"},
-            "standard.distributor",
-            "distributor_address_ch2",
+            [Edit("0%~5%", "0%~3%", "ts.ch四.fees.分銷費用"), Edit("0%~5%", "0%~3%", "iis.p3.fees.分銷費用")],
+            "standard.fees",
+            "分銷費用",
         ),
-        ({"fees": {"分銷費用": "0%~3%"}}, "standard.fees", "分銷費用"),
     ],
 )
-def test_fixed_value_differs_from_review_standard(tmp_path, pdf_kw, rule_id, field):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(**pdf_kw))
+def test_fixed_value_differs_from_review_standard(tmp_path, edits, rule_id, field):
+    report = check(tmp_path, edits=edits)
     assert problems(report) == {(rule_id, MISMATCH)}
     assert [r.field for r in results(report, rule_id) if r.status == MISMATCH] == [field]
 
 
 def test_fixed_values_ignore_line_breaks(tmp_path):
     # 地址在 PDF 中常因換行出現空白（例：「158 號6 樓」）
-    spec = Spec(distributor_address_ch2="台北市松山區民生東路三段158 號6 樓")
-    report = check(tmp_path, spec)
+    report = check(tmp_path, edits=[Edit("158號6樓", "158 號6 樓", "ts.ch二.5")])
     assert {r.status for r in results(report, "standard.distributor")} == {PASS}
 
 
 def test_non_standard_issue_price_requires_review(tmp_path):
-    spec = Spec()
-    report = check(tmp_path, spec, pdf_spec=spec.with_(issue_price="99.5"))
+    report = check(tmp_path, edits=[Edit("面額之100%", "面額之99.5%")])  # 說明書與投資人須知
     assert problems(report) == {("standard.issue_price", REVIEW)}
     assert report.status == REVIEW

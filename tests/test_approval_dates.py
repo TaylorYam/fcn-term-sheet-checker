@@ -16,8 +16,9 @@ from fcn_checker.config import load_review_standard
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel_workflow import PanelSession
 from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, ROOT, check_sheet, load_config, results
+from pdf_writer import Edit, zh_date
 from reference_synth import build_reference_sheet, reference_row
-from synth import Spec, build_pdf
+from synth import APPROVAL_DATE, Spec, build_pdf
 
 TODAY = dt.date(2031, 3, 4)
 D = dt.date
@@ -31,8 +32,8 @@ def standard_with(tmp_path: Path, dates: str) -> Path:
     return path
 
 
-def approval_result(tmp_path: Path, dates: str, spec: Spec):
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+def approval_result(tmp_path: Path, dates: str, spec: Spec, edits: tuple[Edit, ...] = ()):
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec, edits=edits)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     config = load_config(review_standard=standard_with(tmp_path, dates))
     [r] = results(check_sheet(pdf, sheet, config), "standard.approval_date")
@@ -52,7 +53,7 @@ def approval_result(tmp_path: Path, dates: str, spec: Spec):
     ],
 )
 def test_expected_date_is_the_latest_on_or_before_the_trade_date(tmp_path, dates, printed, status, expected):
-    r = approval_result(tmp_path, dates, Spec(approval_date=printed))
+    r = approval_result(tmp_path, dates, Spec(), (Edit(zh_date(APPROVAL_DATE), zh_date(printed), "ts.cover"),))
     assert (r.status, r.expected, r.actual) == (status, expected, printed)
     assert any("交易日" in e.text for e in r.document_evidence)
 

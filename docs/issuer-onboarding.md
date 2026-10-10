@@ -116,7 +116,7 @@
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
 | 規則 | `src/fcn_checker/rules/<上手>.py` | 只寫該上手專屬的說明書內部規則（不碰參考條件表）與未涵蓋清單；其他規則自動沿用（§6.2a） |
-| 合成測試資料 | `tests/<上手>_synth.py` | `Spec` 繼承 `reference_synth.ProductSpec`（補預設商品代號、該上手的改字旋鈕），依該上手版面把規格畫成虛構 PDF，只用 `tests/pdf_writer.py` 排版；參考條件表列一律 `reference_synth.reference_row(spec)`（不自己產），固定文字取 `harness.STANDARD`，單份核對用 `tests/harness.py`；不引用其他上手合成器 |
+| 合成測試資料 | `tests/<上手>_synth.py` | `Spec` 繼承 `reference_synth.ProductSpec`（補預設商品代號、該上手的版面結構旋鈕），依該上手版面把規格畫成虛構 PDF（版面文字由規格算出），只用 `tests/pdf_writer.py` 排版；`build_pdf`／`build_iis_pdf` 收 `edits`（`pdf_writer.Edit`）製造錯誤，模組說明列出段落代號；參考條件表列一律 `reference_synth.reference_row(spec)`（不自己產），固定文字取 `harness.STANDARD`，單份核對用 `tests/harness.py`；不引用其他上手合成器 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |
 
 ### 6.2a 新上手要提供什麼、哪些自動沿用（[ADR 0005](adr/0005-issuer-adapter-and-shared-rules.md)）

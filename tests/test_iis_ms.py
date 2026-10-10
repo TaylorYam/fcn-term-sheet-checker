@@ -17,7 +17,7 @@ from fcn_checker.issuers import MS, detect_iis
 from fcn_checker.parsers import ms as ms_parser
 from harness import MISMATCH, NA, PASS, REVIEW, iis_path
 from ms_synth import DIST, ISSUE, TRADE, WARNING, Spec, build_pdf, check_pair
-from pdf_writer import zh_date
+from pdf_writer import Edit, zh_date
 
 S = Spec()
 FINAL, FIRST_END, MONTHLY = zh_date(S.ends[-1]), zh_date(S.ends[0]), f"{S.monthly}%"
@@ -92,7 +92,7 @@ def test_consistent_ms_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tmp_
 
 
 def test_old_template_is_not_recognised_and_nothing_is_filled(tmp_path):
-    ts, iis = check_pair(tmp_path, Spec(iis_replace=[("cover", "International Plc", "International plc")]))
+    ts, iis = check_pair(tmp_path, edits=[Edit("International Plc", "International plc", "iis.cover")])
     r = next(r for r in iis.report.results if r.rule_id == "template.detect")
     assert (r.status, r.reason_code) == (REVIEW, "template_unknown")
     assert "舊版範本不支援" in r.message
@@ -116,7 +116,7 @@ def test_page_count_and_footer_total(tmp_path, spec, rule, message):
 
 
 @pytest.mark.parametrize(
-    ("replace", "expected", "message"),
+    ("change", "expected", "message"),
     [
         # 參考條件表
         (("summary", "計價幣別：美元 (USD)", "計價幣別：日幣 (JPY)"), ("field.currency", "currency"), None),
@@ -215,8 +215,9 @@ def test_page_count_and_footer_total(tmp_path, spec, rule, message):
         ),
     ],
 )
-def test_each_ms_iis_check_point_reports_a_wrong_value(tmp_path, replace, expected, message):
-    ts, iis = check_pair(tmp_path, Spec(iis_replace=[replace]))
+def test_each_ms_iis_check_point_reports_a_wrong_value(tmp_path, change, expected, message):
+    section, old, new = change
+    ts, iis = check_pair(tmp_path, edits=[Edit(old, new, f"iis.{section}")])
     assert iis.report.template == "ms-zh-iis"
     assert bad(iis) == {(*expected, MISMATCH)}
     if message:
@@ -243,13 +244,13 @@ DIST_PLACES = {  # 受託機構名稱各處（警語 4) 三處、5)、6)）：�
 )
 def test_every_name_place_in_the_warnings_is_checked(tmp_path, old, new, field):
     rule = "standard.distributor" if field.startswith("distributor") else "standard.issuer_name"
-    _, iis = check_pair(tmp_path, Spec(iis_replace=[("warn", old, new)]))
+    _, iis = check_pair(tmp_path, edits=[Edit(old, new, "iis.warn")])
     assert bad(iis) == {(rule, field, MISMATCH)}
 
 
 def test_risk_level_inside_the_fixed_warning_is_checked(tmp_path):
     """警語 1) 的 RRn 寫錯：全文風險等級不一致，固定警語也不再逐字相符。"""
-    _, iis = check_pair(tmp_path, Spec(iis_replace=[("warn", "歸類為RR4", "歸類為RR3")]))
+    _, iis = check_pair(tmp_path, edits=[Edit("歸類為RR4", "歸類為RR3", "iis.warn")])
     assert bad(iis) == {
         ("standard.risk_level", "risk_level", MISMATCH),
         ("standard.fixed_warning", "fixed_warning", MISMATCH),
@@ -257,21 +258,21 @@ def test_risk_level_inside_the_fixed_warning_is_checked(tmp_path):
 
 
 def test_fixed_warning_must_appear_exactly_once(tmp_path):
-    _, iis = check_pair(tmp_path, Spec(iis_replace=[("warn", "8) 範本說明。", "8) " + WARNING + "。")]))
+    _, iis = check_pair(tmp_path, edits=[Edit("8) 範本說明。", "8) " + WARNING + "。", "iis.warn")])
     (r,) = [r for r in iis.report.results if r.rule_id == "standard.fixed_warning"]
     assert (r.status, r.expected, r.actual) == (MISMATCH, 1, 2)
 
 
 def test_unknown_memory_wording_requires_review(tmp_path):
-    spec = Spec(
-        count=1, memory=False, iis_replace=[("redeem", "該連結標的之收盤價大於或等於", "該連結標的之收盤價高於")]
+    spec = Spec(count=1, memory=False)
+    _, iis = check_pair(
+        tmp_path, spec, edits=[Edit("該連結標的之收盤價大於或等於", "該連結標的之收盤價高於", "iis.redeem")]
     )
-    _, iis = check_pair(tmp_path, spec)
     assert bad(iis) == {("field.ko_memory", "ko_memory", REVIEW)}
 
 
 def test_all_fee_rates_are_checked(tmp_path):
-    _, iis = check_pair(tmp_path, Spec(iis_replace=[("fees", "0%~5%", "0%~3%")]))
+    _, iis = check_pair(tmp_path, edits=[Edit("0%~5%", "0%~3%", "iis.fees")])
     assert bad(iis) == {("standard.fees", f, MISMATCH) for f in ("申購費用", "提前贖回費用", "分銷費用")}
 
 
@@ -286,7 +287,7 @@ def test_reference_sheet_ko_terms_are_compared(tmp_path):
 
 
 def test_first_callable_period_on_the_iis_is_compared_with_non_call_and_the_term_sheet_schedule(tmp_path):
-    _, iis = check_pair(tmp_path, Spec(iis_replace=[("redeem", "自第1 個配息週期終止日", "自第2 個配息週期終止日")]))
+    _, iis = check_pair(tmp_path, edits=[Edit("自第1 個配息週期終止日", "自第2 個配息週期終止日", "iis.redeem")])
     assert bad(iis) == {
         ("field.first_callable_period", "first_callable_period", MISMATCH),
         ("iis.ko_observation_dates", "ko_observation_start", MISMATCH),  # 起日不是說明書第 2 期終止日
@@ -294,15 +295,16 @@ def test_first_callable_period_on_the_iis_is_compared_with_non_call_and_the_term
 
 
 @pytest.mark.parametrize(
-    ("replace", "fields"),
+    ("change", "fields"),
     [
         (("redeem", "每日觀察", "每日檢查"), {"ko_observation", "first_callable_period"}),
         (("redeem", "「觸及下限事件」：若在期末定價日", "「觸及下限事件」：若在每個月"), {"ki_type"}),
         (("summary", "(2) 連結標的2:", "(3) 連結標的2:"), {"underlying_names"}),
     ],
 )
-def test_wording_outside_the_template_requires_review(tmp_path, replace, fields):
-    _, iis = check_pair(tmp_path, Spec(iis_replace=[replace]))
+def test_wording_outside_the_template_requires_review(tmp_path, change, fields):
+    section, old, new = change
+    _, iis = check_pair(tmp_path, edits=[Edit(old, new, f"iis.{section}")])
     found = {f for _, f, s in bad(iis) if s == REVIEW}
     assert fields <= found and not {s for *_, s in bad(iis)} - {REVIEW}
 
@@ -317,8 +319,7 @@ def test_monthly_coupon_is_compared_with_the_annual_rate_on_the_sheet(tmp_path):
 
 def test_term_sheet_values_unavailable_require_review_on_the_iis(tmp_path):
     """同商品說明書讀不到開始受理贖回日期時，投資人須知那項轉人工覆核（說明書本身另有錯訊）。"""
-    spec = Spec(replace=[("ch四", "開始受理贖回日期：", "開始受理日期：")])
-    ts, iis = check_pair(tmp_path, Spec(), pdf_spec=spec)
+    ts, iis = check_pair(tmp_path, edits=[Edit("開始受理贖回日期：", "開始受理日期：", "ts.ch四")])
     r = next(r for r in iis.report.results if r.rule_id == "iis.redemption_start")
     assert (r.status, r.reason_code) == (REVIEW, "term_sheet_unavailable")
     assert ts.report.status != PASS

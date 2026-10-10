@@ -1,14 +1,16 @@
-"""MS 合成說明書與參考條件表列（docs/templates/ms-zh-product-description.md）；商品、標的與價格皆虛構。
+"""MS 合成說明書與投資人須知（docs/templates/ms-zh-product-description.md、ms-zh-iis.md）；商品、標的與價格皆虛構。
 
 只用 tests/pdf_writer.py 排版：封面「N. 標籤：值」、章名「第X章、」、第一章條號「N. 標題：」與內文同一行、子項「(n)」，
-表格一格一行。`Spec.replace` 依段落替換文字製造錯誤（段落代號見 `_Doc.section`），`breaks` 在表格某列之後強制換頁。
-`build_pdf` 另寫一份同商品的投資人須知（docs/templates/ms-zh-iis.md）：`Spec.iis_replace` 依投資人須知的段落代號
-（cover、warn、org、summary、coupon、redeem、risk、fees、rest）替換文字，`iis_pages`／`iis_page_total` 改頁數與頁底總頁數。
+表格一格一行。`breaks` 在表格某列之後強制換頁，`iis_pages`／`iis_page_total` 改投資人須知頁數與頁底總頁數。
+改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：說明書 `ts.cover`、第一章各條 `ts.art{n}`
+（日期表 `ts.art14.table`、價格表 `ts.art16.table`／`ts.art18.table`、情境 `ts.scen.一`…）、其他各章 `ts.ch二`～`ts.ch六`；
+投資人須知 `iis.cover`、`iis.warn`、`iis.org`、`iis.summary`、`iis.coupon`、`iis.redeem`、`iis.risk`、`iis.fees`、`iis.rest`。
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -17,7 +19,7 @@ from typing import Any
 import fitz
 
 from harness import CONFIG, STANDARD, check_all, iis_path
-from pdf_writer import FONT, PdfWriter, zh_date
+from pdf_writer import FONT, Edit, PdfWriter, zh_date
 from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
 
 NAME = STANDARD["product_name"]["ms"]
@@ -53,7 +55,7 @@ def underlyings(count: int) -> tuple[UL, ...]:
 
 @dataclass
 class Spec(ProductSpec):
-    """MS 合成說明書與投資人須知的規格：商品規格加上改字旋鈕。預設值下兩份文件與參考條件表列完全一致。
+    """MS 合成說明書與投資人須知的規格：商品規格加上 MS 的版面選項。預設值下兩份文件與參考條件表列完全一致。
 
     標的由 `count` 產生、最終比價日與到期日由配息排程推得：`underlyings`、`final_date`、`maturity_date` 不能直接給。
     """
@@ -69,9 +71,7 @@ class Spec(ProductSpec):
     count: int = 2  # 標的數
     trustee_code: str | None = None  # 受託機構商品代號；None 同商品代號，"" 空白
     ko_column: bool | None = None  # 價格表有無自動提前出場價欄；None 依 Non-Call < 天期
-    replace: list[tuple[str, str, str]] = field(default_factory=list)  # (段落代號前綴, 原文, 新文字)
     breaks: dict[str, int] = field(default_factory=dict)  # 表格（date／price）第 n 列之後換頁
-    iis_replace: list[tuple[str, str, str]] = field(default_factory=list)  # 投資人須知的 (段落代號前綴, 原文, 新文字)
     iis_pages: int = 4  # 投資人須知頁數（多的頁只有頁底）
     iis_page_total: int | None = None  # 投資人須知頁底「共 M頁」的 M；None 同實際頁數
 
@@ -135,36 +135,40 @@ class Spec(ProductSpec):
 
 
 class _Doc:
-    """逐行排版；文字依目前段落代號（`section`）套用 Spec.replace，超過寬度時在非數字處換行。"""
+    """逐行排版；文字依目前段落代號（`section`）套用改字，超過寬度時在非數字處換行。"""
 
-    def __init__(self, s: Spec, replace: list[tuple[str, str, str]] | None = None):
-        self.s, self.w, self.section = s, PdfWriter(), "cover"
-        self.replace = s.replace if replace is None else replace
+    def __init__(self, edits: Sequence[Edit], kind: str):
+        self.w = PdfWriter(edits, kind)
+        self.section = "cover"
+
+    @property
+    def section(self) -> str:
+        return self.w.section
+
+    @section.setter
+    def section(self, value: str) -> None:
+        self.w.section = value
 
     def edit(self, text: str) -> str:
-        for sec, old, new in self.replace:
-            if self.section.startswith(sec):
-                text = text.replace(old, new)
-        return text
+        return self.w.edit(text)
 
     def text(self, x: float, text: str, cont: float | None = None) -> None:
         text = self.edit(text)
         if not text:
             return
         width, cur, used, first = 520 - (x - 36), "", 0.0, True
-        for ch in text:
-            cw = fitz.get_text_length(ch, fontname="helv", fontsize=10) if ord(ch) < 256 else 10
-            if used + cw > width and cur and not (cur[-1] in NUMERIC and ch in NUMERIC):
-                self.w.line(x if first else (cont if cont is not None else x), cur)
-                cur, used, first = "", 0.0, False
-            cur += ch
-            used += cw
-        self.w.line(x if first else (cont if cont is not None else x), cur)
+        with self.w.verbatim():
+            for ch in text:
+                cw = fitz.get_text_length(ch, fontname="helv", fontsize=10) if ord(ch) < 256 else 10
+                if used + cw > width and cur and not (cur[-1] in NUMERIC and ch in NUMERIC):
+                    self.w.line(x if first else (cont if cont is not None else x), cur)
+                    cur, used, first = "", 0.0, False
+                cur += ch
+                used += cw
+            self.w.line(x if first else (cont if cont is not None else x), cur)
 
     def cell(self, x: float, text: str) -> None:
-        text = self.edit(text)
-        if text:
-            self.w.line(x, text, gap=14)
+        self.w.line(x, text, gap=14)  # 整格換成空字串時不畫
 
     def chapter(self, zh: str, name: str) -> None:
         self.w.new_page()
@@ -262,11 +266,11 @@ def _scenarios(d: _Doc, s: Spec) -> None:
     d.text(72, "投資人要承擔發行機構之無擔保信用風險(報酬率則為-100%)。")
 
 
-def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
-    """合成 MS 說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時旁邊另寫一份投資人須知（MS 為未支援上手）。"""
+def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
+    """合成 MS 說明書；檔名是 `<商品代號>_TS.pdf` 且 `iis` 時旁邊另寫一份投資人須知，`edits` 兩份都套用（依段落代號）。"""
     if iis and path.stem.endswith("_TS"):
-        build_iis_pdf(iis_path(path), s)
-    d = _Doc(s)
+        build_iis_pdf(iis_path(path), s, edits=edits)
+    d = _Doc(edits, "ts")
     w = d.w
     ends, payments, starts = s.ends, s.payments, s.starts
     trustee = s.product_code if s.trustee_code is None else s.trustee_code
@@ -516,9 +520,9 @@ def build_pdf(path: Path, s: Spec, *, iis: bool = True) -> Path:
     return w.save(path)
 
 
-def build_iis_pdf(path: Path, s: Spec) -> Path:
-    """MS 中文投資人須知（新版，docs/templates/ms-zh-iis.md）：與 `s` 的說明書、參考條件表列一致，預設 4 頁。"""
-    d = _Doc(s, s.iis_replace)
+def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = ()) -> Path:
+    """MS 中文投資人須知（新版，docs/templates/ms-zh-iis.md）：與 `s` 的說明書、參考條件表列一致，預設 4 頁；`edits` 改字。"""
+    d = _Doc(edits, "iis")
     w = d.w
     ends, payments, k, final = s.ends, s.payments, s.first_callable, s.ends[-1]
     dist, zh_issuer = DIST["name"], ISSUER.split("(")[0]
@@ -676,24 +680,39 @@ def build_iis_pdf(path: Path, s: Spec) -> Path:
 
 
 def check_pair(
-    tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, config=CONFIG, **overrides: Any
+    tmp_path: Path,
+    spec: Spec | None = None,
+    *,
+    pdf_spec: Spec | None = None,
+    edits: Sequence[Edit] = (),
+    config=CONFIG,
+    **overrides: Any,
 ):
     """同 `check`，回傳（說明書, 投資人須知）兩份的批量核對項目（BatchItem）。"""
     spec = spec or Spec()
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec, edits=edits)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
     outcome = check_all(sheet, [pdf, iis_path(pdf)], config)
     ts = next(i for i in outcome.items if i.term_sheet == pdf)
     return ts, next(i for i in outcome.items if i.term_sheet != pdf)
 
 
-def check(tmp_path: Path, spec: Spec | None = None, *, pdf_spec: Spec | None = None, config=CONFIG, **overrides: Any):
-    """合成說明書（`pdf_spec`，預設同 `spec`）＋與 `spec` 一致的參考條件表一列，經批量入口核對，回傳該說明書的 CheckReport。
+def check(
+    tmp_path: Path,
+    spec: Spec | None = None,
+    *,
+    pdf_spec: Spec | None = None,
+    edits: Sequence[Edit] = (),
+    config=CONFIG,
+    **overrides: Any,
+):
+    """合成說明書（`pdf_spec`，預設同 `spec`；`edits` 改字）＋與 `spec` 一致的參考條件表一列，經批量入口核對，
+    回傳該說明書的 CheckReport。
 
     `config` 換核對設定（例：改過的審查標準）。
     """
     spec = spec or Spec()
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec)
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec, edits=edits)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
     outcome = check_all(sheet, [pdf], config)
     return next(i.report for i in outcome.items if i.term_sheet == pdf)

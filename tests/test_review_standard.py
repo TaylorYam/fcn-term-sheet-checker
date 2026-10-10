@@ -13,12 +13,13 @@ import hsbc_synth
 import ms_synth
 from fcn_checker.ingestion import IngestionError
 from harness import MISMATCH, PASS, REVIEW, REVIEW_STANDARD, STANDARD, check_sheet, load_config, results
+from pdf_writer import Edit
 from reference_synth import build_reference_sheet, reference_row
 from synth import Spec, build_pdf, check
 
 BARC_WARNING = STANDARD["risk"]["fixed_warning"]
 HSBC_WARNING = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
-NAME, PHONE, ADDRESS = (STANDARD["distributor"][k] for k in ("name", "phone", "address"))
+PHONE = STANDARD["distributor"]["phone"]
 
 
 def sub(tmp_path: Path, name: str) -> Path:
@@ -34,9 +35,14 @@ def standard_with(tmp_path: Path, old: str, new: str) -> Path:
     return path
 
 
-def check_hsbc(tmp_path: Path, spec: hsbc_synth.Spec | None = None, standard: Path = REVIEW_STANDARD):
+def check_hsbc(
+    tmp_path: Path,
+    spec: hsbc_synth.Spec | None = None,
+    standard: Path = REVIEW_STANDARD,
+    edits: list[Edit] | None = None,
+):
     s = spec or hsbc_synth.Spec()
-    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, edits=edits or ())
     sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     return check_sheet(pdf, sheet, load_config(review_standard=standard))
 
@@ -56,13 +62,13 @@ def test_each_issuer_uses_its_own_fixed_warning(tmp_path):
 
 
 def test_hsbc_document_with_barc_warning_is_mismatch(tmp_path):
-    report = check_hsbc(tmp_path, hsbc_synth.Spec(replacements={HSBC_WARNING: BARC_WARNING}))
+    report = check_hsbc(tmp_path, edits=[Edit(HSBC_WARNING, BARC_WARNING, "ts")])
     r = results(report, "standard.fixed_warning")[0]
     assert (r.status, r.actual) == (MISMATCH, 0)
 
 
 def test_barc_document_with_hsbc_warning_is_mismatch(tmp_path):
-    r = results(check(tmp_path, Spec(warnings=(HSBC_WARNING,) * 3)), "standard.fixed_warning")[0]
+    r = results(check(tmp_path, edits=[Edit(BARC_WARNING, HSBC_WARNING, "ts")]), "standard.fixed_warning")[0]
     assert (r.status, r.actual) == (MISMATCH, 0)
 
 
@@ -113,14 +119,14 @@ def test_international_phone_listed_as_equivalent_passes_for_every_issuer(tmp_pa
     assert (
         results(check_hsbc(sub(tmp_path, "hsbc")), "standard.distributor", "distributor_phone_cover")[0].status == PASS
     )
-    spec = Spec(distributor_cover=(NAME, "+886-2-5556-1313", ADDRESS))
-    r = results(check(sub(tmp_path, "barc"), spec), "standard.distributor", "distributor_phone_cover")[0]
+    edits = [Edit(PHONE, "+886-2-5556-1313", "ts.cover.distributor")]
+    r = results(check(sub(tmp_path, "barc"), edits=edits), "standard.distributor", "distributor_phone_cover")[0]
     assert (r.status, r.actual) == (PASS, "+886-2-5556-1313")
 
 
 def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
-    spec = Spec(distributor_cover=(NAME, "(02)5556-1313", ADDRESS))
-    r = results(check(sub(tmp_path, "barc"), spec), "standard.distributor", "distributor_phone_cover")[0]
+    edits = [Edit(PHONE, "(02)5556-1313", "ts.cover.distributor")]
+    r = results(check(sub(tmp_path, "barc"), edits=edits), "standard.distributor", "distributor_phone_cover")[0]
     assert r.status == MISMATCH
 
     standard = standard_with(
@@ -154,24 +160,28 @@ def test_invalid_ms_review_standard_is_a_batch_config_error(tmp_path, old, new, 
 def test_issuer_name_ignores_apply_only_to_the_configured_issuer(tmp_path):
     """BARC 沒有設定 issuer_name_ignore：第二章少了括號仍是不一致。"""
     plain = STANDARD["issuer_name"]["barc"].replace("（", "").replace("）", "")
-    r = results(check(tmp_path, Spec(issuer_ch2=plain)), "standard.issuer_name", "issuer_name_ch2")[0]
+    r = results(
+        check(tmp_path, edits=[Edit(STANDARD["issuer_name"]["barc"], plain, "ts.ch二.1")]),
+        "standard.issuer_name",
+        "issuer_name_ch2",
+    )[0]
     assert r.status == MISMATCH
 
 
 def test_address_form_not_listed_in_standard_is_mismatch(tmp_path):
     """MS 第二章沒有「松山區」的地址靠審查標準 address_equivalents 才算相符；清單拿掉就判不一致。"""
-    variant = ms_synth.Spec(
-        replace=[("ch二", "◎ 營業所在地：台北市松山區民生東路三段158號6樓", "◎ 營業所在地：台北市民生東路三段158號6樓")]
-    )
+    variant = [
+        Edit("◎ 營業所在地：台北市松山區民生東路三段158號6樓", "◎ 營業所在地：台北市民生東路三段158號6樓", "ts.ch二")
+    ]
     r = results(
-        ms_synth.check(sub(tmp_path, "listed"), pdf_spec=variant), "standard.distributor", "distributor_address_ch2"
+        ms_synth.check(sub(tmp_path, "listed"), edits=variant), "standard.distributor", "distributor_address_ch2"
     )[0]
     assert r.status == PASS and "address_equivalents" in r.tolerance
     standard = standard_with(
         tmp_path, 'address_equivalents = ["台北市民生東路三段158號6樓"]', "address_equivalents = []"
     )
     r = results(
-        ms_synth.check(sub(tmp_path, "unlisted"), pdf_spec=variant, config=load_config(review_standard=standard)),
+        ms_synth.check(sub(tmp_path, "unlisted"), edits=variant, config=load_config(review_standard=standard)),
         "standard.distributor",
         "distributor_address_ch2",
     )[0]

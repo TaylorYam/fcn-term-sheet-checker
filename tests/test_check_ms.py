@@ -15,7 +15,7 @@ from fcn_checker.messages import problem_message
 from fcn_checker.schema import CheckStatus as S
 from harness import check_all
 from ms_synth import Spec, build_pdf, check
-from pdf_writer import zh_date
+from pdf_writer import Edit, zh_date
 from reference_synth import build_reference_sheet, reference_row
 
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
@@ -113,7 +113,7 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
 
 
 @pytest.mark.parametrize(
-    "replace,rule_id,status",
+    "change,rule_id,status",
     [
         # 月配息率與年化報酬率：正式條款正確、重印處錯誤也要抓到（核對規則 §3.8）
         (("art15", "固定配息率 (1.0000%)", "固定配息率 (1.0100%)"), "derive.monthly_coupon", S.MISMATCH),
@@ -194,13 +194,14 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
         (("cover", "Worst of Shares", "Shares"), "standard.product_name", S.MISMATCH),
     ],
 )
-def test_document_difference_is_reported(tmp_path, replace, rule_id, status):
-    r = check(tmp_path, S0, pdf_spec=Spec(replace=[replace]))
+def test_document_difference_is_reported(tmp_path, change, rule_id, status):
+    section, old, new = change
+    r = check(tmp_path, S0, edits=[Edit(old, new, f"ts.{section}")])
     assert any(x.rule_id == rule_id and x.status == status for x in r.results), problems(r)
 
 
 @pytest.mark.parametrize(
-    "replace",
+    "change",
     [
         ("art1", "結構型商品(無保證機構)", "結構型商品（無保證機構）"),  # 括號全半形不計
         ("art2", "本商品風險程度為RR4。", "本商品風險程度等級為RR4。"),  # 第一章第 2 項兩種開頭都視為正確
@@ -213,8 +214,9 @@ def test_document_difference_is_reported(tmp_path, replace, rule_id, status):
         ),  # 審查標準的地址等價寫法
     ],
 )
-def test_allowed_variants_still_pass(tmp_path, replace):
-    r = check(tmp_path, S0, pdf_spec=Spec(replace=[replace]))
+def test_allowed_variants_still_pass(tmp_path, change):
+    section, old, new = change
+    r = check(tmp_path, S0, edits=[Edit(old, new, f"ts.{section}")])
     assert r.status == S.PASS, problems(r)
 
 
@@ -270,7 +272,7 @@ def test_observation_wording_must_match_the_date_table(tmp_path):
     r = check(
         tmp_path,
         S0,
-        pdf_spec=Spec(replace=[("art17", d_sentence, "記憶事件觀察日：每一個定價日自第1 個定價日開始觀察（")]),
+        edits=[Edit(d_sentence, "記憶事件觀察日：每一個定價日自第1 個定價日開始觀察（", "ts.art17")],
     )
     assert rule(r, "doc.ko_observation")[0].status == S.REVIEW_REQUIRED
     assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
@@ -286,20 +288,14 @@ def test_memory_in_name_must_match_article_17(tmp_path):
         ("art17", "記憶事件：任何連結標的於記憶事件觀察日之收盤價大於或等於其自動提前出場價，則發生記憶事件。", ""),
         ("art17", "記憶事件觀察日：每日觀察", "觀察日：每日觀察"),
     ]
-    r = check(tmp_path, S0, pdf_spec=Spec(replace=plain))
+    r = check(tmp_path, S0, edits=[Edit(old, new, f"ts.{section}") for section, old, new in plain])
     assert rule(r, "doc.ko_memory")[0].status == S.REVIEW_REQUIRED
     assert rule(r, "field.ko_memory")[0].status == S.MISMATCH
 
 
 def test_periodic_autocall_dates_follow_non_call(tmp_path):
     spec = Spec(ko_obs="P", count=2, first_callable=2)
-    r = check(
-        tmp_path,
-        spec,
-        pdf_spec=Spec(
-            ko_obs="P", count=2, first_callable=2, replace=[("art14.table", "無", zh_date(spec.payments[0]))]
-        ),
-    )
+    r = check(tmp_path, spec, edits=[Edit("無", zh_date(spec.payments[0]), "ts.art14.table")])
     assert rule(r, "schedule.autocall_dates")[0].status == S.MISMATCH
 
 
@@ -309,13 +305,11 @@ def test_tables_split_across_pages_are_still_read(tmp_path):
 
 
 def test_old_template_is_not_recognised(tmp_path):
-    old = Spec(
-        replace=[
-            ("cover", "International Plc issuance", "International plc issuance"),
-            ("art1", "商品中文名稱：", "商品名稱："),
-        ]
-    )
-    r = check(tmp_path, S0, pdf_spec=old)
+    old = [
+        Edit("International Plc issuance", "International plc issuance", "ts.cover"),
+        Edit("商品中文名稱：", "商品名稱：", "ts.art1"),
+    ]
+    r = check(tmp_path, S0, edits=old)
     x = rule(r, "template.detect")[0]
     assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "template_unknown")
     assert "MS：" in x.message and "舊版範本不支援" in x.message

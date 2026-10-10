@@ -1,8 +1,8 @@
 """合成參考條件表（不分上手）：上手中立的商品規格 `ProductSpec`、與之一致的參考條件表列 `reference_row`（tests/ 只此一份），
 以及仿 FCN參考條件 Excel `樣本清單` 的 `build_reference_sheet`（Issue #145）。
 
-各上手的合成器（tests/<上手>_synth.py）以 `ProductSpec` 的子類別加上該上手的改字旋鈕，只負責把規格畫成說明書與
-投資人須知 PDF；參考條件表列不由上手產生。欄名對照與「發行機構」欄寫法取自參考條件表格式設定
+各上手的合成器（tests/<上手>_synth.py）以 `ProductSpec` 的子類別加上該上手的版面結構旋鈕，只負責把規格畫成說明書與
+投資人須知 PDF（製造錯誤用 `edits`，見 tests/pdf_writer.py 的 `Edit`）；參考條件表列不由上手產生。欄名對照與「發行機構」欄寫法取自參考條件表格式設定
 （config/reference_sheet.toml）。所有數值皆為虛構。
 """
 
@@ -85,7 +85,7 @@ DEFAULT_ULS = (
 class ProductSpec:
     """一檔 FCN 商品的規格（上手中立）：參考條件表一列的內容，也是各上手合成說明書與投資人須知的依據。
 
-    `issuer` 與 `product_code` 沒有預設值：由各上手合成器的子類別補上，並加該上手的改字旋鈕；子類別由其他欄位推得的
+    `issuer` 與 `product_code` 沒有預設值：由各上手合成器的子類別補上，並加該上手的版面結構旋鈕；子類別由其他欄位推得的
     規格（例：BARC 的 Non-Call、MS／HSBC 的標的與日期）改宣告 `init=False`，建構或 `with_` 時給了會直接報錯。
     預設值下說明書、投資人須知與參考條件表列完全一致。
     """

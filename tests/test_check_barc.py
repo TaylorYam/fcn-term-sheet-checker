@@ -11,8 +11,9 @@ from decimal import Decimal
 import pytest
 
 from harness import ERROR, MISMATCH, NA, PASS, REVIEW, check_sheet, problems, results
+from pdf_writer import Edit, zh_date
 from reference_synth import REFERENCE_HEADERS, UL, build_reference_sheet, reference_row
-from synth import Spec, build_not_barc_pdf, build_pdf, check, check_pdf
+from synth import APPROVAL_DATE, Spec, build_not_barc_pdf, build_pdf, check, check_pdf
 
 # ---------------------------------------------------------------- 全部一致
 
@@ -149,14 +150,14 @@ def test_monthly_coupon_beyond_tolerance_mismatches(tmp_path):
 
 
 def test_coupon_mentions_must_agree_within_document(tmp_path):
-    report = check(tmp_path, Spec(mention_overrides={"§17": "1.0100"}))
+    report = check(tmp_path, edits=[Edit("為1.0000%", "為1.0100%", "ts.art17")])
     assert problems(report) == {("doc.coupon_consistency", MISMATCH)}
     bad = [r for r in results(report, "doc.coupon_consistency") if r.status == MISMATCH][0]
     assert any("1.0100" in e.text for e in bad.document_evidence)
 
 
 def test_price_derivation_error(tmp_path):
-    report = check(tmp_path, Spec(price_overrides={(2, "strike"): "61.0500"}))
+    report = check(tmp_path, edits=[Edit("61.0400", "61.0500", f"ts.{t}.price.2.strike") for t in ("art15", "art16")])
     # 說明書內部推算不符，也跟表上（以正確推算值填入）的執行價不同
     assert problems(report) == {("derive.prices", MISMATCH), ("field.underlying_prices", MISMATCH)}
     bad = [r for r in results(report, "derive.prices") if r.status == MISMATCH]
@@ -240,22 +241,19 @@ def test_ambiguous_field_requires_review(tmp_path):
 
 
 def test_chairman_archaic_character(tmp_path):
-    report = check(tmp_path, Spec(chairman="林晉輝"))
+    report = check(tmp_path, edits=[Edit("林晋輝", "林晉輝", "ts.ch二.5")])
     assert problems(report) == {("standard.chairman", MISMATCH)}
 
 
 def test_fixed_warning_altered_by_one_character(tmp_path):
-    from synth import FIXED_WARNING
-
-    altered = FIXED_WARNING.replace("並不保本", "並未保本")
-    report = check(tmp_path, Spec(warnings=(FIXED_WARNING, altered, FIXED_WARNING)))
+    report = check(tmp_path, edits=[Edit("並不保本", "並未保本", "ts.art2")])
     assert problems(report) == {("standard.fixed_warning", MISMATCH)}
 
 
 def test_fixed_warning_wrong_occurrence_count(tmp_path):
     from synth import FIXED_WARNING
 
-    report = check(tmp_path, Spec(warnings=(FIXED_WARNING, FIXED_WARNING, "本商品之風險請參閱銷售說明書。")))
+    report = check(tmp_path, edits=[Edit(FIXED_WARNING, "本商品之風險請參閱銷售說明書。", "ts.ch三")])
     r = results(report, "standard.fixed_warning")[0]
     assert r.status == MISMATCH and r.actual == 2
 
@@ -273,44 +271,39 @@ def test_forbidden_wording_outside_allowed_phrase(tmp_path):
 
 
 def test_approval_date(tmp_path):
-    report = check(tmp_path, Spec(approval_date=dt.date(2025, 12, 18)))
+    report = check(tmp_path, edits=[Edit(zh_date(APPROVAL_DATE), zh_date(dt.date(2025, 12, 18)), "ts.cover")])
     assert problems(report) == {("standard.approval_date", MISMATCH)}
 
 
 def test_chinese_name_without_non_principal_protected_suffix(tmp_path):
-    spec = Spec()
-    name = spec.expected_name_zh().replace("（不保本）", "")
-    report = check(tmp_path, spec, pdf_spec=spec.with_(name_zh=name))
+    report = check(tmp_path, edits=[Edit("（不保本）", "")])
     assert problems(report) == {("standard.product_name", MISMATCH)}
 
 
 def test_chinese_name_half_width_brackets_are_fine(tmp_path):
-    spec = Spec()
-    name = spec.expected_name_zh().replace("（無擔保及無保證機構）", "(無擔保及無保證機構)")
-    report = check(tmp_path, spec, pdf_spec=spec.with_(name_zh=name))
+    report = check(tmp_path, edits=[Edit("（無擔保及無保證機構）", "(無擔保及無保證機構)")])
     assert problems(report) == set()
 
 
 def test_english_name_format(tmp_path):
-    spec = Spec()
-    name = spec.expected_name_en().replace("Memory ", "")
-    report = check(tmp_path, spec, pdf_spec=spec.with_(name_en=name))
+    report = check(tmp_path, edits=[Edit("Memory ", "")])
     assert problems(report) == {("standard.product_name", MISMATCH)}
 
 
 def test_print_date_two_days_after_trade(tmp_path):
-    report = check(tmp_path, Spec(print_date=dt.date(2030, 1, 9)))
+    report = check(tmp_path, edits=[Edit(zh_date(Spec().print_date), zh_date(dt.date(2030, 1, 9)), "ts.cover")])
     assert problems(report) == {("doc.print_date", MISMATCH)}
 
 
 @pytest.mark.parametrize("offset", [0, 1])
 def test_print_date_same_or_next_day(tmp_path, offset):
-    report = check(tmp_path, Spec(print_date=dt.date(2030, 1, 7) + dt.timedelta(days=offset)))
+    printed = dt.date(2030, 1, 7) + dt.timedelta(days=offset)
+    report = check(tmp_path, edits=[Edit(zh_date(Spec().print_date), zh_date(printed), "ts.cover")])
     assert results(report, "doc.print_date")[0].status == PASS
 
 
 def test_subscription_start_must_equal_trade_date(tmp_path):
-    report = check(tmp_path, Spec(subscription_date=dt.date(2030, 1, 8)))
+    report = check(tmp_path, edits=[Edit("申購日期：2030 年1 月7 日", "申購日期：2030 年1 月8 日", "ts.ch四")])
     assert problems(report) == {("doc.subscription_start_date", MISMATCH)}
 
 

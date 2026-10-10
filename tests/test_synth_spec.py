@@ -70,9 +70,11 @@ def test_ms_and_hsbc_dates_and_underlyings_follow_their_schedules():
         hsbc_synth.Spec().with_(final_date=dt.date(2030, 7, 8))
 
 
-def test_hsbc_refuses_spec_values_its_fixed_wording_cannot_draw():
-    with pytest.raises(NotImplementedError, match="strike"):
-        hsbc_synth.Spec(strike=Decimal("65.00"))
-    with pytest.raises(NotImplementedError, match="tenor"):
-        hsbc_synth.Spec(tenor=12)
-    assert hsbc_synth.Spec(count=1, ko_obs="P", memory=False, ki="none").count == 1, "畫得進 PDF 的規格值照常"
+def test_hsbc_schedule_follows_the_trade_date_and_tenor():
+    s = hsbc_synth.Spec(trade_date=dt.date(2030, 11, 30), tenor=3)
+
+    assert s.ends == [dt.date(2030, 12, 30), dt.date(2031, 1, 30), dt.date(2031, 2, 28)], "同一天，沒有這天取月底"
+    assert (s.final_date, s.maturity_date) == (dt.date(2031, 2, 28), dt.date(2031, 3, 3))
+    assert hsbc_synth.Spec().ends[0] == dt.date(2030, 2, 7), "預設值同原本的版面：每月 7 日"
+    row = reference_row(hsbc_synth.Spec(strike=Decimal("65.00")))
+    assert row["K(%)"] == 65.0 and row["UL_1_執行價"] == 65.0, "規格值不再被拒絕"
