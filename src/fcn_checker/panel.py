@@ -159,7 +159,7 @@ def _write(widget: tk.Text, text: str) -> None:
 class ResultPane(ttk.Frame):
     """左側逐份說明書清單（問題優先）；右側選取那份的逐欄結果，選取列可查看完整值與原文證據。
 
-    下方「人工放行」按鈕對選取的說明書操作；能否放行與顯示的原因由 release_state 提供，按下時呼叫 on_release。
+    下方「人工放行」按鈕對選取的說明書操作；能否放行與不能放行的原因由 release_state 提供，說明文字由 PanelOutcome.release_note 組好，按下時呼叫 on_release。
     """
 
     def __init__(
@@ -249,11 +249,11 @@ class ResultPane(ttk.Frame):
             self.release_reason.set("")
         elif item.released:
             self.release_button.configure(text="取消放行", state="normal")
-            self.release_reason.set("已人工放行：儲存時視同通過並回填，不列入錯誤清單。")
+            self.release_reason.set(PanelOutcome.release_note(item, ""))
         else:
             allowed, reason = self.release_state(item)
             self.release_button.configure(text="人工放行…", state="normal" if allowed else "disabled")
-            self.release_reason.set(f"不能人工放行：{reason}" if reason else "")
+            self.release_reason.set(PanelOutcome.release_note(item, reason))
 
     def _release(self):
         item = self.selected_item()
@@ -571,7 +571,7 @@ class PanelWindow:
         self.shown = preview
         for row in preview.rows:
             self.preview_table.insert("", "end", values=PanelOutcome.preview_row(row))
-        self.preview_warnings.set("參考條件表欄名問題：" + "；".join(preview.warnings) if preview.warnings else "")
+        self.preview_warnings.set(PanelOutcome.preview_warnings(preview))
         self.status.set(self.session.message)
         self.tabs.select(0)
 

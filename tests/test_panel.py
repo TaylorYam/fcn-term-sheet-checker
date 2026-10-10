@@ -84,6 +84,15 @@ def test_preview_reports_reference_sheet_column_problems(tmp_path):
     sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)], [*REFERENCE_HEADERS, "新欄位"])
     preview = session_for(tmp_path, sheet, [pdf]).load_preview()
     assert any("新欄位" in w for w in preview.warnings)
+    text = PanelOutcome.preview_warnings(preview)
+    assert text.startswith("參考條件表欄名問題：") and "新欄位" in text
+
+
+def test_preview_without_column_problems_shows_no_warning(tmp_path):
+    sheet, pdfs = inputs(tmp_path)
+    preview = session_for(tmp_path, sheet, pdfs).load_preview()
+    assert not preview.warnings
+    assert PanelOutcome.preview_warnings(preview) == ""
 
 
 def test_pdf_product_code_is_never_taken_from_the_sheet(tmp_path):
@@ -414,6 +423,19 @@ def test_release_button_state_hides_the_reason_for_passed_term_sheets(tmp_path):
     session.start_check()  # 原結果失效
     allowed, reason = session.release_state(mismatch)
     assert not allowed and "重新核對" in reason
+
+
+def test_release_note_explains_the_release_state(tmp_path):
+    spec = Spec()
+    session, outcome = checked(tmp_path, spec, rows=[reference_row(spec, **{"K(%)": 71})])
+    item, _ = outcome.batch.items
+    assert PanelOutcome.release_note(item, session.release_state(item).reason) == "", "可以放行就不必說明"
+    session.release(item)
+    assert PanelOutcome.release_note(item, "") == "已人工放行：儲存時視同通過並回填，不列入錯誤清單。"
+    session.cancel_release(item)
+    session.start_check()  # 原結果失效
+    note = PanelOutcome.release_note(item, session.release_state(item).reason)
+    assert note.startswith("不能人工放行：") and "重新核對" in note
 
 
 def test_released_items_sort_with_passed_ones(tmp_path):
