@@ -92,6 +92,23 @@ def _standard_prices(table: ParsedField) -> ParsedField:
     return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
 
 
+def _table_currencies(table: ParsedField) -> ParsedField:
+    """標準欄位 `currency_others`：第 12 條價格表各列的幣別格是承作幣別（不是標的自己的交易幣別，Issue #167）。
+
+    情境價格表不另列：`doc.scenario_table` 已逐列（含幣別）和正式價格表比。
+    """
+    name = "currency_others"
+    if not table.ok:
+        return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
+    occ = standard_fields.Occurrence
+    items = []
+    for i, (row, lns) in enumerate(zip(table.value["rows"], table.value["row_lines"], strict=True), 1):
+        field = f"price_table_currency_{i}"
+        where = f"第 12 條價格表 {row['ticker']} 幣別"
+        items.append(occ(field, f"{row['ticker']} 幣別", where, ParsedField.present(field, row["currency"], lns)))
+    return standard_fields.occurrences(name, items)
+
+
 def read(lines: Sequence[Line]) -> HsbcTermSheet:
     """讀出標準欄位與 HSBC 規則需要的專屬資料（範本辨識另由 `detect` 負責，不在這裡重做）。"""
     doc = document(lines)
@@ -188,6 +205,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         else ParsedField("underlyings", pt.status, evidence=pt.evidence, note=pt.note)
     )
     fields["underlying_prices"] = _standard_prices(pt)
+    fields["currency_others"] = _table_currencies(pt)
     put("tenor_months", sub(15, 1), r"為(\d+)個月", int)
     for name, n, pattern in [
         ("issue_date", 2, r"發行日[:：]" + D),

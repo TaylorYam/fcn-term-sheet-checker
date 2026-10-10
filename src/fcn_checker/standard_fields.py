@@ -90,6 +90,8 @@ STANDARD_FIELDS: dict[str, str] = {
     "product_code": "str：商品代號（12 位數字）",
     "isin": "str：ISIN",
     "currency_zh": "str：中文幣別（例：美元），由審查標準對照 ISO 代碼",
+    "currency_others": "tuple[Occurrence, ...]：承作幣別的其他出處（值為 ISO 代碼；HSBC 價格表各列幣別格），"
+    "須等於參考條件表承作幣別；範本沒有時交出 absent",
     "underlyings": "list[str]：標的彭博代號，依說明書順序",
     "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據、標的名稱）",
     "strike_pct": "Decimal：執行價為最初價格的 N%，保留說明書顯示位數",
