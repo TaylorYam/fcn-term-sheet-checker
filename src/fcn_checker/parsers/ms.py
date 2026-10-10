@@ -14,7 +14,7 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
-from . import ms_scenario, ms_tables, ms_wording
+from . import money, ms_scenario, ms_tables, ms_wording
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
@@ -249,6 +249,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     put("issuer_name_ch1", article(3), r"本商品發行機構為(.+?)，")
     put("currency_art5", article(5), r"計價幣別：(.+?)（[A-Z]{3}）")
     put("denomination", article(6), r"每單位商品面額：\D*?" + NUM + r"元", _number)
+    put("denomination_currency", article(6), rf"每單位商品面額：({money.CURRENCY}){money.NUMBER}元")
     put("issue_price_pct", article(7), r"發行價格：商品面額之(\d+(?:\.\d+)?)%", Decimal)
     fields["underlyings_art11"] = ms_tables.underlying_table(article(11))
     fields["underlying_names_art11"] = ms_tables.underlying_names(article(11))
@@ -296,6 +297,11 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     put("minimum_redemption", ch4, r"最低贖回金額為[^，。]*，即\D{0,4}?" + NUM + r"元", _number)
     put("redemption_increment", ch4, r"並以\D{0,4}?" + NUM + r"元(?:（[^）]*）)?為累加贖回單位", _number)
     put("issue_price_ch4", ch4, r"發行價格（商品面額的(\d+(?:\.\d+)?)%）", Decimal)
+    ccy, amount = money.CURRENCY, money.NUMBER
+    put("minimum_subscription_currency", ch4, rf"最低申購金額為[^，。]*，即({ccy}){amount}元")
+    put("minimum_additional_currency", ch4, rf"並以({ccy}){amount}元(?:（[^）]*）)?為最低加購單位")
+    put("minimum_redemption_currency", ch4, rf"最低贖回金額為[^，。]*，即({ccy}){amount}元")
+    put("redemption_increment_currency", ch4, rf"並以({ccy}){amount}元(?:（[^）]*）)?為累加贖回單位")
 
     occ = standard_fields.Occurrence
     fields["min_amounts"] = standard_fields.occurrences(
@@ -307,7 +313,8 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
             occ("redemption_increment", "累加贖回單位", "第四章第 8 項累加贖回單位", fields["redemption_increment"]),
         ],
     )
-    fields["currency_others"] = standard_fields.absent("currency_others", "承作幣別的其他出處")
+    scenarios = ms_scenario.section(article(18))
+    fields["currency_others"] = standard_fields.occurrences("currency_others", _currency_occurrences(fields, scenarios))
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
         [occ("issue_price_ch4", "發行價格（第四章申購價金）", "第四章第 5 項申購價金", fields["issue_price_ch4"])],
@@ -320,10 +327,68 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     )
     fields["coupon_pa_pct"] = standard_fields.absent("coupon_pa_pct", "年利率（MS 改核對月配息率與情境年化報酬率）")
 
-    cz = fields["currency_zh"]
-    scenarios = ms_scenario.section(article(18), cz.value if cz.ok else "美元")
     coupons, annualized = _mentions(fields, scenarios)
     return MsTermSheet(fields, TextIndex(doc.lines), doc, scenarios, coupons, annualized)
+
+
+def _currency_occurrences(
+    fields: dict[str, ParsedField], scenarios: ms_scenario.ScenarioSection
+) -> list[standard_fields.Occurrence]:
+    """金額旁的幣別字（標準欄位 `currency_others`，Issue #170）：第一章 §6 面額、第四章四個最低金額、§18 假設總投資金額
+    各一處，§18 每個情境一處（該情境裡每一處「金額 幣別」；股價與含「股」的實物交割算式用標的幣別，不算）。"""
+    occ = standard_fields.Occurrence
+    out = [
+        occ(
+            "denomination_currency",
+            "每單位商品面額幣別",
+            "第一章第 6 項每單位商品面額",
+            fields["denomination_currency"],
+        ),
+        occ(
+            "minimum_subscription_currency",
+            "最低申購金額幣別",
+            "第四章第 4 項最低申購金額",
+            fields["minimum_subscription_currency"],
+        ),
+        occ(
+            "minimum_additional_currency",
+            "最低加購單位幣別",
+            "第四章第 4 項最低加購單位",
+            fields["minimum_additional_currency"],
+        ),
+        occ(
+            "minimum_redemption_currency",
+            "最低贖回金額幣別",
+            "第四章第 8 項最低贖回金額",
+            fields["minimum_redemption_currency"],
+        ),
+        occ(
+            "redemption_increment_currency",
+            "累加贖回單位幣別",
+            "第四章第 8 項累加贖回單位",
+            fields["redemption_increment_currency"],
+        ),
+    ]
+    name, where = "scenario_denomination_currency", "第 18 項假設總投資金額"
+    hit = scenarios.denomination_currency
+    out.append(
+        occ(
+            name,
+            "情境假設總投資金額幣別",
+            where,
+            ParsedField.present(name, hit.values[0], list(hit.lines))
+            if hit
+            else ParsedField.missing(name, "第 18 項假設找不到總投資金額或出現多次"),
+        )
+    )
+    for s in scenarios.scenarios:
+        if s.kind == "default":
+            continue
+        field = f"情境{s.number}_currency"
+        out.append(
+            money.scenario_occurrence(field, f"情境{s.number}金額幣別", f"第 18 項情境{s.number}", s.money, s.lines[:1])
+        )
+    return out
 
 
 def _trustee_block(ch2: list[Line]) -> list[Line]:

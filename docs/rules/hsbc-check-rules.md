@@ -33,7 +33,7 @@
 |---|---|---|---|
 | 商品代號 | TDCC Code | 封面 | 字串相等；也用來配對（`field.product_code`） |
 | ISIN | ISIN Code | §27 | 回填欄位：空白 → 整份通過後回填；有值 → 比對（`backfill.isin`） |
-| 幣別 | 承作幣別 | 封面；§12 價格表各列幣別格 | 封面依審查標準幣別對照；價格表每列幣別格（ISO 代碼）也是承作幣別，逐列相等，各列一筆結果（`field.currency`，Issue #167） |
+| 幣別 | 承作幣別 | 封面；§12 價格表各列幣別格；§6 面額、§7 最低交易金額、第四章最低申購／加購金額、§18 情境假設與各情境金額前的幣別字 | 封面依審查標準幣別對照；價格表每列幣別格（ISO 代碼）也是承作幣別，逐列相等，各列一筆結果（`field.currency`，Issue #167）；金額前的幣別字每處各一筆、情境每個一筆（Issue #170，見 §3.5） |
 | 單位面額 | 單位面額 | §6 | 表上須為整數，非整數轉人工覆核；整數相等（`field.denomination`）。另依審查標準面額預設值，不等於預設值轉人工審查（`doc.denomination`） |
 | 發行日 | 發行日 | §15(2) | 回填欄位：空白 → 整份通過後回填；有值 → 比對（`backfill.issue_date`，Issue #64） |
 | 交易日、最後評價日、到期日 | 交易日／最終比價日／到期日 | §15 | 日期相等（`field.trade_date` 等） |
@@ -73,6 +73,7 @@
 | 記憶式 | 名稱含「記憶式」⇔ §11(2) 為「鎖定股票」寫法 |
 | 情境分析 | §18 重印價格表 = §12(1)（代號與各價格逐格相等）；§18 月配息率 = 年利率 ÷ 12 |
 | 面額 | §7 最低交易金額、第四章 §5 最低申購金額與最低加購金額 = 參考條件表「單位面額」（共用 `field.min_amounts`） |
+| 金額旁的幣別（2026-10-10，Issue #170） | §6 面額、§7 最低交易金額、第四章最低申購／加購金額各一筆，§18 情境假設一筆、每個情境一筆（列出該情境裡幣別不符的金額）：金額前的幣別字 = 參考條件表承作幣別（共用 `field.currency`）。商品幣別不必等於標的幣別：含「股」的實物交割算式不列入；執行價、觸及不保本價格前的幣別字同價格表幣別格，是承作幣別（Issue #167） |
 | 申購日期 | 第四章 §1 商品開始受理申購日、申購結束受理日 = 交易日（共用 `doc.subscription_start_date`） |
 
 ### 3.6 文件資訊與用語
@@ -161,6 +162,7 @@
 | 2026-10-02 | 每處情境重複參數與配息、本金、簡單損益算式納入；總配息採未進位年率推算後最後進位（A） |
 | 2026-10-02 | 簡單損益總額允許 0.01 四捨五入尾差，各項金額仍須完全相等（Issue #82） |
 | 2026-10-10 | 價格表幣別格是承作幣別，逐列 = 參考條件表承作幣別（Issue #167） |
+| 2026-10-10 | 商品幣別不必等於標的幣別（FCN 高度客製化，例：連結日股、美元計價）；說明書與投資人須知金額旁的幣別字逐處 = 參考條件表承作幣別（Issue #170） |
 
 ## 8. 實作 rule_id 與試跑結果（2026-10-02）
 
@@ -177,6 +179,7 @@
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
 | `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 = 交易日、兩個刊印日期在允許天數內（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
 | `doc.currency_consistency`、`doc.name_consistency` | 文件重複欄位 |
+| `field.currency`（其他出處） | 價格表各列幣別格、面額與最低金額、情境假設與各情境金額前的幣別字 = 參考條件表承作幣別（共用，Issue #167、#170；欄位 `price_table_currency_n`、`denomination_currency`、`minimum_trade_currency`、`minimum_subscription_currency`、`minimum_additional_currency`、`scenario_assumption_currency`、`scenario_n_currency`） |
 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_parameters` | 情境每處參數與正式條款一致 |
 | `doc.scenario_calculations`、`doc.scenario_general_annualized` | 本金、配息、部分期間配息、簡單損益；一般到期情境年化率 |
 | `standard.*` | 審查日期、負責人、固定名稱／電話／地址、法人全名、三處警語、風險等級、禁用詞、費率、發行價格、商品命名 |

@@ -33,7 +33,7 @@
 | `risk.fixed_warning_openings.<上手>` | MS：`本商品風險程度為RR4。` | 同上 | 開頭句（到第一個「。」）的其他允許寫法；只換開頭句、其餘逐字相同的版本也算一次 |
 | `wording.forbidden` ／ `allowed_phrases` | 禁用「受託投資」；允許「受託投資或受託買賣」「受託投資、受託買賣或為投資型保單」（HSBC） | 全文 | 片語以外出現「受託投資」即為錯誤（SOP：須改為「受託買賣」） |
 | `product_name.<上手>.zh` ／ `en` | 名稱樣板（依上手分節，例如 `product_name.barc`；缺該上手分節時轉人工覆核） | 封面「商品中文名稱」「商品英文名稱」 | 用說明書欄位填佔位符組出預期名稱後逐字比對（§2.3）；全形／半形括號差異不算錯 |
-| `currency` | 美元→USD、日幣→JPY、人民幣→CNH | 計價幣別 | 不在表內的幣別轉人工覆核 |
+| `currency` | 美元→USD、日幣→JPY、人民幣→CNH、境外人民幣→CNH | 封面計價幣別；金額旁的幣別字（§2.4 `field.currency` 其他出處） | 不在表內的幣別轉人工覆核；金額旁的幣別字 parser 認得的寫法在 `src/fcn_checker/parsers/money.py`，新幣別兩邊都要加 |
 | `denomination` | USD 10,000／JPY 1,000,000／CNH 100,000 | §6 商品面額 | 等於該幣別預設值；不等於時**轉人工審查**（客戶可要求不同面額，不直接判錯） |
 | `dates.print_date_max_days_after_trade` | 1 | 「中文產品說明書刊印日期」 | 刊印日期在交易日當天到交易日後 1 天之內 |
 | `iis.pages` | 4 | 投資人須知（Issue #124） | 頁數剛好等於設定值（比外規「不超過 5 頁」嚴格） |
@@ -86,7 +86,7 @@
 |---|---|---|
 | `doc.denomination` | 面額 = 該幣別的 `denomination` 預設值，不同時轉人工覆核（`denomination_non_default`） | `denomination` |
 | `field.min_amounts` | 各最低金額 = 參考條件表「單位面額」（讀參考條件表，所以放在 `rules/reference.py`；2026-10-02 使用者決定） | `min_amounts`：BARC 最低申購、最低贖回；HSBC 最低交易、最低申購、最低加購 |
-| `field.currency`（其他出處） | 承作幣別的其他出處 = 參考條件表「承作幣別」；表上承作幣別空白或格式不對時只由封面那筆報（Issue #167） | `currency_others`：HSBC 第 12 條價格表各列幣別格；BARC、MS 無（`absent`） |
+| `field.currency`（其他出處） | 金額旁的幣別字與承作幣別的其他出處 = 參考條件表「承作幣別」（中文幣別依 `currency` 對照；寫法不在對照表時只由封面那筆報，和封面寫同一個字的出處不重複）；表上承作幣別空白或格式不對時只由封面那筆報（Issue #167）。**商品幣別不必等於標的幣別**（FCN 高度客製化，例：連結日股、美元計價；連結美股、人民幣計價，2026-10-10 使用者決定，Issue #170）：含「股」的實物交割算式裡的股價用標的幣別，不列入出處；情境試算每個情境一筆，列出該情境裡幣別不符的金額 | `currency_others`：BARC §6 面額、第四章最低申購／最低贖回金額、§16 情境假設面額、§16 (i)～(iii) 各情境；MS 第一章 §6 面額、第四章 §4、§8 四個最低金額、§18 假設總投資金額、§18 各情境（較差情境的收盤價、執行價不算）；HSBC §6 面額、§7 最低交易金額、第四章最低申購／加購金額、§12 價格表各列幣別格、§18 情境假設與各情境；投資人須知：BARC 每單位商品面額、最低申購金額，HSBC 每單位面額 |
 | `doc.subscription_start_date` | 受理申購日 = 交易日 | `subscription_dates`：BARC 開始受理日；HSBC 開始受理日、申購結束受理日 |
 | `doc.print_date` | 交易日當天至交易日後 `print_date_max_days_after_trade` 天 | `print_dates`：BARC 一個；HSBC 參考性審閱版、最終版 |
 

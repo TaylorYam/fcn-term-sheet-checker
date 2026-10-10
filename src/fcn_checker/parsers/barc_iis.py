@@ -14,7 +14,7 @@ from decimal import Decimal
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import PriceRow
 from ..text import squash
-from . import iis
+from . import iis, money
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "barc-zh-iis"
@@ -40,6 +40,7 @@ PROVIDED = frozenset(
         "name_zh",
         "name_en",
         "currency_zh",
+        "currency_others",
         "denomination",
         "min_subscription",
         "issue_price_pct",
@@ -207,6 +208,24 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("currency_zh", r"計價幣別[:：]([^，。]+)")  # 例：人民幣，於香港銀行同業市場進行交易之貨幣
     put("denomination", r"每單位商品面額為([\d,]+)", iis.integer)
     put("min_subscription", r"最低申購金額為([\d,]+)", iis.integer)
+    fields["currency_others"] = iis.occurrences(  # 金額旁的幣別字 = 參考條件表承作幣別（Issue #170）
+        "currency_others",
+        ti,
+        (
+            (
+                "denomination_currency",
+                "每單位商品面額幣別",
+                "商品簡介每單位商品面額",
+                rf"每單位商品面額為[\d,]+\s*({money.CURRENCY})",
+            ),
+            (
+                "min_subscription_currency",
+                "最低申購金額幣別",
+                "商品簡介最低申購金額",
+                rf"最低申購金額為[\d,]+\s*({money.CURRENCY})",
+            ),
+        ),
+    )
     put("issue_price_pct", r"發行價格為商品面額之([\d.]+)%", Decimal)
     fields["underlyings"] = _underlyings(ti)
     put("tenor_months", r"商品年期[:：](\d+)個月", int)

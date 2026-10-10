@@ -8,7 +8,8 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.hsbc import ScenarioIndex
+from ..parsers.hsbc import SCENARIO_HEADING, ScenarioIndex
+from ..parsers.money import CURRENCY
 from ..schema import CheckStatus as S
 from ..schema import Evidence, Item
 from . import kit
@@ -40,10 +41,7 @@ def scenario(i, what):
 def run(ctx):
     ts = ctx.ts
     first = ts.f("first_callable_period")
-    deps = [
-        ts.f(k)
-        for k in ["coupon_pa_pct", "tenor_months", "denomination", "currency_zh", "issue_price_pct", "price_table"]
-    ]
+    deps = [ts.f(k) for k in ["coupon_pa_pct", "tenor_months", "denomination", "issue_price_pct", "price_table"]]
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
         return [
@@ -51,7 +49,7 @@ def run(ctx):
             Check("doc.scenario_calculations", "scenario", SCENARIO, ctx.document).review(bad),
         ]
     ti = ts.scenario_index
-    headings = list(ti.finditer(r"情境分析([一二三四五六])\)"))
+    headings = list(ti.finditer(SCENARIO_HEADING))
     expected_count = 3 if ts.f("ki_type").ok and ts.f("ki_type").value == "none" else 4
     if len(headings) != expected_count or [m[1] for m in headings] != list("一二三四")[:expected_count]:
         return [
@@ -62,11 +60,11 @@ def run(ctx):
                 evidence=[Evidence.of(x) for x in ts.scenarios[:2]],
             )
         ]
-    rate, tenor, denom, currency, issue_price, _ = [p.value for p in deps]
+    rate, tenor, denom, issue_price, _ = [p.value for p in deps]
     monthly = rate / 12
     unit = denom * monthly / 100
     notional = (denom * issue_price / 100).quantize(Q2, ROUND_HALF_UP)
-    money = re.escape(currency)
+    money = CURRENCY  # 金額前的幣別字（任一已知寫法）：這裡只核對數字，幣別由共用規則 field.currency 逐處核對
     out = []
     serial = 0
 

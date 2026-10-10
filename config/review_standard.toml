@@ -7,8 +7,8 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 9
-effective_date = 2026-10-09
+version = 10
+effective_date = 2026-10-10
 
 [distributor]
 # 受託或銷售機構審查通過之日期（說明書封面 p1）：歷次日期都保留，由舊到新。
@@ -148,10 +148,12 @@ normalize_brackets = true
 ignore_whitespace_en = true
 
 [currency]
-# 說明書中文幣別 → ISO 代碼
+# 說明書中文幣別 → ISO 代碼。封面與金額旁的幣別字都查這張表（金額旁的幣別字 parser 認得的寫法見
+# src/fcn_checker/parsers/money.py）；商品幣別不必等於標的幣別（Issue #170）。
 "美元" = "USD"
 "日幣" = "JPY"
 "人民幣" = "CNH"
+"境外人民幣" = "CNH"  # BARC 第四章最低金額旁的寫法
 
 [denomination]
 # 每單位商品面額預設值（依計價幣別）。客戶可要求不同面額，

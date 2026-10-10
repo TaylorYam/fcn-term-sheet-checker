@@ -11,6 +11,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import hsbc_tables as tables
+from . import money
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
@@ -92,21 +93,46 @@ def _standard_prices(table: ParsedField) -> ParsedField:
     return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
 
 
-def _table_currencies(table: ParsedField) -> ParsedField:
-    """標準欄位 `currency_others`：第 12 條價格表各列的幣別格是承作幣別（不是標的自己的交易幣別，Issue #167）。
+def _table_currencies(table: ParsedField) -> list[standard_fields.Occurrence]:
+    """`currency_others` 的價格表出處：第 12 條價格表各列的幣別格是承作幣別（不是標的自己的交易幣別，Issue #167）。
 
-    情境價格表不另列：`doc.scenario_table` 已逐列（含幣別）和正式價格表比。
+    情境價格表不另列：`doc.scenario_table` 已逐列（含幣別）和正式價格表比。價格表讀不到時這些出處各自缺漏。
     """
-    name = "currency_others"
-    if not table.ok:
-        return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
     occ = standard_fields.Occurrence
+    if not table.ok:
+        pf = ParsedField(
+            "price_table_currency", table.status, None, list(table.evidence), list(table.candidates), table.note
+        )
+        return [occ("price_table_currency", "價格表幣別", "第 12 條價格表幣別", pf)]
     items = []
     for i, (row, lns) in enumerate(zip(table.value["rows"], table.value["row_lines"], strict=True), 1):
         field = f"price_table_currency_{i}"
         where = f"第 12 條價格表 {row['ticker']} 幣別"
         items.append(occ(field, f"{row['ticker']} 幣別", where, ParsedField.present(field, row["currency"], lns)))
-    return standard_fields.occurrences(name, items)
+    return items
+
+
+SCENARIO_HEADING = r"情境分析([一二三四五六])\)"
+
+
+def _scenario_currencies(scenarios: Sequence[Line]) -> list[standard_fields.Occurrence]:
+    """`currency_others` 的第 18 條出處（Issue #170）：情境假設一處、每個情境一處（該情境裡每一處「幣別 金額」；
+    含「股」的實物交割算式不算）。找不到情境標題時沒有出處（情境規則另轉人工覆核）。"""
+    ti = ScenarioIndex(scenarios)
+    headings = list(ti.finditer(SCENARIO_HEADING))
+    if not headings:
+        return []
+    segments = [("scenario_assumption_currency", "情境假設金額幣別", "第 18 條情境假設", 0, headings[0].start())]
+    for i, h in enumerate(headings):
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(ti.text)
+        segments.append(
+            (f"scenario_{i + 1}_currency", f"情境 {i + 1} 金額幣別", f"第 18 條情境分析{h[1]})", h.start(), end)
+        )
+    out = []
+    for field, name, where, start, end in segments:
+        found = money.amounts(ti, money.CURRENCY_THEN_AMOUNT, currency_group=1, start=start, end=end)
+        out.append(money.scenario_occurrence(field, name, where, found, ti.lines_for(start, start + 1)))
+    return out
 
 
 def read(lines: Sequence[Line]) -> HsbcTermSheet:
@@ -155,6 +181,9 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     put("currency_art5", article(5), r"計價幣別[:：](.+)$")
     put("denomination", article(6), r"每單位面額[:：].+?" + N + r"元", number)
     put("minimum_trade", article(7), r"最低交易金額[:：].+?" + N + r"元", number)
+    ccy, amount = money.CURRENCY, money.NUMBER
+    put("denomination_currency", article(6), rf"每單位面額[:：]({ccy}){amount}元")
+    put("minimum_trade_currency", article(7), rf"最低交易金額[:：]({ccy}){amount}元")
     put("issue_price_pct", article(10), r"發行價格[:：]" + N + "%", number)
     put("coupon_pa_pct", sub(11, 1), r"固定配息率=" + N + r"%×1/12", number)
     put("coupon_periods", sub(11, 1), r"配息期數=(\d+)", int)
@@ -205,7 +234,6 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         else ParsedField("underlyings", pt.status, evidence=pt.evidence, note=pt.note)
     )
     fields["underlying_prices"] = _standard_prices(pt)
-    fields["currency_others"] = _table_currencies(pt)
     put("tenor_months", sub(15, 1), r"為(\d+)個月", int)
     for name, n, pattern in [
         ("issue_date", 2, r"發行日[:：]" + D),
@@ -231,6 +259,8 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         ("subscription_end", r"商品申購結束受理日[:：]" + D, parse_date),
         ("minimum_subscription", r"最低申購金額[:：].+?" + N + r"元", number),
         ("minimum_additional", r"最低加購金額[:：].+?" + N + r"元", number),
+        ("minimum_subscription_currency", rf"最低申購金額[:：]({ccy}){amount}元", str),
+        ("minimum_additional_currency", rf"最低加購金額[:：]({ccy}){amount}元", str),
     ]:
         put(name, ch4, pattern, convert)
     for label in ["申購費用", "提前贖回費用", "分銷費用"]:
@@ -283,6 +313,32 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         ],
     )
     scenarios = article(18)
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others",
+        [
+            occ("denomination_currency", "每單位面額幣別", "第一章第 6 條每單位面額", fields["denomination_currency"]),
+            occ(
+                "minimum_trade_currency",
+                "最低交易金額幣別",
+                "第一章第 7 條最低交易金額",
+                fields["minimum_trade_currency"],
+            ),
+            occ(
+                "minimum_subscription_currency",
+                "最低申購金額幣別",
+                "第四章最低申購金額",
+                fields["minimum_subscription_currency"],
+            ),
+            occ(
+                "minimum_additional_currency",
+                "最低加購金額幣別",
+                "第四章最低加購金額",
+                fields["minimum_additional_currency"],
+            ),
+            *_table_currencies(pt),
+            *_scenario_currencies(scenarios),
+        ],
+    )
     ti = TextIndex(scenarios)
     start = list(ti.finditer(r"配息期數=\d+，且假設"))
     end = list(ti.finditer(r"\*假設天期"))

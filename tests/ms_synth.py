@@ -120,7 +120,7 @@ class Spec(ProductSpec):
     def name_zh(self) -> str:
         return NAME["zh"].format(
             tenor=self.tenor,
-            ccy_zh="美元",
+            ccy_zh=self.currency_zh,
             underlying_zh=NAME["basket_zh"] if len(self.underlyings) > 1 else NAME["single_zh"],
             memory_zh=NAME["memory_zh"] if self.memory else "",
         )
@@ -129,7 +129,7 @@ class Spec(ProductSpec):
     def name_en(self) -> str:
         return NAME["en"].format(
             tenor=self.tenor,
-            ccy="USD",
+            ccy=self.ccy,
             underlying_en=NAME["basket_en"] if len(self.underlyings) > 1 else NAME["single_en"],
         )
 
@@ -217,7 +217,7 @@ def _price_table(d: _Doc, s: Spec, section: str) -> None:
 
 
 def _scenarios(d: _Doc, s: Spec) -> None:
-    unit, a, n = "美元", s.coupon, s.tenor
+    unit, a, n = s.currency_zh, s.coupon, s.tenor
     profit = []
     if s.first_callable < n:
         profit.append(("較佳情況 A" if s.first_callable + 1 < n else "較佳情況", s.first_callable))
@@ -291,7 +291,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             ),
             "發行機構註冊地：英國",
             "商品註冊地：專業投資人與OSU 客戶不適用",
-            "商品計價幣別：美元 (USD)",
+            f"商品計價幣別：{s.currency_zh} ({s.ccy})",
             f"發行機構：{ISSUER}",
             "發行機構之地址： 25 Fictional Square, London",
             f"報價機構名稱及地址：{ISSUER}",
@@ -313,8 +313,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         1: f"商品中文名稱：{short}",
         2: WARNING_CH1,
         3: f"發行機構名稱及其長期債務信用評等：本商品發行機構為{ISSUER.split('(')[0]}，截至刊印日期之信用評等不核對。",
-        5: "計價幣別：美元 (USD)",
-        6: f"每單位商品面額：美元 {money(s.denom)} 元",
+        5: f"計價幣別：{s.currency_zh} ({s.ccy})",
+        6: f"每單位商品面額：{s.currency_zh} {money(s.denom)} 元",
         7: "發行價格：商品面額之100%",
         11: "連結標的資產，及其相對權重、與投資績效之關連情形：",
         14: "商品年期、發行日、到期日及其他依個別商品性質而定之日期：",
@@ -444,7 +444,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         elif n == 18:
             d.sub(3, "以情境分析解說最大可能獲利、損失及其他狀況之平均年化報酬率：")
             d.text(72, "假設：")
-            d.text(72, f"▪ 總投資金額 = 1 單位商品面額 = {money(s.denom)} 美元")
+            d.text(72, f"▪ 總投資金額 = 1 單位商品面額 = {money(s.denom)} {s.currency_zh}")
             d.text(72, f"▪ 年期：{s.tenor} 個月")
             d.text(72, f"▪ 月配息率={s.monthly}%")
             _price_table(d, s, "art18.table")
@@ -501,7 +501,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.text(36, "3. 商品交易架構：參閱以上第二章。")
     d.text(
         36,
-        f"4. 最低申購金額及最低加購金額：最低申購金額為 1 單位商品面額，即美元{s.denom:,} 元，並以美元"
+        f"4. 最低申購金額及最低加購金額：最低申購金額為 1 單位商品面額，即{s.currency_zh}{s.denom:,} 元，並以{s.currency_zh}"
         f"{money(s.denom)} 元(1 單位商品面額)為最低加購單位。",
     )
     d.text(36, "5. 申購價金之計算：申購價金＝投資人總申購單位數×每單位商品面額×發行價格(商品面額的 100%)+ 申購費用。")
@@ -509,8 +509,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         d.text(36, f"{n}. 範本說明。")
     d.text(
         36,
-        f"8. 最低贖回金額或單位數：最低贖回金額為1 單位商品面額，即美元{s.denom:,} 元，並以美元{money(s.denom)}"
-        "元(1 單位商品面額)為累加贖回單位。",
+        f"8. 最低贖回金額或單位數：最低贖回金額為1 單位商品面額，即{s.currency_zh}{s.denom:,} 元，並以{s.currency_zh}"
+        f"{money(s.denom)}元(1 單位商品面額)為累加贖回單位。",
     )
     d.chapter("五", "定義及其他條款")
     d.text(54, "1. 定義：範本說明。")
@@ -563,7 +563,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
             "本商品風險程度： RR4",
             f"發行機構之長期債務信用評等：本商品發行機構為{zh_issuer}，截至本投資人須知刊印日期，評等不核對。",
             "商品之發行評等：無",
-            "計價幣別：美元 (USD)",
+            f"計價幣別：{s.currency_zh} ({s.ccy})",
             "計價貨幣本金保本率：無。",
             "投資本金達成100%保本率之各項條件：不適用。",
             f"連結標的資產：{uls}",
@@ -578,7 +578,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
         d.text(18, f"{n}) {t}", 47)
     w.new_page()
     d.section = "coupon"
-    d.text(18, "2. 收益分配事項：於每月配息日，發行機構將依下列計算公式以美元為計價單位給付配息金額：")
+    d.text(18, f"2. 收益分配事項：於每月配息日，發行機構將依下列計算公式以{s.currency_zh}為計價單位給付配息金額：")
     if s.ko_obs == "D":
         d.text(
             49,

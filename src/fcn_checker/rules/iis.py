@@ -246,6 +246,7 @@ def reference_fields(ctx: Context) -> list[CheckResult]:
     has, table = ctx.provides, reference.FIELD_CHECKS
     checks: list[tuple[str, Callable[[], CheckResult | list[CheckResult]]]] = [
         ("currency_zh", lambda: reference.currency(ctx)),
+        ("currency_others", lambda: reference.currency_others(ctx)),
         ("denomination", lambda: table["denomination"].check(ctx)),
         ("underlyings", lambda: reference.underlyings(ctx)),
         ("tenor_months", lambda: table["tenor_months"].check(ctx)),
