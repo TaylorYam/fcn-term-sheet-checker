@@ -52,8 +52,9 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
         ),
         Spec(currency_zh="日幣", tenor=7, annual=Decimal("9.00")),
         Spec(currency_zh="人民幣", tenor=12, annual=Decimal("10.00"), monthly=Decimal("0.8333")),
+        Spec(currency_zh="港幣"),
     ],
-    ids=["daily-memory-noKI", "daily-EKI", "periodend-memory-AKI", "periodend-single", "JPY", "CNH"],
+    ids=["daily-memory-noKI", "daily-EKI", "periodend-memory-AKI", "periodend-single", "JPY", "CNH", "HKD"],
 )
 def test_supported_variants_pass(tmp_path, spec):
     report = check(tmp_path, spec)
@@ -437,3 +438,16 @@ def test_underlying_currency_in_the_physical_settlement_formula_is_not_checked(t
     edit = Edit("[(5,000.00 美元)", "[(5,000.00 美元 = 1.00 日幣 × 41 股 ÷ 1.0000)", "ts.art16.iii")
     report = check(tmp_path, edits=[edit])
     assert problems(report) == set()
+
+
+def test_currency_without_a_sample_is_reviewed_once_at_the_cover(tmp_path):
+    """可承作但沒有說明書樣本的幣別（例：AUD）：對照表沒有，封面幣別轉人工覆核一次；其他出處寫同一個字不重複報。"""
+    report = check(tmp_path, Spec(currency_zh="澳幣", currency_iso="AUD"))
+    [cover] = results(report, "field.currency")
+    assert (cover.field, cover.status, cover.reason_code) == ("currency", REVIEW, "currency_unknown")
+    assert results(report, "doc.denomination")[0].reason_code == "currency_unknown"
+    assert problems(report) == {
+        ("field.currency", REVIEW),
+        ("doc.denomination", REVIEW),
+        ("standard.product_name", REVIEW),
+    }
