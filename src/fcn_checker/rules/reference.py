@@ -157,20 +157,22 @@ def currency(ctx: Context) -> CheckResult:
 
 
 def currency_others(ctx: Context) -> list[CheckResult]:
-    """說明書承作幣別的其他出處（HSBC 價格表各列幣別格）= 參考條件表「承作幣別」（Issue #167）。"""
+    """說明書承作幣別的其他出處（HSBC 價格表各列幣別格）= 參考條件表「承作幣別」（Issue #167）。
+
+    表上承作幣別空白或格式不對時只由 `currency` 報一筆，這裡不逐列重複。
+    """
     rid = "field.currency"
-    items, problem = occurrences_of(ctx, rid, "currency_others", Item.sheet("幣別"))
+    items, problem = occurrences_of(ctx, rid, "currency_others", Item.sheet("價格表幣別"))
     if problem:
         return [problem]
+    v, ov, problem = order_value(
+        ctx, "currency", rid, "currency", None, lambda x: x if isinstance(x, str) else None, "文字", name="幣別"
+    )
+    if problem:
+        return []
     out = []
     for occ in items:
         pf = occ.value
-        v, ov, problem = order_value(
-            ctx, "currency", rid, occ.field, pf, lambda x: x if isinstance(x, str) else None, "文字", name=occ.name
-        )
-        if problem:
-            out.append(problem)
-            continue
         check = Check(rid, occ.field, Item.sheet(occ.name, [ov]), ctx.document, ov=(ov,), expected=v).needs(pf)
         out.append(check.compare(v, pf.value, message=f"{occ.where}須等於參考條件表「承作幣別」"))
     return out

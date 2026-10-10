@@ -86,6 +86,7 @@
 |---|---|---|
 | `doc.denomination` | 面額 = 該幣別的 `denomination` 預設值，不同時轉人工覆核（`denomination_non_default`） | `denomination` |
 | `field.min_amounts` | 各最低金額 = 參考條件表「單位面額」（讀參考條件表，所以放在 `rules/reference.py`；2026-10-02 使用者決定） | `min_amounts`：BARC 最低申購、最低贖回；HSBC 最低交易、最低申購、最低加購 |
+| `field.currency`（其他出處） | 承作幣別的其他出處 = 參考條件表「承作幣別」；表上承作幣別空白或格式不對時只由封面那筆報（Issue #167） | `currency_others`：HSBC 第 12 條價格表各列幣別格；BARC、MS 無（`absent`） |
 | `doc.subscription_start_date` | 受理申購日 = 交易日 | `subscription_dates`：BARC 開始受理日；HSBC 開始受理日、申購結束受理日 |
 | `doc.print_date` | 交易日當天至交易日後 `print_date_max_days_after_trade` 天 | `print_dates`：BARC 一個；HSBC 參考性審閱版、最終版 |
 

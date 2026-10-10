@@ -238,6 +238,12 @@ def test_price_table_currency_follows_a_non_usd_trade_currency(tmp_path):
     assert len(rows) == 3 and all(x.status == S.PASS for x in rows)
 
 
+def test_blank_trade_currency_on_the_sheet_is_reported_once(tmp_path):
+    r = check(tmp_path, overrides={"currency": None})
+    [x] = [x for x in r.results if x.rule_id == "field.currency"]
+    assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "order_missing"), "價格表各列不重複報同一格"
+
+
 def test_wrong_prefix_and_unknown_template_require_review(tmp_path):
     r = check(tmp_path, Spec(product_code="029199990001"))
     assert any(x.reason_code == "issuer_prefix_mismatch" for x in r.results)
