@@ -93,31 +93,15 @@ def _standard_prices(table: ParsedField) -> ParsedField:
     return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
 
 
-def _table_currencies(table: ParsedField) -> list[standard_fields.Occurrence]:
-    """`currency_others` 的價格表出處：第 12 條價格表各列的幣別格是承作幣別（不是標的自己的交易幣別，Issue #167）。
-
-    情境價格表不另列：`doc.scenario_table` 已逐列（含幣別）和正式價格表比。價格表讀不到時這些出處各自缺漏。
-    """
-    occ = standard_fields.Occurrence
-    if not table.ok:
-        pf = ParsedField(
-            "price_table_currency", table.status, None, list(table.evidence), list(table.candidates), table.note
-        )
-        return [occ("price_table_currency", "價格表幣別", "第 12 條價格表幣別", pf)]
-    items = []
-    for i, (row, lns) in enumerate(zip(table.value["rows"], table.value["row_lines"], strict=True), 1):
-        field = f"price_table_currency_{i}"
-        where = f"第 12 條價格表 {row['ticker']} 幣別"
-        items.append(occ(field, f"{row['ticker']} 幣別", where, ParsedField.present(field, row["currency"], lns)))
-    return items
-
-
 SCENARIO_HEADING = r"情境分析([一二三四五六])\)"
 
 
 def _scenario_currencies(scenarios: Sequence[Line]) -> list[standard_fields.Occurrence]:
     """`currency_others` 的第 18 條出處（Issue #170）：情境假設一處、每個情境一處（該情境裡每一處「幣別 金額」；
-    執行價、觸及不保本價格與含「股」的實物交割算式跟著標的走，不算）。找不到情境標題時沒有出處（情境規則另轉人工覆核）。"""
+    執行價、觸及不保本價格與含「股」的實物交割算式跟著標的走，不算）。找不到情境標題時沒有出處（情境規則另轉人工覆核）。
+
+    第 12 條價格表各列的幣別格跟著標的走（2026-10-10 使用者決定，取代 Issue #167 的做法），不是承作幣別的出處；
+    情境價格表與正式價格表逐列（含幣別格）一致仍由 `doc.scenario_table` 核對。"""
     ti = ScenarioIndex(scenarios)
     headings = list(ti.finditer(SCENARIO_HEADING))
     if not headings:
@@ -335,7 +319,6 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
                 "第四章最低加購金額",
                 fields["minimum_additional_currency"],
             ),
-            *_table_currencies(pt),
             *_scenario_currencies(scenarios),
         ],
     )

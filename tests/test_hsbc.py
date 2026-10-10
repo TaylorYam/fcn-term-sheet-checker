@@ -218,27 +218,23 @@ def test_spec_value_differing_from_the_reference_row_is_reported(tmp_path):
     assert only(r, "field.strike_pct").status == S.MISMATCH
 
 
-def test_price_table_currency_is_the_trade_currency_on_the_sheet(tmp_path):
-    """第 12 條價格表每列的幣別格是承作幣別：逐列和參考條件表「承作幣別」比（Issue #167）。"""
-    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table")])  # 例：連結日股、美元計價卻寫成標的的幣別
-    rows = {x.field: x for x in r.results if x.rule_id == "field.currency"}
-    assert rows["currency"].status == S.PASS, "封面計價幣別正確"
-    assert {f: x.status for f, x in rows.items() if f.startswith("price_table_currency")} == {
-        "price_table_currency_1": S.MISMATCH,
-        "price_table_currency_2": S.MISMATCH,
-    }
-    assert all(x.status == S.PASS for f, x in rows.items() if not f.startswith("price_table_currency")), "其他出處沒改"
-    bad = rows["price_table_currency_1"]
-    assert (bad.expected, bad.actual) == ("USD", "JPY") and bad.document_evidence
-    assert bad.item.name == "ZZ1 UW 幣別"
+def test_price_table_currency_follows_the_underlying_and_is_not_checked(tmp_path):
+    """第 12 條價格表每列的幣別格跟著標的走（例：連結日股、美元計價寫 JPY），不和承作幣別比；
+    只核對情境價格表和正式價格表逐列一致（2026-10-10 使用者決定，取代 Issue #167）。"""
+    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table"), Edit("USD", "JPY", "ts.art18.table")])
+    assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
+    assert not [x for x in r.results if x.field.startswith("price_table_currency")]
+    r = check(tmp_path, edits=[Edit("USD", "JPY", "ts.art12.table")])
+    assert only(r, "doc.scenario_table").status == S.MISMATCH, "情境表與正式表的幣別格仍要一致"
 
 
 def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
     """商品幣別不必等於標的幣別：人民幣計價、連結美股，每一處幣別都 = 參考條件表承作幣別（Issue #170）。"""
     r = check(tmp_path, Spec(currency_zh="人民幣"))
     rows = [x for x in r.results if x.rule_id == "field.currency"]
-    assert sum(x.field.startswith("price_table_currency") for x in rows) == 2
-    assert all(x.status == S.PASS and x.expected == "CNH" for x in rows), [(x.field, x.status) for x in rows]
+    assert len(rows) > 1 and all(x.status == S.PASS and x.expected == "CNH" for x in rows), [
+        (x.field, x.status) for x in rows
+    ]
 
 
 def test_blank_trade_currency_on_the_sheet_is_reported_once(tmp_path):
