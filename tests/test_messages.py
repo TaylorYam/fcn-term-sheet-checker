@@ -22,8 +22,9 @@ from fcn_checker.rules import kit
 from fcn_checker.schema import CheckResult, CheckStatus, DocKind, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
 from harness import CONFIG, check_all
+from pdf_writer import Edit
 from reference_synth import DEFAULT_ULS, REFERENCE_HEADERS, as_headers, build_reference_sheet, reference_row
-from synth import Spec, build_pdf, check, check_rows
+from synth import ISSUER_NAME, Spec, build_pdf, check, check_rows
 
 # 程式代碼：小寫英文以 . 或 _ 串接（例：doc.scenario_calculations、s1.profit.17、value_mismatch）
 CODE = re.compile(r"(?<![A-Za-z0-9])[a-z][a-z0-9]*(?:[._][a-z0-9]+)+")
@@ -43,10 +44,13 @@ def assert_plain_chinese(report) -> None:
         assert not CODE.search(msg), msg
 
 
-def hsbc_check(tmp_path, spec=None, overrides=None):
-    """HSBC 合成說明書 × 與之一致的參考條件表（正式版面）；overrides 以標準欄位名覆寫。"""
+RR5 = [Edit("RR4", "RR5", "ts"), Edit("RR4", "RR5", "iis.p2")]  # BARC 風險等級：說明書三處警語與投資人須知商品簡介
+
+
+def hsbc_check(tmp_path, spec=None, overrides=None, edits=()):
+    """HSBC 合成說明書（`edits` 改字）× 與之一致的參考條件表（正式版面）；overrides 以標準欄位名覆寫。"""
     s = spec or hsbc_synth.Spec()
-    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
+    pdf = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, edits=edits)
     row = reference_row(s, **as_headers(overrides or {}))
     return check_all(build_reference_sheet(tmp_path / "order.xlsx", [row]), [pdf]).items[0].report
 
@@ -113,8 +117,8 @@ def test_hsbc_compare_date_difference_names_each_cell(tmp_path):
 
 
 def test_latest_compare_date_check_does_not_label_document_dates_as_sheet_values(tmp_path):
-    spec = Spec(ko_overrides={(6, "end"): "2030 年7 月9 日"})  # 最後一期期末日晚於最終評價日 2030-07-08
-    report = check(tmp_path, spec)
+    # 最後一期期末日晚於最終評價日 2030-07-08
+    report = check(tmp_path, edits=[Edit("2030 年7 月8 日", "2030 年7 月9 日", "ts.art13.ko.6.end")])
 
     [r] = [r for r in issues(report) if r.rule_id == "backfill.compare_dates"]
     assert problem_message(r) == "比價日：說明書最晚的比價日 2030-07-09 不等於最終比價日 2030-07-08，不回填"
@@ -155,13 +159,13 @@ def test_derived_rule_names_the_blank_sheet_column(tmp_path):
 
 
 def test_barc_review_standard_and_internal_problems_are_plain_chinese(tmp_path):
-    spec = Spec(
-        chairman="林晉輝",
-        rr="RR5",
-        price_overrides={(1, "strike"): "99.9999"},
-        mention_overrides={"§9": "0.9999%"},
-    )
-    report = check(tmp_path, spec)
+    edits = [
+        Edit("林晋輝", "林晉輝", "ts.ch二.5"),
+        *RR5,
+        *(Edit("86.4150", "99.9999", f"ts.{art}.price.1.strike") for art in ("art15", "art16")),
+        Edit("為1.0000%(顯示", "為0.9999%%(顯示", "ts.art9"),
+    ]
+    report = check(tmp_path, edits=edits)
 
     rules = {r.rule_id for r in issues(report)}
     assert {"standard.chairman", "standard.risk_level", "derive.prices"} <= rules
@@ -169,7 +173,7 @@ def test_barc_review_standard_and_internal_problems_are_plain_chinese(tmp_path):
 
 
 def test_review_standard_difference_shows_both_values(tmp_path):
-    report = check(tmp_path, Spec(rr="RR5"))
+    report = check(tmp_path, edits=RR5)
 
     [r] = [r for r in issues(report) if r.rule_id == "standard.risk_level"]
     msg = problem_message(r)
@@ -190,13 +194,13 @@ def test_review_standard_difference_shows_both_values(tmp_path):
     ],
 )
 def test_hsbc_review_standard_and_internal_problems_are_plain_chinese(tmp_path, old, new):
-    report = hsbc_check(tmp_path, hsbc_synth.Spec(replacements={old: new}))
+    report = hsbc_check(tmp_path, edits=[Edit(old, new, "ts")])
     assert_plain_chinese(report)
 
 
 def test_hsbc_scenario_calculation_names_the_scenario_and_both_values(tmp_path):
     old, new = "固定配息金額=美元10,000×1.0000%=美元100.00", "固定配息金額=美元10,000×1.0000%=美元101.00"
-    report = hsbc_check(tmp_path, hsbc_synth.Spec(replacements={old: new}))
+    report = hsbc_check(tmp_path, edits=[Edit(old, new, "ts")])
 
     calc = [r for r in issues(report) if r.rule_id == "doc.scenario_calculations"]
     assert calc
@@ -393,52 +397,60 @@ def test_term_sheet_missing_every_field_messages_name_their_items(tmp_path, issu
     assert_every_problem_names_its_item(report, codes_allowed=True)
 
 
-BARC_BROKEN_DOCUMENTS = {
-    "many": Spec(
-        chairman="林晉輝",
-        rr="RR5",
-        price_overrides={(1, "strike"): "99.9999", (2, "ko"): "1.0000"},
-        mention_overrides={"§9": "0.9999%"},
-        print_date=dt.date(2030, 3, 1),
-        subscription_date=dt.date(2030, 1, 8),
-        approval_date=dt.date(2020, 1, 1),
-        issue_price="99",
-        title_name="錯的標題",
-        art1_name="錯的名稱",
-        art5_currency="日圓",
-        distributor_code="029199990002",
-        fees={"申購費用": "0%~6%"},
-        scenario_notional=1,
-        general_total="9.99",
-        general_annualized="9.99",
-        favourable_total="9.99",
-        t_range_end=5,
-        min_subscription=1,
-        min_redemption=1,
-        distributor_cover=("錯的銀行", "(02)0000-0000", "錯的地址"),
-        issuer_ch2="錯的發行機構",
-        ko_overrides={(6, "end"): "2030 年7 月9 日", (3, "start"): "2030 年1 月1 日"},
-        coupon_overrides={(2, "payment"): "2030 年1 月1 日"},
-        scenario_overrides={(1, "strike"): "1.0000"},
-        strike_headers={"§15": "71.00"},
-        repeat_overrides={"§9(3)": "0.9999"},
-        extra_text="受託投資",
+_TITLE = Spec().expected_name_zh().replace("（下稱「本商品」）", "")
+_DISTRIBUTOR = "玉山綜合證券股份有限公司，電話：02-5556-1313，地址：台北市松山區民生東路三段158號6樓"
+BARC_BROKEN_DOCUMENTS = {  # 說明書規格與改字
+    "many": (
+        Spec(extra_text="受託投資"),
+        [
+            Edit("林晋輝", "林晉輝", "ts.ch二.5"),
+            *RR5,
+            Edit("86.4150", "99.9999", "ts.art15.price.1.strike"),
+            *(Edit("87.2000", "1.0000", f"ts.{art}.price.2.ko") for art in ("art15", "art16")),
+            Edit("為1.0000%(顯示", "為0.9999%%(顯示", "ts.art9"),
+            Edit("刊印日期：2030 年1 月8 日", "刊印日期：2030 年3 月1 日", "ts.cover"),
+            Edit("申購日期：2030 年1 月7 日", "申購日期：2030 年1 月8 日", "ts.ch四"),
+            Edit("2026 年6 月11 日", "2020 年1 月1 日", "ts.cover.approval_date"),
+            Edit("面額之100%", "面額之99%"),
+            Edit(_TITLE, "錯的標題", "ts.title"),
+            Edit(Spec().expected_name_zh(), "錯的名稱", "ts.art1"),
+            Edit("計價幣別：美元", "計價幣別：日圓", "ts.art5"),
+            Edit("029199990001", "029199990002", "ts.cover.distributor_code"),
+            Edit("受託或銷售機構商品代號:029199990001", "受託或銷售機構商品代號:029199990002", "iis.p1"),
+            *(Edit("0%~5%", "0%~6%", f"{fees}.申購費用") for fees in ("ts.ch四.fees", "iis.p3.fees")),
+            Edit("10,000 美元", "1 美元", "ts.art16"),
+            Edit("= 6.0000%", "= 9.99%", "ts.art16.ii"),
+            Edit("報酬率：12.00%", "報酬率：9.99%", "ts.art16.ii"),
+            Edit("- 1 = 1.0000%", "- 1 = 9.99%", "ts.art16.i"),
+            Edit("至6 的情況", "至5 的情況", "ts.art13"),
+            Edit("至少為10,000", "至少為1", "ts.ch四"),
+            Edit("最低申購金額為10,000", "最低申購金額為1", "iis.p2"),
+            Edit("贖回商品面額為10,000", "贖回商品面額為1", "ts.ch四"),
+            Edit(_DISTRIBUTOR, "錯的銀行，電話：(02)0000-0000，地址：錯的地址", "ts.cover.distributor"),
+            Edit(ISSUER_NAME, "錯的發行機構", "ts.ch二.1"),
+            Edit("2030 年7 月8 日", "2030 年7 月9 日", "ts.art13.ko.6.end"),
+            Edit("2030 年3 月11 日", "2030 年1 月1 日", "ts.art13.ko.3.start"),
+            Edit("2030 年3 月11 日", "2030 年1 月1 日", "ts.art13.coupon.2.payment"),
+            Edit("86.4150", "1.0000", "ts.art16.price.1.strike"),
+            Edit("格的70.00%", "格的71.00%", "ts.art15.price"),
+            Edit("相關配息率為1.0000%", "相關配息率為0.9999%", "ts.art9"),
+        ],
     ),
-    "omitted": Spec(omit=frozenset({"trade_date", "issue_date"}), extra_strike_def="71.00"),
-    "periodic": Spec(ko_obs="P", memory=False, ki="AM", ko_overrides={(3, "trigger"): "99.00%"}),
+    "omitted": (Spec(omit=frozenset({"trade_date", "issue_date"}), extra_strike_def="71.00"), []),
+    "periodic": (Spec(ko_obs="P", memory=False, ki="AM"), []),  # 定期非記憶式沒有提前出場表，原本的改字不曾生效
 }
 
 
-@pytest.mark.parametrize("spec", BARC_BROKEN_DOCUMENTS.values(), ids=BARC_BROKEN_DOCUMENTS.keys())
-def test_barc_broken_term_sheet_messages_name_their_items(tmp_path, spec):
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+@pytest.mark.parametrize(("spec", "edits"), BARC_BROKEN_DOCUMENTS.values(), ids=BARC_BROKEN_DOCUMENTS.keys())
+def test_barc_broken_term_sheet_messages_name_their_items(tmp_path, spec, edits):
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec, edits=edits)
     report = _run(pdf, _barc_sheet(tmp_path, Spec(), {}))
     assert_every_problem_names_its_item(report)
 
 
 @pytest.mark.parametrize("obs", ["D", "P"])
 def test_hsbc_broken_term_sheet_messages_name_their_items(tmp_path, obs):
-    replacements = {
+    changes = {
         "固定配息金額=美元10,000×1.0000%=美元100.00": "固定配息金額=美元10,000×1.0000%=美元101.00",
         "6個計息期間配息金額共為美元600.00": "5個計息期間配息金額共為美元600.00",
         "到期贖回金額為美元10,000×100%=美元10,000.00": "到期贖回金額為美元10,000×100%=美元10,001.00",
@@ -448,12 +460,18 @@ def test_hsbc_broken_term_sheet_messages_name_their_items(tmp_path, obs):
         "發行價格：100%": "發行價格：99%",
         "0%~5%": "0%~6%",
     }
-    report = hsbc_check(tmp_path, hsbc_synth.Spec(ko_obs=obs, replacements=replacements))
+    edits = [Edit(old, new, "ts") for old, new in changes.items()]
+    report = hsbc_check(tmp_path, hsbc_synth.Spec(ko_obs=obs), edits=edits)
     assert_every_problem_names_its_item(report)
 
 
 def test_each_minimum_amount_names_itself(tmp_path):
-    report = check(tmp_path, Spec(min_subscription=1, min_redemption=1))
+    edits = [
+        Edit("至少為10,000", "至少為1", "ts.ch四"),
+        Edit("最低申購金額為10,000", "最低申購金額為1", "iis.p2"),
+        Edit("贖回商品面額為10,000", "贖回商品面額為1", "ts.ch四"),
+    ]
+    report = check(tmp_path, edits=edits)
 
     msgs = [problem_message(r) for r in issues(report) if r.rule_id == "field.min_amounts"]
     assert msgs == [
@@ -473,8 +491,10 @@ def test_monthly_coupon_derived_from_the_sheet_shows_the_sheet_side(tmp_path):
 def test_price_derivation_names_the_underlying_the_same_way_for_both_issuers(tmp_path):
     (tmp_path / "barc").mkdir()
     (tmp_path / "hsbc").mkdir()
-    barc = check(tmp_path / "barc", Spec(price_overrides={(2, "ko"): "1.0000"}))
-    hsbc = hsbc_check(tmp_path / "hsbc", hsbc_synth.Spec(replacements={"70.0000": "71.0000"}))
+    barc = check(
+        tmp_path / "barc", edits=[Edit("87.2000", "1.0000", f"ts.{art}.price.2.ko") for art in ("art15", "art16")]
+    )
+    hsbc = hsbc_check(tmp_path / "hsbc", edits=[Edit("70.0000", "71.0000", "ts")])
 
     assert any(problem_message(r).startswith("UL_2 KO價：") for r in issues(barc) if r.rule_id == "derive.prices")
     assert any(problem_message(r).startswith("UL_1 執行價：") for r in issues(hsbc) if r.rule_id == "derive.prices")

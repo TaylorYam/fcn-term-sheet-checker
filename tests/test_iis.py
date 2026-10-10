@@ -18,6 +18,7 @@ from fcn_checker.panel_workflow import PanelSession
 from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
 from harness import CONFIG, REVIEW_STANDARD, ROOT, check_all, cli_root, iis_path, with_iis
+from pdf_writer import Edit
 from reference_synth import build_reference_sheet, reference_row
 from synth import Spec, barc_adapter, build_iis_pdf, build_pdf
 
@@ -26,7 +27,7 @@ NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 
 
 def pair(tmp_path: Path, spec: Spec | None = None, *, ts_spec: Spec | None = None, **iis) -> tuple[Path, Path]:
-    """同商品的說明書與投資人須知；`iis` 交給投資人須知合成器（replace、pages）製造錯誤。"""
+    """同商品的說明書與投資人須知；`iis` 交給投資人須知合成器（edits、pages）製造錯誤。"""
     spec = spec or Spec()
     ts = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", ts_spec or spec, iis=False)
     return ts, build_iis_pdf(iis_path(ts), spec, **iis)
@@ -185,7 +186,7 @@ def test_term_sheet_named_as_iis_is_not_a_known_iis_template(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("replace", "message"),
+    ("change", "message"),
     [
         ({"2030 年7 月11 日": "2030 年7 月12 日"}, "到期日對不起來：參考條件表 2030-07-11／投資人須知 2030-07-12"),
         ({"86.4150": "86.4151"}, "UL_1 執行價對不起來：參考條件表 86.4150／投資人須知 86.4151"),
@@ -199,9 +200,9 @@ def test_term_sheet_named_as_iis_is_not_a_known_iis_template(tmp_path):
         ),
     ],
 )
-def test_iis_values_are_compared_with_the_reference_sheet(tmp_path, replace, message):
+def test_iis_values_are_compared_with_the_reference_sheet(tmp_path, change, message):
     spec = Spec()
-    ts, iis = pair(tmp_path, spec, replace=replace)
+    ts, iis = pair(tmp_path, spec, edits=[Edit(old, new) for old, new in change.items()])
     item, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert item.report.status == PASS
     assert sheet.report.status == MISMATCH
@@ -209,7 +210,7 @@ def test_iis_values_are_compared_with_the_reference_sheet(tmp_path, replace, mes
 
 
 @pytest.mark.parametrize(
-    ("replace", "message"),
+    ("change", "message"),
     [
         ({"2030 年1 月14 日": "2030 年1 月15 日"}, "發行日對不起來：說明書 2030-01-14／投資人須知 2030-01-15"),
         ({"ISIN:XS0000000000": "ISIN:XS0000000001"}, "ISIN對不起來：說明書 XS0000000000／投資人須知 XS0000000001"),
@@ -218,9 +219,9 @@ def test_iis_values_are_compared_with_the_reference_sheet(tmp_path, replace, mes
         ({"丁戊電子公司": "丁戊電機公司"}, "標的中文名稱對不起來：說明書 "),
     ],
 )
-def test_iis_values_missing_from_the_reference_sheet_are_compared_with_the_term_sheet(tmp_path, replace, message):
+def test_iis_values_missing_from_the_reference_sheet_are_compared_with_the_term_sheet(tmp_path, change, message):
     spec = Spec()
-    ts, iis = pair(tmp_path, spec, replace=replace)
+    ts, iis = pair(tmp_path, spec, edits=[Edit(old, new) for old, new in change.items()])
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert [m for m in problems(sheet) if m.startswith(message)], problems(sheet)
 
@@ -236,7 +237,7 @@ def test_a_term_sheet_error_is_reported_only_on_the_term_sheet(tmp_path):
 def test_iis_cover_product_code_must_match_the_file_name(tmp_path):
     spec = Spec()
     ts, iis = pair(
-        tmp_path, spec, replace={"受託或銷售機構商品代號:029199990001": "受託或銷售機構商品代號:029199990002"}
+        tmp_path, spec, edits=[Edit("受託或銷售機構商品代號:029199990001", "受託或銷售機構商品代號:029199990002")]
     )
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert problems(sheet) == [
@@ -254,7 +255,7 @@ def test_vwap_iis_prices_are_compared_with_the_term_sheet(tmp_path):
     assert sheet.report.status == PASS, problems(sheet)
 
     (tmp_path / "bad").mkdir()
-    ts, iis = pair(tmp_path / "bad", spec, replace={"86.4150": "86.4151"})
+    ts, iis = pair(tmp_path / "bad", spec, edits=[Edit("86.4150", "86.4151")])
     _, sheet = check_all(build_reference_sheet(tmp_path / "bad" / "ref.xlsx", rows), [ts, iis]).items
     assert problems(sheet) == ["UL_1 執行價對不起來：說明書 86.4150／投資人須知 86.4151"]
 
@@ -263,7 +264,7 @@ def test_vwap_iis_prices_are_compared_with_the_term_sheet(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("replace", "message"),
+    ("change", "message"),
     [
         (
             {"受託投資或受託買賣之投資標的": "受託投資之投資標的"},
@@ -280,16 +281,16 @@ def test_vwap_iis_prices_are_compared_with_the_term_sheet(tmp_path):
         ({"3.本商品風險程度：RR4": "3.本商品風險程度：【RR5】"}, "風險等級："),
     ],
 )
-def test_iis_review_standard_items(tmp_path, replace, message):
+def test_iis_review_standard_items(tmp_path, change, message):
     spec = Spec()
-    ts, iis = pair(tmp_path, spec, replace=replace)
+    ts, iis = pair(tmp_path, spec, edits=[Edit(old, new) for old, new in change.items()])
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert [m for m in problems(sheet) if m.startswith(message)], problems(sheet)
 
 
 def test_iis_fee_differs_from_the_review_standard(tmp_path):
     spec = Spec()
-    ts, iis = pair(tmp_path, spec.with_(fees={"分銷費用": "0%~3%"}))
+    ts, iis = pair(tmp_path, spec, edits=[Edit("0%~5%", "0%~3%", "iis.p3.fees.分銷費用")])
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert [m for m in problems(sheet) if m.startswith("分銷費用：")], problems(sheet)
 
@@ -297,11 +298,11 @@ def test_iis_fee_differs_from_the_review_standard(tmp_path):
 def test_hsbc_iis_forbidden_wording_and_print_date(tmp_path):
     s = hsbc_synth.Spec()
     ts = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, iis=False)
-    replace = {
-        "四、本商品雖經": "四、受託或銷售機構將為投資人受託投資本商品。本商品雖經",
-        "2030 年1 月7 日": "2030 年1 月9 日",
-    }
-    iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, replace=replace)
+    edits = [
+        Edit("四、本商品雖經", "四、受託或銷售機構將為投資人受託投資本商品。本商品雖經"),
+        Edit("2030 年1 月7 日", "2030 年1 月9 日"),
+    ]
+    iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, edits=edits)
     sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     _, item = check_all(sheet, [ts, iis]).items
     messages = problems(item)
@@ -373,14 +374,14 @@ def test_barc_price_table_variants(tmp_path, spec, checked, skipped):
 
 def test_barc_knock_in_price_on_the_iis_is_compared_with_the_sheet(tmp_path):
     spec = Spec(memory=False, ki="AM")
-    ts, iis = pair(tmp_path, spec, replace={"74.0700": "74.0701"})  # 123.4500 × 60%
+    ts, iis = pair(tmp_path, spec, edits=[Edit("74.0700", "74.0701")])  # 123.4500 × 60%
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert problems(sheet) == ["UL_1 下限價對不起來：參考條件表 74.0700／投資人須知 74.0701"]
 
 
 def test_unreadable_iis_price_table_requires_review_naming_the_iis(tmp_path):
     spec = Spec()
-    ts, iis = pair(tmp_path, spec, replace={"最初價格": "期初價格"})
+    ts, iis = pair(tmp_path, spec, edits=[Edit("最初價格", "期初價格")])
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert sheet.report.status == REVIEW
     assert "價格表：投資人須知的值無法辨識：價格表欄頭找不到或有多個「最初價格」" in problems(sheet)
@@ -422,14 +423,14 @@ def test_issue_date_on_the_sheet_is_compared_with_the_sheet_and_a_term_sheet_err
     assert sheet.report.status == PASS, problems(sheet)
 
     (tmp_path / "iis").mkdir()
-    ts, iis = pair(tmp_path / "iis", spec, replace={"2030 年1 月14 日": "2030 年1 月16 日"})
+    ts, iis = pair(tmp_path / "iis", spec, edits=[Edit("2030 年1 月14 日", "2030 年1 月16 日")])
     _, sheet = check_all(build_reference_sheet(tmp_path / "iis" / "ref.xlsx", rows), [ts, iis]).items
     assert problems(sheet) == ["發行日對不起來：參考條件表 2030-01-14／投資人須知 2030-01-16"]
 
 
 def test_barc_risk_level_in_the_product_summary_is_checked(tmp_path):
     spec = Spec()
-    ts, iis = pair(tmp_path, spec, replace={"3.本商品風險程度：RR4": "3.本商品風險程度：RR5"})
+    ts, iis = pair(tmp_path, spec, edits=[Edit("3.本商品風險程度：RR4", "3.本商品風險程度：RR5")])
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert problems(sheet) == ["風險等級（商品簡介）：兩邊的值不同（審查標準 RR4／投資人須知 RR5）"]
 

@@ -1,12 +1,15 @@
-"""合成說明書用的 PDF 寫入工具（不分上手）。
+"""合成說明書與投資人須知用的 PDF 寫入工具（不分上手），以及三家共用的改字 `Edit`。
 
-各上手的說明書合成器（tests/synth.py、tests/hsbc_synth.py）都只透過這裡的公開工具排版；
+各上手的合成器（tests/synth.py、tests/ms_synth.py、tests/hsbc_synth.py）都只透過這裡的公開工具排版；
 頁尾等版面細節由各合成器自行加上。
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import fitz
@@ -37,16 +40,73 @@ def _runs(text: str) -> list[tuple[bool, str]]:
     return out
 
 
+@dataclass(frozen=True)
+class Edit:
+    """合成文件的一處改字（製造錯誤用）：在段落代號落在 `where` 之內的文字單位裡，把 `old` 換成 `new`。
+
+    段落代號是以「.」分層的路徑，第一層是文件：說明書 `ts`、投資人須知 `iis`（例：`ts.art17`、`iis.warn`）。
+    `where` 以整層比對前綴：`ts.art1` 含 `ts.art1.x`，不含 `ts.art17`；空白表示兩份文件全文。
+    各上手的段落代號見各合成器的模組說明。一行文字整個被換成空字串時，那一行不畫（不佔行距）。
+    每個 `Edit` 至少要換到一處，否則合成器報錯（`require_used`），以免段落代號或原文打錯時測試白白通過。
+    """
+
+    old: str
+    new: str
+    where: str = ""
+
+    def covers(self, path: str) -> bool:
+        return not self.where or path == self.where or path.startswith(self.where + ".")
+
+
+def require_used(edits: Sequence[Edit], used: set[Edit]) -> None:
+    """合成完一份（或成對的兩份）文件後檢查：每個改字都至少換到一處。"""
+    missing = [e for e in edits if e not in used]
+    if missing:
+        raise ValueError(f"改字沒有換到任何文字（原文或段落代號有誤）：{missing}")
+
+
 class PdfWriter:
-    """A4 由上而下逐行排版；超過頁底自動換頁。"""
+    """A4 由上而下逐行排版；超過頁底自動換頁。
+
+    寫入的每個文字單位（`put`／`line`／`row` 一格／`para` 整段／`numbered` 標題）先套用 `edits` 中涵蓋
+    目前段落（`kind`.`section`）的改字；合成器自行分行的文字先以 `edit` 整段改過，再在 `verbatim()` 內寫入。
+    """
 
     TOP, BOTTOM = 80.0, 770.0
 
-    def __init__(self) -> None:
+    def __init__(self, edits: Sequence[Edit] = (), kind: str = "ts", used: set[Edit] | None = None) -> None:
         self.doc = fitz.open()
         self.page: fitz.Page
         self.y = 0.0
+        self.edits, self.kind = tuple(edits), kind  # kind：文件層段落代號（ts／iis）
+        self.section = ""  # 目前段落代號（不含文件層）
+        self.used = set() if used is None else used  # 換到過文字的改字（成對文件可共用同一個 set）
+        self._verbatim = False
         self.new_page()
+
+    def path(self, section: str | None = None) -> str:
+        sec = self.section if section is None else section
+        return f"{self.kind}.{sec}" if sec else self.kind
+
+    def edit(self, text: str, section: str | None = None) -> str:
+        """套用涵蓋段落 `section`（省略為目前段落）的改字；`verbatim()` 內不改。"""
+        if self._verbatim:
+            return text
+        path = self.path(section)
+        for e in self.edits:
+            if e.covers(path) and e.old in text:
+                text = text.replace(e.old, e.new)
+                self.used.add(e)
+        return text
+
+    @contextmanager
+    def verbatim(self) -> Iterator[None]:
+        """區塊內寫入的文字不再改字（已先以 `edit` 整段改過、再由合成器自行分行的文字）。"""
+        before, self._verbatim = self._verbatim, True
+        try:
+            yield
+        finally:
+            self._verbatim = before
 
     def new_page(self) -> None:
         self.page = self.doc.new_page(width=595, height=842)
@@ -56,9 +116,12 @@ class PdfWriter:
         if self.y + h > self.BOTTOM:
             self.new_page()
 
-    def put(self, x: float, y: float, text: str, size: float = 10) -> None:
-        """西文字元（Latin-1）用 Helvetica、其餘用 CJK 字型，逐段相接排版，避免全形寬度造成溢出或重疊。"""
-        for western, run in _runs(text):
+    def put(self, x: float, y: float, text: str, size: float = 10, section: str | None = None) -> None:
+        """西文字元（Latin-1）用 Helvetica、其餘用 CJK 字型，逐段相接排版，避免全形寬度造成溢出或重疊。
+
+        `section` 指定這個文字單位的段落代號（例：表格某一格），省略為目前段落。
+        """
+        for western, run in _runs(self.edit(text, section)):
             if western:
                 self.page.insert_text((x, y + size), run, fontname="helv", fontsize=size)
                 x += fitz.get_text_length(run, fontname="helv", fontsize=size)
@@ -67,19 +130,28 @@ class PdfWriter:
                 x += size * len(run)
 
     def line(self, x: float, text: str, size: float = 10, gap: float = 13) -> None:
+        text = self.edit(text)
+        if not text:
+            return
         self.need(gap)
-        self.put(x, self.y, text, size)
+        with self.verbatim():
+            self.put(x, self.y, text, size)
         self.y += gap
 
-    def row(self, cells: list[tuple[float, str]], gap: float = 20, size: float = 10) -> None:
+    def row(
+        self, cells: Sequence[tuple[float, str] | tuple[float, str, str]], gap: float = 20, size: float = 10
+    ) -> None:
+        """一列表格；格子可帶第三個元素作為該格的段落代號。"""
         self.need(gap)
-        for x, t in cells:
-            self.put(x, self.y, t, size)
+        for x, t, *section in cells:
+            self.put(x, self.y, t, size, section[0] if section else None)
         self.y += gap
 
     def para(self, x: float, text: str, width: int = 40, size: float = 10, gap: float = 13) -> None:
-        for k in range(0, len(text), width):
-            self.line(x, text[k : k + width], size, gap)
+        text = self.edit(text)
+        with self.verbatim():
+            for k in range(0, len(text), width):
+                self.line(x, text[k : k + width], size, gap)
 
     def numbered(self, n: str, x_num: float, x_body: float, title: str, gap: float = 20) -> None:
         self.need(gap)

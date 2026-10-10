@@ -22,6 +22,7 @@ from fcn_checker.issuers import BARC
 from fcn_checker.saving import run_batch, save_batch
 from fcn_checker.schema import CheckStatus, DetectionResult
 from harness import CONFIG, ISSUER_PREFIXES, REVIEW_STANDARD, check_all, load_config, with_iis
+from pdf_writer import Edit
 from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet, reference_row
 from synth import SYNTH_ISIN, Spec, barc_adapter, build_iis_pdf, build_pdf, schedule_rows
 
@@ -34,8 +35,8 @@ PASS, MISMATCH, REVIEW, ERROR = (
 NOW = dt.datetime(2030, 2, 3, 4, 5, 6)
 
 
-def pdf_for(tmp_path: Path, spec: Spec, name: str | None = None) -> Path:
-    return build_pdf(tmp_path / (name or f"{spec.product_code}_TS.pdf"), spec)
+def pdf_for(tmp_path: Path, spec: Spec, name: str | None = None, *, edits: list[Edit] | None = None) -> Path:
+    return build_pdf(tmp_path / (name or f"{spec.product_code}_TS.pdf"), spec, edits=edits or ())
 
 
 def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], *, sheet: Path | None = None, config=CONFIG):
@@ -110,8 +111,9 @@ def test_daily_with_non_call_equal_to_tenor_fills_only_the_last_period(tmp_path)
 
 
 def test_latest_compare_date_must_equal_final_valuation_date(tmp_path):
-    spec = Spec(ko_overrides={(6, "end"): "2030 年7 月9 日"})  # 最後一期期末日晚於最終評價日 2030-07-08
-    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec)])
+    spec = Spec()
+    late = [Edit("2030 年7 月8 日", "2030 年7 月9 日", "ts.art13.ko.6.end")]  # 最後一期期末日晚於最終評價日 2030-07-08
+    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec, edits=late)], [reference_row(spec)])
 
     item = outcome.items[0]
     r = only(item, "backfill.compare_dates")

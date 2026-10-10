@@ -19,6 +19,7 @@ from fcn_checker.schema import CheckReport
 from fcn_checker.schema import CheckStatus as S
 from harness import CONFIG, REVIEW_STANDARD, ROOT, STANDARD, check_all, cli_root, load_record, with_iis
 from hsbc_synth import Spec, build_pdf
+from pdf_writer import Edit
 from reference_synth import REFERENCE_HEADERS, as_headers, build_reference_sheet, reference_row
 
 
@@ -42,9 +43,11 @@ def sheet_for(tmp_path, s, overrides=None):
     return build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s, **as_headers(overrides or {}))])
 
 
-def check(tmp_path, spec=None, overrides=None):
+def check(tmp_path, spec=None, overrides=None, edits=()):
     s = spec or Spec()
-    return run_check(build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s), sheet_for(tmp_path, s, overrides))
+    return run_check(
+        build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, edits=edits), sheet_for(tmp_path, s, overrides)
+    )
 
 
 @pytest.mark.parametrize(
@@ -145,7 +148,7 @@ def test_order_difference_is_reported(tmp_path, field, value, rule):
     ],
 )
 def test_document_difference_is_reported(tmp_path, old, new, rule):
-    r = check(tmp_path, Spec(replacements={old: new}))
+    r = check(tmp_path, edits=[Edit(old, new, "ts")])
     assert any(x.rule_id == rule and x.status in (S.MISMATCH, S.REVIEW_REQUIRED) for x in r.results)
 
 
@@ -190,26 +193,43 @@ def test_table_pairing_failures_stop_rules(tmp_path, change, reason):
     assert not any(x.rule_id.startswith("field.") for x in r.results)
 
 
+@pytest.mark.parametrize(
+    "spec",
+    [
+        Spec(strike=Decimal("65")),
+        Spec(ko=Decimal("105"), ki_pct=Decimal("55")),
+        Spec(tenor=12),
+        Spec(trade_date=dt.date(2030, 3, 9), issue_date=dt.date(2030, 3, 16)),
+        Spec(ko_obs="P", memory=False, ki="none", first_callable=3),
+        Spec(currency_zh="人民幣"),
+    ],
+    ids=["strike", "ko-ki", "tenor", "trade-date", "non-call", "currency"],
+)
+def test_spec_values_are_drawn_into_both_documents(tmp_path, spec):
+    """說明書與投資人須知照規格畫：改了規格值，兩份文件仍與同一規格的參考條件表列一致（Issue #166）。"""
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    items = check_all(sheet_for(tmp_path, spec), [pdf], CONFIG).items
+    assert [i.report.status for i in items] == [S.PASS, S.PASS], [i.problem_messages for i in items]
+
+
+def test_spec_value_differing_from_the_reference_row_is_reported(tmp_path):
+    s = Spec(strike=Decimal("65"))
+    r = run_check(build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s), sheet_for(tmp_path, Spec()))
+    assert only(r, "field.strike_pct").status == S.MISMATCH
+
+
 def test_wrong_prefix_and_unknown_template_require_review(tmp_path):
     r = check(tmp_path, Spec(product_code="029199990001"))
     assert any(x.reason_code == "issuer_prefix_mismatch" for x in r.results)
     other = tmp_path / "other"
     other.mkdir()
-    r = check(other, Spec(replacements={"中文產品說明書(最終版)": "未知說明書"}))
+    r = check(other, edits=[Edit("中文產品說明書(最終版)", "未知說明書", "ts")])
     assert r.status == S.REVIEW_REQUIRED and r.template is None
 
 
 def test_partial_coupon_and_unrounded_total(tmp_path):
+    # 情境分析照年利率畫：月配息率 0.9992%、每期 99.92，合計以年利率算後才四捨五入（599.50、199.83）
     s = Spec(annual=Decimal("11.99"))
-    monthly = "0.9992"
-    s.replacements = {
-        "固定配息率為1.0000%，配息期數=6，且假設": f"固定配息率為{monthly}%，配息期數=6，且假設",
-        "固定配息金額=美元10,000×1.0000%=美元100.00": f"固定配息金額=美元10,000×{monthly}%=美元99.92",
-        "6個計息期間配息金額共為美元600.00": "6個計息期間配息金額共為美元599.50",
-        "損益=美元10,000.00+美元200.00-美元10,000.00=美元200.00": "損益=美元10,000.00+美元199.83-美元10,000.00=美元199.83",
-        "損益=美元10,000.00+美元600.00-美元10,000.00=美元600.00": "損益=美元10,000.00+美元599.50-美元10,000.00=美元599.50",
-        "平均年化報酬率(以簡單平均年化報酬率之方式計算)為12.00%": "平均年化報酬率(以簡單平均年化報酬率之方式計算)為11.99%",
-    }
     assert check(tmp_path, s).status == S.PASS
 
 
@@ -273,36 +293,37 @@ def test_distributor_standard_difference(tmp_path, field, new, rule):
 
     old = STANDARD["distributor"][field]
     # Change all places containing this value, including longer labels.
-    s = Spec()
     if field == "chairman":
         oldline = "(c)營業所在地：" + STANDARD["distributor"]["address"] + "(d)負責人姓名：" + old
     elif field == "name":
         oldline = "受託或銷售機構之名稱、電話及地址：" + old
     else:
         oldline = old
-    s.replacements = {oldline: oldline.replace(old, new)}
-    r = check(tmp_path, s)
+    r = check(tmp_path, edits=[Edit(oldline, oldline.replace(old, new), "ts")])
     assert any(x.rule_id == rule and x.status == S.MISMATCH for x in r.results)
 
 
 def test_warning_risk_wording_and_name_rules(tmp_path):
 
     warning = STANDARD["risk"]["fixed_warning_by_issuer"]["hsbc"]
-    s = Spec(replacements={warning: warning.replace("RR4", "RR3")})
-    r = check(tmp_path, s)
+    r = check(tmp_path, edits=[Edit(warning, warning.replace("RR4", "RR3"), "ts")])
     assert any(x.rule_id == "standard.fixed_warning" and x.status == S.MISMATCH for x in r.results)
     assert any(x.rule_id == "standard.risk_level" and x.status == S.MISMATCH for x in r.results)
     other = tmp_path / "wording"
     other.mkdir()
-    r = check(other, Spec(replacements={"其他說明": "受託投資"}))
+    r = check(other, edits=[Edit("其他說明", "受託投資", "ts")])
     assert any(x.rule_id == "standard.forbidden_wording" and x.status == S.MISMATCH for x in r.results)
     other = tmp_path / "name"
     other.mkdir()
-    s = Spec()
-    s.replacements = {
-        f"商品英文名稱：{s.en}": "商品英文名稱：Autocallable Fixed Coupon Notes (Non Guaranteed, Unsecured)"
-    }
-    r = check(other, s)
+    en = Spec().en
+    r = check(
+        other,
+        edits=[
+            Edit(
+                f"商品英文名稱：{en}", "商品英文名稱：Autocallable Fixed Coupon Notes (Non Guaranteed, Unsecured)", "ts"
+            )
+        ],
+    )
     assert any(x.rule_id == "standard.product_name" and x.status == S.MISMATCH for x in r.results)
     assert any(x.rule_id == "doc.name_consistency" and x.status == S.MISMATCH for x in r.results)
 
@@ -315,7 +336,7 @@ def test_warning_risk_wording_and_name_rules(tmp_path):
     ],
 )
 def test_scenario_table_is_independently_compared(tmp_path, old, new, rule):
-    r = check(tmp_path, Spec(scenario_replacements={old: new}))
+    r = check(tmp_path, edits=[Edit(old, new, "ts.art18.table")])
     assert any(x.rule_id == rule and x.status == S.MISMATCH for x in r.results)
 
 
@@ -330,7 +351,7 @@ def test_scenario_table_is_independently_compared(tmp_path, old, new, rule):
     ],
 )
 def test_missing_ambiguous_or_unknown_document_requires_review(tmp_path, old, new, rule):
-    r = check(tmp_path, Spec(replacements={old: new}))
+    r = check(tmp_path, edits=[Edit(old, new, "ts")])
     assert any(x.rule_id == rule and x.status == S.REVIEW_REQUIRED for x in r.results)
 
 
@@ -433,13 +454,13 @@ def test_each_review_standard_occurrence_is_checked_with_the_shared_rule(tmp_pat
     ],
 )
 def test_only_the_differing_occurrence_mismatches(tmp_path, old, new, rule, field):
-    r = check(tmp_path, Spec(replacements={old: new}))
+    r = check(tmp_path, edits=[Edit(old, new, "ts")])
     bad = {x.field for x in r.results if x.rule_id == rule and x.status == S.MISMATCH}
     assert bad == {field}
 
 
 def test_non_default_denomination_requires_review_like_barc(tmp_path):
-    r = check(tmp_path, Spec(replacements={"每單位面額：美元10,000元": "每單位面額：美元20,000元"}))
+    r = check(tmp_path, edits=[Edit("每單位面額：美元10,000元", "每單位面額：美元20,000元", "ts")])
     x = only(r, "doc.denomination")
     assert (x.status, x.reason_code) == (S.REVIEW_REQUIRED, "denomination_non_default")
 
@@ -477,28 +498,27 @@ def test_reference_fields_use_the_shared_rule_ids(tmp_path):
     ],
 )
 def test_each_required_scenario_formula_or_reference_must_be_present(tmp_path, old, new, field):
-    r = check(tmp_path, Spec(replacements={old: new}))
+    r = check(tmp_path, edits=[Edit(old, new, "ts")])
     assert any(x.status == S.REVIEW_REQUIRED and field in x.field for x in r.results)
 
 
 def test_daily_schedule_end_must_not_precede_start(tmp_path):
-    s = Spec()
     # Third period's start follows period 2, but its end is moved before that start.
-    s.replacements = {"2030 年4 月7 日": "2030 年3 月6 日"}
-    r = check(tmp_path, s)
+    r = check(tmp_path, edits=[Edit("2030 年4 月7 日", "2030 年3 月6 日", "ts")])
     assert any(x.rule_id == "schedule.autocall_dates" and x.status == S.MISMATCH for x in r.results)
 
 
 @pytest.mark.parametrize(
-    "replacements,reason",
+    "change,reason",
     [
         ({"投資人應注意": "投資人注意事項"}, "document_missing"),  # 定期KO表沒有結束錨點
         ({"2030 年5 月7 日": "2030 年5 月XX日"}, "document_invalid"),  # 第 3 列決定日不是日期；配息表只印付款日
     ],
 )
-def test_periodic_ko_table_unreadable_requires_review_not_unexpected(tmp_path, replacements, reason):
+def test_periodic_ko_table_unreadable_requires_review_not_unexpected(tmp_path, change, reason):
     """定期觀察的提前出場表讀不到：schedule.autocall_dates 轉人工覆核，整份不能記成非預期錯誤。"""
-    r = check(tmp_path, Spec(ko_obs="P", memory=False, ki="none", count=1, replacements=replacements))
+    edits = [Edit(old, new, "ts") for old, new in change.items()]
+    r = check(tmp_path, Spec(ko_obs="P", memory=False, ki="none", count=1), edits=edits)
     assert not any(x.rule_id == "batch.unexpected" for x in r.results), [(x.rule_id, x.message) for x in r.results]
     autocall = only(r, "schedule.autocall_dates")
     assert (autocall.status, autocall.reason_code) == (S.REVIEW_REQUIRED, reason)
@@ -510,10 +530,8 @@ def test_periodic_ko_table_unreadable_requires_review_not_unexpected(tmp_path, r
 @pytest.mark.parametrize("amount,status", [("25.00", S.PASS), ("26.00", S.MISMATCH)])
 def test_partial_period_coupon_arithmetic(tmp_path, amount, status):
     s = Spec(partial_coupon=True)
-    s.replacements = {
-        "第3個計息期間配息金額=美元10,000×1.0000%×5/20=美元25.00": f"第3個計息期間配息金額=美元10,000×1.0000%×5/20=美元{amount}"
-    }
-    r = check(tmp_path, s)
+    old = "第3個計息期間配息金額=美元10,000×1.0000%×5/20=美元25.00"
+    r = check(tmp_path, s, edits=[Edit(old, old.replace("美元25.00", f"美元{amount}"), "ts")])
     assert r.status == status
     assert any(
         x.rule_id == "doc.scenario_calculations"
@@ -535,12 +553,8 @@ def test_partial_period_coupon_arithmetic(tmp_path, amount, status):
 )
 def test_profit_total_allows_rounding_difference_only(tmp_path, items, total, status):
     s = Spec(partial_coupon=True)
-    s.replacements = {
-        "損益=美元10,000.00+美元200.00+美元25.00-美元10,000.00=美元225.00": (
-            f"損益=美元10,000.00+美元200.00{items}-美元10,000.00=美元{total}"
-        )
-    }
-    r = check(tmp_path, s)
+    old = "損益=美元10,000.00+美元200.00+美元25.00-美元10,000.00=美元225.00"
+    r = check(tmp_path, s, edits=[Edit(old, f"損益=美元10,000.00+美元200.00{items}-美元10,000.00=美元{total}", "ts")])
     [profit] = [x for x in r.results if x.field.startswith("s1.profit.")]
     assert profit.rule_id == "doc.scenario_calculations" and profit.tolerance
     assert profit.status == status and profit.actual == Decimal(total)
