@@ -1,7 +1,7 @@
 """PANEL 公開工作流程：參考條件表＋多份說明書與投資人須知的唯讀預覽、核對、失效檢查與手動儲存。
 
 核對與儲存都呼叫批量入口（batch.py），PANEL 不另做規則；按「儲存」之前不寫任何檔案。
-PANEL 操作員讀到的預覽列、結果清單列、結果明細與回填決策文字都由 PanelOutcome 組好，Tk 視窗只負責顯示。
+PANEL 操作員讀到的預覽列、欄名警告、結果清單列、結果明細、回填決策與放行說明文字都由 PanelOutcome 組好，Tk 視窗只負責顯示。
 每次載入預覽時載入一次核對設定；核對沿用預覽的辨識與讀出，同一份說明書只讀一次。
 """
 
@@ -92,6 +92,11 @@ class PanelOutcome:
         )
 
     @staticmethod
+    def preview_warnings(preview: BatchPreview) -> str:
+        """預覽表下方的參考條件表欄名問題；沒有問題時不顯示。"""
+        return "參考條件表欄名問題：" + "；".join(preview.warnings) if preview.warnings else ""
+
+    @staticmethod
     def item_row(item: BatchItem) -> tuple[str, ...]:
         """結果清單一列：狀態標籤、種類、PDF 檔名、問題數。"""
         problems = sum(r.status.is_problem for r in item.report.results)
@@ -159,6 +164,13 @@ class PanelOutcome:
             + "\n".join(f"・{m}" for m in item.problem_messages)
             + "\n\n確認人工放行？放行後視同通過：儲存時回填，不列入錯誤清單。"
         )
+
+    @staticmethod
+    def release_note(item: BatchItem, reason: str) -> str:
+        """人工放行按鈕旁的說明：已放行的說明怎麼處理；不能放行時說明原因（reason 來自 PanelSession.release_state）。"""
+        if item.released:
+            return "已人工放行：儲存時視同通過並回填，不列入錯誤清單。"
+        return f"不能人工放行：{reason}" if reason else ""
 
     @property
     def not_covered(self) -> tuple[NotCoveredGroup, ...]:
