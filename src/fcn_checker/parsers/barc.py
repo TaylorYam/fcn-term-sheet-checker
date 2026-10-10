@@ -677,7 +677,8 @@ def _currency_occurrences(
     for k, case in enumerate(_CASES):
         field, name, where = f"scenario_{_CASE_IDS[k]}_currency", f"情境 ({_CASE_IDS[k]}) 金額幣別", f"第 16 條{case}"
         if pos[k] < 0 or (k + 1 < len(pos) and pos[k + 1] < pos[k]):
-            out.append(occ(field, name, where, ParsedField.missing(field, f"第 16 條找不到「{case}」")))
+            gone = case if pos[k] < 0 else _CASES[k + 1]
+            out.append(occ(field, name, where, ParsedField.missing(field, f"第 16 條找不到「{gone}」")))
             continue
         end = pos[k + 1] if k + 1 < len(pos) else None
         found = money.amounts(s16, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=pos[k], end=end)

@@ -212,8 +212,9 @@ def _currency_occurrence(
             return None if value == cover_word else _unknown_currency(ctx, check, [value])
         shown = f"（{value} → {iso}）" if value != iso else ""
         return check.compare(expected, iso, message=where + shown)
-    bad = [m for m in value if (iso := currency_iso(ctx, m.currency)) is not None and iso != expected]
-    unknown = [m for m in value if currency_iso(ctx, m.currency) is None and m.currency != cover_word]
+    mapped = [(m, currency_iso(ctx, m.currency)) for m in value]
+    bad = [m for m, iso in mapped if iso is not None and iso != expected]
+    unknown = [m for m, iso in mapped if iso is None and m.currency != cover_word]
     if bad:
         return check.compare(
             expected,
@@ -226,7 +227,7 @@ def _currency_occurrence(
         return _unknown_currency(
             ctx, check, sorted({m.currency for m in unknown}), [e for m in unknown for e in m.evidence]
         )
-    if all(currency_iso(ctx, m.currency) is None for m in value):
+    if all(iso is None for _, iso in mapped):
         return None  # 全部和封面寫同一個不在對照表的字：封面那筆已轉人工覆核
     return check.compare(expected, expected, message=where)
 

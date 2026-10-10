@@ -64,7 +64,7 @@ def run(ctx):
     monthly = rate / 12
     unit = denom * monthly / 100
     notional = (denom * issue_price / 100).quantize(Q2, ROUND_HALF_UP)
-    money = CURRENCY  # 金額前的幣別字（任一已知寫法）：這裡只核對數字，幣別由共用規則 field.currency 逐處核對
+    ccy = CURRENCY  # 金額前的幣別字（任一已知寫法）：這裡只核對數字，幣別由共用規則 field.currency 逐處核對
     out = []
     serial = 0
 
@@ -102,13 +102,11 @@ def run(ctx):
     assumptions = ScenarioIndex(a)
     monthly_shown = monthly.quantize(Q4, ROUND_HALF_UP)
     mentions(assumptions, r"商品天期為(\d+)個月期", Decimal(tenor), "assumption.tenor", assumption("天期"))
-    mentions(
-        assumptions, r"每單位面額為" + money + N + "元", denom, "assumption.denomination", assumption("每單位面額")
-    )
+    mentions(assumptions, r"每單位面額為" + ccy + N + "元", denom, "assumption.denomination", assumption("每單位面額"))
     mentions(assumptions, r"固定配息率為" + N + "%", monthly_shown, "assumption.monthly", assumption("固定配息率"))
     mentions(assumptions, r"配息期數=(\d+)", Decimal(tenor), "assumption.periods", assumption("配息期數"))
     mentions(assumptions, r"發行價格為" + N + "%", issue_price, "assumption.issue_price", assumption("發行價格"))
-    initial = list(assumptions.finditer(r"每單位期初投資金額=" + money + N + r"\(=" + N + r"×" + N + r"%\)"))
+    initial = list(assumptions.finditer(r"每單位期初投資金額=" + ccy + N + r"\(=" + N + r"×" + N + r"%\)"))
     if not initial:
         missing("initial_investment", "情境試算期初投資金額", assumptions)
     for m in initial:
@@ -150,7 +148,7 @@ def run(ctx):
             required=True,
         )
         # Denomination, monthly percentage, optional full periods or partial-period fraction.
-        formula = money + N + r"[×xX]" + N + r"%(?:[×xX](\d+)(?:/(\d+))?)?=" + money + N
+        formula = ccy + N + r"[×xX]" + N + r"%(?:[×xX](\d+)(?:/(\d+))?)?=" + ccy + N
         formulas = list(segment.finditer(formula))
         coupon_hits = []
         principal_hits = []
@@ -235,7 +233,7 @@ def run(ctx):
             missing(f"s{i + 1}.coupon_formula", scenario(i, "配息公式"), segment)
         if (i == 0 or (expected_count == 4 and i == 2)) and not principal_hits:
             missing(f"s{i + 1}.principal_formula", scenario(i, "本金給付公式"), segment)
-        total_pattern = r"(\d+)個計息期間配息金額共為" + money + N
+        total_pattern = r"(\d+)個計息期間配息金額共為" + ccy + N
         totals = list(segment.finditer(total_pattern))
         total = (unit * Decimal(expected_period)).quantize(Q2, ROUND_HALF_UP)
         if i > 0 and not totals:
@@ -266,9 +264,9 @@ def run(ctx):
         named = [row for row in rows if row["label"] and "（" + row["label"] + "）" in text]
         row = rows[0] if len(rows) == 1 else named[0] if len(named) == 1 else None
         for label, key in [("執行價", "strike"), ("觸及不保本價格", "ki")]:
-            refs = list(segment.finditer(re.escape(label) + money + N))
+            refs = list(segment.finditer(re.escape(label) + ccy + N))
             required = i >= 2 and (key == "strike" or expected_count == 4)
-            mentions_count = len(re.findall(re.escape(label) + money, text))
+            mentions_count = len(re.findall(re.escape(label) + ccy, text))
             name = scenario(i, label)
             if (required and not refs) or mentions_count > len(refs):
                 missing(f"s{i + 1}.reference_{key}", name, segment)
@@ -289,13 +287,13 @@ def run(ctx):
         if worst:
             # Complex redemption is explicitly excluded; do not feed an unchecked redemption into a PASS profit calculation.
             continue
-        term = money + r"[\d,]+(?:\.\d+)?"
-        sums = list(segment.finditer(r"=" + term + r"(?:[+-]" + term + r"){2,3}=" + money + N))
+        term = ccy + r"[\d,]+(?:\.\d+)?"
+        sums = list(segment.finditer(r"=" + term + r"(?:[+-]" + term + r"){2,3}=" + ccy + N))
         if not sums:
             missing(f"s{i + 1}.profit", scenario(i, "損益金額"), segment)
         for m in sums:
             expression = m[0][1:].rsplit("=", 1)[0]
-            parts = re.findall(r"([+-]?)" + money + N, expression)
+            parts = re.findall(r"([+-]?)" + ccy + N, expression)
             values = [(-1 if sign == "-" else 1) * number(v) for sign, v in parts]
             expected_values = [denom, total] + fraction_amounts + [-notional]
             actual = number(m[1])
