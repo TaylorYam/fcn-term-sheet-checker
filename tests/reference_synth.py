@@ -20,40 +20,11 @@ import openpyxl
 from harness import CURRENCY_ISO, REFERENCE_FORMAT, STANDARD
 
 _FORMAT = tomllib.loads(REFERENCE_FORMAT.read_text(encoding="utf-8"))
-# Excel 欄名 → 標準欄位（[columns] 內的 ignored 清單不是欄名）
-REFERENCE_COLUMNS: dict[str, str] = {h: f for h, f in _FORMAT["columns"].items() if isinstance(f, str)}
+# Excel 欄名 → 標準欄位
+REFERENCE_COLUMNS: dict[str, str] = dict(_FORMAT["columns"])
 _COLUMN_OF = {f: h for h, f in REFERENCE_COLUMNS.items()}  # 標準欄位 → Excel 欄名
 
-REFERENCE_HEADERS = [
-    "TS",
-    "IIS",
-    "庫存狀態",
-    "當日比價",
-    "Product",
-    "發行機構",
-    "TDCC Code",
-    "ISIN Code",
-    "私銀註記",
-    "單位面額",
-    "承作幣別",
-    "交易日",
-    "發行日",
-    *[f"比價日_{i}" for i in range(1, 13)],
-    "最終比價日",
-    "到期日",
-    "期初定價",
-    "KO(%)",
-    "KO(Freq)",
-    "KO(memo)",
-    "K(%)",
-    "KI(%)",
-    "KI(Freq)",
-    "UF",
-    "Coupon p.a. (%)",
-    "天期(月)",
-    "Non-Call(月)",
-    *[f"UL_{i}{suffix}" for i in range(1, 6) for suffix in ("", "_進場價", "_執行價", "_下限價", "_KO價", "_Memo")],
-]
+REFERENCE_HEADERS: list[str] = list(_FORMAT["layout"]["column_order"])  # 參考條件表欄位順序，同真實 樣本清單 第 3 列
 DATE_FORMAT = "mm-dd-yy"
 Q4 = Decimal("0.0001")
 DEFAULT_DENOMINATION = {k: int(v) for k, v in STANDARD["denomination"].items()}  # 幣別預設面額（審查標準）
