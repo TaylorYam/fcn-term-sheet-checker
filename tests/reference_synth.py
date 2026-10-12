@@ -24,7 +24,7 @@ _FORMAT = tomllib.loads(REFERENCE_FORMAT.read_text(encoding="utf-8"))
 REFERENCE_COLUMNS: dict[str, str] = dict(_FORMAT["columns"])
 _COLUMN_OF = {f: h for h, f in REFERENCE_COLUMNS.items()}  # 標準欄位 → Excel 欄名
 
-REFERENCE_HEADERS: list[str] = list(_FORMAT["layout"]["standard_order"])  # 標準欄位順序，同真實 樣本清單 第 3 列
+REFERENCE_HEADERS: list[str] = list(_FORMAT["layout"]["column_order"])  # 參考條件表欄位順序，同真實 樣本清單 第 3 列
 DATE_FORMAT = "mm-dd-yy"
 Q4 = Decimal("0.0001")
 DEFAULT_DENOMINATION = {k: int(v) for k, v in STANDARD["denomination"].items()}  # 幣別預設面額（審查標準）

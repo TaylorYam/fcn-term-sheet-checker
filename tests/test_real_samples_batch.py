@@ -121,14 +121,14 @@ def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
     return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
 
 
-def test_standard_order_is_the_real_sheet_header_and_the_result_keeps_it(saved):
-    """標準欄位順序 = 真實 樣本清單 第 3 列的具名欄；「回填後」照它排，沒有表頭的欄留在後面（Issue #173）。"""
+def test_column_order_is_the_real_sheet_header_and_the_result_keeps_it(saved):
+    """參考條件表欄位順序 = 真實 樣本清單 第 3 列的具名欄；「回填後」照它排，沒有表頭的欄留在後面（Issue #173）。"""
     fmt = CONFIG.reference_format
     real = [c.value for c in openpyxl.load_workbook(REFERENCE)[fmt.sheet][fmt.header_row]]
-    assert [h for h in real if h is not None] == list(fmt.standard_order)
+    assert [h for h in real if h is not None] == list(fmt.column_order)
     out = [c.value for c in openpyxl.load_workbook(saved[1].output)["回填後"][fmt.header_row]]
-    assert out[: len(fmt.standard_order)] == list(fmt.standard_order)
-    assert not any(out[len(fmt.standard_order) :])
+    assert out[: len(fmt.column_order)] == list(fmt.column_order)
+    assert not any(out[len(fmt.column_order) :])
 
 
 @requires(TO_FILL)  # 回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）

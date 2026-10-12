@@ -1,7 +1,7 @@
 """核對結果檔：一批說明書核對後唯一的 Excel 產出（Issue #72）。
 
-- 「回填後」：原參考條件表 `樣本清單` 刪掉不要的列，欄位再照標準欄位順序重排（Issue #173）：各欄從第 1 列起的值、
-  儲存格與日期格式、欄寬跟著欄走；表上缺少的欄在標準位置補一個只有表頭的空白欄；沒有表頭（或不在標準欄位順序、
+- 「回填後」：原參考條件表 `樣本清單` 刪掉不要的列，欄位再照參考條件表欄位順序重排（Issue #173）：各欄從第 1 列起的值、
+  儲存格與日期格式、欄寬跟著欄走；表上缺少的欄在該欄應在的位置補一個只有表頭的空白欄；沒有表頭（或不在參考條件表欄位順序、
   重複）的欄接在最右邊，保持原相對順序。資料列只留下整份通過且已回填的列，順序照原表；可以直接匯入資料庫。
   原檔其他工作表不帶入。
 - 「錯誤清單」：每份沒通過的說明書一列，依 PDF 輸入順序：TDCC Code、PDF 檔名、錯訊（多條以換行分隔）。
@@ -9,8 +9,8 @@
 檔名 `<參考條件表檔名>_核對結果_<YYYYMMDD-HHMMSS>.xlsx`，寫到指定資料夾，不覆蓋既有檔案。
 
 「回填後」是刪掉不要的列做出來的。合併儲存格、格式化條件、資料驗證的範圍與公式不會跟著位移，
-`樣本清單` 有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表；要重排欄位時，合併儲存格（含表頭以上）
-也一樣。篩選範圍跟著資料列數縮小，補欄時跟著變寬。
+`樣本清單` 有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表；要重排欄位時，合併儲存格（含表頭以上）、
+篩選或排序條件也一樣。篩選範圍跟著資料列數縮小，補欄時跟著變寬。
 """
 
 from __future__ import annotations
@@ -63,8 +63,11 @@ def check_layout(wb: Workbook, rfmt: ReferenceFormat) -> None:
     """版面無法安全刪列時丟出 IngestionError。要在回填前檢查：資料列的合併儲存格連回填都寫不進去。"""
     ws = wb[rfmt.sheet]
     unsupported = _unsupported_layout(ws, rfmt.first_data_row)
-    if ws.merged_cells.ranges and not _is_identity(_arrangement(ws, rfmt)):
-        unsupported.append("合併儲存格（欄位要照標準欄位順序重排）")
+    if not _is_identity(_arrangement(ws, rfmt)):  # 欄位要照參考條件表欄位順序重排：這些設定不會跟著欄移動
+        if ws.merged_cells.ranges:
+            unsupported.append("合併儲存格（欄位要照參考條件表欄位順序重排）")
+        if ws.auto_filter.filterColumn or ws.auto_filter.sortState:
+            unsupported.append("篩選或排序條件（欄位要照參考條件表欄位順序重排）")
     if unsupported:
         raise IngestionError(
             "result_layout_unsupported",
@@ -144,36 +147,42 @@ def _keep_rows(ws: Worksheet, first: int, keep: list[int]) -> None:
 def _arrangement(ws: Worksheet, rfmt: ReferenceFormat) -> list[int | str]:
     """「回填後」由左到右每一欄的來源：原表欄號，或表上缺少、要補空白欄的欄名。
 
-    標準欄位順序的欄依序在前；沒有表頭、不在標準欄位順序或重複出現的欄接在後面，保持原相對順序。"""
-    standard = set(rfmt.standard_order)
-    last = max([ws.max_column, *(hi for _, hi in map(_dim_span, ws.column_dimensions.values()))])
+    參考條件表欄位順序的欄依序在前；沒有表頭、不在參考條件表欄位順序或重複出現的欄接在後面，保持原相對順序。
+    只看到有儲存格的最右欄：Excel 常把欄格式一路設到 XFD，只有欄寬沒有儲存格的欄不搬。"""
+    standard = set(rfmt.column_order)
     named: dict[str, int] = {}
     rest: list[int] = []
-    for col in range(1, last + 1):
+    for col in range(1, ws.max_column + 1):
         header = normalize_cell(ws.cell(row=rfmt.header_row, column=col).value)
         if header is not None and str(header) in standard and str(header) not in named:
             named[str(header)] = col
         else:
             rest.append(col)
-    return [named.get(h, h) for h in rfmt.standard_order] + rest
+    return [named.get(h, h) for h in rfmt.column_order] + rest
 
 
 def _is_identity(order: list[int | str]) -> bool:
     return order == list(range(1, len(order) + 1))
 
 
-def _dim_span(dim: ColumnDimension) -> tuple[int, int]:
-    lo = dim.min or column_index_from_string(dim.index)
-    return lo, dim.max or lo
+def _dim_columns(ws: Worksheet, last: int) -> dict[int, ColumnDimension]:
+    """欄號 → 欄設定（欄寬、隱藏等）；一筆設定涵蓋多欄時展開，只到第 `last` 欄。"""
+    out = {}
+    for dim in ws.column_dimensions.values():
+        lo = dim.min or column_index_from_string(dim.index)
+        for c in range(lo, min(dim.max or lo, last) + 1):
+            out[c] = dim
+    return out
 
 
 def _arrange_columns(ws: Worksheet, rfmt: ReferenceFormat) -> None:
-    """欄位照標準欄位順序重排；已是標準順序時不動。合併儲存格已由 `check_layout` 擋下。"""
+    """欄位照參考條件表欄位順序重排；已照參考條件表欄位順序時不動。合併儲存格已由 `check_layout` 擋下。"""
     order = _arrangement(ws, rfmt)
     if _is_identity(order):
         return
-    dims = {c: dim for dim in ws.column_dimensions.values() for c in range(_dim_span(dim)[0], _dim_span(dim)[1] + 1)}
+    dims = _dim_columns(ws, ws.max_column)
     rows = range(1, ws.max_row + 1)
+    # 直接搬 _value／data_type／_style：經 `.value` 會重新判斷型別（例：「=」開頭的字串變公式），格式也只能整組複製
     snap = {
         src: [(c._value, c.data_type, copy(c._style), c.hyperlink, c.comment) for c in (ws.cell(r, src) for r in rows)]
         for src in order

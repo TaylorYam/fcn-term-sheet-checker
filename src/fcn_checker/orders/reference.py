@@ -200,7 +200,7 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
             special[header] = col
         if header in fmt.columns:
             std_cols[fmt.columns[header]] = col
-        elif header not in fmt.ignored and header not in special:
+        elif header not in fmt.column_order:
             unknown.append(where)
     missing = [h for h in (*fmt.columns, fmt.issuer_column) if h not in seen]
     if fmt.key_column not in special:

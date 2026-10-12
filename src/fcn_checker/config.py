@@ -143,16 +143,11 @@ class ReferenceFormat:
     checked_value: str  # TS、IIS 欄的打勾寫法（核對沒問題）
     issuer_values: dict[str, str]  # 上手代號 → 發行機構欄的寫法
     columns: dict[str, str]  # Excel 欄名 → 標準欄位（要核對的欄）
-    standard_order: tuple[str, ...]  # 標準欄位順序：全部具名欄的固定左右順序（Issue #173）
+    column_order: tuple[str, ...]  # 參考條件表欄位順序；不在 columns 的是不核對的欄（Issue #173）
     ko_observation_values: dict[str, str]
     ko_memory_values: dict[str, bool]
     ki_type_values: dict[str, str]
     initial_pricing_values: dict[str, str]  # 期初定價：開盤價／收盤價／VWAP → open／close／vwap
-
-    @property
-    def ignored(self) -> tuple[str, ...]:
-        """不核對的欄：標準欄位順序中不在欄位對照裡的欄名。"""
-        return tuple(h for h in self.standard_order if h not in self.columns)
 
 
 def _load(path: Path, what: str) -> dict[str, Any]:
@@ -319,7 +314,7 @@ def load_reference_format(path: Path) -> ReferenceFormat:
             checked_value=layout["checked_value"],
             issuer_values=dict(d["issuer_values"]),
             columns=cols,
-            standard_order=tuple(str(h) for h in layout["standard_order"]),
+            column_order=tuple(str(h) for h in layout["column_order"]),
             ko_observation_values=dict(d["values"]["ko_observation"]),
             ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
             ki_type_values=dict(d["values"]["ki_type"]),
@@ -327,18 +322,18 @@ def load_reference_format(path: Path) -> ReferenceFormat:
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e
-    _check_standard_order(fmt)
+    _check_column_order(fmt)
     return fmt
 
 
-def _check_standard_order(fmt: ReferenceFormat) -> None:
-    """標準欄位順序要涵蓋每個核對欄與發行機構欄，且每個欄名只出現一次。"""
-    order = fmt.standard_order
+def _check_column_order(fmt: ReferenceFormat) -> None:
+    """參考條件表欄位順序要涵蓋每個核對欄與發行機構欄，且每個欄名只出現一次。"""
+    order = fmt.column_order
     absent = [h for h in (*fmt.columns, fmt.key_column, fmt.issuer_column) if h not in order]
     repeated = sorted({h for h in order if order.count(h) > 1}, key=order.index)
     problems = [f"缺少「{h}」" for h in dict.fromkeys(absent)] + [f"「{h}」重複" for h in repeated]
     if problems:
-        raise IngestionError("config_invalid", f"參考條件表格式設定檔的標準欄位順序{'、'.join(problems)}")
+        raise IngestionError("config_invalid", f"參考條件表格式設定檔的參考條件表欄位順序{'、'.join(problems)}")
 
 
 def load_issuer_prefixes(path: Path) -> dict[str, str]:
