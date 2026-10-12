@@ -261,6 +261,10 @@ def _scenarios(d: _Doc, s: Spec) -> None:
     pnl = a * n + 6000 - s.denom
     d.text(72, f"= {money(a)} {unit}×{n}+6,000.00 {unit}-{money(s.denom)} {unit}={money(pnl)} {unit}")
     d.text(72, "以簡單平均計算報酬率之方式以計算年化報酬率為-40.00%（四捨五入至百分位後第二位)")
+    # 提醒句的「收盤價格」被換行拆開；標的收盤價跟著標的走（美元），不是商品幣別的出處（Issue #179）
+    d.text(72, f"*請注意，在情境分析{worse}下，若在期末定價日籃子中表現最差的連結標的（{s.tickers[0]}）收盤")
+    d.text(72, "價格小於42.0000美元，投資人的本金損失可能更大。")
+    d.text(72, f"在最差情況下，每單位商品面額到期贖回價值為0 {unit}。")
     d.section = f"scen.{fail}"
     d.text(72, f"情境{fail}：發行機構無法履約")
     d.text(72, "投資人要承擔發行機構之無擔保信用風險(報酬率則為-100%)。")

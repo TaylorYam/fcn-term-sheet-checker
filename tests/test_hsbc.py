@@ -229,7 +229,8 @@ def test_price_table_currency_follows_the_underlying_and_is_not_checked(tmp_path
 
 
 def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
-    """商品幣別不必等於標的幣別：人民幣計價、連結美股，每一處幣別都 = 參考條件表承作幣別（Issue #170）。"""
+    """商品幣別不必等於標的幣別：人民幣計價、連結美股，每一處幣別都 = 參考條件表承作幣別（Issue #170）；
+    情境假設的匯率與實物交割算式裡的美元股價不算（Issue #179）。"""
     r = check(tmp_path, Spec(currency_zh="人民幣"))
     rows = [x for x in r.results if x.rule_id == "field.currency"]
     assert len(rows) > 1 and all(x.status == S.PASS and x.expected == "CNH" for x in rows), [
@@ -720,6 +721,7 @@ def test_hsbc_price_table_without_ki_column_for_a_ki_product_requires_review(tmp
         ("ch四", "最低加購金額：美元10,000元", "最低加購金額：日幣10,000元", "minimum_additional_currency"),
         ("art18", "每單位面額為美元10,000元", "每單位面額為日幣10,000元", "scenario_assumption_currency"),
         ("art18", "-美元10,000.00=美元200.00", "-美元10,000.00=日幣200.00", "scenario_1_currency"),
+        ("art18", "=美元230.45", "=日幣230.45", "scenario_4_currency"),  # 實物交割的剩餘金額（Issue #179）
     ],
     ids=lambda x: (
         (x if isinstance(x, str) else "+".join(x))

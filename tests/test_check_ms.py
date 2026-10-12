@@ -351,7 +351,8 @@ def test_ms_term_sheet_is_filled_when_the_investor_sheet_passes_too(tmp_path):
 
 
 def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
-    """商品幣別不必等於標的幣別：日圓計價、連結美股，全部通過（合成器照規格畫幣別，不再寫死美元）。"""
+    """商品幣別不必等於標的幣別：日圓計價、連結美股，全部通過（合成器照規格畫幣別，不再寫死美元）；
+    較差情境提醒句的美元收盤價被換行拆開也不算（Issue #179）。"""
     r = check(tmp_path, Spec(currency_zh="日幣"))
     assert r.status == S.PASS, problems(r)
     currency = rule(r, "field.currency")

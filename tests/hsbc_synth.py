@@ -249,6 +249,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             w.section = "art18"
             line("*假設天期")
             line("發行價格為100%")
+            fx = "1" if ccy == "美元" else "0.006"  # 標的以美元計價；匯率不是商品幣別的出處（Issue #179）
+            line(f"期末匯率為1{ccy}=美元{fx}")
             line(f"每單位期初投資金額={ccy}{s.denom:,.2f}(={denom}×100%)")
             partial = (s.coupon * 5 / 20).quantize(CENT, ROUND_HALF_UP) if s.partial_coupon else None
             ul = s.underlyings[0]
@@ -270,6 +272,16 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
                         line(f"觸及不保本價格{ccy}{price(ul.initial, s.ki_pct):.4f}")
                 if i == (2 if s.ki == "none" else 3):
                     line("交割股數：假設實物給付")
+                    # 實物交割算式：說明在上一行、數字在下一行，股價跟著標的走，剩餘金額以承作幣別支付（Issue #179）
+                    line(f"零股數則以{ccy}支付(「剩餘金額」)，計算方式為：")
+                    line("最後評價日最差表現連結標的期末股價×零股數/期末匯率")
+                    line(f"=美元83.30×0.0166/{fx}")
+                    line(f"={ccy}230.45")
+                    line("每單位面額到期贖回價值計算方式為：")
+                    line(f"最差表現連結標的期末股價×交割股數/期末匯率+以{ccy}支")
+                    line("付的剩餘金額")
+                    line(f"=(美元83.30×36/{fx})+{ccy}230.45")
+                    line(f"={ccy}5,000.45")
                 else:
                     line(f"到期贖回金額為{ccy}{denom}×100%={ccy}{s.denom:,.2f}")
                     got = s.coupons(periods)
