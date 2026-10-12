@@ -1,13 +1,16 @@
 """核對結果檔：一批說明書核對後唯一的 Excel 產出（Issue #72）。
 
-- 「回填後」：原參考條件表 `樣本清單` 的版面（表頭與表頭以上各列、欄寬、列高、儲存格與日期格式），
-  資料列只留下整份通過且已回填的列，順序照原表；可以直接匯入資料庫。原檔其他工作表不帶入。
+- 「回填後」：原參考條件表 `樣本清單` 刪掉不要的列，欄位再照標準欄位順序重排（Issue #173）：各欄從第 1 列起的值、
+  儲存格與日期格式、欄寬跟著欄走；表上缺少的欄在標準位置補一個只有表頭的空白欄；沒有表頭（或不在標準欄位順序、
+  重複）的欄接在最右邊，保持原相對順序。資料列只留下整份通過且已回填的列，順序照原表；可以直接匯入資料庫。
+  原檔其他工作表不帶入。
 - 「錯誤清單」：每份沒通過的說明書一列，依 PDF 輸入順序：TDCC Code、PDF 檔名、錯訊（多條以換行分隔）。
 
 檔名 `<參考條件表檔名>_核對結果_<YYYYMMDD-HHMMSS>.xlsx`，寫到指定資料夾，不覆蓋既有檔案。
 
 「回填後」是刪掉不要的列做出來的。合併儲存格、格式化條件、資料驗證的範圍與公式不會跟著位移，
-`樣本清單` 有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表。篩選範圍跟著資料列數縮小。
+`樣本清單` 有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表；要重排欄位時，合併儲存格（含表頭以上）
+也一樣。篩選範圍跟著資料列數縮小，補欄時跟著變寬。
 """
 
 from __future__ import annotations
@@ -20,13 +23,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl.styles import Alignment
-from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.styles.cell_style import StyleArray
+from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
 from openpyxl.workbook.workbook import Workbook
+from openpyxl.worksheet.dimensions import ColumnDimension
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .config import ReferenceFormat
 from .identification import Identification, name_code
 from .ingestion import IngestionError, write_new
+from .orders.reference import normalize_cell
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
@@ -55,7 +61,10 @@ def output_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:
 
 def check_layout(wb: Workbook, rfmt: ReferenceFormat) -> None:
     """版面無法安全刪列時丟出 IngestionError。要在回填前檢查：資料列的合併儲存格連回填都寫不進去。"""
-    unsupported = _unsupported_layout(wb[rfmt.sheet], rfmt.first_data_row)
+    ws = wb[rfmt.sheet]
+    unsupported = _unsupported_layout(ws, rfmt.first_data_row)
+    if ws.merged_cells.ranges and not _is_identity(_arrangement(ws, rfmt)):
+        unsupported.append("合併儲存格（欄位要照標準欄位順序重排）")
     if unsupported:
         raise IngestionError(
             "result_layout_unsupported",
@@ -81,6 +90,7 @@ def _build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Seq
     ws.sheet_view.tabSelected = True
     wb.active = ws
     _keep_rows(ws, rfmt.first_data_row, sorted(set(keep)))
+    _arrange_columns(ws, rfmt)
     _error_sheet(wb.create_sheet(ERROR_SHEET), errors)
     buf = io.BytesIO()
     wb.save(buf)
@@ -129,6 +139,73 @@ def _keep_rows(ws: Worksheet, first: int, keep: list[int]) -> None:
         if max_row >= first:
             last = max(first + len(keep) - 1, min_row)
             ws.auto_filter.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{last}"
+
+
+def _arrangement(ws: Worksheet, rfmt: ReferenceFormat) -> list[int | str]:
+    """「回填後」由左到右每一欄的來源：原表欄號，或表上缺少、要補空白欄的欄名。
+
+    標準欄位順序的欄依序在前；沒有表頭、不在標準欄位順序或重複出現的欄接在後面，保持原相對順序。"""
+    standard = set(rfmt.standard_order)
+    last = max([ws.max_column, *(hi for _, hi in map(_dim_span, ws.column_dimensions.values()))])
+    named: dict[str, int] = {}
+    rest: list[int] = []
+    for col in range(1, last + 1):
+        header = normalize_cell(ws.cell(row=rfmt.header_row, column=col).value)
+        if header is not None and str(header) in standard and str(header) not in named:
+            named[str(header)] = col
+        else:
+            rest.append(col)
+    return [named.get(h, h) for h in rfmt.standard_order] + rest
+
+
+def _is_identity(order: list[int | str]) -> bool:
+    return order == list(range(1, len(order) + 1))
+
+
+def _dim_span(dim: ColumnDimension) -> tuple[int, int]:
+    lo = dim.min or column_index_from_string(dim.index)
+    return lo, dim.max or lo
+
+
+def _arrange_columns(ws: Worksheet, rfmt: ReferenceFormat) -> None:
+    """欄位照標準欄位順序重排；已是標準順序時不動。合併儲存格已由 `check_layout` 擋下。"""
+    order = _arrangement(ws, rfmt)
+    if _is_identity(order):
+        return
+    dims = {c: dim for dim in ws.column_dimensions.values() for c in range(_dim_span(dim)[0], _dim_span(dim)[1] + 1)}
+    rows = range(1, ws.max_row + 1)
+    snap = {
+        src: [(c._value, c.data_type, copy(c._style), c.hyperlink, c.comment) for c in (ws.cell(r, src) for r in rows)]
+        for src in order
+        if isinstance(src, int)
+    }
+    for col, src in enumerate(order, start=1):
+        for r in rows:
+            cell = ws.cell(r, col)
+            if isinstance(src, int):
+                cell._value, cell.data_type, cell._style, hyperlink, comment = snap[src][r - 1]
+            else:  # 表上缺少的欄：只有表頭
+                cell._value, cell.data_type, cell._style, hyperlink, comment = None, "n", StyleArray(), None, None
+            cell.hyperlink, cell.comment = hyperlink, comment
+    present = [col for col, src in enumerate(order, start=1) if isinstance(src, int)]
+    for col, src in enumerate(order, start=1):
+        if isinstance(src, str):  # 表頭格式比照最近的原有欄的表頭格
+            cell = ws.cell(rfmt.header_row, col)
+            cell.value = src
+            if present:
+                near = min(present, key=lambda c: abs(c - col))
+                cell._style = copy(ws.cell(rfmt.header_row, near)._style)
+    ws.column_dimensions.clear()
+    for col, src in enumerate(order, start=1):
+        if isinstance(src, int) and src in dims:
+            dim = copy(dims[src])
+            dim.index = get_column_letter(col)
+            dim.min = dim.max = col
+            ws.column_dimensions[dim.index] = dim
+    if ws.auto_filter.ref:
+        min_col, min_row, max_col, max_row = range_boundaries(ws.auto_filter.ref)
+        added = sum(isinstance(src, str) for src in order)
+        ws.auto_filter.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col + added)}{max_row}"
 
 
 def _error_sheet(ws: Worksheet, errors: Sequence[ErrorRow]) -> None:

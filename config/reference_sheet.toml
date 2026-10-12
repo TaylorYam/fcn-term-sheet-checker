@@ -5,10 +5,11 @@
 # 回填欄位（TS、IIS、ISIN Code、發行日、比價日_1～12）由工具填入；其他欄位由作業人員事先填好，只做核對。
 # TS、IIS：說明書與投資人須知都通過或人工放行的商品打勾（checked_value，Issue #127）。
 # 期初定價為 VWAP 的商品，UL_n 四個價格欄不比對，核對通過後以說明書價格覆寫（Issue #122）。
+# 核對結果檔「回填後」的欄位照 layout.standard_order 排，不論表上欄位怎麼排（Issue #173）。
 # 規則說明見 docs/order-formats/reference-sheet.md。
 
-version = 4
-effective_date = 2026-10-09
+version = 5
+effective_date = 2026-10-12
 
 [layout]
 sheet = "樣本清單"
@@ -18,6 +19,21 @@ key_column = "TDCC Code"  # 商品代號，用來配對說明書；同一代號�
 issuer_column = "發行機構"
 empty_value = "-"         # 空值寫法（比價日不需要填的期別也寫 -）
 checked_value = "V"       # TS、IIS 欄的打勾寫法（半形英文字母 V，同「當日比價」「私銀註記」）
+# 標準欄位順序（Issue #173）：樣本清單全部具名欄的固定左右順序，「回填後」一律照它排。
+# 不在 [columns] 的欄是不核對的欄（存續或內部資訊，說明書沒有對應資料；發行機構只用來確認列屬於哪家上手）；
+# 表上少了不核對的欄不提示，「回填後」在它的位置補一個只有表頭的空白欄。無表頭的欄一律忽略，「回填後」接在最右邊。
+standard_order = [
+    "TS", "IIS", "庫存狀態", "當日比價", "Product", "發行機構", "TDCC Code", "ISIN Code", "私銀註記",
+    "單位面額", "承作幣別", "交易日", "發行日",
+    "比價日_1", "比價日_2", "比價日_3", "比價日_4", "比價日_5", "比價日_6", "比價日_7", "比價日_8", "比價日_9", "比價日_10", "比價日_11", "比價日_12",
+    "最終比價日", "到期日", "期初定價", "KO(%)", "KO(Freq)", "KO(memo)", "K(%)", "KI(%)", "KI(Freq)", "UF",
+    "Coupon p.a. (%)", "天期(月)", "Non-Call(月)",
+    "UL_1", "UL_1_進場價", "UL_1_執行價", "UL_1_下限價", "UL_1_KO價", "UL_1_Memo",
+    "UL_2", "UL_2_進場價", "UL_2_執行價", "UL_2_下限價", "UL_2_KO價", "UL_2_Memo",
+    "UL_3", "UL_3_進場價", "UL_3_執行價", "UL_3_下限價", "UL_3_KO價", "UL_3_Memo",
+    "UL_4", "UL_4_進場價", "UL_4_執行價", "UL_4_下限價", "UL_4_KO價", "UL_4_Memo",
+    "UL_5", "UL_5_進場價", "UL_5_執行價", "UL_5_下限價", "UL_5_KO價", "UL_5_Memo",
+]
 
 # 上手代號 → 該上手在「發行機構」欄的寫法
 [issuer_values]
@@ -84,11 +100,6 @@ MS = "MS"
 "UL_5_執行價" = "underlying_5_strike_price"
 "UL_5_下限價" = "underlying_5_ki_price"
 "UL_5_KO價" = "underlying_5_ko_price"
-
-# 存續或內部資訊，說明書沒有對應資料，不核對；發行機構只用來確認列屬於哪家上手
-ignored = ["庫存狀態", "當日比價", "Product", "發行機構", "私銀註記", "UF",
-           "UL_1_Memo", "UL_2_Memo", "UL_3_Memo", "UL_4_Memo", "UL_5_Memo"]
-# 無表頭的欄（例：已 KO 註記）一律忽略
 
 # KO(Freq)：D 期間每日觀察／P 每期定日觀察
 [values.ko_observation]

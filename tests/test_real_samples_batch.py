@@ -121,6 +121,16 @@ def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
     return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
 
 
+def test_standard_order_is_the_real_sheet_header_and_the_result_keeps_it(saved):
+    """標準欄位順序 = 真實 樣本清單 第 3 列的具名欄；「回填後」照它排，沒有表頭的欄留在後面（Issue #173）。"""
+    fmt = CONFIG.reference_format
+    real = [c.value for c in openpyxl.load_workbook(REFERENCE)[fmt.sheet][fmt.header_row]]
+    assert [h for h in real if h is not None] == list(fmt.standard_order)
+    out = [c.value for c in openpyxl.load_workbook(saved[1].output)["回填後"][fmt.header_row]]
+    assert out[: len(fmt.standard_order)] == list(fmt.standard_order)
+    assert not any(out[len(fmt.standard_order) :])
+
+
 @requires(TO_FILL)  # 回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）
 def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     sheet = shutil.copy(TO_FILL, tmp_path / TO_FILL.name)

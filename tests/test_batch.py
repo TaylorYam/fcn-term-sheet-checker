@@ -512,6 +512,69 @@ def test_result_file_keeps_only_passing_rows_in_sheet_order_with_the_original_la
         assert header_cell(ws, "比價日_2", r).value == "-"
 
 
+def test_result_file_puts_columns_in_the_standard_order_whatever_the_sheet_order(tmp_path):
+    spec = Spec()
+    shuffled = list(reversed(REFERENCE_HEADERS))
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=shuffled)
+
+    def change(wb):
+        ws = wb["樣本清單"]
+        ws.cell(1, shuffled.index("發行日") + 1, "標題跟著欄走")
+        ws.column_dimensions[ws.cell(3, shuffled.index("發行日") + 1).column_letter].width = 23
+        ws.column_dimensions[ws.cell(3, shuffled.index("TS") + 1).column_letter].width = 4
+
+    edit_sheet(sheet, change)
+    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+
+    assert receipt.filled(outcome.items[0])
+    ws = openpyxl.load_workbook(receipt.output)["回填後"]
+    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS, "表頭照標準欄位順序"
+    issue = header_cell(ws, "發行日", 4)
+    assert ws.cell(1, issue.column).value == "標題跟著欄走", "表頭以上的列跟著欄走"
+    assert ws.column_dimensions[issue.column_letter].width == 23, "欄寬跟著欄走"
+    assert ws.column_dimensions["A"].width == 4
+    assert issue.value.date() == spec.issue_date and issue.number_format == DATE_FORMAT
+    row = row_of(receipt.output, spec.product_code)
+    assert (row["TS"], row["IIS"], row["ISIN Code"]) == ("V", "V", SYNTH_ISIN)
+    assert row["UL_1"] == spec.underlyings[0].ticker and row["發行機構"] == "Barclays"
+
+
+def test_missing_unchecked_column_is_not_a_problem_and_comes_back_blank_in_its_standard_place(tmp_path):
+    spec = Spec()
+    headers = [h for h in REFERENCE_HEADERS if h not in ("UF", "UL_3_Memo")]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=headers)
+    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+
+    assert problems(outcome.items[0]) == [] and receipt.filled(outcome.items[0]), "少了不核對的欄不提示"
+    ws = openpyxl.load_workbook(receipt.output)["回填後"]
+    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS, "補回的欄在標準位置，其他欄位置不變"
+    uf = header_cell(ws, "UF", 4)
+    assert uf.value is None and ws.cell(1, uf.column).value is None, "補回的欄只有表頭"
+    assert header_cell(ws, "UL_3_Memo", 4).value is None
+    assert header_cell(ws, "Coupon p.a. (%)", 4).value == float(spec.annual)
+
+
+def test_columns_without_a_standard_header_go_to_the_right_in_their_original_order(tmp_path):
+    spec = Spec()
+    shuffled = list(reversed(REFERENCE_HEADERS))
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=shuffled)
+
+    def change(wb):
+        ws = wb["樣本清單"]
+        ws.insert_cols(10)  # 夾在中間、沒有表頭的欄
+        ws.cell(4, 10, "中間的註記")
+        ws.cell(4, ws.max_column + 2, "最右的註記")
+
+    edit_sheet(sheet, change)
+    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+
+    assert receipt.filled(outcome.items[0])
+    ws = openpyxl.load_workbook(receipt.output)["回填後"]
+    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS
+    notes = [c.value for c in ws[4][len(REFERENCE_HEADERS) :] if c.value is not None]
+    assert notes == ["中間的註記", "最右的註記"], "沒有表頭的欄接在最右邊，保持原相對順序"
+
+
 def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
     ok, bad, missing = Spec(), Spec(product_code="029199990002"), Spec(product_code="029199990003")
     unsupported = Spec(product_code="999199990001")
@@ -584,6 +647,21 @@ def test_layout_that_cannot_be_trimmed_safely_writes_no_result_file(tmp_path, fe
     assert receipt.record is not None and receipt.record.exists()
 
 
+@pytest.mark.parametrize("shuffled", [True, False])
+def test_merged_title_cells_block_the_result_file_only_when_columns_must_move(tmp_path, shuffled):
+    spec = Spec()
+    headers = list(reversed(REFERENCE_HEADERS)) if shuffled else None
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=headers)
+    edit_sheet(sheet, lambda wb: wb["樣本清單"].merge_cells("A1:C1"))
+    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+    if shuffled:
+        assert receipt.output is None and not receipt.filled(outcome.items[0])
+        e = receipt.errors[0]
+        assert (e.reason_code, "合併儲存格" in e.message) == ("result_layout_unsupported", True)
+    else:
+        assert receipt.filled(outcome.items[0]), "已是標準順序，不用重排，照舊產生"
+
+
 def test_existing_result_file_is_never_overwritten(tmp_path):
     spec = Spec()
     taken = tmp_path / "reports" / "FCN參考條件_核對結果_20300203-040506.xlsx"
@@ -601,6 +679,25 @@ def test_config_problem_is_reported_when_loading_the_config_and_nothing_is_writt
         load_config(reference_format=tmp_path / "missing.toml")
     assert raised.value.reason_code == "config_not_found" and "missing.toml" in str(raised.value)
     assert not (tmp_path / "reports").exists() and not (tmp_path / "runtime").exists()
+
+
+@pytest.mark.parametrize(
+    "old,new,named",
+    [
+        ('"ISIN Code", ', "", "ISIN Code"),  # 核對欄沒排進標準欄位順序
+        ('"發行機構", ', "", "發行機構"),  # 配對上手用的欄也要在
+        ('"UF",', '"UF", "UF",', "UF"),  # 重複
+    ],
+)
+def test_standard_order_that_disagrees_with_the_column_map_is_a_config_problem(tmp_path, old, new, named):
+    text = REFERENCE_FORMAT.read_text(encoding="utf-8")
+    start = text.index("standard_order = [")
+    bad = tmp_path / "reference_sheet.toml"
+    bad.write_text(text[:start] + text[start:].replace(old, new, 1), encoding="utf-8")
+    with pytest.raises(IngestionError) as raised:
+        load_config(reference_format=bad)
+    assert raised.value.reason_code == "config_invalid" and "標準欄位順序" in str(raised.value)
+    assert named in str(raised.value)
 
 
 def test_broken_reference_sheet_is_a_batch_error_and_writes_no_result_file(tmp_path):
