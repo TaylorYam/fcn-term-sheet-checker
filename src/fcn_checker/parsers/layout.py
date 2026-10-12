@@ -95,6 +95,14 @@ class TextIndex:
         j = max(i, bisect.bisect_right(self._starts, max(start, end - 1)) - 1)
         return self.lines[i : j + 1]
 
+    def line_at(self, pos: int) -> int:
+        """`text[pos]` 所在行的索引（`lines` 的位置）。"""
+        return max(0, bisect.bisect_right(self._starts, pos) - 1)
+
+    def line_start(self, i: int) -> int:
+        """第 i 行在 `text` 的起點。"""
+        return self._starts[i]
+
     def finditer(self, pattern: str | re.Pattern[str]):
         return re.finditer(pattern, self.text)
 
