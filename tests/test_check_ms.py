@@ -439,3 +439,30 @@ def test_stock_prices_in_the_worse_scenario_are_not_product_currency(tmp_path):
     ]
     r = check(tmp_path, edits=edits)
     assert r.status == S.PASS, problems(r)
+
+
+@pytest.mark.parametrize("currency_zh", ["澳幣", "南非幣"])
+def test_currencies_seen_on_samples_are_in_the_review_standard_table(tmp_path, currency_zh):
+    """樣本上看過的澳幣、南非幣有對照（Issue #185）：封面、面額、商品名稱照常核對，不轉人工覆核。"""
+    r = check(tmp_path, Spec(currency_zh=currency_zh))
+    assert r.status == S.PASS, problems(r)
+
+
+def test_scenario_amounts_written_without_decimals_are_read_and_checked(tmp_path):
+    """日圓樣本的情境算式金額寫到整數位（1,000,000 日圓×1.0000%=10,000 日圓）：照常讀出並核對（Issue #181）。"""
+    s = Spec(currency_zh="日圓", integer_amounts=True)
+    r = check(tmp_path, s)
+    assert r.status == S.PASS, problems(r)
+    assert {x.status for x in rule(r, "doc.scenario_calculations")} == {S.PASS}
+    other = tmp_path / "other"
+    other.mkdir()
+    r = check(other, s, edits=[Edit("10,000 日圓×2", "10,000 日圓×3", "ts.scen.二")])
+    assert flagged(r, "doc.scenario_calculations", S.MISMATCH), problems(r)
+
+
+@pytest.mark.parametrize(("times", "status"), [("x2", S.PASS), ("X2", S.PASS), ("x3", S.MISMATCH)])
+def test_halfwidth_x_is_read_as_the_multiplication_sign(tmp_path, times, status):
+    """損益算式的乘號寫成半形 x（南非幣樣本）：照常讀出並核對（Issue #181）。"""
+    r = check(tmp_path, S0, edits=[Edit("100.00 美元×2", f"100.00 美元{times}", "ts.scen.二")])
+    assert {x.status for x in rule(r, "doc.scenario_calculations")} >= {status}, problems(r)
+    assert not flagged(r, "doc.scenario_calculations", S.REVIEW_REQUIRED), problems(r)

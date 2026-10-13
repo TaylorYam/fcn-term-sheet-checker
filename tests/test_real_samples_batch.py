@@ -177,9 +177,13 @@ def test_hsbc_investor_sheets_only_differ_by_the_forbidden_wording(outcome):
     # 2026-10-08 使用者決定：第七節「受託投資本商品」兩處判不一致（docs/rules/iis-check-rules.md §5）
     sheets = investor_sheets(outcome, "325")
     assert len(sheets) >= 8
+    forbidden = Counter({("standard.forbidden_wording", "forbidden_wording"): 1})
     for item in sheets:
-        assert problems(item) == Counter({("standard.forbidden_wording", "forbidden_wording"): 1}), item.term_sheet.name
+        assert problems(item) >= forbidden, item.term_sheet.name
         assert item.partner is not None and not item.partner.fills_sheet
+    # 另外各 1 份（2026-10-13 使用者確認）：參考條件表到期日填成最後評價日；刊印日期晚於交易日 5 天（文件問題，#183）
+    others = sum((problems(i) - forbidden for i in sheets), Counter())
+    assert others == Counter({("field.maturity_date", "value_mismatch"): 1, ("doc.print_date", "value_mismatch"): 1})
 
 
 def test_every_local_investor_sheet_belongs_to_an_issuer_with_an_iis_template(outcome):

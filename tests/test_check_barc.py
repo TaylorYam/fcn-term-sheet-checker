@@ -427,10 +427,10 @@ def test_wrong_currency_message_names_the_place(tmp_path):
 
 
 def test_currency_word_outside_the_review_standard_table_requires_review(tmp_path):
-    report = check(tmp_path, edits=[Edit("每單位商品面額為10,000 美元。", "每單位商品面額為10,000 歐元。", "ts.art6")])
+    report = check(tmp_path, edits=[Edit("每單位商品面額為10,000 美元。", "每單位商品面額為10,000 瑞郎。", "ts.art6")])
     assert problems(report) == {("field.currency", REVIEW)}
     [r] = results(report, "field.currency", "denomination_currency")
-    assert r.reason_code == "currency_unknown" and "「歐元」" in r.message
+    assert r.reason_code == "currency_unknown" and "「瑞郎」" in r.message
 
 
 def test_underlying_currency_in_the_physical_settlement_formula_is_not_checked(tmp_path):
@@ -441,8 +441,8 @@ def test_underlying_currency_in_the_physical_settlement_formula_is_not_checked(t
 
 
 def test_currency_without_a_sample_is_reviewed_once_at_the_cover(tmp_path):
-    """可承作但沒有說明書樣本的幣別（例：AUD）：對照表沒有，封面幣別轉人工覆核一次；其他出處寫同一個字不重複報。"""
-    report = check(tmp_path, Spec(currency_zh="澳幣", currency_iso="AUD"))
+    """沒有樣本的幣別寫法（例：澳元）：對照表沒有，封面幣別轉人工覆核一次；其他出處寫同一個字不重複報。"""
+    report = check(tmp_path, Spec(currency_zh="澳元", currency_iso="AUD"))
     [cover] = results(report, "field.currency")
     assert (cover.field, cover.status, cover.reason_code) == ("currency", REVIEW, "currency_unknown")
     assert results(report, "doc.denomination")[0].reason_code == "currency_unknown"

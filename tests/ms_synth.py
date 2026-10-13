@@ -41,6 +41,11 @@ def money(x: Decimal | int) -> str:
     return f"{Decimal(x):,.2f}"
 
 
+def whole(x: Decimal | int) -> str:
+    """情境算式金額寫到整數位（日圓樣本）。"""
+    return f"{Decimal(x):,.0f}"
+
+
 def underlying_name(i: int) -> str:
     """第 i 檔標的的名稱（說明書第 11 項標的表與投資人須知連結標的資產同一寫法）。"""
     return f"虛構標的{i}公司(FICTIONAL {i})"
@@ -74,6 +79,7 @@ class Spec(ProductSpec):
     breaks: dict[str, int] = field(default_factory=dict)  # 表格（date／price）第 n 列之後換頁
     iis_pages: int = 4  # 投資人須知頁數（多的頁只有頁底）
     iis_page_total: int | None = None  # 投資人須知頁底「共 M頁」的 M；None 同實際頁數
+    integer_amounts: bool = False  # 第 18 項情境算式金額寫到整數位（日圓樣本的寫法，Issue #181）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -218,6 +224,7 @@ def _price_table(d: _Doc, s: Spec, section: str) -> None:
 
 def _scenarios(d: _Doc, s: Spec) -> None:
     unit, a, n = s.currency_zh, s.coupon, s.tenor
+    fmt = whole if s.integer_amounts else money  # 情境算式金額的寫法
     profit = []
     if s.first_callable < n:
         profit.append(("較佳情況 A" if s.first_callable + 1 < n else "較佳情況", s.first_callable))
@@ -238,13 +245,11 @@ def _scenarios(d: _Doc, s: Spec) -> None:
             span = "配息觀察期間" if s.ko_obs == "D" else "定價日"
             d.text(72, f"假設在第1 至第{n} 個{span}，不曾發生任何自動提前出場事件，到期日以現金結算收益：")
         d.text(72, "每單位商品面額×固定配息率")
-        d.text(72, f"= 每單位商品面額×{s.monthly}%={money(s.denom)} {unit}×{s.monthly}%={money(a)} {unit}")
+        d.text(72, f"= 每單位商品面額×{s.monthly}%={fmt(s.denom)} {unit}×{s.monthly}%={fmt(a)} {unit}")
         if s.ko_obs == "D" and 1 < k < n:
-            d.text(
-                72, f"第{k} 個配息觀察期間配息觀察日總數 ={money(s.denom)} {unit}×{s.monthly}%×100% ={money(a)} {unit}"
-            )
+            d.text(72, f"第{k} 個配息觀察期間配息觀察日總數 ={fmt(s.denom)} {unit}×{s.monthly}%×100% ={fmt(a)} {unit}")
         times = f"×{k}" if k > 1 else ""
-        d.text(72, f"={money(s.denom)} {unit}+{money(a)} {unit}{times}-{money(s.denom)} {unit}={money(a * k)} {unit}")
+        d.text(72, f"={fmt(s.denom)} {unit}+{fmt(a)} {unit}{times}-{fmt(s.denom)} {unit}={fmt(a * k)} {unit}")
         d.text(72, f"以簡單平均計算報酬率之方式以計算年化報酬率為{s.annual:.2f}%（四捨五入至百分位後第二位)")
     worse, fail = zh[len(profit)], zh[len(profit) + 1]
     d.section = f"scen.{worse}"
@@ -256,10 +261,10 @@ def _scenarios(d: _Doc, s: Spec) -> None:
         f"於期末定價日籃子中表現最差之連結標的（{s.tickers[0]})的收盤價=42.0000 {unit}小於其執行價={strike:.4f} {unit}，"
         "到期日以實物交割結算收益：",
     )
-    d.text(72, f"= 每單位商品面額×{s.monthly}%={money(s.denom)} {unit}×{s.monthly}%={money(a)} {unit}")
-    d.text(72, f"=42.0000 {unit}×142 股/1+36.00 {unit}=6,000.00 {unit}")
+    d.text(72, f"= 每單位商品面額×{s.monthly}%={fmt(s.denom)} {unit}×{s.monthly}%={fmt(a)} {unit}")
+    d.text(72, f"=42.0000 {unit}×142 股/1+{fmt(36)} {unit}={fmt(6000)} {unit}")
     pnl = a * n + 6000 - s.denom
-    d.text(72, f"= {money(a)} {unit}×{n}+6,000.00 {unit}-{money(s.denom)} {unit}={money(pnl)} {unit}")
+    d.text(72, f"= {fmt(a)} {unit}×{n}+{fmt(6000)} {unit}-{fmt(s.denom)} {unit}={fmt(pnl)} {unit}")
     d.text(72, "以簡單平均計算報酬率之方式以計算年化報酬率為-40.00%（四捨五入至百分位後第二位)")
     # 提醒句的「收盤價格」被換行拆開；標的收盤價跟著標的走（美元），不是商品幣別的出處（Issue #179）
     d.text(72, f"*請注意，在情境分析{worse}下，若在期末定價日籃子中表現最差的連結標的（{s.tickers[0]}）收盤")
