@@ -22,6 +22,7 @@ LAYOUT = LayoutSpec(
 )
 N = r"([\d,]+(?:\.\d+)?)"
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
+CURRENCY_WORD = "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True))  # 中文幣別字，長的先比
 
 
 def document(lines: Sequence[Line]) -> Document:
@@ -165,7 +166,8 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         r"受託或銷售機構之名稱、電話及地址[:：].+?電話[:：][+\d-]+(.+?)(?:\(營業活動所在地\))?公會審查",
     )
     put("name_art1", article(1), r"商品名稱[:：](.+)$")
-    put("currency_art5", article(5), r"計價幣別[:：](.+)$")
+    # 只讀幣別字：人民幣商品後面接「人民幣計價債券之說明事項：…」段落（Issue #180）；讀不到認得的幣別字時為缺漏
+    put("currency_art5", article(5), rf"計價幣別[:：]({CURRENCY_WORD})")
     put("denomination", article(6), r"每單位面額[:：].+?" + N + r"元", number)
     put("minimum_trade", article(7), r"最低交易金額[:：].+?" + N + r"元", number)
     ccy, amount = money.CURRENCY, money.NUMBER

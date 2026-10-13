@@ -238,6 +238,16 @@ def test_product_currency_need_not_match_the_underlying_currency(tmp_path):
     ]
 
 
+def test_article_5_reads_only_the_currency_before_the_cnh_explanation(tmp_path):
+    """人民幣商品第 5 條幣別後面接說明段落：只讀幣別字，與封面一致（Issue #180）；第 5 條幣別真的不同時仍判不一致。"""
+    s = Spec(currency_zh="人民幣")
+    assert only(check(tmp_path, s), "doc.currency_consistency").status == S.PASS
+    other = tmp_path / "other"
+    other.mkdir()
+    r = check(other, s, edits=[Edit("計價幣別：人民幣人民幣計價", "計價幣別：美元人民幣計價", "ts.art5")])
+    assert only(r, "doc.currency_consistency").status == S.MISMATCH
+
+
 @pytest.mark.parametrize("currency_zh", ["澳幣", "歐元", "英鎊"])
 def test_currencies_seen_on_samples_are_in_the_review_standard_table(tmp_path, currency_zh):
     """樣本上看過的澳幣、歐元、英鎊有對照（Issue #185）：封面、面額、商品名稱照常核對，不轉人工覆核。"""

@@ -21,6 +21,8 @@ from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
 from reference_synth import UL, ProductSpec, price
 
 CENT = Decimal("0.01")
+# 人民幣商品第一章第 5 條在幣別後面接的說明段落（真實樣本寫法節錄，Issue #180）
+CNH_NOTE = "人民幣計價債券之說明事項：交割貨幣：境外人民幣本債券將以境外人民幣交割並於中國大陸境外交易。替代交割貨幣：美金"
 
 
 def underlyings(count: int) -> tuple[UL, ...]:
@@ -180,7 +182,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             {
                 1: "商品名稱：" + short + s.en,
                 2: warning,
-                5: f"計價幣別：{ccy}",
+                5: f"計價幣別：{ccy}" + (CNH_NOTE if ccy == "人民幣" else ""),
                 6: f"每單位面額：{ccy}{denom}元",
                 7: f"最低交易金額：{ccy}{denom}元",
                 10: "發行價格：100%",
