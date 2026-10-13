@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from ..schema import Line, ParsedField
 from ..text import squash
+from .common import dec
 from .layout import DATE_RE, TextIndex, capture, parse_date
 
 # 標的表的列標籤（去空白；冒號全半形皆有），依出現順序；下限價格列只在有 KI 時出現
@@ -36,10 +37,6 @@ FEE_PATTERNS = {  # 第四章第 2 項費用表（去空白）：費用項目名
     "提前贖回費用": r"提前贖回費用投資人提前贖回價金的(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)",
     "分銷費用": r"分銷費用\([^)]*\)申購價金的(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)",
 }
-
-
-def _dec(s: str) -> Decimal:
-    return Decimal(s.replace(",", ""))
 
 
 def price_table(name: str, lines: list[Line], *, with_tickers: bool) -> ParsedField:
@@ -90,7 +87,7 @@ def price_table(name: str, lines: list[Line], *, with_tickers: bool) -> ParsedFi
         for col in columns:
             m = cells[col][i]
             offset = found[col].end()
-            prices[col] = _dec(m[1])
+            prices[col] = dec(m[1])
             if col != "initial":
                 pcts[col].append(Decimal(m[2]))
             for ln in ti.lines_for(offset + m.start(), offset + m.end()):
@@ -123,31 +120,6 @@ def _tickers(lines: list[Line]) -> list[str] | None:
     if not cells or any(not TICKER.fullmatch(c) for c in cells):
         return None
     return [re.sub(r"\s+", " ", c) for c in cells]
-
-
-def _names(lines: list[Line], n: int) -> list[str] | None:
-    """「連結標的名稱：」列到「彭博代碼：」列之前的各格名稱（只用來指出情境假設的是哪一檔，不核對）。
-
-    行數 = 標的數時一行一格；名稱換行時同一格的行 x 座標相同，依 x 座標分格（表格一格一欄）。分不出 n 格時為 None。
-    """
-    starts = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(NAME_LABEL))]
-    ends = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(TICKER_LABEL))]
-    if len(starts) != 1 or len(ends) != 1 or ends[0] <= starts[0]:
-        return None
-    a, b = starts[0], ends[0]
-    head = lines[a].text.split("：", 1)[1].strip() if "：" in lines[a].text else ""
-    cells: list[tuple[float | None, str]] = ([(None, head)] if head else []) + [
-        (ln.x0, ln.text.strip()) for ln in lines[a + 1 : b] if ln.text.strip()
-    ]
-    if len(cells) == n:
-        return [text for _, text in cells]
-    groups: dict[float | None, list[str]] = {}
-    for x, text in cells:
-        key = next((k for k in groups if k is not None and x is not None and abs(k - x) < 2), x)
-        groups.setdefault(key, []).append(text)
-    if len(groups) != n:
-        return None
-    return ["".join(parts) for parts in groups.values()]
 
 
 def _names(lines: list[Line], n: int) -> list[str] | None:

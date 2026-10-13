@@ -45,49 +45,13 @@ START_GAP = dt.timedelta(days=4)  # D 型配息期開始日最晚在前期結束
 BASE_PROSPECTUS_PLACES = 3  # 基本公開說明書日期：封面警語 (7)、第三章 §6(7)、第五章 §2(1)
 
 
-def _bad(deps: list[ParsedField]) -> ParsedField | None:
-    return next((p for p in deps if not p.ok), None)
-
-
-def _doc(ctx: IssuerContext, rid: str, field: str, name: str, *deps: ParsedField) -> Check:
-    """文件內部比對的結果身分：項目名稱為 `name`（預期值來自同一份文件其他位置），依賴欄位有問題轉人工覆核。"""
-    return Check(rid, field, Item.expected(name), ctx.document).needs(*deps)
-
-
 # ---------------------------------------------------------------- 年利率與月配息率（核對規則 §3.3，讀參考條件表）
-
-
-def _rate_mentions(ctx: IssuerContext, rid, field, what, mentions, compare, tolerance, message) -> list[CheckResult]:
-    """說明書每個出處一筆，與參考條件表年利率推得的值比對；讀不到或出現多個轉人工覆核。"""
-    annual, ov, problem = bnp_scenario.annual_rate(ctx, rid, field)
-    if problem:
-        return [problem]
-    out = []
-    for m in mentions:
-        check = Check(rid, field, Item.derived(f"{what} %（{m.where}）", [ov]), ctx.document, ov=(ov,))
-        if m.value is None:
-            out.append(
-                check.result(
-                    S.REVIEW_REQUIRED,
-                    evidence=list(m.evidence),
-                    reason="document_missing",
-                    message=f"說明書{m.where}找不到{what}或出現多個",
-                )
-            )
-            continue
-        ok, shown = compare(annual, m.value)
-        out.append(
-            check.compare(
-                shown, m.value, ok=ok, evidence=list(m.evidence), tolerance=tolerance, message=message(annual)
-            )
-        )
-    return out
 
 
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
     """第 15 項兩處、第 18 項假設與各情境算式的每個月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到說明書顯示的位數
     （USD／GBP 4 位、JPY 6 位）。"""
-    return _rate_mentions(
+    return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
         "monthly_coupon_pct",
@@ -104,7 +68,7 @@ def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
 
 def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
     """第 18 項獲利情境（自動提前贖回、最佳情況）每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
-    return _rate_mentions(
+    return kit.rate_mentions(
         ctx,
         "derive.annualized_return",
         "annualized_return_pct",
@@ -120,7 +84,7 @@ def min_coupon_rate(ctx: IssuerContext) -> CheckResult:
     """第 17 項「最低配息率為Y%（年化）」= 第 15 項年利率。"""
     f = ctx.ts.f
     annual, low = f("coupon_pa_pct"), f("min_coupon_rate")
-    return _doc(ctx, "doc.min_coupon_rate", "min_coupon_rate", "第 17 項最低保證配息率", annual, low).compare(
+    return kit.doc_check(ctx, "doc.min_coupon_rate", "min_coupon_rate", "第 17 項最低保證配息率", annual, low).compare(
         annual.value,
         low.value,
         ok=annual.ok and low.ok and kit.shown(annual.value, low.value) == low.value,
@@ -140,7 +104,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     f = ctx.ts.f
     code, trustee = f("product_code"), f("trustee_product_code")
     out = [
-        _doc(ctx, "doc.trustee_product_code", "trustee_product_code", "受託機構商品代號", code, trustee).compare(
+        kit.doc_check(
+            ctx, "doc.trustee_product_code", "trustee_product_code", "受託機構商品代號", code, trustee
+        ).compare(
             code.value,
             trustee.value or "（空白）",
             ok=code.ok and trustee.ok and trustee.value == code.value,
@@ -155,7 +121,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     ):
         pf = f(field)
         out.append(
-            _doc(ctx, "doc.name_consistency", field, name, zh, pf).compare(
+            kit.doc_check(ctx, "doc.name_consistency", field, name, zh, pf).compare(
                 _norm_name(zh.value) if zh.ok else None,
                 _norm_name(pf.value) if pf.ok else None,
                 fail_message=f"{where}須等於封面第 2 項商品中文名稱（不含「(下稱「商品」)」；忽略空白、括號全半形）",
@@ -163,7 +129,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
         )
     cz, c5 = f("currency_zh"), f("currency_art5")
     out.append(
-        _doc(ctx, "doc.currency_consistency", "currency_art5", "第一章第 5 項計價幣別", cz, c5).compare(
+        kit.doc_check(ctx, "doc.currency_consistency", "currency_art5", "第一章第 5 項計價幣別", cz, c5).compare(
             squash(cz.value) if cz.ok else None, squash(c5.value) if c5.ok else None
         )
     )
@@ -180,10 +146,12 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     if zh.ok and months is None:
         name_months = ParsedField.invalid("name_months", [], "商品名稱找不到「N 個月期」")
     return [
-        _doc(ctx, rid, "date_table", "第 14 項日期表期數", tenor, table).compare(
+        kit.doc_check(ctx, rid, "date_table", "第 14 項日期表期數", tenor, table).compare(
             tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
         ),
-        _doc(ctx, rid, "name_months", "商品名稱月數", tenor, name_months).compare(tenor.value, name_months.value),
+        kit.doc_check(ctx, rid, "name_months", "商品名稱月數", tenor, name_months).compare(
+            tenor.value, name_months.value
+        ),
     ]
 
 
@@ -192,7 +160,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
     f = ctx.ts.f
     table, wording = f("date_table"), f("ko_wording")
     out = [
-        _doc(
+        kit.doc_check(
             ctx, "doc.ko_observation", "ko_observation", "KO 觀察方式（日期表與第 14 項寫法）", table, wording
         ).compare(
             table.value["type"] if table.ok else None,
@@ -205,7 +173,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
     mem, mem20 = f("ko_memory"), f("ko_memory_art20")
     label = {True: "記憶式", False: "非記憶式"}
     out.append(
-        _doc(ctx, "doc.ko_memory", "ko_memory_art20", "記憶式（第 16 項與第 20 項(1)）", mem, mem20).compare(
+        kit.doc_check(ctx, "doc.ko_memory", "ko_memory_art20", "記憶式（第 16 項與第 20 項(1)）", mem, mem20).compare(
             label.get(mem.value) if mem.ok else None,
             label.get(mem20.value) if mem20.ok else None,
             fail=S.REVIEW_REQUIRED,
@@ -220,7 +188,7 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
     """第 16 項自動提前贖回金額、第 17 項到期贖回金額 = 商品面額 × 100%（固定）。"""
     f = ctx.ts.f
     return [
-        _doc(ctx, "doc.redemption_pct", field, name, f(field)).compare(
+        kit.doc_check(ctx, "doc.redemption_pct", field, name, f(field)).compare(
             100, f(field).value, fail_message=f"{name}須為商品面額 × 100%"
         )
         for field, name in (
@@ -281,12 +249,6 @@ def page_count(ctx: IssuerContext) -> CheckResult:
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）
 
 
-def _structure_check(ctx: IssuerContext, rid: str, field: str, name: str, deps, issues, tolerance=None) -> CheckResult:
-    return _doc(ctx, rid, field, name, *deps).compare(
-        None, None, ok=not issues, reason="schedule_inconsistent", message="；".join(issues), tolerance=tolerance
-    )
-
-
 def schedule(ctx: IssuerContext) -> list[CheckResult]:
     f = ctx.ts.f
     table, final, maturity, issue = (
@@ -313,13 +275,13 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
     if late:
         issues.append(f"第 {'、'.join(map(str, late))} 期{label}沒有早於配息日")
     deps = [table, final, maturity]
-    if _bad(deps) is None:
+    if kit.first_bad(deps) is None:
         if payments[-1] != maturity.value:
             issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
         if rows[-1][observed] != final.value:
             issues.append(f"末期{label} {rows[-1][observed] or '不適用'} 不等於期末評價日 {final.value}")
     out.append(
-        _structure_check(ctx, "schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], deps, issues)
+        kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], deps, issues)
     )
 
     if kind == "D":  # 第 1 期開始日 = 發行日；前期結束日 < 開始日 ≤ 前期結束日 + 4 個日曆天
@@ -332,7 +294,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
                     f"第 {row['period']} 期開始日 {row['start']} 不在前期結束日 {prev['end']} 後 4 個日曆天內"
                 )
         out.append(
-            _structure_check(
+            kit.structure_check(
                 ctx,
                 "schedule.period_starts",
                 "period_starts",
@@ -356,31 +318,11 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
                     shown = "應有日期" if want else "應為「不適用」"
                     issues.append(f"第 {r['period']} 期自動提前贖回評價日{shown}")
     out.append(
-        _structure_check(
+        kit.structure_check(
             ctx, "schedule.autocall_dates", "autocall_dates", names["schedule.autocall_dates"], [table, k], issues
         )
     )
     return out
-
-
-# ---------------------------------------------------------------- 審查標準（第四章受託機構電話）
-
-
-def distributor_phone_ch4(ctx: IssuerContext) -> CheckResult:
-    """第四章第 16 項「受託機構聯絡方式」= 審查標準受託機構電話（含等價寫法）。"""
-    std, pf = ctx.issuer_std, ctx.ts.f("distributor_phone_ch4")
-    check = Check("standard.distributor", "distributor_phone_ch4", Item.standard("第四章受託機構電話"), ctx.document)
-    check = check.needs(pf)
-    if (problem := check.blocked) is not None:
-        return problem
-    listed = {squash(v) for v in (std.distributor_phone, *std.distributor_phone_equivalents)}
-    return check.compare(
-        std.distributor_phone,
-        pf.value,
-        ok=squash(pf.value) in listed,
-        tolerance="忽略空白後逐字相等，或為審查標準列出的電話等價寫法（distributor.phone_equivalents）",
-        fail_message="第四章第 16 項受託機構聯絡方式與審查標準不同",
-    )
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
@@ -396,6 +338,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *schedule(ctx),
         base_prospectus(ctx),
         page_count(ctx),
-        distributor_phone_ch4(ctx),
         *bnp_scenario.run(ctx),
     ]

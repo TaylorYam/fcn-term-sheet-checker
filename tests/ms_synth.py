@@ -20,7 +20,7 @@ import fitz
 
 from harness import CONFIG, STANDARD, check_all, iis_path
 from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
-from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
+from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row, weekday_on_or_after
 
 NAME = STANDARD["product_name"]["ms"]
 WARNING = STANDARD["risk"]["fixed_warning_by_issuer"]["ms"]
@@ -29,12 +29,6 @@ ISSUER = STANDARD["issuer_name"]["ms"]
 DIST = STANDARD["distributor"]
 TRADE, ISSUE, APPROVAL = dt.date(2030, 1, 7), dt.date(2030, 1, 14), dt.date(2026, 6, 11)
 NUMERIC = set("0123456789,.")
-
-
-def _weekday(d: dt.date) -> dt.date:
-    while d.weekday() >= 5:
-        d += dt.timedelta(days=1)
-    return d
 
 
 def money(x: Decimal | int) -> str:
@@ -91,16 +85,16 @@ class Spec(ProductSpec):
         out = []
         for j in range(1, self.tenor + 1):
             m = 1 + j
-            out.append(_weekday(dt.date(2030 + (m - 1) // 12, (m - 1) % 12 + 1, 14)))
+            out.append(weekday_on_or_after(dt.date(2030 + (m - 1) // 12, (m - 1) % 12 + 1, 14)))
         return out
 
     @property
     def payments(self) -> list[dt.date]:
-        return [_weekday(d + dt.timedelta(days=3)) for d in self.ends]
+        return [weekday_on_or_after(d + dt.timedelta(days=3)) for d in self.ends]
 
     @property
     def starts(self) -> list[dt.date]:
-        return [self.issue_date] + [_weekday(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
+        return [self.issue_date] + [weekday_on_or_after(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
 
     @property
     def tickers(self) -> list[str]:
@@ -489,7 +483,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
 
     d.chapter("四", "一般交易事項")
     d.text(36, "1. 商品開始受理贖回日期及後續受理贖回日期，每營業日受理申購、贖回申請截止時間：")
-    d.text(54, f"(1) 開始受理贖回日期：{zh_date(_weekday(s.issue_date + dt.timedelta(days=1)))}")
+    d.text(54, f"(1) 開始受理贖回日期：{zh_date(weekday_on_or_after(s.issue_date + dt.timedelta(days=1)))}")
     d.text(54, "(2) 結束受理贖回日期：期末定價日前三個營業日")
     d.text(36, "2. 投資人應負擔的各項費用及金額或計算基準之表列：")
     w.need(260)
@@ -564,7 +558,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     d.text(18, "1. 商品簡介：")
     label = (lambda i: f"連結標的{i}") if len(s.underlyings) > 1 else (lambda i: "連結標的")
     uls = " ".join(f"({i}) {label(i)}: {underlying_name(i)}" for i in range(1, len(s.underlyings) + 1))
-    redeem_from = _weekday(s.issue_date + dt.timedelta(days=1))
+    redeem_from = weekday_on_or_after(s.issue_date + dt.timedelta(days=1))
     for n, t in enumerate(
         [
             "受託對象：專業投資人及OSU 客戶",

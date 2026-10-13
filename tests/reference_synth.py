@@ -30,6 +30,13 @@ Q4 = Decimal("0.0001")
 DEFAULT_DENOMINATION = {k: int(v) for k, v in STANDARD["denomination"].items()}  # 幣別預設面額（審查標準）
 
 
+def weekday_on_or_after(d: dt.date) -> dt.date:
+    """`d` 當天或之後的第一個平日（合成日期表用；不考慮假日）。"""
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+
 def price(initial: Decimal, pct: Decimal) -> Decimal:
     """期初價 × 百分比，四位小數（參考條件表各標的價格欄與說明書價格表同一算法）。"""
     return (initial * pct / 100).quantize(Q4, ROUND_HALF_UP)

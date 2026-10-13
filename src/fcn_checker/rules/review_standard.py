@@ -15,7 +15,7 @@ from ..config import ISSUER_NAME_IGNORES, NAME_FLAGS, RISK_LEVEL
 from ..investor_sheet import read_iis
 from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
-from ..standard_fields import fee_field
+from ..standard_fields import GUARANTOR_PLACES, fee_field
 from ..text import full_brackets, squash
 from .kit import Check, Context, occurrences_of, standard_field
 
@@ -283,7 +283,8 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
 
 
 def _distributor_info(ctx: Context) -> list[CheckResult]:
-    """受託或銷售機構名稱、電話、地址：封面與第二章每一處 = 審查標準；電話、地址另接受審查標準列出的等價寫法。"""
+    """受託或銷售機構名稱、電話、地址：封面與第二章每一處（範本另有第四章電話時含那一處）= 審查標準；
+    電話、地址另接受審查標準列出的等價寫法。範本沒有的出處（不適用）不核對。"""
     rid, std = "standard.distributor", ctx.issuer_std
     checks = (  # 標準欄位、種類、審查標準值、說明的開頭、項目名稱
         ("distributor_name_cover", "name", std.distributor_name, "封面受託或銷售機構名稱", "封面受託或銷售機構名稱"),
@@ -310,6 +311,10 @@ def _distributor_info(ctx: Context) -> list[CheckResult]:
             "第二章受託或銷售機構地址",
         ),
     )
+    if standard_field(ctx, "distributor_phone_ch4").status != FieldStatus.NOT_APPLICABLE:
+        checks += (
+            ("distributor_phone_ch4", "phone", std.distributor_phone, "第四章受託機構聯絡方式", "第四章受託機構電話"),
+        )
     return [
         _distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)
         for name, kind, exp, what, zh in checks
@@ -479,12 +484,6 @@ def _product_name(ctx: Context) -> list[CheckResult]:
 
 
 # ---------------------------------------------------------------- 審查標準有該上手分節才核對的固定值（BNP）
-
-GUARANTOR_PLACES = {  # 出處鍵 → 標準欄位、說明的開頭、項目名稱
-    "cover": ("guarantor_name_cover", "封面「保證機構」名稱", "封面保證機構名稱"),
-    "ch1": ("guarantor_name_ch1", "第一章保證機構名稱", "第一章保證機構名稱"),
-    "ch2": ("guarantor_name_ch2", "第二章「保證機構」事業名稱", "第二章保證機構名稱"),
-}
 
 
 def _guarantor_name(ctx: Context) -> list[CheckResult]:

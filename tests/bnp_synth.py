@@ -21,7 +21,7 @@ import fitz
 
 from harness import CONFIG, STANDARD, check_all, iis_path
 from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
-from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
+from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row, weekday_on_or_after
 
 NAME = STANDARD["product_name"]["bnp"]
 WARNING = STANDARD["risk"]["fixed_warning_by_issuer"]["bnp"]
@@ -37,12 +37,6 @@ APPROVAL = dt.date(2026, 6, 11)
 PROSPECTUS = dt.date(2026, 5, 21)
 ZH = "一二三四五六七八九十"
 NUMERIC = set("0123456789,.")
-
-
-def _weekday(d: dt.date) -> dt.date:
-    while d.weekday() >= 5:
-        d += dt.timedelta(days=1)
-    return d
 
 
 def underlyings(count: int) -> tuple[UL, ...]:
@@ -84,16 +78,16 @@ class Spec(ProductSpec):
         out = []
         for j in range(1, self.tenor + 1):
             m = 1 + j
-            out.append(_weekday(dt.date(2030 + (m - 1) // 12, (m - 1) % 12 + 1, 14)))
+            out.append(weekday_on_or_after(dt.date(2030 + (m - 1) // 12, (m - 1) % 12 + 1, 14)))
         return out
 
     @property
     def payments(self) -> list[dt.date]:
-        return [_weekday(d + dt.timedelta(days=3)) for d in self.ends]
+        return [weekday_on_or_after(d + dt.timedelta(days=3)) for d in self.ends]
 
     @property
     def starts(self) -> list[dt.date]:
-        return [self.issue_date] + [_weekday(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
+        return [self.issue_date] + [weekday_on_or_after(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
 
     @property
     def tickers(self) -> list[str]:

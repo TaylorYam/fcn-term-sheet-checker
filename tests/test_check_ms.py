@@ -13,26 +13,12 @@ from fcn_checker.backfill import BackfillAction
 from fcn_checker.issuers import MS
 from fcn_checker.messages import problem_message
 from fcn_checker.schema import CheckStatus as S
-from harness import check_all
+from harness import check_all, flagged
+from harness import field_problems as problems
+from harness import results as rule
 from ms_synth import Spec, build_pdf, check
 from pdf_writer import Edit, zh_date
 from reference_synth import build_reference_sheet, reference_row
-
-PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
-
-
-def problems(report) -> list[tuple[str, str, S]]:
-    return [(r.rule_id, r.field, r.status) for r in report.results if r.status in PROBLEMS]
-
-
-def rule(report, rule_id, field=None):
-    out = [r for r in report.results if r.rule_id == rule_id and (field is None or r.field == field)]
-    assert out, f"沒有 {rule_id} {field or ''} 的結果"
-    return out
-
-
-def flagged(report, rule_id, status=None) -> bool:
-    return any(r.rule_id == rule_id and r.status in ((status,) if status else PROBLEMS) for r in report.results)
 
 
 @pytest.mark.parametrize(

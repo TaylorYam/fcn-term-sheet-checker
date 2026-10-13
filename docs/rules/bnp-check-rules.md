@@ -217,7 +217,7 @@
 |---|---|---|
 | §3.1 參考條件表欄位、回填、VWAP | `field.*`、`backfill.*` | 共用 `rules/reference.py`、`backfill.py` |
 | §3.1 最低金額倍數 | `field.min_amounts`（倍數 `min_amount_multiples.bnp`） | 共用 `rules/reference.py` |
-| §3.2 審查標準共用項目 | `standard.approval_date`、`standard.chairman`、`standard.distributor`（含第四章 §16 電話）、`standard.issuer_name`、`standard.fixed_warning`、`standard.risk_level`、`standard.forbidden_wording`、`standard.product_name`、`standard.fees`、`standard.issue_price`（三處重印）、`doc.denomination`、`doc.print_date`、`doc.subscription_start_date` | 共用 `rules/review_standard.py`；第四章電話在 `rules/bnp.py` |
+| §3.2 審查標準共用項目 | `standard.approval_date`、`standard.chairman`、`standard.distributor`（含第四章 §16 電話：標準欄位 `distributor_phone_ch4`，由共用規則核對，Issue #196）、`standard.issuer_name`、`standard.fixed_warning`、`standard.risk_level`、`standard.forbidden_wording`、`standard.product_name`、`standard.fees`、`standard.issue_price`（三處重印）、`doc.denomination`、`doc.print_date`、`doc.subscription_start_date` | 共用 `rules/review_standard.py`；第四章電話在 `rules/bnp.py` |
 | §3.2 商品種類、發行不成立門檻 | `standard.product_type`、`standard.minimum_issue_size` | 共用 `rules/review_standard.py`（有該上手分節才核對） |
 | §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
 | §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`（`split_suspected`） | 共用 |

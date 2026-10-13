@@ -15,6 +15,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import bnp_scenario, bnp_tables, money
+from .common import NUM, Hit, Mention, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "bnp-zh-pd"
@@ -40,7 +41,6 @@ COVER_TITLE = "中文產品說明書(適用於專業投資人及OSU客戶)"
 TITLE_START = "(下稱「本產品說明書」)"
 ISSUER_EN = "BNP Paribas Issuance B.V."
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
-NUM = r"([\d,]+(?:\.\d+)?)"
 PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
 FEES = ("申購費用", "提前贖回費用", "分銷費用")
@@ -56,7 +56,6 @@ KI_WORDINGS = (  # 定義句開頭 → KI 型態（範本規格 §4.4）
     ("每一個配息期結束日", "P"),
 )
 NO_KI = re.compile(r"若於期末評價日，(?:表現最差)?連結標的之收盤價格大於或等於其執行價格")
-DECIMALS = {"四捨五入至小數點以下第二位": 2, "四捨五入至整數位": 0}
 
 
 def document(lines: Sequence[Line]) -> Document:
@@ -163,15 +162,6 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
 # ---------------------------------------------------------------- 讀出
 
 
-@dataclass(frozen=True)
-class Mention:
-    """月配息率或年化報酬率的一個出處；值讀不到時為 None。"""
-
-    where: str
-    value: Decimal | None
-    evidence: tuple[Evidence, ...]
-
-
 @dataclass
 class BnpTermSheet:
     fields: dict[str, ParsedField]
@@ -184,18 +174,6 @@ class BnpTermSheet:
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
-
-
-def _number(x: str) -> int | Decimal:
-    d = Decimal(x.replace(",", ""))
-    return int(d) if d == d.to_integral_value() else d
-
-
-def _derived(name: str, src: ParsedField, value=None) -> ParsedField:
-    """由另一個欄位推得（證據沿用來源）：來源有問題時沿用來源的狀態與說明。"""
-    if not src.ok:
-        return ParsedField(name, src.status, None, list(src.evidence), list(src.candidates), src.note)
-    return ParsedField(name, FieldStatus.PRESENT, value, list(src.evidence))
 
 
 def _labelled(name: str, lines: Sequence[Line], label: str) -> ParsedField:
@@ -295,20 +273,20 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
             note = "封面第 12 項無法切出名稱、電話、地址"
             fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=list(distributor.evidence), note=note)
         else:
-            fields[key] = _derived(key, distributor, parts[k].strip() if parts else None)
+            fields[key] = derived(key, distributor, parts[k].strip() if parts else None)
     approval = _item(items, 13, "approval_date", "玉山綜合證券股份有限公司(受託機構)審查通過之日期")
     approved = parse_date(approval.value) if approval.ok else None
     fields["approval_date"] = (
         ParsedField("approval_date", FieldStatus.INVALID, evidence=approval.evidence, note="審查通過日期不是日期")
         if approval.ok and approved is None
-        else _derived("approval_date", approval, approved)
+        else derived("approval_date", approval, approved)
     )
     printed = _item(items, 16, "print_date", "產品說明書刊印日期")
     print_date = parse_date(printed.value) if printed.ok else None
     fields["print_date"] = (
         ParsedField("print_date", FieldStatus.INVALID, evidence=printed.evidence, note="刊印日期不是日期")
         if printed.ok and print_date is None
-        else _derived("print_date", printed, print_date)
+        else derived("print_date", printed, print_date)
     )
     full = TextIndex(doc.lines)
     fields["base_prospectus_dates"] = capture("base_prospectus_dates", full, r"發行機構於?" + D + r"公告之", parse_date)
@@ -325,7 +303,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     fields["guarantor_name_ch1"] = _labelled("guarantor_name_ch1", art3, "保證機構：")
     fields["currency_art5"] = _labelled("currency_art5", article(5), "計價幣別：")
     art6 = article(6)
-    put("denomination", art6, r"商品面額：每單位商品" + NUM + CCY, _number)
+    put("denomination", art6, r"商品面額：每單位商品" + NUM + CCY, number)
     put("denomination_currency", art6, rf"商品面額：每單位商品{money.NUMBER}({CCY})")
     put("issue_price_pct", article(7), r"發行價格：" + PCT, Decimal)
     art11 = article(11)
@@ -347,7 +325,12 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     put("coupon_pa_pct", art15, r"月配息率：\d+(?:\.\d+)?%\(即年利率" + PCT + r"\)", Decimal)
     put("monthly_coupon_pct", art15, r"月配息率：" + PCT + r"\(即年利率", Decimal)
     put("coupon_formula_pct", art15, r"固定配息金額=每單位面額×" + PCT, Decimal)
-    put("coupon_decimals", art15, r"\((四捨五入至小數點以下第二位|四捨五入至整數位)\)計算以", lambda x: DECIMALS[x])
+    put(
+        "coupon_decimals",
+        art15,
+        r"\((四捨五入至小數點以下第二位|四捨五入至整數位)\)計算以",
+        lambda x: bnp_scenario.DECIMALS[x],
+    )
     put("coupon_currency_art15", art15, rf"計算以({CCY})計值的配息款項")
     art16 = article(16)
     put("autocall_redemption_pct", art16, r"自動提前贖回金額=商品面額×" + PCT, Decimal)
@@ -395,15 +378,15 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
             label, standard_fields.fee_field(label), doc.span_lines(ch4.get(2))
         )
     art4 = doc.span_lines(ch4.get(4))
-    put("minimum_subscription", art4, r"最低申購金額：" + NUM + CCY, _number)
-    put("minimum_additional", art4, r"最低加購金額：" + NUM + CCY, _number)
+    put("minimum_subscription", art4, r"最低申購金額：" + NUM + CCY, number)
+    put("minimum_additional", art4, r"最低加購金額：" + NUM + CCY, number)
     put("minimum_subscription_currency", art4, rf"最低申購金額：{money.NUMBER}({CCY})")
     put("minimum_additional_currency", art4, rf"最低加購金額：{money.NUMBER}({CCY})")
     put("issue_price_ch4", doc.span_lines(ch4.get(5)), r"每單位商品面額×" + PCT + r"\+申購費用", Decimal)
     put("minimum_issue_size", doc.span_lines(ch4.get(7)), r"至少達(\(等值\)[^之]*?)之總申購價值")
     art8 = doc.span_lines(ch4.get(8))
-    put("minimum_redemption", art8, r"最低贖回金額為" + NUM + CCY, _number)
-    put("redemption_increment", art8, r"並以" + NUM + CCY + r"為增加贖回之單位", _number)
+    put("minimum_redemption", art8, r"最低贖回金額為" + NUM + CCY, number)
+    put("redemption_increment", art8, r"並以" + NUM + CCY + r"為增加贖回之單位", number)
     put("minimum_redemption_currency", art8, rf"最低贖回金額為{money.NUMBER}({CCY})")
     put("redemption_increment_currency", art8, rf"並以{money.NUMBER}({CCY})為增加贖回之單位")
     fields["distributor_phone_ch4"] = _labelled(
@@ -447,13 +430,18 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
                 "issue_price_scenario",
                 "發行價格（第 18 項假設）",
                 "第 18 項假設發行價格",
-                _hit_field("issue_price_scenario", scenarios.issue_price, 0, "第 18 項假設找不到發行價格或出現多次"),
+                _hit_field("issue_price_scenario", scenarios.issue_price, "第 18 項假設找不到發行價格或出現多次"),
             ),
             occ(
                 "issue_price_principal",
                 "發行價格（第 18 項投資本金）",
                 "第 18 項投資本金算式",
-                _hit_field("issue_price_principal", scenarios.principal, 0, "第 18 項假設找不到投資本金算式或出現多次"),
+                _hit_field(
+                    "issue_price_principal",
+                    scenarios.principal,
+                    "第 18 項假設找不到投資本金算式或出現多次",
+                    lambda v: v.pct,
+                ),
             ),
             occ("issue_price_ch4", "發行價格（第四章申購價金）", "第四章第 5 項申購價金", fields["issue_price_ch4"]),
         ],
@@ -463,10 +451,11 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     return BnpTermSheet(fields, full, doc, scenarios, coupons, annualized, page_headers(lines))
 
 
-def _hit_field(name: str, hit: bnp_scenario.Hit | None, index: int, missing: str) -> ParsedField:
+def _hit_field(name: str, hit: Hit | None, missing: str, pick: Callable = lambda v: v) -> ParsedField:
+    """文件上一處值（`pick` 取出其中一個具名欄位）；找不到或多處時為缺漏。"""
     if hit is None:
         return ParsedField.missing(name, missing)
-    return ParsedField.present(name, hit.values[index], list(hit.lines))
+    return ParsedField.present(name, pick(hit.value), list(hit.lines))
 
 
 def _art11_region(art11: list[Line]) -> list[Line]:
@@ -503,7 +492,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
         for key in keys:
-            fields[key] = _derived(key, bad)
+            fields[key] = derived(key, bad)
         return
     kind, rows = table.value["type"], table.value["rows"]
     ev = table.evidence + wording.evidence
@@ -537,7 +526,7 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line
     """第 11 項標的表 → 標準欄位：標的（彭博代碼）與各標的價格列。"""
     if not table.ok:
         for key in ("underlyings", "underlying_prices"):
-            fields[key] = _derived(key, table)
+            fields[key] = derived(key, table)
         return
     tickers = table.value["tickers"]
     names = table.value["names"] or [None] * len(tickers)
@@ -561,7 +550,7 @@ def _pcts(fields: dict[str, ParsedField]) -> None:
             fields[key] = ParsedField(key, FieldStatus.NOT_APPLICABLE, evidence=list(ki.evidence))
             continue
         if not table.ok:
-            fields[key] = _derived(key, table)
+            fields[key] = derived(key, table)
             continue
         pcts = table.value["pcts"].get(col)
         if pcts is None:
@@ -621,14 +610,22 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
             "情境假設商品面額幣別",
             "第 18 項假設商品面額",
             _hit_field(
-                "scenario_denomination_currency", scenarios.denomination, 1, "第 18 項假設找不到商品面額或出現多次"
+                "scenario_denomination_currency",
+                scenarios.denomination,
+                "第 18 項假設找不到商品面額或出現多次",
+                lambda v: v.currency,
             ),
         ),
         occ(
             "scenario_principal_currency",
             "情境假設投資本金幣別",
             "第 18 項假設投資本金",
-            _hit_field("scenario_principal_currency", scenarios.principal, 2, "第 18 項假設找不到投資本金或出現多次"),
+            _hit_field(
+                "scenario_principal_currency",
+                scenarios.principal,
+                "第 18 項假設找不到投資本金或出現多次",
+                lambda v: v.currency,
+            ),
         ),
     ]
     for s in scenarios.scenarios:
@@ -646,30 +643,25 @@ def _mentions(
 ) -> tuple[list[Mention], list[Mention]]:
     """月配息率的每個出處與獲利情境的年化報酬率（核對規則 §3.3）；讀不到的出處值為 None。"""
 
-    def one(where: str, pf: ParsedField) -> Mention:
-        return Mention(where, pf.value if pf.ok else None, tuple(pf.evidence))
+    one = Mention.of_field
 
-    def hit(where: str, h: bnp_scenario.Hit | None, index: int, fallback: Sequence[Line]) -> Mention:
-        if h is None:
-            return Mention(where, None, tuple(Evidence.of(ln) for ln in fallback))
-        return Mention(where, h.values[index], tuple(Evidence.of(ln) for ln in h.lines))
+    def hit(where: str, h: Hit | None, pick: Callable, fallback: Sequence[Line]) -> Mention:
+        return Mention.missing(where, fallback) if h is None else Mention.of_hit(where, pick(h.value), h)
 
     coupons = [
         one("第 15 項月配息率", fields["monthly_coupon_pct"]),
         one("第 15 項固定配息金額算式", fields["coupon_formula_pct"]),
     ]
     if len(scenarios.monthly) == 1:
-        coupons.append(hit("第 18 項假設每月配息率", scenarios.monthly[0], 0, []))
+        coupons.append(hit("第 18 項假設每月配息率", scenarios.monthly[0], lambda v: v, []))
     else:
-        coupons.append(
-            Mention("第 18 項假設每月配息率", None, tuple(Evidence.of(ln) for ln in scenarios.assumptions[:1]))
-        )
+        coupons.append(Mention.missing("第 18 項假設每月配息率", scenarios.assumptions[:1]))
     annualized = []
     for s in scenarios.scenarios:
         if s.kind == "extreme":
             continue
         where = f"第 18 項情境{s.number}"
-        coupons.append(hit(f"{where}配息算式", s.coupon, 4, s.lines[:1]))
+        coupons.append(hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1]))
         if s.kind in ("autocall", "best"):
-            annualized.append(hit(f"{where}年化報酬率", s.total_return, 4, s.lines[:1]))
+            annualized.append(hit(f"{where}年化報酬率", s.total_return, lambda v: v.annualized, s.lines[:1]))
     return coupons, annualized

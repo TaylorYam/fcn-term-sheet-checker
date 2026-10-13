@@ -48,7 +48,7 @@
 | 第一個可提前出場期 | Non-Call(月) | §4.3 | 整數相等（`field.first_callable_period`） |
 | 各期比價日 | 比價日_1～12 | §11(1)(2) | 回填欄位，見 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md) §4（`backfill.compare_dates`） |
 | 標的 | UL_1～5 | §12(1) 彭博代號 | 依順序逐字相等（含交易所尾碼），數量相同；空值寫法表示沒有這檔標的（`field.underlyings`） |
-| 各標的價格 | UL_n_進場價／執行價／下限價／KO價 | §12(1) | 表上值四捨五入（half-up）到 4 位後相等；無 KI 時下限價必須是空值寫法（`field.underlying_prices`，欄位名稱「代號 執行價」等）。期初定價為 `VWAP` 時不比對，核對通過後以 §12(1) 覆寫（`backfill.underlying_prices`，Issue #122） |
+| 各標的價格 | UL_n_進場價／執行價／下限價／KO價 | §12(1) | 表上值四捨五入（half-up）到 4 位後相等；同一檔標的可比對的價格欄全部與說明書差同一比例（表上值 ÷ 說明書值，4 位）且不是 1 時，該檔轉人工覆核並寫出比例（疑為股票分割調整後的價格，`split_suspected`，各上手共用，Issue #191）；只有部分欄位不同或比例不同時照常判不一致。無 KI 時下限價必須是空值寫法（`field.underlying_prices`，欄位名稱「代號 執行價」等）。期初定價為 `VWAP` 時不比對，核對通過後以 §12(1) 覆寫（`backfill.underlying_prices`，Issue #122） |
 
 ### 3.3 數值
 
