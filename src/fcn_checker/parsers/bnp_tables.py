@@ -24,7 +24,7 @@ PRICE_LABELS = (
 PRICE = r"([\d,]+\.\d{4})"
 PRICE_PCT = PRICE + r"，?即期初價格之(\d+(?:\.\d+)?)%"  # 第 11 項「N 即期初價格之X%」、第 18 項「N，即期初價格之X%」
 TICKER = re.compile(r"^[A-Z0-9][A-Z0-9./-]*\s+[A-Z]{2}$")
-TICKER_LABEL, EXCHANGE_LABEL = "彭博代碼：", "交易所："
+NAME_LABEL, TICKER_LABEL, EXCHANGE_LABEL = "連結標的名稱：", "彭博代碼：", "交易所："
 
 # 日期表：表頭（去空白、接在「j」之後）→ 表型
 DATE_HEADERS = {"配息期開始日配息期結束日配息日": "D", "自動提前贖回評價日配息日": "P"}
@@ -107,6 +107,7 @@ def price_table(name: str, lines: list[Line], *, with_tickers: bool) -> ParsedFi
         if len(tickers) != n:
             return ParsedField.invalid(name, lines, f"標的表彭博代碼有 {len(tickers)} 個，價格列有 {n} 格")
         value["tickers"] = tickers
+        value["names"] = _names(lines, n)
     return ParsedField.present(name, value, evidence)
 
 
@@ -122,6 +123,56 @@ def _tickers(lines: list[Line]) -> list[str] | None:
     if not cells or any(not TICKER.fullmatch(c) for c in cells):
         return None
     return [re.sub(r"\s+", " ", c) for c in cells]
+
+
+def _names(lines: list[Line], n: int) -> list[str] | None:
+    """「連結標的名稱：」列到「彭博代碼：」列之前的各格名稱（只用來指出情境假設的是哪一檔，不核對）。
+
+    行數 = 標的數時一行一格；名稱換行時同一格的行 x 座標相同，依 x 座標分格（表格一格一欄）。分不出 n 格時為 None。
+    """
+    starts = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(NAME_LABEL))]
+    ends = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(TICKER_LABEL))]
+    if len(starts) != 1 or len(ends) != 1 or ends[0] <= starts[0]:
+        return None
+    a, b = starts[0], ends[0]
+    head = lines[a].text.split("：", 1)[1].strip() if "：" in lines[a].text else ""
+    cells: list[tuple[float | None, str]] = ([(None, head)] if head else []) + [
+        (ln.x0, ln.text.strip()) for ln in lines[a + 1 : b] if ln.text.strip()
+    ]
+    if len(cells) == n:
+        return [text for _, text in cells]
+    groups: dict[float | None, list[str]] = {}
+    for x, text in cells:
+        key = next((k for k in groups if k is not None and x is not None and abs(k - x) < 2), x)
+        groups.setdefault(key, []).append(text)
+    if len(groups) != n:
+        return None
+    return ["".join(parts) for parts in groups.values()]
+
+
+def _names(lines: list[Line], n: int) -> list[str] | None:
+    """「連結標的名稱：」列到「彭博代碼：」列之前的各格名稱（只用來指出情境假設的是哪一檔，不核對）。
+
+    行數 = 標的數時一行一格；名稱換行時同一格的行 x 座標相同，依 x 座標分格（表格一格一欄）。分不出 n 格時為 None。
+    """
+    starts = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(NAME_LABEL))]
+    ends = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(TICKER_LABEL))]
+    if len(starts) != 1 or len(ends) != 1 or ends[0] <= starts[0]:
+        return None
+    a, b = starts[0], ends[0]
+    head = lines[a].text.split("：", 1)[1].strip() if "：" in lines[a].text else ""
+    cells: list[tuple[float | None, str]] = ([(None, head)] if head else []) + [
+        (ln.x0, ln.text.strip()) for ln in lines[a + 1 : b] if ln.text.strip()
+    ]
+    if len(cells) == n:
+        return [text for _, text in cells]
+    groups: dict[float | None, list[str]] = {}
+    for x, text in cells:
+        key = next((k for k in groups if k is not None and x is not None and abs(k - x) < 2), x)
+        groups.setdefault(key, []).append(text)
+    if len(groups) != n:
+        return None
+    return ["".join(parts) for parts in groups.values()]
 
 
 def ticker_lines(lines: list[Line]) -> list[Line]:

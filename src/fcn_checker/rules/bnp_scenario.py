@@ -11,6 +11,7 @@ from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 from ..schema import CheckResult, Evidence, Item
 from ..schema import CheckStatus as S
+from ..text import squash
 from . import kit
 from .kit import Check, IssuerContext
 
@@ -134,7 +135,10 @@ def parameters(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
-    """較差／最差情境假設句與股數算式的執行價格 = 第 11 項某一檔標的的執行價格（表現最差標的）。"""
+    """較差／最差情境假設句與股數算式的執行價格 = 第 11 項表現最差標的的執行價格（核對規則 §3.4）。
+
+    表現最差標的是假設句「(假設為X)」對到第 11 項名稱列的那一檔；單一標的就是那一檔。對不到時轉人工覆核。
+    """
     rows, rid, name = ctx.ts.f("underlying_prices"), "doc.scenario_strike", "較差情境執行價格"
     out = []
     for s in ctx.ts.scenarios.scenarios:
@@ -150,10 +154,14 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
             )
             continue
         strike = s.strike.values[2]
-        strikes = {r.prices["strike"]: r.ticker for r in rows.value}
+        target, why = _worst_row(s, list(rows.value))
+        if target is None:
+            out.append(_result(rid, field, name, [why], _ev(s.strike.lines), review=True))
+            continue
+        expected = target.prices["strike"]
         issues = []
-        if strike not in strikes:
-            issues.append(f"執行價格 {strike} 不是第 11 項任何一檔標的的執行價格")
+        if strike != expected:
+            issues.append(f"執行價格 {strike} 不是表現最差標的 {target.ticker} 的執行價格 {expected}")
         if s.shares is not None and s.shares.values[3] != strike:
             issues.append(f"股數算式的執行價格 {s.shares.values[3]} 與假設句的 {strike} 不同")
         out.append(
@@ -163,11 +171,24 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
                 name,
                 issues,
                 _ev(s.strike.lines) + (_ev(s.shares.lines) if s.shares else []),
-                expected=sorted(strikes),
+                expected=expected,
                 actual=strike,
             )
         )
     return out
+
+
+def _worst_row(s, rows):
+    """情境假設的表現最差標的那一列；對不到時 (None, 原因)。"""
+    if len(rows) == 1:
+        return rows[0], None
+    if s.worst_name is None:
+        return None, "多檔標的但找不到「(假設為某標的)」，無法確定表現最差標的是哪一檔"
+    wanted = squash(s.worst_name.values[0])
+    row = next((r for r in rows if r.name is not None and squash(r.name) == wanted), None)
+    if row is None:
+        return None, f"假設的表現最差標的「{s.worst_name.values[0]}」對不到第 11 項的標的名稱"
+    return row, None
 
 
 def calculations(ctx: IssuerContext) -> list[CheckResult]:
@@ -189,6 +210,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             "return": Item.expected(f"{tag}總報酬率"),
             "shares": Item.expected(f"{tag}股數"),
             "remainder": Item.expected(f"{tag}剩餘金額"),
+            "assumed": Item.expected(f"{tag}假設的自動提前贖回評價日"),
         }
         bad = next((p for p in (denom, tenor, k) if not p.ok), None)
         if bad is not None:
@@ -209,6 +231,8 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
                 )
             )
             continue
+        if s.kind == "autocall":
+            _assumed(out, rid, tag, items["assumed"], s, tenor.value, k.value)
         amount = _coupon(out, rid, tag, items["coupon"], s, denom.value, tenor.value, k.value, annual, ov)
         _cumulative(out, rid, tag, items["cumulative"], s, amount)
         if s.kind in ("autocall", "best"):
@@ -217,6 +241,28 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
         else:
             _worse(out, rid, tag, items, s, denom.value)
     return out
+
+
+def _assumed(out, rid, tag, item, s, tenor, k) -> None:
+    """情境一假設句寫「第1 個」自動提前贖回評價日；Non-Call = 天期時寫「第1(j=N)個」（核對規則 §3.7 期別）。"""
+    field = f"{tag}_assumed"
+    if s.assumed is None:
+        out.append(
+            _result(rid, field, item, ["找不到「假設於第…個自動提前贖回評價日」"], _ev(s.lines[:1]), review=True)
+        )
+        return
+    number, j = s.assumed.values
+    expected = f"第1(j={tenor})個" if k == tenor else "第1個"
+    actual = f"第{number}(j={j})個" if j is not None else f"第{number}個"
+    issues = (
+        []
+        if actual == expected
+        else [
+            "情境一假設第 1 個自動提前贖回評價日"
+            + ("，Non-Call = 天期時加註 (j=天期)" if k == tenor else "，不加 j 註記")
+        ]
+    )
+    out.append(_result(rid, field, item, issues, _ev(s.assumed.lines), expected=expected, actual=actual))
 
 
 def _coupon(out, rid, tag, item, s, denom, tenor, k, annual, ov) -> Decimal | None:

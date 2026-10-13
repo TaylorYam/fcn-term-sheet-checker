@@ -411,6 +411,48 @@ def test_page_total_must_equal_page_count(tmp_path):
     assert x.status == S.MISMATCH and x.actual == 99
 
 
+def test_page_total_counts_attachment_pages_without_text(tmp_path):
+    """附件頁沒有文字層（沒有頁首）：頁首「共M頁」仍須等於 PDF 頁數。"""
+    (tmp_path / "ok").mkdir()
+    (tmp_path / "short").mkdir()
+    ok = check(tmp_path / "ok", Spec(blank_pages=2))
+    assert rule(ok, "doc.page_count")[0].status == S.PASS, problems(ok)
+    r = check(tmp_path / "short", Spec(blank_pages=2, page_total=rule(ok, "doc.page_count")[0].expected - 2))
+    x = rule(r, "doc.page_count")[0]
+    assert x.status == S.MISMATCH and x.expected - x.actual == 2
+
+
+def test_worse_scenario_strike_must_be_the_assumed_worst_underlying(tmp_path):
+    """假設句「(假設為X)」指出表現最差標的；執行價格要是那一檔的執行價，對不到名稱時轉人工覆核。"""
+    (tmp_path / "other").mkdir()
+    (tmp_path / "unknown").mkdir()
+    first, second = Spec().underlyings[:2]
+    worst, other = first.name, second.name
+    r = check(tmp_path / "other", Spec(), edits=[Edit(f"假設為{worst}", f"假設為{other}", "ts.scen.三")])
+    x = rule(r, "doc.scenario_strike", "情境三_strike")[0]
+    assert x.status == S.MISMATCH and second.ticker in x.message
+    r = check(
+        tmp_path / "unknown",
+        Spec(),
+        edits=[Edit(f"假設為{worst}", "假設為不存在的公司", "ts.scen.三")],
+    )
+    assert rule(r, "doc.scenario_strike", "情境三_strike")[0].status == S.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("spec", "old", "new"),
+    [
+        (Spec(), "假設於第1 個自動提前贖回評價日", "假設於第2 個自動提前贖回評價日"),
+        (Spec(first_callable=6), "假設於第1(j=6)個自動提前贖回評價日", "假設於第1 個自動提前贖回評價日"),
+        (Spec(), "假設於第1 個自動提前贖回評價日", "假設於第1(j=6)個自動提前贖回評價日"),
+    ],
+)
+def test_scenario_one_assumes_the_first_autocall_date(tmp_path, spec, old, new):
+    """情境一假設第 1 個自動提前贖回評價日；Non-Call = 天期時加註 (j=天期)，否則不加。"""
+    r = check(tmp_path, spec, edits=[Edit(old, new, "ts.scen.一")])
+    assert rule(r, "doc.scenario_calculations", "情境一_assumed")[0].status == S.MISMATCH
+
+
 def test_tables_split_across_pages_are_still_read(tmp_path):
     r = check(tmp_path, Spec(count=4, breaks={"date": 2, "price": 2}))
     assert r.status == S.PASS, problems(r)

@@ -47,6 +47,7 @@ class Scenario:
     redemption: Hit | None = None  # 贖回金額算式：(標籤, 面額, 幣別, 金額, 幣別)
     total_return: Hit | None = None  # 獲利情境總報酬率：(面額, 累積, 面額, 總報酬率, 年化報酬率)
     strike: Hit | None = None  # 較差情境假設句：(收盤價, 幣別, 執行價, 幣別)
+    worst_name: Hit | None = None  # 較差情境假設句「(假設為X)」的表現最差標的名稱：(X,)（單一標的時沒有）
     shares: Hit | None = None  # 股數：(面額, 幣別, 匯率 或 None, 執行價, 幣別, 股數, 整數股數)
     remainder: Hit | None = None  # 剩餘金額：(收盤價, 幣別, 匯率 或 None, 畸零股數, 金額, 幣別, 四捨五入位數)
     worse_return: Hit | None = (
@@ -137,6 +138,7 @@ def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
             lambda m: (_dec(m[1]), m[2], _dec(m[3]), m[4]),
         )
     )
+    s.worst_name = _one(_hits(ti, r"[(（]假設為(.+?)[)）]於期末評價日之收盤價格", lambda m: (m[1],)))
     s.shares = _one(
         _hits(
             ti,

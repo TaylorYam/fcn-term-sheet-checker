@@ -540,13 +540,14 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line
             fields[key] = _derived(key, table)
         return
     tickers = table.value["tickers"]
+    names = table.value["names"] or [None] * len(tickers)
     fields["underlyings"] = ParsedField.present("underlyings", list(tickers), bnp_tables.ticker_lines(art11))
     fields["underlying_prices"] = ParsedField(
         "underlying_prices",
         FieldStatus.PRESENT,
         tuple(
-            standard_fields.PriceRow(ticker, dict(row["prices"]), tuple(Evidence.of(ln) for ln in lns))
-            for ticker, row, lns in zip(tickers, table.value["rows"], table.value["row_lines"], strict=True)
+            standard_fields.PriceRow(ticker, dict(row["prices"]), tuple(Evidence.of(ln) for ln in lns), name=nm)
+            for ticker, row, lns, nm in zip(tickers, table.value["rows"], table.value["row_lines"], names, strict=True)
         ),
         list(table.evidence),
     )

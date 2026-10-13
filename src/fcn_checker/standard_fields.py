@@ -139,7 +139,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "distributor_address_cover": "str：封面受託或銷售機構地址",
     "distributor_name_ch2": "str：第二章受託或銷售機構事業名稱",
     "distributor_address_ch2": "str：第二章受託或銷售機構營業所在地",
-    # 審查標準有該上手分節才核對的固定值（BNP）；範本沒有時不必交出
+    # 審查標準有該上手分節才核對的固定值（BNP）；沒有分節的上手不會被讀，可不交出（issuer-onboarding §6.2a）
     "product_type": "str：封面「商品種類」（審查標準 product_type.<上手> 有固定值時核對；MS 依標的數另由上手規則核對）",
     "guarantor_name_cover": "str：封面「保證機構」名稱（審查標準 guarantor_name.<上手> 有 cover 時核對）",
     "guarantor_name_ch1": "str：第一章保證機構名稱（審查標準 guarantor_name.<上手> 有 ch1 時核對）",

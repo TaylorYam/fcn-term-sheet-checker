@@ -221,7 +221,7 @@
 | §3.2 商品種類、發行不成立門檻 | `standard.product_type`、`standard.minimum_issue_size` | 共用 `rules/review_standard.py`（有該上手分節才核對） |
 | §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
 | §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`（`split_suspected`） | 共用 |
-| §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike` | `rules/bnp_scenario.py` |
-| §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`、`schedule.coupon_dates`、`schedule.period_starts`、`schedule.autocall_dates` | `rules/bnp.py` |
+| §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike`（表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/bnp_scenario.py` |
+| §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.coupon_dates`、`schedule.period_starts`、`schedule.autocall_dates` | `rules/bnp.py` |
 | §3.6 保證機構名稱 | `standard.guarantor_name`（`guarantor_name.bnp` 三處） | 共用 `rules/review_standard.py` |
-| §3.7 情境分析 | `doc.scenario_parameters`（假設、情境種類）、`doc.scenario_calculations`（`情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_shares`／`_remainder`） | `rules/bnp_scenario.py` |
+| §3.7 情境分析 | `doc.scenario_parameters`（假設、情境種類）、`doc.scenario_calculations`（`情境一_assumed` 假設句期別、`情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_shares`／`_remainder`） | `rules/bnp_scenario.py` |

@@ -71,7 +71,8 @@ class Spec(ProductSpec):
     trustee_code: str | None = None  # 受託機構商品代號；None 同商品代號，"" 空白
     breaks: dict[str, int] = field(default_factory=dict)  # 表格（date／price）第 n 列之後換頁
     fx: Decimal | None = None  # 標的幣別（美元）≠ 商品幣別時的匯率（每一商品幣別兌美元）
-    page_total: int | None = None  # 頁首「共M頁」的 M；None 同實際頁數
+    page_total: int | None = None  # 頁首「共M頁」的 M；None 同 PDF 頁數
+    blank_pages: int = 0  # 文末沒有文字層的附件頁數（真實樣本的附件是圖）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -484,12 +485,12 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.number(1)
     d.text(80, "發行機構")
     d.sub(1, f"事業名稱：{ISSUER}")
-    d.sub(2, "設立日期：1989 年11 月10 日")
+    d.sub(2, "設立日期：1995 年3 月15 日")
     d.sub(3, "營業所在地：荷蘭 (1 Fictional Street, Amsterdam)")
     d.number(2)
     d.text(80, "保證機構")
     d.sub(1, f"事業名稱：{GUARANTOR['ch2']}")
-    d.sub(2, "設立日期：1966 年5 月26 日")
+    d.sub(2, "設立日期：1972 年8 月8 日")
     d.sub(3, "營業所在地：1 Fictional Boulevard, Paris, France")
     d.number(3)
     d.text(80, "總代理人、計算代理機構、商品主事務代理機構、受託機構、保管機構及其他相關機構")
@@ -598,8 +599,13 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         f"本商品為依據發行機構{zh_date(PROSPECTUS)}公告之基本公開說明書及其增補(如有)及於發行日所確定有關本境外結構型商品之最終條款發行。",
     )
     d.sub(2, "自救權及吸收虧損權：範本說明。")
+    text_pages = len(w.doc)
+    for _ in range(s.blank_pages):
+        w.doc.new_page(width=595, height=842)
     total = s.page_total or len(w.doc)
     for i, page in enumerate(w.doc):
+        if i >= text_pages:
+            continue
         page.insert_text((268, 40), f"第{i + 1}頁，共{total}頁", fontname=FONT, fontsize=8)
     require_used(edits, w.used)
     return w.save(path)

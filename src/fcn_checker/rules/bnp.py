@@ -20,6 +20,10 @@ ISSUER = "BNP"
 # 本上手規則可讀的參考條件表欄位（ADR 0005 的例外：月配息率與年化報酬率依表上年利率核對，同 BARC／MS）
 REFERENCE_FIELDS = ("coupon_pa_pct",)
 NOT_COVERED = [
+    {
+        "rule_id": "doc.fixed_warnings_2_to_9",
+        "description": "固定警語 (2)～(9) 的全文不核對（只保留 (7)(8) 的禁用語檢查與 (5) 名稱的結構檢查，2026-10-13 確認）",
+    },
     {"rule_id": "doc.underlying_names", "description": "連結標的中文名稱、交易所與貨幣列不核對；以彭博代碼為準"},
     {"rule_id": "doc.initial_prices", "description": "期初價格本身的外部正確性（沒有權威來源）"},
     {
@@ -255,20 +259,22 @@ def base_prospectus(ctx: IssuerContext) -> CheckResult:
 
 
 def page_count(ctx: IssuerContext) -> CheckResult:
-    """每頁頁首「共M頁」的 M = 實際頁數（最後一頁的頁碼），且每頁相同。"""
+    """每頁頁首「共M頁」的 M = PDF 實際頁數（含沒有文字層的附件頁），且每頁相同。"""
     headers = ctx.ts.page_headers
     check = Check("doc.page_count", "page_count", Item.expected("頁首總頁數"), ctx.document)
     if not headers:
         return check.result(S.REVIEW_REQUIRED, reason="document_missing", message="找不到頁首「第N頁，共M頁」")
-    pages = max(p for p, _, _ in headers)
+    pages = ctx.pages
+    if pages is None:
+        return check.result(S.REVIEW_REQUIRED, reason="document_missing", message="不知道 PDF 頁數，無法核對頁首總頁數")
     totals = sorted({m for _, m, _ in headers})
-    bad = [ln for p, m, ln in headers if m != pages]
+    bad = [ln for _, m, ln in headers if m != pages]
     return check.compare(
         pages,
         totals if len(totals) > 1 else totals[0],
         ok=not bad,
         evidence=[Evidence.of(ln) for ln in (bad or [headers[0][2]])],
-        fail_message="頁首「共M頁」須等於實際頁數",
+        fail_message="頁首「共M頁」須等於 PDF 頁數",
     )
 
 
