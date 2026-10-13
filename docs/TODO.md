@@ -51,6 +51,9 @@
   - [x] HSBC：規格與 H02 螢光範圍完成，Issue #34 實作 parser、整理表按商品代號選列、規則與 CLI／PANEL；SG 暫緩（Issue #27）。
   - [x] MS：說明書規格與 S06 螢光範圍完成（Issue #132），說明書實作（Issue #135）。
   - [x] MS 投資人須知：範本規格 `docs/templates/ms-zh-iis.md`、核對規則 §3 MS 欄（Issue #137，已實作；只支援新版範本）。
+  - [x] BNP：說明書探勘、BN4 雙方螢光範圍與規格完成（Issue #189；[範本規格](templates/bnp-zh-product-description.md)、[核對規則](rules/bnp-check-rules.md)）。
+  - [ ] BNP 說明書實作（parser、`issuers.py` 登記、審查標準 BNP 分節與 `{autocall_*}` 佔位符、最低金額倍數、保證機構名稱）：規格合併後另開實作 Issue；投資人須知再另開 Issue。
+  - [ ] SG、UBS：樣本與參考條件表列已就位（2026-10-13），尚未探勘。
   - [x] 上手編號對照補齊尚無範本的 11 家（Issue #149）：未支援上手的錯訊寫出上手代號。
   - [x] 其他幣別：可承作的八種幣別（USD、JPY、CNH、HKD、AUD、EUR、GBP、ZAR）審查標準 `[currency]`、`[denomination]` 都有了；澳幣、歐元、英鎊、南非幣在有樣本確認中文寫法後於 2026-10-13 加入（Issue #185）。表裡沒有的寫法（例：澳元、南非蘭特）仍轉人工覆核。
   - [x] MS 第二章受託機構營業所在地 6 份樣本都少「松山區」：2026-10-09 確認視為正確，審查標準加地址等價寫法（[核對規則](rules/ms-check-rules.md) §5）。
