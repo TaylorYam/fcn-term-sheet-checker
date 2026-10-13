@@ -15,7 +15,9 @@ from ..text import squash
 from . import money, ms_tables
 from .layout import TextIndex
 
-N = r"([\d,]+\.\d{2})"  # 金額（2 位小數）
+N = r"([\d,]+(?:\.\d{2})?)"  # 金額：2 位小數，或整數（日圓樣本寫到整數位，Issue #181）
+PNL = r"(-?[\d,]+(?:\.\d{2})?)"  # 損益（可為負）
+TIMES = "[×xX]"  # 乘號：全形 ×，也有樣本寫半形 x（Issue #181）
 UNIT = money.CURRENCY  # 金額後的幣別字（任一已知寫法；寫哪一個才對由共用規則核對，Issue #170）
 SCENARIO_HEAD = re.compile(r"^情境([一二三四五六七八九十]+)[:：](.*)$")
 
@@ -98,20 +100,22 @@ def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
     ]
     s.assumed = _one(assumed)
     s.coupons = _hits(
-        ti, rf"{N}{unit}×(\d+(?:\.\d+)?)%(?:×100%)?={N}{unit}", lambda m: (_dec(m[1]), Decimal(m[2]), _dec(m[3]))
+        ti,
+        rf"{N}{unit}{TIMES}(\d+(?:\.\d+)?)%(?:{TIMES}100%)?={N}{unit}",
+        lambda m: (_dec(m[1]), Decimal(m[2]), _dec(m[3])),
     )
-    s.coupon_formulas = len(list(ti.finditer(rf"\d{unit}×\d+(?:\.\d+)?%")))
-    s.rates = _hits(ti, r"(?<!%)×(\d+(?:\.\d+)?)%", lambda m: (Decimal(m[1]),))
+    s.coupon_formulas = len(list(ti.finditer(rf"\d{unit}{TIMES}\d+(?:\.\d+)?%")))
+    s.rates = _hits(ti, rf"(?<!%){TIMES}(\d+(?:\.\d+)?)%", lambda m: (Decimal(m[1]),))
     if kind == "profit":
         s.pnl = _hits(
             ti,
-            rf"={N}{unit}\+{N}{unit}(?:×(\d+))?-{N}{unit}=(-?[\d,]+\.\d{{2}}){unit}",
+            rf"={N}{unit}\+{N}{unit}(?:{TIMES}(\d+))?-{N}{unit}={PNL}{unit}",
             lambda m: (_dec(m[1]), _dec(m[2]), int(m[3] or 1), _dec(m[4]), _dec(m[5])),
         )
     elif kind == "worse":
         s.pnl = _hits(
             ti,
-            rf"={N}{unit}×(\d+)\+([\d,]+(?:\.\d+)?){unit}-{N}{unit}=(-?[\d,]+\.\d{{2}}){unit}",
+            rf"={N}{unit}{TIMES}(\d+)\+([\d,]+(?:\.\d+)?){unit}-{N}{unit}={PNL}{unit}",
             lambda m: (_dec(m[1]), int(m[2]), _dec(m[3]), _dec(m[4]), _dec(m[5])),
         )
         s.strike = _hits(
