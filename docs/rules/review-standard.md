@@ -1,7 +1,7 @@
 # 審查標準（Review Standard）
 
 - 設定檔：[`config/review_standard.toml`](../../config/review_standard.toml)
-- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）。HSBC 差異（§2.2、§3.1）已確認並實作（Issue #32、#34）；MS 差異（§2.6）已確認並實作（Issue #132、#135）；BNP 差異（§2.7）已確認並實作（Issue #189、#191）；SG 差異（§2.8）已確認，待實作（Issue #192）
+- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）。HSBC 差異（§2.2、§3.1）已確認並實作（Issue #32、#34）；MS 差異（§2.6）已確認並實作（Issue #132、#135）；BNP 差異（§2.7）已確認並實作（Issue #189、#191）；SG 差異（§2.8）已確認並實作（Issue #192、#194）
 
 ## 1. 為什麼要獨立成設定檔
 
@@ -79,7 +79,8 @@
 | `{maxi_zh}`／`{maxi_en}` | 標的數 ≥ 2 時填入 `maxi_zh`／`maxi_en`，否則空白 |
 | `{daily_zh}`／`{daily_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`，否則空白 |
 | `{underlying_zh}`／`{underlying_en}` | 標的寫法：標的 1 檔填 `single_zh`／`single_en`、2 檔以上填 `basket_zh`／`basket_en`（兩組不同字串，不是「多檔才加前綴」；Issue #135） |
-| `{autocall_zh}`／`{autocall_en}` | 第一個可提前出場期早於到期（Non-Call < 天期）時填入 `autocall_zh`／`autocall_en`，否則空白（BNP，Issue #191） |
+| `{autocall_zh}`／`{autocall_en}` | 第一個可提前出場期早於到期（Non-Call < 天期）時填入 `autocall_zh`／`autocall_en`，否則空白（BNP，Issue #191）；會提前出場且記憶式、樣板另有 `autocall_memory_zh`／`autocall_memory_en` 時改填它（SG 中文「（記憶式自動提前出場）」，Issue #194） |
+| `{ccy}` 的別名 | 樣板的 `ccy_aliases`（ISO 代碼 → 名稱用的代碼）：SG 英文名稱把 CNH 寫成 CNY（Issue #194） |
 
 樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
 
@@ -136,9 +137,9 @@
 - **幣別對照**：加 `英鎊 = GBP`（BNP 樣本已確認中文寫法）。
 - 總代理人、受託機構設立日期、基本公開說明書日期（只做文件內一致）不核對。
 
-### 2.8 SG 的差異（2026-10-13 確認，Issue #192；尚未實作）
+### 2.8 SG 的差異（2026-10-13 確認，Issue #192；已實作 Issue #194）
 
-細節見 [SG 核對規則](sg-check-rules.md) §3.2、§3.6。審查通過日期（含月份補零的寫法）、負責人、風險等級值、受託機構電話、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
+細節見 [SG 核對規則](sg-check-rules.md) §3.2、§3.6。實作新增的設定鍵：`risk.fixed_warning_variants.<上手>`（固定警語的其他完整寫法，每處都算一次）、`agent_name.<上手>`（總代理人名稱，出處 cover／ch2）、`distributor.name_equivalents`（受託機構名稱等價寫法）、`min_amount_multiples.<上手>.<出處>` 可寫成依幣別的表、`product_name.<上手>` 的 `autocall_memory_zh`／`autocall_memory_en` 與 `ccy_aliases`。審查通過日期（含月份補零的寫法）、負責人、風險等級值、受託機構電話、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
 
 - **固定警語**（`risk.fixed_warning_by_issuer.sg`）：= MS 版本（無【】、有 `*`）加結尾句號。出現 3 次（封面警語一、第一章 §2、第三章 §5 一）。第一章 §2 的風險等級寫 `[RR4]`（半形方括號），封面與第三章寫 `RR4`：比對前把方括號寫法正規化，不得因此判不一致。固定警語只算警語一段，二～十不核對；警語七「為於／於中華民國境內受託買賣」兩種都允許。
 - **風險等級**（`risk.level_formats.sg`）：`風險程度等級為RRn`、`歸類為RRn`、`風險程度等級為[RRn]`、`歸類為[RRn]`。
