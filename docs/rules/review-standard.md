@@ -1,7 +1,7 @@
 # 審查標準（Review Standard）
 
 - 設定檔：[`config/review_standard.toml`](../../config/review_standard.toml)
-- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）。HSBC 差異（§2.2、§3.1）已確認並實作（Issue #32、#34）；MS 差異（§2.6）已確認並實作（Issue #132、#135）；BNP 差異（§2.7）已確認，待實作（Issue #189）；SG 差異（§2.8）已確認，待實作（Issue #192）
+- 狀態：2026-10-01 與使用者確認；已實作為 `standard.*` 規則（Issue #7），並在本機以 14 份 BARC 樣本驗證（結果同 §3）。HSBC 差異（§2.2、§3.1）已確認並實作（Issue #32、#34）；MS 差異（§2.6）已確認並實作（Issue #132、#135）；BNP 差異（§2.7）已確認並實作（Issue #189、#191）；SG 差異（§2.8）已確認，待實作（Issue #192）
 
 ## 1. 為什麼要獨立成設定檔
 
@@ -33,6 +33,10 @@
 | `risk.fixed_warning_openings.<上手>` | MS：`本商品風險程度為RR4。` | 同上 | 開頭句（到第一個「。」）的其他允許寫法；只換開頭句、其餘逐字相同的版本也算一次 |
 | `wording.forbidden` ／ `allowed_phrases` | 禁用「受託投資」；允許「受託投資或受託買賣」「受託投資、受託買賣或為投資型保單」（HSBC） | 全文 | 片語以外出現「受託投資」即為錯誤（SOP：須改為「受託買賣」） |
 | `product_name.<上手>.zh` ／ `en` | 名稱樣板（依上手分節，例如 `product_name.barc`；缺該上手分節時轉人工覆核） | 封面「商品中文名稱」「商品英文名稱」 | 用說明書欄位填佔位符組出預期名稱後逐字比對（§2.3）；全形／半形括號差異不算錯 |
+| `guarantor_name.<上手>` | BNP：`cover`、`ch1`、`ch2` 三處各一個寫法 | 封面「保證機構之名稱及地址」、第一章「保證機構：」、第二章「保證機構」事業名稱 | 忽略空白後逐字相等；沒有該上手分節的上手不核對（沒有保證機構） |
+| `product_type.<上手>` | BNP：`股權連結結構型商品` | 封面「商品種類」 | 忽略空白後逐字相等；沒有設定的上手不核對（MS 依標的數由上手規則核對） |
+| `minimum_issue_size.<上手>` | BNP：`(等值)300,000 美元` | 第四章「發行不成立之情形」的最低有效申購金額 | 忽略空白後逐字相等；沒有設定的上手不核對 |
+| `min_amount_multiples.<上手>` | BNP：最低申購、最低贖回 5，最低加購、增加贖回單位 1 | 第四章各最低金額（`field.min_amounts`） | 各出處 = 參考條件表單位面額 × 倍數；沒列的出處倍數為 1（BARC、HSBC、MS 不變） |
 | `currency` | 美元→USD、日幣／日圓→JPY、人民幣／境外人民幣→CNH、港幣／港元→HKD、澳幣→AUD、歐元→EUR、英鎊→GBP、南非幣→ZAR（樣本看過的寫法，加上使用者同意的同義寫法）。表裡沒有的寫法（例：澳元、南非蘭特）未確認前不放：封面幣別轉人工覆核一次，其他出處寫同一個字時不重複報（2026-10-10 使用者決定；AUD、EUR、GBP、ZAR 有樣本後於 2026-10-13 加入，Issue #185） | 封面計價幣別；金額旁的幣別字（§2.4 `field.currency` 其他出處） | 不在表內的幣別轉人工覆核；金額旁的幣別字 parser 認得的寫法在 `src/fcn_checker/parsers/money.py`，新幣別兩邊都要加 |
 | `denomination` | USD／AUD／EUR／GBP 10,000；JPY 1,000,000；CNH／HKD／ZAR 100,000（2026-10-10 使用者提供的承作幣別表） | §6 商品面額 | 等於該幣別預設值；不等於時**轉人工審查**（客戶可要求不同面額，不直接判錯） |
 | `dates.print_date_max_days_after_trade` | 1 | 「中文產品說明書刊印日期」 | 刊印日期在交易日當天到交易日後 1 天之內 |
@@ -75,6 +79,7 @@
 | `{maxi_zh}`／`{maxi_en}` | 標的數 ≥ 2 時填入 `maxi_zh`／`maxi_en`，否則空白 |
 | `{daily_zh}`／`{daily_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`，否則空白 |
 | `{underlying_zh}`／`{underlying_en}` | 標的寫法：標的 1 檔填 `single_zh`／`single_en`、2 檔以上填 `basket_zh`／`basket_en`（兩組不同字串，不是「多檔才加前綴」；Issue #135） |
+| `{autocall_zh}`／`{autocall_en}` | 第一個可提前出場期早於到期（Non-Call < 天期）時填入 `autocall_zh`／`autocall_en`，否則空白（BNP，Issue #191） |
 
 樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
 
@@ -85,7 +90,7 @@
 | rule_id | 規則 | 出處清單（標準欄位） |
 |---|---|---|
 | `doc.denomination` | 面額 = 該幣別的 `denomination` 預設值，不同時轉人工覆核（`denomination_non_default`） | `denomination` |
-| `field.min_amounts` | 各最低金額 = 參考條件表「單位面額」（讀參考條件表，所以放在 `rules/reference.py`；2026-10-02 使用者決定） | `min_amounts`：BARC 最低申購、最低贖回；HSBC 最低交易、最低申購、最低加購 |
+| `field.min_amounts` | 各最低金額 = 參考條件表「單位面額」× 該出處的倍數（`min_amount_multiples.<上手>`，沒設定為 1；讀參考條件表，所以放在 `rules/reference.py`；2026-10-02 使用者決定、2026-10-13 加倍數） | `min_amounts`：BARC 最低申購、最低贖回；HSBC 最低交易、最低申購、最低加購；MS 第四章四個；BNP 第四章四個（申購、贖回 5 倍） |
 | `field.currency`（其他出處） | 金額旁的幣別字與承作幣別的其他出處 = 參考條件表「承作幣別」（中文幣別依 `currency` 對照；寫法不在對照表時只由封面那筆報，和封面寫同一個字的出處不重複）；表上承作幣別空白或格式不對時只由封面那筆報。**商品幣別不必等於標的幣別**（FCN 高度客製化，例：連結日股、美元計價；連結美股、人民幣計價，2026-10-10 使用者決定，Issue #170）：承作幣別只影響面額、配息、本金這類金額，執行價、收盤價、觸及不保本價格等股價跟著標的走，股價與含「股」的實物交割算式所在的行整行不列入出處（同一行的商品幣別金額也不核對）。關鍵字落在上一行（算式說明在上一行、數字在下一行）或被換行拆開（`收盤價`／`格小於…`）時，看同一句裡金額前面的文字（到上一個「。，；：」或上一個算式結束為止），同樣不列入，但算式的結果（`=` 後面、後面不再接運算，例：以承作幣別支付的剩餘金額、到期贖回價值）仍列入，同一句裡不在 `=` 後面的金額不列入（已知限制：一句跨多行都沒有標點、前面又出現股價字眼時，後面的配息、本金也不列入；現有樣本都有標點，2026-10-12 使用者決定暫不收緊）；匯率寫法（`1 日圓 = 美元 0.006`）是兩種幣別的換算，不列入（2026-10-12，Issue #179）；情境試算每個情境一筆，列出該情境裡幣別不符的金額。parser 只認得 `parsers/money.py` 列的幣別寫法，寫法不在清單時那一處是「抓不到」轉人工覆核 | `currency_others`：BARC §6 面額、第四章最低申購／最低贖回金額、§16 情境假設面額、§16 (i)～(iii) 各情境；MS 第一章 §6 面額、第四章 §4、§8 四個最低金額、§18 假設總投資金額、§18 各情境（較差情境的收盤價、執行價不算）；HSBC §6 面額、§7 最低交易金額、第四章最低申購／加購金額、§18 情境假設與各情境（執行價、觸及不保本價格不算；§12 價格表幣別格跟著標的走，不核對，取代 Issue #167）；投資人須知：BARC 每單位商品面額、最低申購金額，HSBC 每單位面額 |
 | `doc.subscription_start_date` | 受理申購日 = 交易日 | `subscription_dates`：BARC 開始受理日；HSBC 開始受理日、申購結束受理日 |
 | `doc.print_date` | 交易日當天至交易日後 `print_date_max_days_after_trade` 天 | `print_dates`：BARC 一個；HSBC 參考性審閱版、最終版 |
@@ -113,18 +118,19 @@
 - **受理申購日**：MS 範本沒有；改由 MS 專屬規則核對開始受理贖回日期。
 - 審查通過日期只以 2026 年後的文件為準，不為 2025 年的舊審查日期加清單。
 
-### 2.7 BNP 的差異（2026-10-13 確認，Issue #189；尚未實作）
+### 2.7 BNP 的差異（2026-10-13 確認，Issue #189；Issue #191 實作）
 
 細節見 [BNP 核對規則](bnp-check-rules.md) §3.2、§3.6。審查通過日期（含月份補零的寫法）、負責人、風險等級值、受託機構名稱、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
 
 - **固定警語**（`risk.fixed_warning_by_issuer.bnp`）：現行版本的 `【RR4】` 改為 `[RR4]`（半形方括號）、`【證券交易所交易證券】` 去掉【】、沒有 `*`；結尾有句號。出現 3 次（封面警語 (1)、第一章 §2、第三章 §6(1)）。固定警語只算 (1) 段，(2)～(9) 不核對。
 - **風險等級**（`risk.level_formats.bnp`）：`風險程度等級為[RRn]`、`歸類為[RRn]`。
-- **商品名稱樣板**（`product_name.bnp`）：中文 `法國巴黎銀行{天期}個月期{幣別中文}計價固定配息{自動提前贖回}連結{單一|一籃子}股票/交易所買賣基金結構型商品(不保本)(無擔保)`，英文 `{天期} Months {幣別代碼} Fixed Coupon {Early Redeemable }Note linked to {a Single Share/ETI|a Basket of Shares/ETIs} issued by BNP Paribas Issuance B.V. (unsecured)`。標的寫法用 `{underlying_zh}`／`{underlying_en}`；「自動提前贖回／Early Redeemable」只在 Non-Call < 天期時出現，需要新的佔位符 `{autocall_zh}`／`{autocall_en}`（實作時加入 §2.3 表）。沒有記憶式字樣。
+- **商品名稱樣板**（`product_name.bnp`）：中文 `法國巴黎銀行{天期}個月期{幣別中文}計價固定配息{自動提前贖回}連結{單一|一籃子}股票/交易所買賣基金結構型商品(不保本)(無擔保)`，英文 `{天期} Months {幣別代碼} Fixed Coupon {Early Redeemable }Note linked to {a Single Share/ETI|a Basket of Shares/ETIs} issued by BNP Paribas Issuance B.V. (unsecured)`。標的寫法用 `{underlying_zh}`／`{underlying_en}`；「自動提前贖回／Early Redeemable」只在 Non-Call < 天期時出現，用佔位符 `{autocall_zh}`／`{autocall_en}`（§2.3）。沒有記憶式字樣。
 - **發行機構全名**（`issuer_name.bnp`）：`BNP Paribas Issuance B.V.`（只有英文法人名）；封面 5、第一章 §3、第二章 §1(1) 三處寫法相同。
 - **保證機構名稱**（BNP 特有，新增 `guarantor_name.bnp`）：封面 11 `法商法國巴黎銀行股份有限公司 (BNP Paribas)`、第一章 §3 `法國巴黎銀行`、第二章 §2(1) `法國巴黎銀行 (BNP Paribas)`，三處各自固定；地址不核對。
 - **商品種類**：封面 4 固定 `股權連結結構型商品`，不隨標的數改變（MS 依標的數）。
-- **最低金額倍數**（BNP 專屬，2026-10-13 使用者確認）：最低申購金額、最低贖回金額 = 5 × 單位面額；最低加購金額、增加贖回單位 = 單位面額。共用 `field.min_amounts` 的「= 單位面額」對 BNP 不適用，實作時以倍數設定表達。
-- **發行不成立門檻**：第四章 §7 `(等值)300,000 美元` 為固定值（2026-10-13 確認納入）。
+- **最低金額倍數**（BNP 專屬，2026-10-13 使用者確認）：最低申購金額、最低贖回金額 = 5 × 單位面額；最低加購金額、增加贖回單位 = 單位面額（`min_amount_multiples.bnp`，共用 `field.min_amounts` 依出處乘上倍數）。
+- **發行不成立門檻**：第四章 §7 `(等值)300,000 美元` 為固定值（`minimum_issue_size.bnp`，2026-10-13 確認納入）。
+- **保證機構名稱**與**商品種類**分別放在 `guarantor_name.bnp`、`product_type.bnp`（上表）。
 - **受託機構電話**：封面與第四章 §16 寫 `+886 (2) 5556 1313`，`phone_equivalents` 加這個寫法。
 - **受託機構地址**：封面與第二章寫 `臺北市105 民生東路三段158 號6 樓`（「臺」、郵遞區號、沒有「松山區」），`address_equivalents` 加 `臺北市105民生東路三段158號6樓`。
 - **幣別對照**：加 `英鎊 = GBP`（BNP 樣本已確認中文寫法）。

@@ -41,20 +41,21 @@ class Paired:
     issuer: Issuer
     ts: TermSheet
     row: OrderRecord
+    pages: int | None  # PDF 頁數
 
     @classmethod
     def of(cls, ident: Identification) -> Paired | None:
         """有上手、讀出結果、對到的列且規則會跑才算配對成功；否則 None（不執行任何條件規則）。"""
         if ident.adapter is None or ident.term_sheet is None or ident.row is None or not ident.checked:
             return None
-        return cls(ident.adapter, ident.term_sheet, ident.row)
+        return cls(ident.adapter, ident.term_sheet, ident.row, ident.pages)
 
 
 def _issuer_context(paired: Paired, std: ReviewStandard) -> IssuerContext:
     """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0005）。"""
     row = paired.row
     declared = {key: row.get(key) for key in paired.issuer.reference_fields}
-    return IssuerContext(paired.ts, std, paired.issuer.code, declared, row.source)
+    return IssuerContext(paired.ts, std, paired.issuer.code, declared, row.source, pages=paired.pages)
 
 
 def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config: CheckConfig) -> CheckReport:

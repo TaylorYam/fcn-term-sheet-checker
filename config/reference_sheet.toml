@@ -8,8 +8,8 @@
 # 核對結果檔「回填後」的欄位照 layout.column_order 排，不論表上欄位怎麼排（Issue #173）。
 # 規則說明見 docs/order-formats/reference-sheet.md。
 
-version = 5
-effective_date = 2026-10-12
+version = 6
+effective_date = 2026-10-13
 
 [layout]
 sheet = "樣本清單"
@@ -40,6 +40,7 @@ column_order = [
 BARC = "Barclays"
 HSBC = "HSBC"
 MS = "MS"
+BNP = "BNP"
 
 # Excel 欄名 → 標準欄位
 [columns]

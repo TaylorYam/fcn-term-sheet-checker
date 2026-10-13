@@ -97,6 +97,7 @@ class IssuerContext(_IssuerStandardOf):
     declared: Mapping[str, OrderValue | None]  # 上手宣告的參考條件表欄位 → 該列的值
     sheet_source: str
     document: DocKind = DocKind.TERM_SHEET  # 上手說明書內部規則只核對說明書
+    pages: int | None = None  # 說明書 PDF 頁數（含沒有文字層的頁；頁首總頁數規則用）
 
     def sheet_field(self, key: str) -> OrderValue | None:
         if key not in self.declared:

@@ -50,8 +50,12 @@ def outcome(saved):
 
 def test_other_issuers_are_unsupported(saved):
     outcome, receipt = saved
-    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147"))]
+    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147", "082"))]
     assert others and all(i.unsupported and not receipt.filled(i) for i in others)
+    # BNP 說明書已有範本、投資人須知沒有：說明書照常核對，但 BNP 商品不回填（ADR 0007；test_real_bnp.py）
+    bnp = [i for i in outcome.items if i.term_sheet.name.startswith("082")]
+    assert bnp and not any(receipt.filled(i) for i in bnp)
+    assert all(i.unsupported == (i.kind == DocKind.IIS) for i in bnp)
     # MS 說明書與投資人須知都通過的 3 檔才回填（docs/templates/ms-zh-iis.md §7、test_real_ms.py）
     ms = [i for i in outcome.items if i.kind == DocKind.TERM_SHEET and i.term_sheet.name.startswith("147")]
     filled = [i for i in ms if receipt.filled(i)]
@@ -106,7 +110,7 @@ def vwap_codes(path: Path) -> set[str]:
 
 def test_vwap_rows_skip_price_comparison_and_take_the_document_prices(outcome):
     vwap = [i for i in term_sheets(outcome) if i.product_code in vwap_codes(REFERENCE)]
-    assert len(vwap) == 2, "表上有 2 列期初定價 VWAP（BARC、HSBC 各 1）"
+    assert len(vwap) == 3, "表上有 3 列期初定價 VWAP（BARC、HSBC、BNP 各 1）"
     for item in vwap:
         assert item.report.status == CheckStatus.PASS, (item.term_sheet.name, problems(item))
         assert not [r for r in item.report.results if r.rule_id == "field.underlying_prices"]
@@ -187,6 +191,8 @@ def test_hsbc_investor_sheets_only_differ_by_the_forbidden_wording(outcome):
 
 
 def test_every_local_investor_sheet_belongs_to_an_issuer_with_an_iis_template(outcome):
-    """本機投資人須知只有 BARC、HSBC、MS，三家都有範本（MS：Issue #137）；未支援上手的投資人須知見合成測試 test_iis.py。"""
+    """本機投資人須知：BARC、HSBC、MS 都有範本（MS：Issue #137）；BNP（Issue #191）與其他上手尚無範本，是未支援上手；
+    其他未支援上手的投資人須知另見合成測試 test_iis.py。"""
     sheets = [i for i in outcome.items if i.kind == DocKind.IIS]
-    assert len(sheets) >= 24 and not any(i.unsupported for i in sheets)
+    assert len(sheets) >= 24
+    assert all(i.unsupported == (not i.term_sheet.name.startswith(("029", "325", "147"))) for i in sheets)

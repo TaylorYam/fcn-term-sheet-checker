@@ -388,11 +388,30 @@ def initial_pricing(ctx: Context) -> CheckResult:
     return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=message)
 
 
+SPLIT_SUSPECTED = "split_suspected"  # 同一檔標的各價格與說明書差同一比例：疑似分割調整後的價格，轉人工覆核
+
+
+def _split_ratio(compared: list[tuple[Any, Any]]) -> Any | None:
+    """同一檔標的可比對的價格欄（表上值, 說明書值）全部不同、且「表上 ÷ 說明書」（4 位）全部相同又不是 1 時回傳該比例。"""
+    if len(compared) < 2 or any(doc_v == 0 for _, doc_v in compared):
+        return None
+    if any(shown == doc_v for shown, doc_v in compared):
+        return None
+    ratios = {(shown / doc_v).quantize(Q4, ROUND_HALF_UP) for shown, doc_v in compared}
+    if len(ratios) != 1:
+        return None
+    ratio = ratios.pop()
+    return None if ratio == 1 else ratio
+
+
 def underlying_prices(ctx: Context) -> list[CheckResult]:
     """各標的進場／執行／下限／KO 價：表上值四捨五入（half-up）到 4 位後與說明書價格列相等。
 
     期初定價為 VWAP 時不比對（改由回填規則 `backfill.underlying_prices` 覆寫）。說明書判定 KO 價不適用
     （`ko_pct` 不適用，例：MS Non-Call = 天期時價格表沒有 KO 欄）時各標的 KO 價不比對。
+    同一檔標的可比對的價格欄全部與說明書差同一個比例（表上 ÷ 說明書相同且不是 1）時，疑似表上是股票分割調整後的
+    價格：該檔的價格欄轉人工覆核並寫出比例，不判不一致（2026-10-13 作業人員決定，所有上手適用）；
+    只有部分欄位不同或比例不同時照常判不一致。
     """
     if is_vwap(ctx):
         return []
@@ -405,6 +424,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
         ev = list(row.evidence)
+        pending: list[tuple[Check, Any, Any]] = []  # 這檔可比對的價格欄：(結果身分, 表上值（4 位）, 說明書值)
         for col, zh in PRICE_COLUMNS:
             field, name = f"{label} {zh}", price_item(i, col)
             ov = ctx.order.price(i, col)
@@ -439,17 +459,36 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
                 message = f"{ctx.order.source}的值不是數字"
                 out.append(order_review(rid, field, ov, None, "order_invalid", message, name=name))
                 continue
-            shown = v.quantize(Q4, ROUND_HALF_UP)
-            out.append(check.compare(shown, doc_v, evidence=ev, tolerance="表上值四捨五入（half-up）到 4 位"))
+            pending.append((check, v.quantize(Q4, ROUND_HALF_UP), doc_v))
+        ratio = _split_ratio([(shown, doc_v) for _, shown, doc_v in pending])
+        for check, shown, doc_v in pending:
+            if ratio is None:
+                out.append(check.compare(shown, doc_v, evidence=ev, tolerance="表上值四捨五入（half-up）到 4 位"))
+            else:
+                out.append(
+                    check.result(
+                        S.REVIEW_REQUIRED,
+                        expected=shown,
+                        actual=doc_v,
+                        evidence=ev,
+                        reason=SPLIT_SUSPECTED,
+                        message=f"{label} 的各價格欄都與{ctx.document}差同一比例（表上 ÷ 說明書 = {ratio}），"
+                        "疑為股票分割調整後的價格，請人工確認；表上值不改",
+                    )
+                )
     return out
 
 
 def min_amounts(ctx: Context) -> list[CheckResult]:
-    """說明書各最低金額出處（最低交易／申購／加購／贖回金額）= 參考條件表「單位面額」。"""
+    """說明書各最低金額出處（最低交易／申購／加購／贖回金額）= 參考條件表「單位面額」× 該出處的倍數。
+
+    倍數取自審查標準 `min_amount_multiples.<上手>.<出處欄位>`（BNP 最低申購／最低贖回為 5 倍），沒設定為 1。
+    """
     rid = "field.min_amounts"
     items, problem = occurrences_of(ctx, rid, "min_amounts", Item.sheet("最低金額"))
     if problem:
         return [problem]
+    multiples = ctx.issuer_std.min_amount_multiples
     out = []
     for occ in items:
         pf = occ.value
@@ -457,9 +496,12 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
         if problem:
             out.append(problem)
             continue
+        times = multiples.get(occ.field, 1)
+        expected = v * times
+        rule = "須等於參考條件表「單位面額」" + (f"× {times}（審查標準 min_amount_multiples）" if times != 1 else "")
         item = Item.sheet(occ.name, [ov])  # 各出處分開寫（例：最低申購金額），不寫成「單位面額」
-        check = Check(rid, occ.field, item, ctx.document, ov=(ov,), expected=v).needs(pf)
-        out.append(check.compare(v, pf.value, message=f"{occ.where}須等於參考條件表「單位面額」"))
+        check = Check(rid, occ.field, item, ctx.document, ov=(ov,), expected=expected).needs(pf)
+        out.append(check.compare(expected, pf.value, message=f"{occ.where}{rule}"))
     return out
 
 

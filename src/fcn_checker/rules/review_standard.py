@@ -380,12 +380,13 @@ def _issue_price_at(ctx: Context, rid: str, field: str, pf: ParsedField, name: s
 
 
 def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
-    """名稱樣板的 maxi（標的數 ≥ 2；{underlying_*} 也依它選 1 檔或 2 檔以上的寫法）、daily（KO 每日觀察）旗標；
-    只讀樣板用到的說明書欄位。不依上手分支。"""
+    """名稱樣板的 maxi（標的數 ≥ 2；{underlying_*} 也依它選 1 檔或 2 檔以上的寫法）、daily（KO 每日觀察）、
+    autocall（第一個可提前出場期早於到期，即 Non-Call < 天期）旗標；只讀樣板用到的說明書欄位。不依上手分支。"""
     flags: dict[str, bool] = {}
     for flag, field, test, names in (
         ("maxi", "underlyings", lambda v: len(v) >= 2, {"maxi_zh", "maxi_en", "underlying_zh", "underlying_en"}),
         ("daily", "ko_observation", lambda v: v == "D", {"daily_zh", "daily_en"}),
+        ("autocall", "autocall_schedule", lambda v: v.first_callable < v.periods, {"autocall_zh", "autocall_en"}),
     ):
         if used & names:
             pf = standard_field(ctx, field)
@@ -470,10 +471,63 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 tolerance=tol,
                 message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式"
                 + ("、標的數" if {"underlying_zh", "underlying_en"} & tpl.placeholders(lang) else "")
+                + ("、是否會提前出場" if {"autocall_zh", "autocall_en"} & tpl.placeholders(lang) else "")
                 + "組出",
             )
         )
     return out
+
+
+# ---------------------------------------------------------------- 審查標準有該上手分節才核對的固定值（BNP）
+
+GUARANTOR_PLACES = {  # 出處鍵 → 標準欄位、說明的開頭、項目名稱
+    "cover": ("guarantor_name_cover", "封面「保證機構」名稱", "封面保證機構名稱"),
+    "ch1": ("guarantor_name_ch1", "第一章保證機構名稱", "第一章保證機構名稱"),
+    "ch2": ("guarantor_name_ch2", "第二章「保證機構」事業名稱", "第二章保證機構名稱"),
+}
+
+
+def _guarantor_name(ctx: Context) -> list[CheckResult]:
+    """保證機構名稱：審查標準 guarantor_name.<上手> 列出的每個出處 = 該出處的固定值（三處寫法可不同）；
+    沒有該上手分節的上手不核對（沒有保證機構的範本）。"""
+    rid = "standard.guarantor_name"
+    return [
+        _fixed_text(rid, field, standard_field(ctx, field), expected, what, name, document=ctx.document)
+        for place, expected in ctx.issuer_std.guarantor_names.items()
+        for field, what, name in (GUARANTOR_PLACES[place],)
+    ]
+
+
+def _product_type(ctx: Context) -> list[CheckResult]:
+    """封面「商品種類」= 審查標準 product_type.<上手> 的固定值；沒有設定的上手不核對（MS 依標的數由上手規則核對）。"""
+    expected = ctx.issuer_std.product_type
+    if expected is None:
+        return []
+    pf = standard_field(ctx, "product_type")
+    return [
+        _fixed_text(
+            "standard.product_type", "product_type", pf, expected, "商品種類", "商品種類", document=ctx.document
+        )
+    ]
+
+
+def _minimum_issue_size(ctx: Context) -> list[CheckResult]:
+    """第四章發行不成立門檻的金額寫法 = 審查標準 minimum_issue_size.<上手>；沒有設定的上手不核對。"""
+    expected = ctx.issuer_std.minimum_issue_size
+    if expected is None:
+        return []
+    pf = standard_field(ctx, "minimum_issue_size")
+    return [
+        _fixed_text(
+            "standard.minimum_issue_size",
+            "minimum_issue_size",
+            pf,
+            expected,
+            "發行不成立門檻",
+            "發行不成立門檻",
+            document=ctx.document,
+        )
+    ]
 
 
 # ---------------------------------------------------------------- 投資人須知（ADR 0007）
@@ -574,4 +628,7 @@ def review_standard_rules(ctx: Context) -> list[CheckResult]:
         *_distributor_info(ctx),
         *_fees(ctx),
         *_issue_price(ctx),
+        *_guarantor_name(ctx),
+        *_product_type(ctx),
+        *_minimum_issue_size(ctx),
     ]

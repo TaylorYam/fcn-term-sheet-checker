@@ -37,8 +37,8 @@ def reports(tmp_path_factory):
 
 def test_other_issuers_are_unsupported(reports):
     others = [
-        i for i in reports.values() if not i.term_sheet.name.startswith(("029", "325", "147"))
-    ]  # MS 見 test_real_ms.py
+        i for i in reports.values() if not i.term_sheet.name.startswith(("029", "325", "147", "082"))
+    ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py
     assert others, "本機應有其他上手的負面樣本"
     assert all(i.unsupported and i.report.status == CheckStatus.REVIEW_REQUIRED for i in others)
 

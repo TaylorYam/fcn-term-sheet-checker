@@ -3,7 +3,7 @@
 - 文件側：[BNP 範本規格](../templates/bnp-zh-product-description.md)
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [BNP 下單資料格式](../order-formats/bnp-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.7（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #189）；**尚未實作**（實作 Issue 另開，§7）
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #189）；已實作（Issue #191；rule_id 對照見 §9），本機 7 份真實樣本結果與 §5 一致
 - 本文件只寫與 [BARC 核對規則](barc-check-rules.md)、[HSBC 核對規則](hsbc-check-rules.md)、[MS 核對規則](ms-check-rules.md)不同或 BNP 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -83,7 +83,7 @@
 | 期數 | 日期表列數 = 天期 = 名稱 `N 個月期` = §18 其餘情境 `第1~N 個月` |
 | KO 觀察方式 | §14(6)(7)(8) 寫法與日期表表頭一致（範本規格 §4.1） |
 | 記憶式 | §16 定義句 = §20(1) 定義句（範本規格 §4.2） |
-| KI | §17 有無觸及生效事件與 §11 有無下限價格列一致；有 KI 時情境為六個、無 KI 為五個（以標題判斷） |
+| KI | §17 有無觸及生效事件與 §11 有無下限價格列一致（共用 `derive.prices`）；情境數依 KI 型態：無 KI 與到期觀察五個、每日／每期觀察六個（以標題判斷） |
 | D 型日期表 | 第 1 期開始日 = 發行日；前期結束日 < 開始日 ≤ 前期結束日 + 4 個日曆天；結束日 < 配息日；末期結束日 = 期末評價日；末期配息日 = 到期日；配息日遞增 |
 | P 型日期表 | 評價日 < 配息日；末列評價日 = 期末評價日；末期配息日 = 到期日；配息日遞增；`不適用` 列 = 第 1～Non-Call−1 期 |
 | 贖回金額 | §16 `自動提前贖回金額 = 商品面額 × 100%`、§17 `商品面額 × 100%` 固定（2026-10-13 作業人員標記納入） |
@@ -180,9 +180,9 @@
 - BN4 沒有參考條件表列、沒有投資人須知；要當驗收樣本時需補列。
 - BNP 投資人須知：另開 Issue（同 MS #137 流程）。
 
-## 7. 建議實作方式
+## 7. 實作方式
 
-共用規則與多上手架構已完成，建議**一張實作 Issue**；PR 太大時分兩段：
+共用規則與多上手架構已完成，以一張實作 Issue（#191）、一個 PR 完成下列兩段：
 
 | 階段 | 內容 |
 |---|---|
@@ -209,3 +209,19 @@
 | 2026-10-13 | 月配息率 = 年利率 ÷ 12，四捨五入到說明書顯示位數（JPY 6 位）；JPY 配息金額取整數 |
 | 2026-10-13 | 商品種類固定 `股權連結結構型商品`；§16／§17 贖回金額 100% 固定 |
 | 2026-10-13 | 參考條件表某檔標的各價格與說明書差同一比例（疑似分割調整）→ 轉人工覆核，表上值不改；情境累積配息與每期配息 × 期數不符 → 判不一致 |
+| 2026-10-13 | 到期觀察（AM）KI 的情境只有五個（兩份樣本皆如此），規則依 KI 型態決定情境數（Issue #191 實作時修正範本規格 §4.7） |
+
+## 9. 規則對照（Issue #191）
+
+| 核對規則 | rule_id | 位置 |
+|---|---|---|
+| §3.1 參考條件表欄位、回填、VWAP | `field.*`、`backfill.*` | 共用 `rules/reference.py`、`backfill.py` |
+| §3.1 最低金額倍數 | `field.min_amounts`（倍數 `min_amount_multiples.bnp`） | 共用 `rules/reference.py` |
+| §3.2 審查標準共用項目 | `standard.approval_date`、`standard.chairman`、`standard.distributor`（含第四章 §16 電話）、`standard.issuer_name`、`standard.fixed_warning`、`standard.risk_level`、`standard.forbidden_wording`、`standard.product_name`、`standard.fees`、`standard.issue_price`（三處重印）、`doc.denomination`、`doc.print_date`、`doc.subscription_start_date` | 共用 `rules/review_standard.py`；第四章電話在 `rules/bnp.py` |
+| §3.2 商品種類、發行不成立門檻 | `standard.product_type`、`standard.minimum_issue_size` | 共用 `rules/review_standard.py`（有該上手分節才核對） |
+| §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
+| §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`（`split_suspected`） | 共用 |
+| §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike`（表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/bnp_scenario.py` |
+| §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.coupon_dates`、`schedule.period_starts`、`schedule.autocall_dates` | `rules/bnp.py` |
+| §3.6 保證機構名稱 | `standard.guarantor_name`（`guarantor_name.bnp` 三處） | 共用 `rules/review_standard.py` |
+| §3.7 情境分析 | `doc.scenario_parameters`（假設、情境種類）、`doc.scenario_calculations`（`情境一_assumed` 假設句期別、`情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_shares`／`_remainder`） | `rules/bnp_scenario.py` |

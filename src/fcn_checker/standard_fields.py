@@ -120,7 +120,8 @@ STANDARD_FIELDS: dict[str, str] = {
     "ki_type": "str：none 無 KI／AM 到期觀察／D 每日觀察／P 每期觀察（每個配息週期終止日）／M 每月觀察（BARC Monthly KI，"
     "尚無樣本）；none 可用 NOT_APPLICABLE 狀態交出",
     "autocall_schedule": "AutocallSchedule：提前出場排程（第一個可提前出場期、期數、各期比價日）",
-    "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額的各最低金額出處（最低交易／申購／加購／贖回金額）",
+    "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額 × 倍數的各最低金額出處（最低交易／申購／加購／贖回金額）；"
+    "倍數依審查標準 min_amount_multiples.<上手>.<出處欄位>，沒設定為 1",
     "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",
     "print_dates": "tuple[Occurrence, ...]：須在交易日當天至允許天數內的刊印日期出處",
     # 審查標準規則（docs/rules/review-standard.md）
@@ -138,6 +139,12 @@ STANDARD_FIELDS: dict[str, str] = {
     "distributor_address_cover": "str：封面受託或銷售機構地址",
     "distributor_name_ch2": "str：第二章受託或銷售機構事業名稱",
     "distributor_address_ch2": "str：第二章受託或銷售機構營業所在地",
+    # 審查標準有該上手分節才核對的固定值（BNP）；沒有分節的上手不會被讀，可不交出（issuer-onboarding §6.2a）
+    "product_type": "str：封面「商品種類」（審查標準 product_type.<上手> 有固定值時核對；MS 依標的數另由上手規則核對）",
+    "guarantor_name_cover": "str：封面「保證機構」名稱（審查標準 guarantor_name.<上手> 有 cover 時核對）",
+    "guarantor_name_ch1": "str：第一章保證機構名稱（審查標準 guarantor_name.<上手> 有 ch1 時核對）",
+    "guarantor_name_ch2": "str：第二章「保證機構」事業名稱（審查標準 guarantor_name.<上手> 有 ch2 時核對）",
+    "minimum_issue_size": "str：第四章發行不成立門檻的金額寫法（審查標準 minimum_issue_size.<上手> 有固定值時核對）",
 }
 
 # 另有一組費用欄位：每個費用項目一個，名稱由 fee_field 產生

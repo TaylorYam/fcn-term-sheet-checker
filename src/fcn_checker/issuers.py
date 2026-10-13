@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
 from .parsers import barc_iis, hsbc_iis, ms_iis
+from .parsers import bnp as bnp_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
 from .rules import barc as barc_rules
+from .rules import bnp as bnp_rules
 from .rules import hsbc as hsbc_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
@@ -130,7 +132,20 @@ MS = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS)
+BNP = Issuer(
+    code=bnp_rules.ISSUER,
+    template_id=bnp_parser.TEMPLATE_ID,
+    label="BNP 中文產品說明書",
+    parser_version=bnp_parser.PARSER_VERSION,
+    not_covered=tuple(bnp_rules.NOT_COVERED),
+    detect=bnp_parser.detect,
+    read=bnp_parser.read,
+    rules=bnp_rules.run_all,
+    reference_fields=bnp_rules.REFERENCE_FIELDS,
+    iis=None,  # BNP 投資人須知尚無範本（另開 Issue）：未支援上手，BNP 商品不打 V、不回填（ADR 0007）
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

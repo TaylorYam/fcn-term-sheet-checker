@@ -130,7 +130,9 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
     assert r.status == MISMATCH
 
     standard = standard_with(
-        tmp_path, 'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313"]', "phone_equivalents = []"
+        tmp_path,
+        'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313", "+886 (2) 5556 1313"]',
+        "phone_equivalents = []",
     )
     r = results(
         check_hsbc(sub(tmp_path, "hsbc"), standard=standard), "standard.distributor", "distributor_phone_cover"
@@ -178,7 +180,9 @@ def test_address_form_not_listed_in_standard_is_mismatch(tmp_path):
     )[0]
     assert r.status == PASS and "address_equivalents" in r.tolerance
     standard = standard_with(
-        tmp_path, 'address_equivalents = ["台北市民生東路三段158號6樓"]', "address_equivalents = []"
+        tmp_path,
+        'address_equivalents = ["台北市民生東路三段158號6樓", "臺北市105民生東路三段158號6樓"]',
+        "address_equivalents = []",
     )
     r = results(
         ms_synth.check(sub(tmp_path, "unlisted"), edits=variant, config=load_config(review_standard=standard)),
