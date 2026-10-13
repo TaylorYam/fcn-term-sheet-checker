@@ -165,24 +165,24 @@ def test_currency_occurrences_map_chinese_words_and_iso_codes_to_the_sheet():
 
 def test_currency_word_outside_the_table_is_reported_once_at_the_cover():
     """封面幣別不在對照表時封面那筆已轉人工覆核；寫同一個字的出處不重複，寫別的字才各自報。"""
-    assert _currency_others("澳幣", {"a": "澳幣"}, currency="AUD") == []
-    [r] = _currency_others("澳幣", {"a": "歐元"}, currency="AUD")
-    assert (r.status, r.reason_code, r.actual) == (REVIEW, "currency_unknown", "歐元")
-    [r] = _currency_others("美元", {"a": "歐元"}, currency="USD")
-    assert (r.status, r.reason_code) == (REVIEW, "currency_unknown") and "「歐元」" in r.message
+    assert _currency_others("澳元", {"a": "澳元"}, currency="AUD") == []
+    [r] = _currency_others("澳元", {"a": "瑞郎"}, currency="AUD")
+    assert (r.status, r.reason_code, r.actual) == (REVIEW, "currency_unknown", "瑞郎")
+    [r] = _currency_others("美元", {"a": "瑞郎"}, currency="USD")
+    assert (r.status, r.reason_code) == (REVIEW, "currency_unknown") and "「瑞郎」" in r.message
 
 
 def test_scenario_currency_lists_only_the_amounts_that_do_not_match():
     ev = Evidence(1, (0.0, 0.0, 1.0, 1.0), "x")
     good = Money("100.00美元", "美元", (ev,))
-    bad, odd = Money("10,100.00日幣", "日幣", (ev,)), Money("1.00歐元", "歐元", ())
+    bad, odd = Money("10,100.00日幣", "日幣", (ev,)), Money("1.00瑞郎", "瑞郎", ())
     [r] = _currency_others("美元", {"s": (good, good)}, currency="USD")
     assert (r.status, r.expected, r.actual) == (PASS, "USD", "USD")
     [r] = _currency_others("美元", {"s": (good, bad, odd)}, currency="USD")
     assert (r.status, r.actual, r.document_evidence) == (MISMATCH, ["10,100.00日幣"], [ev])
     [r] = _currency_others("美元", {"s": (good, odd)}, currency="USD")
-    assert (r.status, r.reason_code, r.actual) == (REVIEW, "currency_unknown", "歐元")
-    assert _currency_others("澳幣", {"s": (Money("1澳幣", "澳幣", ()),)}, currency="AUD") == []
+    assert (r.status, r.reason_code, r.actual) == (REVIEW, "currency_unknown", "瑞郎")
+    assert _currency_others("澳元", {"s": (Money("1澳元", "澳元", ()),)}, currency="AUD") == []
 
 
 def test_currency_occurrences_are_silent_when_the_sheet_currency_is_blank_or_absent():

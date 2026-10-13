@@ -16,7 +16,10 @@ from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
 PARSER_VERSION = "1"
-LAYOUT = LayoutSpec(r"第{zh}章\s*{name}", re.compile(r"^(\d{1,2})\.$"), 100, re.compile(r"^\((\d{1,2})\)\s*(.*)$"), 110)
+# 條號自成一行（`9.`），也可能與標題同一行（`10. 發行價格：`，真實樣本第 10 條起是這種版面，Issue #185）
+LAYOUT = LayoutSpec(
+    r"第{zh}章\s*{name}", re.compile(r"^(\d{1,2})\.(?:\s+\S.*)?$"), 100, re.compile(r"^\((\d{1,2})\)\s*(.*)$"), 110
+)
 N = r"([\d,]+(?:\.\d+)?)"
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 

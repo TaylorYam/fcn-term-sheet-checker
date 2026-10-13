@@ -59,6 +59,7 @@ class Spec(ProductSpec):
     underlyings: tuple[UL, ...] = field(init=False)
     count: int = 2  # 標的數
     partial_coupon: bool = False  # 情境一多一行不足一期的配息
+    inline_articles_from: int | None = None  # 第一章從第 N 條起條號與標題同一行（`10. 發行價格：`，Issue #185）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -129,6 +130,9 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
 
     def article(n, text):
         w.section = f"art{n}"
+        if s.inline_articles_from is not None and n >= s.inline_articles_from:
+            line(f"{n}. {text}", 60)
+            return
         w.line(60, f"{n}.")
         line(text)
 
