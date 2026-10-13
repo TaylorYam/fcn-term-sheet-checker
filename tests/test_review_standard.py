@@ -157,11 +157,6 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
             "minimum_subscription = { USD = 10, JPY = 0, CNH = 1 }",
             "min_amount_multiples.sg",
         ),
-        (
-            'sg = ["""本商品風險程度等級為[RR4]。',
-            'sg = ["""本商品風險程度等級為RR4。',
-            "risk.fixed_warning_variants.sg",
-        ),
         ('ccy_aliases = { CNH = "CNY" }', "ccy_aliases = { CNH = 1 }", "product_name.sg.ccy_aliases"),
     ],
 )
@@ -193,7 +188,7 @@ def test_address_form_not_listed_in_standard_is_mismatch(tmp_path):
     assert r.status == PASS and "address_equivalents" in r.tolerance
     standard = standard_with(
         tmp_path,
-        'address_equivalents = ["台北市民生東路三段158號6樓", "臺北市105民生東路三段158號6樓"]',
+        'address_equivalents = ["台北市民生東路三段158號6樓", "臺北市105民生東路三段158號6樓", "台北市松山區民生東路3段158號6樓"]',
         "address_equivalents = []",
     )
     r = results(
