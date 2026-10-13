@@ -73,15 +73,19 @@ class TextIndex:
     """把一段文字行去空白後串接，並可由字元位置找回原始行（作為證據）。
 
     `unify_brackets`：半形括號換成全形（一對一換字，位置不變），句型用全形括號寫一次就好（MS）。
+    `separate_digits`：上一行結尾與下一行開頭都是數字時在中間插入 `|`，避免相鄰的數字相黏（表格一格一行、算式換行）。
     """
 
-    def __init__(self, lines: Sequence[Line], *, unify_brackets: bool = False):
+    def __init__(self, lines: Sequence[Line], *, unify_brackets: bool = False, separate_digits: bool = False):
         self.lines = list(lines)
         parts: list[str] = []
         self._starts: list[int] = []
         pos = 0
         for ln in self.lines:
             s = squash(ln.text)
+            if separate_digits and parts and s and parts[-1][-1:].isdigit() and s[0].isdigit():
+                parts.append("|")
+                pos += 1
             self._starts.append(pos)
             parts.append(s)
             pos += len(s)

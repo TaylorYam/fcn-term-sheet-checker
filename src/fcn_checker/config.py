@@ -12,9 +12,9 @@ from typing import Any
 
 from .ingestion import IngestionError
 
-# 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察），
-# 與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）
-NAME_FLAGS = ("memory", "maxi", "daily")
+# 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）、
+# autocall（Non-Call < 天期，BNP），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）
+NAME_FLAGS = ("memory", "maxi", "daily", "autocall")
 NAME_PLACEHOLDERS = frozenset(
     {"tenor", "ccy_zh", "ccy"} | {f"{f}_{lang}" for f in (*NAME_FLAGS, "underlying") for lang in ("zh", "en")}
 )
@@ -39,6 +39,8 @@ class ProductNameTemplate:
     single_en: str = ""
     basket_zh: str = ""  # 標的 2 檔以上時填入
     basket_en: str = ""
+    autocall_zh: str = ""  # {autocall_zh}／{autocall_en}：Non-Call < 天期（會提前出場）時填入（BNP）
+    autocall_en: str = ""
 
     def placeholders(self, lang: str) -> frozenset[str]:
         """樣板（zh／en）用到的佔位符名稱。"""
@@ -71,6 +73,11 @@ class IssuerStandard:
     distributor_address: str
     distributor_address_equivalents: tuple[str, ...]  # 地址可接受的其他寫法（所有上手適用）
     iis_fixed_warning_occurrences: int | None  # 投資人須知的固定警語次數；None → 審查標準沒有該上手的值
+    # 下列只有審查標準有該上手分節時才核對（BNP）
+    guarantor_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch1／ch2）→ 保證機構名稱
+    product_type: str | None = None  # 封面商品種類固定值
+    minimum_issue_size: str | None = None  # 第四章發行不成立門檻的金額寫法
+    min_amount_multiples: dict[str, int] = field(default_factory=dict)  # 最低金額出處欄位 → 單位面額的倍數（沒列為 1）
 
 
 @dataclass(frozen=True)
@@ -102,6 +109,10 @@ class ReviewStandard:
     fixed_warning_openings: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 警語開頭句的其他寫法
     risk_level_formats: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 風險等級寫法
     issuer_name_ignore: dict[str, frozenset[str]] = field(default_factory=dict)  # 上手 → 全名比對另外忽略的差異
+    guarantor_names: dict[str, dict[str, str]] = field(default_factory=dict)  # 上手 → 出處 → 保證機構名稱
+    product_types: dict[str, str] = field(default_factory=dict)  # 上手 → 封面商品種類固定值
+    minimum_issue_sizes: dict[str, str] = field(default_factory=dict)  # 上手 → 發行不成立門檻寫法
+    min_amount_multiples: dict[str, dict[str, int]] = field(default_factory=dict)  # 上手 → 最低金額出處 → 倍數
 
     def approval_date_on(self, trade_date: dt.date) -> dt.date | None:
         """交易日當天或之前最近一次的審查通過日期；交易日早於最早的日期時為 None。"""
@@ -126,6 +137,10 @@ class ReviewStandard:
             distributor_address=self.distributor_address,
             distributor_address_equivalents=self.distributor_address_equivalents,
             iis_fixed_warning_occurrences=self.iis_fixed_warning_occurrences.get(key),
+            guarantor_names=dict(self.guarantor_names.get(key, {})),
+            product_type=self.product_types.get(key),
+            minimum_issue_size=self.minimum_issue_sizes.get(key),
+            min_amount_multiples=dict(self.min_amount_multiples.get(key, {})),
         )
 
 
@@ -176,6 +191,8 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
         single_en=n.get("single_en", ""),
         basket_zh=n.get("basket_zh", ""),
         basket_en=n.get("basket_en", ""),
+        autocall_zh=n.get("autocall_zh", ""),
+        autocall_en=n.get("autocall_en", ""),
     )
     for lang in ("zh", "en"):
         unknown = sorted(tpl.placeholders(lang) - NAME_PLACEHOLDERS)
@@ -247,6 +264,55 @@ def _issuer_name_ignore(d: dict[str, Any]) -> dict[str, frozenset[str]]:
     return {k: frozenset(v) for k, v in lists.items()}
 
 
+GUARANTOR_PLACES = ("cover", "ch1", "ch2")  # 保證機構名稱的出處鍵：封面、第一章、第二章
+
+
+def _per_issuer_texts(d: Any, where: str, keys: tuple[str, ...] | None = None) -> dict[str, dict[str, str]]:
+    """`[<表>.<上手>]` 裡每個鍵一段不空白的文字；`keys` 給了就只允許這些鍵。"""
+    if not isinstance(d, dict):
+        raise IngestionError("config_invalid", f"審查標準 {where} 須是一個表（[{where}]）")
+    out: dict[str, dict[str, str]] = {}
+    for issuer, values in d.items():
+        if not isinstance(values, dict) or not values:
+            raise IngestionError("config_invalid", f"審查標準 {where}.{issuer} 須是一個表，每個鍵一段文字")
+        bad = [k for k, v in values.items() if not isinstance(v, str) or not v.strip()]
+        unknown = sorted(set(values) - set(keys)) if keys else []
+        if bad or unknown:
+            raise IngestionError(
+                "config_invalid",
+                f"審查標準 {where}.{issuer} 的鍵須為 {'、'.join(keys or values)}，值為不空白的文字"
+                + (f"（有問題：{'、'.join(bad + unknown)}）" if bad + unknown else ""),
+            )
+        out[issuer] = dict(values)
+    return out
+
+
+def _per_issuer_text(d: Any, where: str) -> dict[str, str]:
+    """`[<表>]` 裡每個上手一段不空白的文字。"""
+    if not isinstance(d, dict):
+        raise IngestionError("config_invalid", f"審查標準 {where} 須是一個表（[{where}]）")
+    bad = [k for k, v in d.items() if not isinstance(v, str) or not v.strip()]
+    if bad:
+        raise IngestionError("config_invalid", f"審查標準 {where}.{bad[0]} 須是一段不空白的文字")
+    return dict(d)
+
+
+def _min_amount_multiples(d: Any) -> dict[str, dict[str, int]]:
+    """`[min_amount_multiples.<上手>]`：最低金額出處欄位 → 正整數倍數。"""
+    where = "min_amount_multiples"
+    if not isinstance(d, dict):
+        raise IngestionError("config_invalid", f"審查標準 {where} 須是一個表（[{where}]）")
+    out: dict[str, dict[str, int]] = {}
+    for issuer, values in d.items():
+        if not isinstance(values, dict) or not values:
+            raise IngestionError("config_invalid", f"審查標準 {where}.{issuer} 須是一個表，每個最低金額出處一個倍數")
+        bad = [k for k, v in values.items() if type(v) is not int or v < 1]
+        if bad:
+            raise IngestionError("config_invalid", f"審查標準 {where}.{issuer}.{bad[0]} 須是正整數（單位面額的倍數）")
+        out[issuer] = dict(values)
+    return out
+
+
 def _approval_dates(value: Any) -> tuple[dt.date, ...]:
     """distributor.approval_dates：至少一筆、都是日期、不重複；回傳由舊到新。"""
     where = "審查標準 distributor.approval_dates"
@@ -293,6 +359,10 @@ def load_review_standard(path: Path) -> ReviewStandard:
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
             iis_pages=int(d["iis"]["pages"]),
             iis_fixed_warning_occurrences={k: int(v) for k, v in d["iis"]["fixed_warning_occurrences"].items()},
+            guarantor_names=_per_issuer_texts(d.get("guarantor_name", {}), "guarantor_name", GUARANTOR_PLACES),
+            product_types=_per_issuer_text(d.get("product_type", {}), "product_type"),
+            minimum_issue_sizes=_per_issuer_text(d.get("minimum_issue_size", {}), "minimum_issue_size"),
+            min_amount_multiples=_min_amount_multiples(d.get("min_amount_multiples", {})),
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"審查標準設定檔缺少或格式錯誤的項目：{e}") from e

@@ -1,16 +1,13 @@
 # 下單資料格式：BNP（參考條件表）
 
 - 設定檔：所有上手共用的 [`config/reference_sheet.toml`](../../config/reference_sheet.toml)
-- 狀態：規格已確認（Issue #189），**尚未實作**。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 BNP 的說明書來源與差異
+- 狀態：已實作（Issue #191）。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 BNP 的說明書來源與差異
 
 ## 1. 結構
 
 與其他上手相同（`樣本清單` 工作表、第 3 列表頭、每列一檔）。BNP 列的 `發行機構` 欄寫 `BNP`；商品代號前 3 碼為 `082`（`config/issuer_prefixes.toml` 已登記）。
 
-實作時要登記：
-
-- `config/reference_sheet.toml`：BNP 在 `發行機構` 欄的寫法 `BNP`。
-- `src/fcn_checker/issuers.py`：BNP 範本（`bnp-zh-pd`）。
+已登記：`config/reference_sheet.toml` 的 `issuer_values.BNP = "BNP"`、`src/fcn_checker/issuers.py` 的 BNP 範本（`bnp-zh-pd`）。
 
 ## 2. 欄位對照
 
