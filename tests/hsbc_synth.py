@@ -22,7 +22,9 @@ from reference_synth import UL, ProductSpec, price
 
 CENT = Decimal("0.01")
 # 人民幣商品第一章第 5 條在幣別後面接的說明段落（真實樣本寫法節錄，Issue #180）
-CNH_NOTE = "人民幣計價債券之說明事項：交割貨幣：境外人民幣本債券將以境外人民幣交割並於中國大陸境外交易。替代交割貨幣：美金"
+CNH_NOTE = (
+    "人民幣計價債券之說明事項：交割貨幣：境外人民幣本債券將以境外人民幣交割並於中國大陸境外交易。替代交割貨幣：美金"
+)
 
 
 def underlyings(count: int) -> tuple[UL, ...]:
