@@ -176,7 +176,7 @@ class BnpTermSheet:
         return standard_fields.lookup(self.fields, name)
 
 
-def _labelled(name: str, lines: Sequence[Line], label: str) -> ParsedField:
+def labelled(name: str, lines: Sequence[Line], label: str) -> ParsedField:
     """以「標籤：值」開頭的那一行（剛好一行）的值，保留行內空白；標籤比對去空白。"""
     hits = [ln for ln in lines if squash(ln.text).startswith(squash(label))]
     if not hits:
@@ -197,7 +197,7 @@ def memory_of(clause: str) -> bool | None:
     return None
 
 
-def _ko_memory(name: str, lines: list[Line], pattern: str, missing: str) -> ParsedField:
+def ko_memory(name: str, lines: list[Line], pattern: str, missing: str) -> ParsedField:
     ti = TextIndex(lines)
     hits = []
     for m in ti.finditer(pattern):
@@ -209,7 +209,7 @@ def _ko_memory(name: str, lines: list[Line], pattern: str, missing: str) -> Pars
     return ParsedField.from_hits(name, hits, missing_note=missing)
 
 
-def _ki_type(lines: list[Line]) -> ParsedField:
+def ki_type(lines: list[Line]) -> ParsedField:
     """第 17 項「觸及生效事件觀察日」定義句 → KI 型態；沒有這句、也沒有「觸及生效事件」字樣、且到期贖回寫
     「若於期末評價日，…收盤價格大於或等於其執行價格」時為無 KI。"""
     name = "ki_type"
@@ -299,9 +299,9 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
         else ParsedField.missing("name_art1", "找不到第一章第 1 項商品名稱")
     )
     art3 = article(3)
-    fields["issuer_name_ch1"] = _labelled("issuer_name_ch1", art3, "發行機構：")
-    fields["guarantor_name_ch1"] = _labelled("guarantor_name_ch1", art3, "保證機構：")
-    fields["currency_art5"] = _labelled("currency_art5", article(5), "計價幣別：")
+    fields["issuer_name_ch1"] = labelled("issuer_name_ch1", art3, "發行機構：")
+    fields["guarantor_name_ch1"] = labelled("guarantor_name_ch1", art3, "保證機構：")
+    fields["currency_art5"] = labelled("currency_art5", article(5), "計價幣別：")
     art6 = article(6)
     put("denomination", art6, r"商品面額：每單位商品" + NUM + CCY, number)
     put("denomination_currency", art6, rf"商品面額：每單位商品{money.NUMBER}({CCY})")
@@ -309,7 +309,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     art11 = article(11)
     table = bnp_tables.price_table("underlying_table", _art11_region(art11), with_tickers=True)
     fields["underlying_table"] = table
-    _prices(fields, table, art11)
+    price_fields(fields, table, art11)
 
     art14 = article(14)
     put("tenor_months", art14, r"商品年期：(\d+)個月期", int)
@@ -335,7 +335,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     art16 = article(16)
     put("autocall_redemption_pct", art16, r"自動提前贖回金額=商品面額×" + PCT, Decimal)
     put("currency_art16", art16, rf"計算之({CCY})金額\(「自動提前贖回金額」\)")
-    fields["ko_memory"] = _ko_memory(
+    fields["ko_memory"] = ko_memory(
         "ko_memory",
         art16,
         r"「自動提前贖回事件」：計算代理機構將依專業合理的方式釐定，若於任一自動提前贖回評價日，(.+?)，則視為發生自動提前贖回事件",
@@ -345,24 +345,24 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     put("maturity_redemption_pct", art17, r"商品面額×" + PCT + r"；或", Decimal)
     put("min_coupon_rate", art17, r"最低配息率為" + PCT + r"[（(]年化[）)]", Decimal)
     put("currency_art17", art17, rf"計算之({CCY})金額或實體連結標的")
-    fields["ki_type"] = _ki_type(art17)
-    fields["ko_memory_art20"] = _ko_memory(
+    fields["ki_type"] = ki_type(art17)
+    fields["ko_memory_art20"] = ko_memory(
         "ko_memory_art20",
         doc.span_lines(doc.subitems(arts.get(20)).get(1)),
         r"自動提前贖回事件：若於任一自動提前贖回評價日，(.+?)，則視為發生自動提前贖回事件",
         "找不到第 20 項(1) 自動提前贖回事件定義句",
     )
-    _pcts(fields)
+    pct_fields(fields)
     scenarios = bnp_scenario.section(doc.span_lines(doc.subitems(arts.get(18)).get(3)))
 
     # 第二章
     ch2 = doc.articles(2)
-    fields["issuer_name_ch2"] = _labelled("issuer_name_ch2", doc.span_lines(ch2.get(1)), "(1)事業名稱：")
-    fields["guarantor_name_ch2"] = _labelled("guarantor_name_ch2", doc.span_lines(ch2.get(2)), "(1)事業名稱：")
+    fields["issuer_name_ch2"] = labelled("issuer_name_ch2", doc.span_lines(ch2.get(1)), "(1)事業名稱：")
+    fields["guarantor_name_ch2"] = labelled("guarantor_name_ch2", doc.span_lines(ch2.get(2)), "(1)事業名稱：")
     trustee = _trustee_block(doc.span_lines(ch2.get(3)))
-    fields["distributor_name_ch2"] = _labelled("distributor_name_ch2", trustee, "◎事業名稱：")
-    fields["distributor_address_ch2"] = _labelled("distributor_address_ch2", trustee, "◎營業所在地：")
-    fields["chairman"] = _labelled("chairman", trustee, "◎負責人姓名：")
+    fields["distributor_name_ch2"] = labelled("distributor_name_ch2", trustee, "◎事業名稱：")
+    fields["distributor_address_ch2"] = labelled("distributor_address_ch2", trustee, "◎營業所在地：")
+    fields["chairman"] = labelled("chairman", trustee, "◎負責人姓名：")
 
     # 第四章
     ch4 = doc.articles(4)
@@ -389,7 +389,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     put("redemption_increment", art8, r"並以" + NUM + CCY + r"為增加贖回之單位", number)
     put("minimum_redemption_currency", art8, rf"最低贖回金額為{money.NUMBER}({CCY})")
     put("redemption_increment_currency", art8, rf"並以{money.NUMBER}({CCY})為增加贖回之單位")
-    fields["distributor_phone_ch4"] = _labelled(
+    fields["distributor_phone_ch4"] = labelled(
         "distributor_phone_ch4", doc.span_lines(ch4.get(16)), "受託機構聯絡方式："
     )
 
@@ -522,7 +522,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     )
 
 
-def _prices(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line]) -> None:
+def price_fields(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line]) -> None:
     """第 11 項標的表 → 標準欄位：標的（彭博代碼）與各標的價格列。"""
     if not table.ok:
         for key in ("underlyings", "underlying_prices"):
@@ -542,7 +542,7 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line
     )
 
 
-def _pcts(fields: dict[str, ParsedField]) -> None:
+def pct_fields(fields: dict[str, ParsedField]) -> None:
     """執行價／自動提前贖回價／下限價的百分比：第 11 項每檔都寫，須全部相同（否則歧義）；無 KI 時下限價不適用。"""
     table, ki = fields["underlying_table"], fields["ki_type"]
     for key, col in (("strike_pct", "strike"), ("ko_pct", "ko"), ("ki_pct", "ki")):

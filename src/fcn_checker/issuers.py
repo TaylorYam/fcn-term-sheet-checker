@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, hsbc_iis, ms_iis
+from .parsers import barc_iis, bnp_iis, hsbc_iis, ms_iis
 from .parsers import bnp as bnp_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
@@ -70,7 +70,7 @@ class Issuer:
 
 _IIS_SAMPLES = {
     "rule_id": "iis.template_variants",
-    "description": "投資人須知依各 8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表；MS 只支援其中新版 6 份）："
+    "description": "投資人須知依各 6～8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表；MS 只支援其中新版 6 份）："
     "其他型態的寫法未驗證，範本以外的欄位或寫法會轉人工覆核",
 }
 
@@ -144,7 +144,14 @@ BNP = Issuer(
     read=bnp_parser.read,
     rules=bnp_rules.run_all,
     reference_fields=bnp_rules.REFERENCE_FIELDS,
-    iis=None,  # BNP 投資人須知尚無範本（另開 Issue）：未支援上手，BNP 商品不打 V、不回填（ADR 0007）
+    iis=IisTemplate(
+        template_id=bnp_iis.TEMPLATE_ID,
+        label="BNP 中文投資人須知",
+        parser_version=bnp_iis.PARSER_VERSION,
+        detect=bnp_iis.detect,
+        read=bnp_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+    ),
 )
 
 SG = Issuer(

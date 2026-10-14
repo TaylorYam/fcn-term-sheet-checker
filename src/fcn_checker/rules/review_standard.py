@@ -79,9 +79,9 @@ def _denomination(ctx: Context) -> CheckResult:
     )
 
 
-def _subscription_dates(ctx: Context) -> list[CheckResult]:
-    """各受理申購日出處（開始、結束）= 交易日。"""
-    rid, trade = "doc.subscription_start_date", standard_field(ctx, "trade_date")
+def _subscription_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckResult]:
+    """各受理申購日出處（開始、結束）= 交易日；交易日預設取說明書（投資人須知由呼叫端給參考條件表的交易日）。"""
+    rid, trade = "doc.subscription_start_date", trade or standard_field(ctx, "trade_date")
     items, problem = occurrences_of(ctx, rid, "subscription_dates", Item.expected("受理申購日"))
     if problem:
         return [problem]
@@ -596,6 +596,28 @@ def _iis_occurrences(
     ]
 
 
+def _iis_guarantor_names(ctx: Context, name: str, place: str) -> list[CheckResult]:
+    """投資人須知各處保證機構名稱 = 審查標準 guarantor_name.<上手> 的固定值：寫全名的出處用 cover 的寫法、
+    寫簡稱的出處用 ch1 的寫法（BNP，同說明書封面與第一章）；沒有該值時轉人工覆核。"""
+    rid, what = "standard.guarantor_name", "保證機構名稱"
+    container = read_iis(ctx.iis, name)
+    if not container.ok:
+        return [Check(rid, name, Item.standard(what), ctx.document).review(container)]
+    expected = ctx.issuer_std.guarantor_names.get(place)
+    if expected is None:
+        missing = f"審查標準沒有 {ctx.issuer} 的保證機構名稱（guarantor_name.{ctx.issuer.lower()}.{place}）"
+        return [
+            Check(rid, occ.field, Item.standard(occ.name), ctx.document)
+            .needs(occ.value)
+            .result(S.REVIEW_REQUIRED, reason="standard_missing", message=missing)
+            for occ in container.value
+        ]
+    return [
+        _fixed_text(rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, document=ctx.document)
+        for occ in container.value
+    ]
+
+
 def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[CheckResult]:
     """投資人須知的審查標準規則：`ctx` 帶投資人須知的讀出結果，只核對範本有的項目（`ctx.provides`）。
 
@@ -623,8 +645,17 @@ def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[Check
     for name, rid, expected, what, missing, kind in occurrence_checks:
         if provides(name):
             out.extend(_iis_occurrences(ctx, rid, name, expected, what, missing, kind))
+    for name, place in (("guarantor_names", "cover"), ("guarantor_names_short", "ch1")):
+        if provides(name):
+            out.extend(_iis_guarantor_names(ctx, name, place))
     if any(provides(fee_field(label)) for label in ctx.std.fees):
         out.extend(_fees(ctx))
+    if provides("subscription_dates"):
+        out.extend(_subscription_dates(ctx, trade))
+    if provides("product_type"):  # 沒有 product_type.<上手> 的上手不核對（MS 依標的數由範本專屬規則核對）
+        out.extend(_product_type(ctx))
+    if provides("minimum_issue_size"):
+        out.extend(_minimum_issue_size(ctx))
     return out
 
 

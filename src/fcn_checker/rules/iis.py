@@ -33,6 +33,7 @@ from .kit import (
     order_value,
     price_item,
     read_standard,
+    shown,
     to_date,
     to_decimal,
     to_int,
@@ -171,6 +172,24 @@ def _monthly_coupon(ctx: Context) -> CheckResult:
     return check.compare(expected, pf.value, ok=ok, tolerance=f"差 ≤ {MONTHLY_TOLERANCE}", message="須等於年利率 ÷ 12")
 
 
+def _monthly_coupon_shown(ctx: Context) -> CheckResult:
+    """月配息率（BNP）= 參考條件表年利率 ÷ 12，四捨五入（half-up）到文件顯示的位數後相等（同 BNP 說明書 §3.3）。"""
+    rid, key = "iis.monthly_coupon", "monthly_coupon_shown_pct"
+    pf = read_iis(ctx.iis, key)
+    annual, ov, problem = order_value(ctx, "coupon_pa_pct", rid, key, pf, to_decimal, "數字", name="月配息率")
+    if problem:
+        return problem
+    check = Check(rid, key, Item.derived("月配息率", [ov]), ctx.document, ov=(ov,)).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
+    return check.compare(
+        shown(annual / 12, pf.value),
+        pf.value,
+        tolerance="年利率 ÷ 12 四捨五入（half-up）到文件顯示的位數",
+        message="須等於年利率 ÷ 12",
+    )
+
+
 def _monthly_coupons(ctx: Context) -> list[CheckResult]:
     """月配息率的每一處（MS）= 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位後相等（同 MS 說明書 §3.3）。"""
     rid, container = "iis.monthly_coupon", read_iis(ctx.iis, "monthly_coupons")
@@ -253,6 +272,7 @@ def reference_fields(ctx: Context) -> list[CheckResult]:
         ("maturity_date", lambda: table["maturity_date"].check(ctx)),
         ("coupon_pa_pct", lambda: table["coupon_pa_pct"].check(ctx)),
         ("monthly_coupon_pct", lambda: _monthly_coupon(ctx)),
+        ("monthly_coupon_shown_pct", lambda: _monthly_coupon_shown(ctx)),
         ("strike_pct", lambda: table["strike_pct"].check(ctx)),
         ("ko_pct", lambda: table["ko_pct"].check(ctx)),
         ("ki_pct", lambda: _KI_PCT.check(ctx)),

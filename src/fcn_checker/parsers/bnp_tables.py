@@ -23,7 +23,8 @@ PRICE_LABELS = (
     ("currency", r"貨幣\(Currency\)[:：]"),
 )
 PRICE = r"([\d,]+\.\d{4})"
-PRICE_PCT = PRICE + r"，?即期初價格之(\d+(?:\.\d+)?)%"  # 第 11 項「N 即期初價格之X%」、第 18 項「N，即期初價格之X%」
+# 說明書第 11 項「N 即期初價格之X%」、第 18 項「N，即期初價格之X%」；投資人須知「N,即期初價格之X%」（半形逗號）
+PRICE_PCT = PRICE + r"[，,]?即期初價格之(\d+(?:\.\d+)?)%"
 TICKER = re.compile(r"^[A-Z0-9][A-Z0-9./-]*\s+[A-Z]{2}$")
 NAME_LABEL, TICKER_LABEL, EXCHANGE_LABEL = "連結標的名稱：", "彭博代碼：", "交易所："
 
