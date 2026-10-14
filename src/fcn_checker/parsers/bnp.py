@@ -645,8 +645,7 @@ def _mentions(
 
     one = Mention.of_field
 
-    def hit(where: str, h: Hit | None, pick: Callable, fallback: Sequence[Line]) -> Mention:
-        return Mention.missing(where, fallback) if h is None else Mention.of_hit(where, pick(h.value), h)
+    hit = Mention.of_optional_hit
 
     coupons = [
         one("第 15 項月配息率", fields["monthly_coupon_pct"]),

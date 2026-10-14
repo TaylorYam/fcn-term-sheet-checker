@@ -17,6 +17,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money, sg_scenario, sg_tables
+from .common import NUM, Hit, Mention, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "sg-zh-pd"
@@ -45,7 +46,6 @@ FOOTNOTE = re.compile(
     r"^\d{1,2}\s*(非許可之受讓人|本商品之一切付款|特殊因素指|連結標的中斷日之後果|評價時間指|買賣中斷指|交易所中斷指|提早收盤|持有由SG)"
 )
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
-NUM = r"([\d,]+(?:\.\d+)?)"
 PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
 FEES = ("申購費用", "提前贖回費用", "分銷費用")
@@ -137,15 +137,6 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
 # ---------------------------------------------------------------- 讀出
 
 
-@dataclass(frozen=True)
-class Mention:
-    """配息率或平均年化報酬率的一個出處；值讀不到時為 None。"""
-
-    where: str
-    value: Decimal | None
-    evidence: tuple[Evidence, ...]
-
-
 @dataclass
 class SgTermSheet:
     fields: dict[str, ParsedField]
@@ -157,18 +148,6 @@ class SgTermSheet:
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
-
-
-def _number(x: str) -> int | Decimal:
-    d = Decimal(x.replace(",", ""))
-    return int(d) if d == d.to_integral_value() else d
-
-
-def _derived(name: str, src: ParsedField, value=None) -> ParsedField:
-    """由另一個欄位推得（證據沿用來源）：來源有問題時沿用來源的狀態與說明。"""
-    if not src.ok:
-        return ParsedField(name, src.status, None, list(src.evidence), list(src.candidates), src.note)
-    return ParsedField(name, FieldStatus.PRESENT, value, list(src.evidence))
 
 
 def _absent(name: str, note: str) -> ParsedField:
@@ -236,7 +215,7 @@ def _date_field(name: str, pf: ParsedField, what: str) -> ParsedField:
     value = parse_date(pf.value) if pf.ok else None
     if pf.ok and value is None:
         return ParsedField(name, FieldStatus.INVALID, evidence=pf.evidence, note=f"{what}不是日期")
-    return _derived(name, pf, value)
+    return derived(name, pf, value)
 
 
 def read(lines: Sequence[Line]) -> SgTermSheet:
@@ -304,7 +283,7 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
     put("guarantor_name_ch1", article(3), r"保證機構名稱及其長期債務信用評等：(.+?)，截至")
     art5 = article(5)
     put("currency_art5", art5, rf"計價幣別：({CCY})")
-    put("denomination", art5, r"每單位面額：" + NUM + CCY, _number)
+    put("denomination", art5, r"每單位面額：" + NUM + CCY, number)
     put("denomination_currency", art5, rf"每單位面額：{money.NUMBER}({CCY})")
     put("issue_price_pct", art5, r"發行價格：每單位面額的" + PCT, Decimal)
     put("isin_art26", article(26), r"ISIN代碼：([A-Z]{2}[A-Z0-9]{10})")
@@ -367,6 +346,7 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
     # 第二章
     ch2 = doc.articles(2)
     fields["issuer_name_ch2"] = _labelled("issuer_name_ch2", doc.span_lines(ch2.get(1)), "事業名稱：")
+    fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
     fields["issuer_name_ch1"] = standard_fields.absent(
         "issuer_name_ch1", "第一章的發行機構名稱（SG 第一章第 3 項寫的是保證機構）"
     )
@@ -387,13 +367,13 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
             label, standard_fields.fee_field(label), doc.span_lines(ch4.get(2))
         )
     art4 = doc.span_lines(ch4.get(4))
-    put("minimum_subscription", art4, r"最低申購金額：" + NUM + CCY, _number)
-    put("minimum_additional", art4, r"最低加購金額：" + NUM + CCY, _number)
+    put("minimum_subscription", art4, r"最低申購金額：" + NUM + CCY, number)
+    put("minimum_additional", art4, r"最低加購金額：" + NUM + CCY, number)
     put("minimum_subscription_currency", art4, rf"最低申購金額：{money.NUMBER}({CCY})")
     put("minimum_additional_currency", art4, rf"最低加購金額：{money.NUMBER}({CCY})")
     put("issue_price_ch4", doc.span_lines(ch4.get(5)), r"申購金額之計算：每單位面額×申購單位數×" + PCT, Decimal)
     art8_ch4 = doc.span_lines(ch4.get(8))
-    put("minimum_redemption", art8_ch4, r"最低贖回金額或單位數：" + NUM + CCY, _number)
+    put("minimum_redemption", art8_ch4, r"最低贖回金額或單位數：" + NUM + CCY, number)
     put("minimum_redemption_currency", art8_ch4, rf"最低贖回金額或單位數：{money.NUMBER}({CCY})")
     put("minimum_redemption_units", art8_ch4, rf"最低贖回金額或單位數：{money.NUMBER}{CCY}（即(\d+)單位）", int)
 
@@ -532,7 +512,7 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, tickers: ParsedF
     無自動提前出場時表上沒有 KO 欄：KO 價 = 期初價格（KO 100%，見 `NO_AUTOCALL_KO_PCT`），照常與參考條件表比對。
     """
     if not table.ok:
-        fields["underlying_prices"] = _derived("underlying_prices", table)
+        fields["underlying_prices"] = derived("underlying_prices", table)
         return
     rows = table.value["rows"]
     names = tickers.value if tickers.ok and len(tickers.value) == len(rows) else [None] * len(rows)
@@ -580,7 +560,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
         for key in keys:
-            fields[key] = _derived(key, bad)
+            fields[key] = derived(key, bad)
         return
     kind, rows = table.value["type"], table.value["rows"]
     ev = table.evidence + wording.evidence
@@ -637,10 +617,11 @@ def _block(doc: Document, blocks, title: str) -> list[Line]:
     return doc.span_lines(found[0]) if len(found) == 1 else []
 
 
-def _hit_field(name: str, hit: sg_scenario.Hit | None, index: int, missing: str) -> ParsedField:
+def _hit_field(name: str, hit: Hit | None, missing: str, pick: Callable = lambda v: v) -> ParsedField:
+    """文件上一處值（`pick` 取出其中一個具名欄位）；找不到或多處時為缺漏。"""
     if hit is None:
         return ParsedField.missing(name, missing)
-    return ParsedField.present(name, hit.values[index], list(hit.lines))
+    return ParsedField.present(name, pick(hit.value), list(hit.lines))
 
 
 def _currency_occurrences(fields: dict[str, ParsedField], scenarios: sg_scenario.ScenarioSection) -> list[Occurrence]:
@@ -672,7 +653,12 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: sg_scenario
             "scenario_total_currency",
             "情境假設總投資金額幣別",
             "第 15 項假設總投資金額",
-            _hit_field("scenario_total_currency", scenarios.total, 2, "第 15 項假設找不到總投資金額或出現多次"),
+            _hit_field(
+                "scenario_total_currency",
+                scenarios.total,
+                "第 15 項假設找不到總投資金額或出現多次",
+                lambda v: v.currency,
+            ),
         ),
     ]
     for s in scenarios.scenarios:
@@ -688,22 +674,16 @@ def _mentions(
 ) -> tuple[list[Mention], list[Mention]]:
     """配息率的每個出處與獲利情境的平均年化報酬率（核對規則 §3.3）；讀不到的出處值為 None。"""
 
-    def one(where: str, pf: ParsedField) -> Mention:
-        return Mention(where, pf.value if pf.ok else None, tuple(pf.evidence))
-
-    def hit(where: str, h: sg_scenario.Hit | None, index: int, fallback: Sequence[Line]) -> Mention:
-        if h is None:
-            return Mention(where, None, tuple(Evidence.of(ln) for ln in fallback))
-        return Mention(where, h.values[index], tuple(Evidence.of(ln) for ln in h.lines))
+    one, hit = Mention.of_field, Mention.of_optional_hit
 
     coupons = [
         one("第 8 項配息率", fields["monthly_coupon_pct"]),
-        hit("第 15 項假設配息率", scenarios.rate, 0, scenarios.assumptions[-1:]),
+        hit("第 15 項假設配息率", scenarios.rate, lambda v: v, scenarios.assumptions[-1:]),
     ]
     annualized = []
     for s in scenarios.scenarios:
         where = f"第 15 項情境{s.number}"
-        coupons.append(hit(f"{where}配息算式", s.coupon, 5, s.lines[:1]))
+        coupons.append(hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1]))
         if s.kind in ("best", "middle"):
-            annualized.append(hit(f"{where}平均年化報酬率", s.total_return, 5, s.lines[:1]))
+            annualized.append(hit(f"{where}平均年化報酬率", s.total_return, lambda v: v.annualized, s.lines[:1]))
     return coupons, annualized

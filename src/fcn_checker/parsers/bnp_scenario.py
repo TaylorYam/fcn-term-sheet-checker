@@ -13,7 +13,7 @@ from ..schema import Line, ParsedField
 from ..standard_fields import Money
 from ..text import squash
 from . import bnp_tables, money
-from .common import NUM, SCENARIO_HEAD, Hit, dec, hits, one
+from .common import NUM, SCENARIO_HEAD, Amount, Hit, dec, hits, one
 from .layout import TextIndex
 
 PCT = r"(-?\d+(?:\.\d+)?)%"
@@ -43,13 +43,6 @@ class CouponCalc(NamedTuple):
     amount: Decimal
     amount_currency: str
     decimals: int
-
-
-class Amount(NamedTuple):
-    """金額與旁邊的幣別字。"""
-
-    amount: Decimal
-    currency: str
 
 
 class Redemption(NamedTuple):

@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Generic, TypeVar
+from typing import Generic, NamedTuple, TypeVar
 
 from ..schema import Evidence, FieldStatus, Line, ParsedField
 from .layout import TextIndex
@@ -36,6 +36,13 @@ def derived(name: str, src: ParsedField, value=None) -> ParsedField:
     if not src.ok:
         return ParsedField(name, src.status, None, list(src.evidence), list(src.candidates), src.note)
     return ParsedField(name, FieldStatus.PRESENT, value, list(src.evidence))
+
+
+class Amount(NamedTuple):
+    """金額與旁邊的幣別字（例：累積總配息金額）。"""
+
+    amount: Decimal
+    currency: str
 
 
 @dataclass(frozen=True)
@@ -75,3 +82,8 @@ class Mention:
     @classmethod
     def missing(cls, where: str, lines) -> Mention:
         return cls(where, None, tuple(Evidence.of(ln) for ln in lines))
+
+    @classmethod
+    def of_optional_hit(cls, where: str, hit: Hit | None, pick: Callable, fallback) -> Mention:
+        """`hit` 找不到時為讀不到（證據為 `fallback` 行）；找到時值為 `pick(hit.value)`。"""
+        return cls.missing(where, fallback) if hit is None else cls.of_hit(where, pick(hit.value), hit)

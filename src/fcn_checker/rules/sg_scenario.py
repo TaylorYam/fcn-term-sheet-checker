@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_HALF_UP, Decimal
 
-from ..schema import CheckResult, Evidence, Item
+from ..schema import CheckResult, Item
 from ..schema import CheckStatus as S
 from . import kit
 from .kit import Check, IssuerContext
@@ -22,31 +22,9 @@ Q2 = kit.Q2
 Q4 = kit.Q4
 
 
-def annual_rate(ctx: IssuerContext, rid: str, field: str):
-    """參考條件表年利率（SG 宣告的 reference_fields）；（值, 儲存格, 有問題時的人工覆核結果）。"""
-    return kit.order_value(ctx, "coupon_pa_pct", rid, field, None, kit.to_decimal, "數字", name="年利率 %")
-
-
 def monthly_rate(annual: Decimal) -> Decimal:
     """配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（SG 固定 4 位，JPY 也是）。"""
     return (annual / 12).quantize(Q4, ROUND_HALF_UP)
-
-
-def _ev(lines) -> list[Evidence]:
-    return [Evidence.of(ln) for ln in lines]
-
-
-def _result(rid, field, item, issues, evidence, *, review=False, expected=None, actual=None, ov=None) -> CheckResult:
-    item = Item.expected(item) if isinstance(item, str) else item
-    return Check(rid, field, item, ov=tuple(ov or ())).compare(
-        expected,
-        actual,
-        ok=not issues,
-        fail=S.REVIEW_REQUIRED if review else S.MISMATCH,
-        reason="scenario_unknown_wording" if review else "value_mismatch",
-        message="；".join(issues),
-        evidence=evidence,
-    )
 
 
 def reprint(ctx: IssuerContext) -> list[CheckResult]:
@@ -103,22 +81,26 @@ def parameters(ctx: IssuerContext) -> list[CheckResult]:
         out.append(Check(rid, "scenario_total", item, ctx.document).review(denom))
     elif sec.total is None:
         out.append(
-            _result(
+            kit.calc_result(
                 rid,
                 "scenario_total",
                 item,
                 ["第 15 項假設找不到「總投資金額 = U單位面額 = N」或出現多次"],
-                _ev(sec.assumptions[:1]),
+                kit.evidence(sec.assumptions[:1]),
                 review=True,
             )
         )
     else:
-        units, amount, _ = sec.total.values
+        units, amount = sec.total.value.units, sec.total.value.amount
         expected = Decimal(denom.value) * units
         issues = (
             [] if amount == expected else [f"總投資金額 {amount} 應為 {units} 單位 × 面額 {denom.value} = {expected}"]
         )
-        out.append(_result(rid, "scenario_total", item, issues, _ev(sec.total.lines), expected=expected, actual=amount))
+        out.append(
+            kit.calc_result(
+                rid, "scenario_total", item, issues, kit.evidence(sec.total.lines), expected=expected, actual=amount
+            )
+        )
     kinds = [s.kind for s in sec.scenarios]
     check = Check(rid, "scenario_titles", Item.expected("第 15 項情境標題"), ctx.document).needs(has)
     if (problem := check.blocked) is not None:
@@ -132,7 +114,7 @@ def parameters(ctx: IssuerContext) -> list[CheckResult]:
             ok=kinds == expected_kinds,
             fail=S.REVIEW_REQUIRED,
             reason="scenario_unknown_wording",
-            evidence=_ev([s.lines[0] for s in sec.scenarios] or sec.lines[:1]),
+            evidence=kit.evidence([s.lines[0] for s in sec.scenarios] or sec.lines[:1]),
             fail_message="情境的數量或種類與有無自動提前出場不符（有：較佳、中間、較差、最差；無：較佳、較差、最差）",
         )
     )
@@ -146,7 +128,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
     denom, tenor, k, has, rows = (
         f(x) for x in ("denomination", "tenor_months", "first_callable_period", "has_autocall", "underlying_prices")
     )
-    annual, ov, problem = annual_rate(ctx, rid, "scenario_calculations")
+    annual, ov, problem = kit.annual_rate(ctx, rid, "scenario_calculations")
     if problem:
         return [problem]
     out = []
@@ -171,19 +153,19 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             continue
         if s.kind == "unknown":
             out.append(
-                _result(
+                kit.calc_result(
                     rid,
                     f"{tag}_coupon",
                     items["coupon"],
                     [f"情境標題「{s.title}」不是已知的種類"],
-                    _ev(s.lines[:1]),
+                    kit.evidence(s.lines[:1]),
                     review=True,
                     ov=[ov],
                 )
             )
             continue
         autocall = s.kind == "best" and bool(has.value)
-        units = sec.total.values[0] if sec.total else None
+        units = sec.total.value.units if sec.total else None
         if autocall:
             _assumed(out, rid, tag, items["assumed"], s, k.value, f("ko_wording"))
         amount = _coupon(
@@ -202,14 +184,20 @@ def _assumed(out, rid, tag, item, s, k, wording) -> None:
     """情境一假設句：D 型寫「於…觀察期間起始日」；P 型寫「於第 k 個評價日」（k = Non-Call）。"""
     field = f"{tag}_assumed"
     if s.assumed is None:
-        out.append(_result(rid, field, item, ["找不到「假設於…發生自動提前出場事件」"], _ev(s.lines[:1]), review=True))
+        out.append(
+            kit.calc_result(
+                rid, field, item, ["找不到「假設於…發生自動提前出場事件」"], kit.evidence(s.lines[:1]), review=True
+            )
+        )
         return
-    kind, number = s.assumed.values
+    a = s.assumed.value
     wtype = wording.value["type"] if wording.ok else None
     expected = "觀察期間起始日" if wtype == "D" else f"第{k}個評價日"
-    actual = "觀察期間起始日" if kind == "D" else f"第{number}個評價日"
+    actual = "觀察期間起始日" if a.observation == "D" else f"第{a.period}個評價日"
     issues = [] if actual == expected else ["情境一假設的自動提前出場時點與第 8 項觀察方式或 Non-Call 不符"]
-    out.append(_result(rid, field, item, issues, _ev(s.assumed.lines), expected=expected, actual=actual))
+    out.append(
+        kit.calc_result(rid, field, item, issues, kit.evidence(s.assumed.lines), expected=expected, actual=actual)
+    )
 
 
 def _coupon(out, rid, tag, item, s, denom, units, tenor, k, autocall, annual, ov) -> Decimal | None:
@@ -218,10 +206,11 @@ def _coupon(out, rid, tag, item, s, denom, units, tenor, k, autocall, annual, ov
     field = f"{tag}_coupon"
     if s.coupon is None or s.coupon_count != 1:
         why = "找不到每期配息算式" if s.coupon_count == 0 else "每期配息算式的寫法無法辨識或出現多次"
-        out.append(_result(rid, field, item, [why], _ev(s.lines[:1]), review=True, ov=[ov]))
+        out.append(kit.calc_result(rid, field, item, [why], kit.evidence(s.lines[:1]), review=True, ov=[ov]))
         return None
-    a, b, u, d, _, rate, total, _, rate2, amount, _ = s.coupon.values
-    b = a if b is None else b
+    c = s.coupon.value
+    a, u, d, rate, total, rate2, amount = c.first, c.units, c.denomination, c.rate, c.total, c.rate_again, c.amount
+    b = a if c.last is None else c.last
     expected_rate = monthly_rate(annual)
     want = (1, k) if autocall else (1, tenor)
     issues = []
@@ -241,66 +230,82 @@ def _coupon(out, rid, tag, item, s, denom, units, tenor, k, autocall, annual, ov
     expected = (total * expected_rate / 100).quantize(Q2, ROUND_HALF_UP)
     if amount != expected:
         issues.append(f"每期配息 {amount} 應為 {expected}（總投資金額 × 配息率 {expected_rate}%，四捨五入到 2 位）")
-    out.append(_result(rid, field, item, issues, _ev(s.coupon.lines), expected=expected, actual=amount, ov=[ov]))
+    out.append(
+        kit.calc_result(
+            rid, field, item, issues, kit.evidence(s.coupon.lines), expected=expected, actual=amount, ov=[ov]
+        )
+    )
     return expected if not issues else None
 
 
 def _cumulative(out, rid, tag, item, s, amount) -> None:
     field = f"{tag}_cumulative"
     if s.cumulative is None or s.coupon is None:
-        out.append(_result(rid, field, item, ["找不到累積總配息金額或每期配息算式"], _ev(s.lines[:1]), review=True))
+        out.append(
+            kit.calc_result(
+                rid, field, item, ["找不到累積總配息金額或每期配息算式"], kit.evidence(s.lines[:1]), review=True
+            )
+        )
         return
-    a, b, *_ = s.coupon.values
-    periods_ = (b if b is not None else a) - a + 1
-    per = amount if amount is not None else s.coupon.values[9]
+    c = s.coupon.value
+    periods_ = (c.last if c.last is not None else c.first) - c.first + 1
+    per = amount if amount is not None else c.amount
     expected = per * periods_
-    actual = s.cumulative.values[0]
+    actual = s.cumulative.value.amount
     issues = [] if actual == expected else [f"累積總配息金額 {actual} 應為每期配息 {per} × {periods_} 期 = {expected}"]
-    out.append(_result(rid, field, item, issues, _ev(s.cumulative.lines), expected=expected, actual=actual))
+    out.append(
+        kit.calc_result(rid, field, item, issues, kit.evidence(s.cumulative.lines), expected=expected, actual=actual)
+    )
 
 
 def _redemption(out, rid, tag, item, s, denom, units) -> None:
     field = f"{tag}_redemption"
     if s.redemption is None:
         out.append(
-            _result(
+            kit.calc_result(
                 rid,
                 field,
                 item,
                 ["找不到贖回金額算式（單位數 × 面額 × 100% = 總投資金額）"],
-                _ev(s.lines[:1]),
+                kit.evidence(s.lines[:1]),
                 review=True,
             )
         )
         return
-    label, u, d, _, total, _, amount, _ = s.redemption.values
+    r = s.redemption.value
+    label, u, d, total, amount = r.label, r.units, r.denomination, r.total, r.amount
     expected = Decimal(denom) * (units if units is not None else u)
     issues = []
     if d != denom or (units is not None and u != units):
         issues.append(f"{label}算式的單位數 {u} 與面額 {d} 應為假設的單位數與第一章面額 {denom}")
     if total != expected or amount != expected:
         issues.append(f"{label}算式的總投資金額 {total} 與結果 {amount} 都應等於 {expected}")
-    out.append(_result(rid, field, item, issues, _ev(s.redemption.lines), expected=expected, actual=amount))
+    out.append(
+        kit.calc_result(rid, field, item, issues, kit.evidence(s.redemption.lines), expected=expected, actual=amount)
+    )
 
 
 def _profit_return(out, rid, tag, item, s) -> None:
     """獲利情境總報酬率 = (贖回金額 + 累積) ÷ 總投資金額 − 1，依說明書顯示位數四捨五入；平均年化另由 derive.annualized_return 核對。"""
     field = f"{tag}_return"
     if s.total_return is None:
-        out.append(_result(rid, field, item, ["找不到總報酬率算式"], _ev(s.lines[:1]), review=True))
+        out.append(kit.calc_result(rid, field, item, ["找不到總報酬率算式"], kit.evidence(s.lines[:1]), review=True))
         return
-    total_sum, _, total, _, r, _ = s.total_return.values
+    tr = s.total_return.value
+    total_sum, total, r = tr.total_sum, tr.total, tr.pct
     issues = []
     if s.cumulative is not None and s.redemption is not None:
-        want = s.redemption.values[6] + s.cumulative.values[0]
+        want = s.redemption.value.amount + s.cumulative.value.amount
         if total_sum != want:
             issues.append(f"總報酬率算式的合計 {total_sum} 應為贖回金額 + 累積總配息金額 = {want}")
-    if s.redemption is not None and total != s.redemption.values[4]:
-        issues.append(f"總報酬率算式的總投資金額 {total} 與贖回金額算式的 {s.redemption.values[4]} 不同")
+    if s.redemption is not None and total != s.redemption.value.total:
+        issues.append(f"總報酬率算式的總投資金額 {total} 與贖回金額算式的 {s.redemption.value.total} 不同")
     expected = kit.shown(total_sum / total * 100 - 100, r) if total else None
     if expected != r:
         issues.append(f"總報酬率 {r}% 應為 ({total_sum} ÷ {total}) − 1 = {expected}%")
-    out.append(_result(rid, field, item, issues, _ev(s.total_return.lines), expected=expected, actual=r))
+    out.append(
+        kit.calc_result(rid, field, item, issues, kit.evidence(s.total_return.lines), expected=expected, actual=r)
+    )
 
 
 def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
@@ -309,17 +314,17 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
     平均年化報酬率 = 未四捨五入的總報酬率 × 12 ÷ 天期（依文件顯示位數四捨五入）。"""
     if s.close is None:
         out.append(
-            _result(
+            kit.calc_result(
                 rid,
                 f"{tag}_strike",
                 items["strike"],
                 ["找不到「連結標的(k=n)收盤價=…小於下限價／執行價」假設句"],
-                _ev(s.lines[:1]),
+                kit.evidence(s.lines[:1]),
                 review=True,
             )
         )
         return
-    kidx, close, _, _ = s.close.values
+    kidx, close = s.close.value.k, s.close.value.close
     strike_expected = None
     if rows.ok:
         prices = list(rows.value)
@@ -328,18 +333,23 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
             strike_expected = prices[idx].prices.get("strike")
     if s.shares is None:
         for key in ("strike", "shares"):
-            out.append(_result(rid, f"{tag}_{key}", items[key], ["找不到數額算式"], _ev(s.lines[:1]), review=True))
+            out.append(
+                kit.calc_result(
+                    rid, f"{tag}_{key}", items[key], ["找不到數額算式"], kit.evidence(s.lines[:1]), review=True
+                )
+            )
         return
-    d, _, strike, _, fx, quantity = s.shares.values
+    q = s.shares.value
+    d, strike, fx, quantity = q.denomination, q.strike, q.fx, q.quantity
     issues = []
     if strike_expected is None:
         out.append(
-            _result(
+            kit.calc_result(
                 rid,
                 f"{tag}_strike",
                 items["strike"],
                 ["對不到第 8 項標的表的那一檔（k）"],
-                _ev(s.shares.lines),
+                kit.evidence(s.shares.lines),
                 review=True,
             )
         )
@@ -347,12 +357,12 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
         if strike != strike_expected:
             issues.append(f"執行價 {strike} 不是第 8 項第 {kidx or 1} 檔的執行價 {strike_expected}")
         out.append(
-            _result(
+            kit.calc_result(
                 rid,
                 f"{tag}_strike",
                 items["strike"],
                 issues,
-                _ev(s.shares.lines),
+                kit.evidence(s.shares.lines),
                 expected=strike_expected,
                 actual=strike,
             )
@@ -360,7 +370,7 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
     issues = []
     if d != denom:
         issues.append(f"數額算式的面額 {d} 不等於第一章面額 {denom}")
-    if (fx is None) != (s.fx is None) or (fx is not None and s.fx is not None and fx != s.fx.values[0]):
+    if (fx is None) != (s.fx is None) or (fx is not None and s.fx is not None and fx != s.fx.value):
         issues.append("數額算式的匯率與「最終匯率定價」不一致")
     divisor = strike * fx if fx is not None else strike
     expected_q = (Decimal(d) / divisor).quantize(Q4, ROUND_CEILING) if divisor else None
@@ -369,15 +379,15 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
     expected_whole = int(quantity.quantize(Decimal(1), ROUND_DOWN))
     if s.whole is None:
         issues.append("找不到應實際交付數")
-    elif s.whole.values[0] != expected_whole:
-        issues.append(f"應實際交付數 {s.whole.values[0]} 應為 {quantity} 向下取整 = {expected_whole}")
+    elif s.whole.value != expected_whole:
+        issues.append(f"應實際交付數 {s.whole.value} 應為 {quantity} 向下取整 = {expected_whole}")
     out.append(
-        _result(
+        kit.calc_result(
             rid,
             f"{tag}_shares",
             items["shares"],
             issues,
-            _ev(s.shares.lines) + (_ev(s.whole.lines) if s.whole else []),
+            kit.evidence(s.shares.lines) + (kit.evidence(s.whole.lines) if s.whole else []),
             expected=expected_q,
             actual=quantity,
         )
@@ -385,9 +395,12 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
 
     field = f"{tag}_cash"
     if s.cash is None:
-        out.append(_result(rid, field, items["cash"], ["找不到現金交割算式"], _ev(s.lines[:1]), review=True))
+        out.append(
+            kit.calc_result(rid, field, items["cash"], ["找不到現金交割算式"], kit.evidence(s.lines[:1]), review=True)
+        )
         return
-    close2, _, frac, fx2, amount, _ = s.cash.values
+    cs = s.cash.value
+    close2, frac, fx2, amount = cs.close, cs.fraction, cs.fx, cs.amount
     issues = []
     if close2 != close:
         issues.append(f"現金交割算式的收盤價 {close2} 與假設句的 {close} 不同")
@@ -403,7 +416,8 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
             f"現金交割 {amount} 應為 {close} × {frac}{f' × {fx2}' if fx2 else ''} = {expected_cash}（無條件進入至 2 位）"
         )
     if s.holdings is not None:
-        u, total_units, total_cash, _ = s.holdings.values
+        h = s.holdings.value
+        u, total_units, total_cash = h.units, h.total_units, h.total_cash
         if units is not None and u != units:
             issues.append(f"「總投資金額 = {u}單位面額」與假設的 {units} 單位不同")
         if total_units != u * expected_whole:
@@ -413,12 +427,12 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
     else:
         issues.append("找不到「總投資金額 = U單位面額，因此，到期日將獲得…」")
     out.append(
-        _result(
+        kit.calc_result(
             rid,
             field,
             items["cash"],
             issues,
-            _ev(s.cash.lines) + (_ev(s.holdings.lines) if s.holdings else []),
+            kit.evidence(s.cash.lines) + (kit.evidence(s.holdings.lines) if s.holdings else []),
             expected=expected_cash,
             actual=amount,
         )
@@ -426,35 +440,45 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
 
     field = f"{tag}_return"
     if s.worse_return is None:
-        out.append(_result(rid, field, items["return"], ["找不到現金結算總報酬率算式"], _ev(s.lines[:1]), review=True))
+        out.append(
+            kit.calc_result(
+                rid, field, items["return"], ["找不到現金結算總報酬率算式"], kit.evidence(s.lines[:1]), review=True
+            )
+        )
         return
-    total, _, close3, _, strike3, _, cum, _, total2, _, r, annualized = s.worse_return.values
+    wr = s.worse_return.value
+    total, close3, strike3, cum, total2 = wr.total, wr.close, wr.strike, wr.cumulative, wr.divisor
+    r, annualized = wr.pct, wr.annualized
     issues = []
     if close3 != close:
         issues.append(f"總報酬率算式的收盤價 {close3} 與假設句的 {close} 不同")
     if strike3 != strike:
         issues.append(f"總報酬率算式的執行價 {strike3} 與數額算式的 {strike} 不同")
-    if s.cumulative is not None and cum != s.cumulative.values[0]:
-        issues.append(f"總報酬率算式的累積配息 {cum} 與累積總配息金額 {s.cumulative.values[0]} 不同")
+    if s.cumulative is not None and cum != s.cumulative.value.amount:
+        issues.append(f"總報酬率算式的累積配息 {cum} 與累積總配息金額 {s.cumulative.value.amount} 不同")
     if total != total2 or (units is not None and total != Decimal(denom) * units):
         issues.append(f"總報酬率算式的總投資金額 {total}／{total2} 應為單位數 × 面額")
     exact = (total * close3 / strike3 + cum) / total2 * 100 - 100 if strike3 and total2 else None
     expected = kit.shown(exact, r) if exact is not None else None
     if expected != r:
         issues.append(f"總報酬率 {r}% 應為 [{total} × ({close3} ÷ {strike3}) + {cum}] ÷ {total2} − 1 = {expected}%")
-    out.append(_result(rid, field, items["return"], issues, _ev(s.worse_return.lines), expected=expected, actual=r))
+    out.append(
+        kit.calc_result(
+            rid, field, items["return"], issues, kit.evidence(s.worse_return.lines), expected=expected, actual=r
+        )
+    )
 
     expected = kit.shown(exact * 12 / tenor, annualized) if exact is not None and tenor else None
     issues = []
     if expected != annualized:
         issues.append(f"平均年化報酬率 {annualized}% 應為總報酬率 × 12 ÷ {tenor} = {expected}%")
     out.append(
-        _result(
+        kit.calc_result(
             rid,
             f"{tag}_annualized",
             items["annualized"],
             issues,
-            _ev(s.worse_return.lines),
+            kit.evidence(s.worse_return.lines),
             expected=expected,
             actual=annualized,
         )
