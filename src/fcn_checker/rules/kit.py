@@ -499,3 +499,18 @@ def rate_mentions(
             )
         )
     return out
+
+
+def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
+    """獲利情境每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）；出處由上手讀出結果的
+    `annualized_mentions` 交出（MS：標題不含「較差」的情境；BNP：自動提前贖回、最佳情況）。"""
+    return rate_mentions(
+        ctx,
+        "derive.annualized_return",
+        "annualized_return_pct",
+        "年化報酬率",
+        ctx.ts.annualized_mentions,
+        cmp_pct,
+        "依說明書顯示位數四捨五入後比對",
+        lambda annual: "獲利情境的年化報酬率應等於年利率",
+    )

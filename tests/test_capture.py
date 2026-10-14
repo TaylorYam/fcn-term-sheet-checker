@@ -77,3 +77,15 @@ def test_unified_brackets_let_full_width_patterns_match_half_width_text_with_the
     assert unified.text == "固定配息率（0.85%）按月下一行" and len(unified.text) == len(plain.text), (
         "一對一換字，位置不變"
     )
+
+
+def test_separate_digits_looks_past_empty_lines():
+    """`separate_digits`：上一個非空行結尾與下一行開頭都是數字時插 `|`；中間夾空行也一樣（MS、BNP 情境共用，Issue #196）。"""
+    rows = [line(1, 100, "1,000"), line(1, 112, " "), line(1, 124, "25 美元"), line(1, 136, "6個月")]
+
+    ti = TextIndex(rows, separate_digits=True)
+
+    assert ti.text == "1,000|25美元6個月"
+    assert TextIndex(rows).text == "1,00025美元6個月", "沒開 separate_digits 時照常串接"
+    start = ti.text.index("25")
+    assert ti.lines_for(start, start + 2) == [rows[2]], "插入的 | 不影響找回原始行"

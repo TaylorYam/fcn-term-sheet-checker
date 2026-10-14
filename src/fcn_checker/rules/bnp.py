@@ -66,20 +66,6 @@ def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
     )
 
 
-def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
-    """第 18 項獲利情境（自動提前贖回、最佳情況）每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
-    return kit.rate_mentions(
-        ctx,
-        "derive.annualized_return",
-        "annualized_return_pct",
-        "年化報酬率",
-        ctx.ts.annualized_mentions,
-        kit.cmp_pct,
-        "依說明書顯示位數四捨五入後比對",
-        lambda annual: "獲利情境的年化報酬率應等於年利率",
-    )
-
-
 def min_coupon_rate(ctx: IssuerContext) -> CheckResult:
     """第 17 項「最低配息率為Y%（年化）」= 第 15 項年利率。"""
     f = ctx.ts.f
@@ -329,7 +315,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果、審查標準與宣告的參考條件表欄位（年利率）。"""
     return [
         *monthly_coupon(ctx),
-        *annualized_return(ctx),
+        *kit.annualized_return(ctx),
         min_coupon_rate(ctx),
         *document_info(ctx),
         *periods(ctx),

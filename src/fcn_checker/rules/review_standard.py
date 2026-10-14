@@ -313,7 +313,13 @@ def _distributor_info(ctx: Context) -> list[CheckResult]:
     )
     if standard_field(ctx, "distributor_phone_ch4").status != FieldStatus.NOT_APPLICABLE:
         checks += (
-            ("distributor_phone_ch4", "phone", std.distributor_phone, "第四章受託機構聯絡方式", "第四章受託機構電話"),
+            (
+                "distributor_phone_ch4",
+                "phone",
+                std.distributor_phone,
+                "第四章第 16 項受託機構聯絡方式",
+                "第四章受託機構電話",
+            ),  # 只有 BNP 範本有這處
         )
     return [
         _distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)

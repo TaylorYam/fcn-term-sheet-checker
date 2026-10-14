@@ -64,20 +64,6 @@ def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
     )
 
 
-def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
-    """第 18 項獲利情境（標題不含「較差」）每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
-    return kit.rate_mentions(
-        ctx,
-        "derive.annualized_return",
-        "annualized_return_pct",
-        "年化報酬率",
-        ctx.ts.annualized_mentions,
-        kit.cmp_pct,
-        "依說明書顯示位數四捨五入後比對",
-        lambda annual: "獲利情境的年化報酬率應等於年利率",
-    )
-
-
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.4、§3.5）
 
 
@@ -302,7 +288,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果、審查標準與宣告的參考條件表欄位（年利率）。"""
     return [
         *monthly_coupon(ctx),
-        *annualized_return(ctx),
+        *kit.annualized_return(ctx),
         *document_info(ctx),
         *periods(ctx),
         *ko_terms(ctx),
