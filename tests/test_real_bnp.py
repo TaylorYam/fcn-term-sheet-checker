@@ -33,6 +33,7 @@ pytestmark = [
 ]
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
 BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
+EMPTY = CONFIG.reference_format.empty_value  # 不需要填的比價日寫空值寫法
 SPLIT = Counter({("iis.underlying_prices", "split_suspected"): 3})  # 一檔標的的進場價、執行價、KO 價
 
 
@@ -116,11 +117,16 @@ def test_only_products_whose_two_documents_pass_are_filled(saved, items):
         assert row["ISIN Code"] == ts.f("isin").value
         assert as_date(row["發行日"]) == ts.f("issue_date").value
         decisions = {d.column: d for d in item.report.backfill}
-        assert set(BACKFILL_COLUMNS) <= set(decisions), item.term_sheet.name
-        for column in BACKFILL_COLUMNS:  # 表上空白 → 依說明書與比價日規則回填（D 型 Non-Call 那期與最後一期、P 型每期）
-            d = decisions[column]
-            assert d.sheet_value is None and d.action == "fill", (item.term_sheet.name, column)
-            assert as_date(row[column]) == d.expected, (item.term_sheet.name, column)
+        assert all(decisions[c].sheet_value is None and decisions[c].action == "fill" for c in BACKFILL_COLUMNS)
+        # 比價日依說明書提前出場排程：D 型填第一個可提前出場期與最後一期、P 型從第一個可提前出場期起每期都填
+        sched = ts.f("autocall_schedule").value
+        assert sched.dates[sched.periods] == ts.f("final_valuation_date").value
+        last = sched.periods + 1
+        periods = (
+            {sched.first_callable, sched.periods} if sched.observation == "D" else range(sched.first_callable, last)
+        )
+        want = [sched.dates[n] if n in periods else EMPTY for n in range(1, 13)]
+        assert [as_date(row[f"比價日_{n}"]) for n in range(1, 13)] == want, item.term_sheet.name
 
 
 def test_vwap_rows_take_the_term_sheet_prices(saved, items):
@@ -133,8 +139,8 @@ def test_vwap_rows_take_the_term_sheet_prices(saved, items):
     for item in vwap:
         row, table = got[item.product_code], BNP.read(_lines(item.term_sheet)).f("underlying_prices").value
         for n, prices in enumerate((r.prices for r in table), 1):
-            for col, name in (("initial", "進場價"), ("strike", "執行價"), ("ko", "KO價")):
-                assert rounded(row[f"UL_{n}_{name}"]) == prices[col], (n, name)
+            for col, name in (("initial", "進場價"), ("strike", "執行價"), ("ki", "下限價"), ("ko", "KO價")):
+                assert rounded(row[f"UL_{n}_{name}"]) == prices.get(col, EMPTY), (n, name)  # 無 KI：下限價為空值寫法
 
 
 def rows_by_code(path: Path) -> dict[str, dict]:

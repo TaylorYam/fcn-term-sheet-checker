@@ -222,7 +222,7 @@
 | §3.2 審查標準共用項目 | `standard.approval_date`、`standard.chairman`、`standard.distributor`（含第四章 §16 電話：標準欄位 `distributor_phone_ch4`，由共用規則核對，Issue #196）、`standard.issuer_name`、`standard.fixed_warning`、`standard.risk_level`、`standard.forbidden_wording`、`standard.product_name`、`standard.fees`、`standard.issue_price`（三處重印）、`doc.denomination`、`doc.print_date`、`doc.subscription_start_date` | 共用 `rules/review_standard.py` |
 | §3.2 商品種類、發行不成立門檻 | `standard.product_type`、`standard.minimum_issue_size` | 共用 `rules/review_standard.py`（有該上手分節才核對） |
 | §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
-| §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`、投資人須知 `iis.underlying_prices`（`split_suspected`，Issue #222） | 共用 `rules/reference.py` 的 `sheet_prices` |
+| §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`、投資人須知 `iis.underlying_prices`（`split_suspected`，Issue #222） | 共用 `rules/reference.py` 的 `compare_sheet_prices` |
 | §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike`（表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/bnp_scenario.py` |
 | §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.coupon_dates`、`schedule.period_starts`、`schedule.autocall_dates` | `rules/bnp.py` |
 | §3.6 保證機構名稱 | `standard.guarantor_name`（`guarantor_name.bnp` 三處） | 共用 `rules/review_standard.py` |

@@ -423,7 +423,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
         ev = list(row.evidence)
-        pending: list[tuple[Check, Any, Any]] = []  # 這檔可比對的價格欄：(結果身分, 表上值（4 位）, 說明書值)
+        pending: list[tuple[Check, Decimal, Decimal]] = []  # 這檔可比對的價格欄：(結果身分, 表上值（4 位）, 說明書值)
         for col, zh in PRICE_COLUMNS:
             field, name = f"{label} {zh}", price_item(i, col)
             ov = ctx.order.price(i, col)
@@ -459,11 +459,11 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
                 out.append(order_review(rid, field, ov, None, "order_invalid", message, name=name))
                 continue
             pending.append((check, v.quantize(Q4, ROUND_HALF_UP), doc_v))
-        out += sheet_prices(pending, label=label, document=ctx.document, evidence=ev)
+        out += compare_sheet_prices(pending, label=label, document=ctx.document, evidence=ev)
     return out
 
 
-def sheet_prices(
+def compare_sheet_prices(
     pending: list[tuple[Check, Decimal, Decimal]], *, label: str, document: str, evidence: list
 ) -> list[CheckResult]:
     """同一檔標的可比對的價格欄（結果身分, 表上值（4 位）, 文件值）和參考條件表比：說明書與投資人須知共用。

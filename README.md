@@ -179,7 +179,7 @@ ruff check src tests
 
 ## 資料管理
 
-真實 PDF、下單檔、擷取文字、OCR 影像、核對結果檔與核對紀錄放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：說明書與投資人須知 PDF 放 `data/term-sheets/`、參考條件表放 `data/orders/`（完整表 `FCN參考條件.xlsx`、回填欄位空白的 `FCN參考條件_待回補.xlsx`）、探勘輸出與暫存檔放 `data/tmp/`、CLI 核對結果檔預設輸出到 `runtime/reports/`、核對紀錄在 `runtime/核對紀錄/`。本機真實樣本測試照這個結構讀檔；樣本放在其他資料夾時，設定環境變數 `FCN_TEST_DATA_DIR` 指向該資料夾（底下一樣是 `orders/`、`term-sheets/`）。`data/` 不進 Git，多台電腦之間依公司規定自行同步。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
+真實 PDF、下單檔、擷取文字、OCR 影像、核對結果檔與核對紀錄放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：說明書與投資人須知 PDF 放 `data/term-sheets/`、參考條件表放 `data/orders/`（完整表 `FCN參考條件.xlsx`、回填欄位空白的 `FCN參考條件_待回補.xlsx`；有 BNP 列的公司原始待建檔表另放 `data/核對表格式..xlsx`，BNP 真實樣本測試用，Issue #222）、探勘輸出與暫存檔放 `data/tmp/`、CLI 核對結果檔預設輸出到 `runtime/reports/`、核對紀錄在 `runtime/核對紀錄/`。本機真實樣本測試照這個結構讀檔；樣本放在其他資料夾時，設定環境變數 `FCN_TEST_DATA_DIR` 指向該資料夾（底下一樣是 `orders/`、`term-sheets/` 與 `核對表格式..xlsx`）。`data/` 不進 Git，多台電腦之間依公司規定自行同步。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
 
 ## 範本來源
 

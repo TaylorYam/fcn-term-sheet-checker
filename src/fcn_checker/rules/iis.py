@@ -119,14 +119,15 @@ def _prices(ctx: Context) -> list[CheckResult]:
     order = ctx.order
     out = []
     for i, row in enumerate(rows.value, start=1):
-        label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"UL_{i}"
+        label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
+        ev = list(row.evidence)
         # 和參考條件表比的價格欄：(結果身分, 表上值（4 位）, 投資人須知值)，整檔一起判斷是否疑似分割調整
         pending: list[tuple[Check, Decimal, Decimal]] = []
         for col, zh in reference.PRICE_COLUMNS:
             doc_v = row.prices.get(col)
             if doc_v is None:  # 價格表沒有這一欄（例：無 KI）
                 continue
-            field, name, ev = f"UL_{i} {zh}", price_item(i, col), list(row.evidence)
+            field, name = f"UL_{i} {zh}", price_item(i, col)
             if not vwap:
                 ov = order.price(i, col)
                 if ov is None or ov.value is None or to_decimal(ov.value) is None:
@@ -146,7 +147,7 @@ def _prices(ctx: Context) -> list[CheckResult]:
             else:
                 check = Check(rid, field, Item.term_sheet(name), ctx.document)
                 out.append(check.compare(ts_rows[i - 1].prices[col], doc_v, evidence=ev))
-        out += reference.sheet_prices(pending, label=label, document=ctx.document, evidence=list(row.evidence))
+        out += reference.compare_sheet_prices(pending, label=label, document=ctx.document, evidence=ev)
     return out
 
 
