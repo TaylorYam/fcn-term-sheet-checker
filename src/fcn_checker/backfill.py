@@ -332,9 +332,11 @@ def checked_marks(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
 
 
 def open_reference(path: Path) -> Workbook:
-    """開啟參考條件表準備回填（來源是否與核對時相同由批量入口以來源快照確認）。"""
+    """開啟參考條件表準備回填（來源是否與核對時相同由批量入口以來源快照確認）。
+
+    讀值（data_only）：「回填後」照匯入格式重新產生、只帶值（Issue #203），公式格取 Excel 上次算好的值。"""
     try:
-        return openpyxl.load_workbook(path)  # 不用 data_only：保留公式與格式
+        return openpyxl.load_workbook(path, data_only=True)
     except Exception as e:
         raise IngestionError("reference_unreadable", f"參考條件表無法開啟（可能已損毀或不是 Excel）：{e}") from e
 
@@ -349,9 +351,13 @@ def _date_format(ws: Any, first_data_row: int) -> str:
 
 
 def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -> None:
-    """把要回填的說明書（呼叫端已決定：整份 PASS 或人工放行）的「回填」格寫進工作表。"""
+    """把要回填的說明書（呼叫端已決定：整份 PASS 或人工放行）的「回填」格寫進記憶體中的工作表（原檔不動）。
+
+    合併儲存格先拆開，回填值才寫得進去；「回填後」照匯入格式重新產生，不帶合併儲存格（Issue #203）。"""
     layout = locate(wb, rfmt)
     ws = wb[layout.sheet]
+    for merged in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged))
     fmt = _date_format(ws, layout.first_data_row)
     for report in reports:
         for d in report.backfill:

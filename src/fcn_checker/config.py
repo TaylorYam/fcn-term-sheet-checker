@@ -174,6 +174,17 @@ class ReviewStandard:
 
 
 @dataclass(frozen=True)
+class ImportFormat:
+    """匯入格式：核對結果檔「回填後」固定的版面，比照公司原始待建檔表（Issue #203）。"""
+
+    title: str  # 第 1 列 A1；B1 為留下的列裡最晚的交易日
+    header_row: int
+    checked_column: str  # 一律寫打勾寫法
+    fallbacks: dict[str, str]  # 欄名 → 參考條件表沒有這欄時改取的欄
+    columns: tuple[str, ...]  # 欄位與左右順序
+
+
+@dataclass(frozen=True)
 class ReferenceFormat:
     """參考條件表（多列表格）的版面與欄位對照，所有上手共用。"""
 
@@ -186,7 +197,7 @@ class ReferenceFormat:
     issuer_values: dict[str, str]  # 上手代號 → 發行機構欄的寫法
     columns: dict[str, str]  # Excel 欄名 → 標準欄位（要核對或回填的欄；同一標準欄位可有多個欄名）
     optional_columns: tuple[str, ...]  # columns 裡不是必要欄的欄名（表上沒有也照常核對）
-    column_order: tuple[str, ...]  # 參考條件表欄位順序；不在 columns 的是不核對的欄（Issue #173）
+    import_format: ImportFormat  # 核對結果檔「回填後」的版面（Issue #203）
     ko_observation_values: dict[str, str]
     ko_memory_values: dict[str, bool]
     ki_type_values: dict[str, str]
@@ -458,7 +469,7 @@ def load_reference_format(path: Path) -> ReferenceFormat:
             issuer_values=dict(d["issuer_values"]),
             columns=cols,
             optional_columns=tuple(str(h) for h in layout["optional_columns"]),
-            column_order=tuple(str(h) for h in layout["column_order"]),
+            import_format=_import_format(d["import_format"]),
             ko_observation_values=dict(d["values"]["ko_observation"]),
             ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
             ki_type_values=dict(d["values"]["ki_type"]),
@@ -466,26 +477,40 @@ def load_reference_format(path: Path) -> ReferenceFormat:
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e
-    _check_column_order(fmt)
+    _check_columns(fmt)
     return fmt
 
 
-def _check_column_order(fmt: ReferenceFormat) -> None:
-    """參考條件表欄位順序要涵蓋每個標準欄位（同一標準欄位有多個欄名時至少一個）、配對欄與發行機構欄，
-    且每個欄名只出現一次；optional_columns 要是 [columns] 的欄名。"""
-    order = fmt.column_order
-    named = {std for h, std in fmt.columns.items() if h in order}
-    absent = [h for h, std in fmt.columns.items() if std not in named]
-    absent += [h for h in (fmt.key_column, fmt.issuer_column) if h not in order]
-    repeated = sorted({h for h in order if order.count(h) > 1}, key=order.index)
-    problems = [f"缺少「{h}」" for h in dict.fromkeys(absent)] + [f"「{h}」重複" for h in repeated]
-    if problems:
-        raise IngestionError("config_invalid", f"參考條件表格式設定檔的參考條件表欄位順序{'、'.join(problems)}")
+def _import_format(d: dict[str, Any]) -> ImportFormat:
+    return ImportFormat(
+        title=str(d["title"]),
+        header_row=int(d["header_row"]),
+        checked_column=str(d["checked_column"]),
+        fallbacks={str(k): str(v) for k, v in d["fallbacks"].items()},
+        columns=tuple(str(h) for h in d["columns"]),
+    )
+
+
+def _check_columns(fmt: ReferenceFormat) -> None:
+    """optional_columns 要是 [columns] 的欄名；匯入格式的欄名不重複、表頭在第 1 列以下、涵蓋 checked_column 與
+    fallbacks，且每個必要的標準欄位至少有一個欄名在匯入格式裡（核對與回填的值都會進「回填後」）。"""
     unknown = [h for h in fmt.optional_columns if h not in fmt.columns]
     if unknown:
         raise IngestionError(
             "config_invalid", f"參考條件表格式設定檔 optional_columns 有 [columns] 沒有的欄名：{'、'.join(unknown)}"
         )
+    imp = fmt.import_format
+    cols = imp.columns
+    named = {fmt.columns[h] for h in cols if h in fmt.columns}
+    optional = {fmt.columns[h] for h in fmt.optional_columns}
+    absent = [h for h, std in fmt.columns.items() if std not in named and std not in optional]
+    absent += [h for h in (imp.checked_column, *imp.fallbacks) if h not in cols]
+    repeated = sorted({h for h in cols if cols.count(h) > 1}, key=cols.index)
+    problems = [f"缺少「{h}」" for h in dict.fromkeys(absent)] + [f"「{h}」重複" for h in repeated]
+    if imp.header_row < 2:
+        problems.append("header_row 須在第 2 列以下（第 1 列是標題）")
+    if problems:
+        raise IngestionError("config_invalid", f"參考條件表格式設定檔的匯入格式{'、'.join(problems)}")
 
 
 def load_issuer_prefixes(path: Path) -> dict[str, str]:

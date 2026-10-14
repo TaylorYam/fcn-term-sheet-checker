@@ -53,8 +53,8 @@ def filled_codes(receipt) -> list[str]:
     import openpyxl
 
     ws = openpyxl.load_workbook(receipt.output)["回填後"]
-    headers = [c.value for c in ws[3]]
-    return [dict(zip(headers, r, strict=False))["TDCC Code"] for r in ws.iter_rows(min_row=4, values_only=True)]
+    headers = [c.value for c in ws[2]]  # 匯入格式：第 2 列表頭
+    return [dict(zip(headers, r, strict=False))["TDCC Code"] for r in ws.iter_rows(min_row=3, values_only=True)]
 
 
 # ---------------------------------------------------------------- 一致時兩份都通過，說明書回填

@@ -5,7 +5,7 @@ PANEL「匯出回報包…」呼叫 `export_bundle`，不需要先儲存核對�
 
 - `回報總表.xlsx`：「回報」一條錯訊一列（上手、TDCC Code、PDF 檔名、錯訊、我的判斷、備註），「我的判斷」是
   誤報／真錯／不確定的下拉選單，由作業人員填；「摘要」是這批各類別的份數。
-- `參考條件表_未通過.xlsx`：只有這些商品的列，只留參考條件表欄位順序與核對欄（其他欄拿掉），版面位置照原表。
+- `參考條件表_未通過.xlsx`：只有這些商品的列，只留匯入格式的欄、核對欄與發行機構（其他欄拿掉），版面位置照原表。
 - `核對紀錄_未通過.json`：核對紀錄中這些商品的部分，格式相同。
 - `PDF/`：這些商品的說明書與投資人須知（同商品兩份都附，就算只有一份未通過）。檔名是辨識的依據，不改名；同名的不同檔案
   （例：多份對到同一列）另放 `PDF/同名<n>/`，重跑時一起帶入（`PDF/*.pdf PDF/同名*/*.pdf`），摘要會註明。
@@ -217,7 +217,7 @@ def _reference_extract(reference_sheet: Path, rfmt: ReferenceFormat, members: Se
         raise IngestionError("reference_unreadable", f"參考條件表無法開啟（可能已損毀或不是 Excel）：{e}") from e
     layout = locate(wb, rfmt)
     src = wb[layout.sheet]
-    known = {*rfmt.column_order, *rfmt.columns}
+    known = {*rfmt.import_format.columns, *rfmt.columns, rfmt.issuer_column}
     cols: list[int] = []
     seen: set[str] = set()
     for col in range(1, src.max_column + 1):

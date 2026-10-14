@@ -3,7 +3,7 @@
 `save_batch` 是唯一的儲存進入點，內部順序只在這裡：
 1. 以來源快照確認參考條件表、說明書、設定檔都與核對時相同，開啟參考條件表（變更或讀不到時兩個檔都不寫）
 2. 依每份 PDF 的類別決定列入錯誤清單的文件，以及要回填的說明書（說明書與同商品投資人須知都通過或人工放行）
-3. 確認版面能安全刪列（result_file.py）→ 回填（backfill.py）→ 產生核對結果檔（result_file.py）
+3. 回填（backfill.py）→ 照匯入格式產生核對結果檔（result_file.py）
 4. 核對結果檔處理完後寫核對紀錄（reporting.py），才記得到核對結果檔路徑與是否已回填
 
 批量核對結果本身不被儲存改寫；同一份結果可以存很多次，每次都有自己的收據。
@@ -98,9 +98,8 @@ def save_batch(outcome: BatchOutcome, out_dir: Path, *, root: Path, now: dt.date
 
 
 def _fill_and_save(wb: Workbook, outcome: BatchOutcome, to_fill: Sequence[BatchItem], out: Path) -> Path:
-    """先確認版面能安全刪列，再回填、寫出核對結果檔；版面不行時回填也不做。"""
+    """回填（寫進記憶體中的參考條件表），再照匯入格式寫出核對結果檔。"""
     rfmt = outcome.reference_format
-    result_file.check_layout(wb, rfmt)
     backfill.apply(wb, rfmt, [i.report for i in to_fill])
     keep = [i.reference_row for i in to_fill if i.reference_row]
     error_rows = [_error_row(i) for i in outcome.items if not i.fillable]

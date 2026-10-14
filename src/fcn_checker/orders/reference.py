@@ -269,9 +269,9 @@ def _column_problems(fmt: ReferenceFormat, by_header: Mapping[str, Sequence[int]
     """表頭（欄名 → 欄號）的必要欄問題：缺少必要欄、會讀到的欄（[columns] 的欄與發行機構）重複；沒有問題時為空。
 
     同一標準欄位的欄名（例：承作幣別、計價幣別）合起來算一欄：有一個就不缺，出現兩次以上就算重複。
-    不在格式設定的欄一律不管。依參考條件表欄位順序列出。"""
+    不在格式設定的欄一律不管。依匯入格式的欄位順序列出（不在匯入格式的 TS、IIS、發行機構排最後）。"""
     groups = [*header_names(fmt).values(), [fmt.issuer_column]]  # 每組是同一欄的各種欄名
-    rank = {h: i for i, h in enumerate(fmt.column_order)}
+    rank = {h: i for i, h in enumerate(fmt.import_format.columns)}
     ordered = sorted(groups, key=lambda hs: min(rank.get(h, len(rank)) for h in hs))
     optional = {*fmt.optional_columns, fmt.issuer_column}
     missing = [

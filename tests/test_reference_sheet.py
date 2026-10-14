@@ -70,7 +70,7 @@ def test_duplicate_columns_that_are_read_stop_the_whole_batch(tmp_path):
     headers = [*ORIGINAL_HEADERS, "KO(%)", "承作幣別", "TS", "TS", "分公司_1"]
     e = _error(build_reference_sheet(tmp_path / "重複.xlsx", [_row()], headers, header_row=2))
     assert e.reason_code == "reference_columns_invalid"
-    assert "欄名重複：TS、承作幣別／計價幣別、KO(%)" in str(e)
+    assert "欄名重複：承作幣別／計價幣別、KO(%)、TS" in str(e)
     assert "分公司_1" not in str(e), "不讀的欄重複不提示"
 
 
