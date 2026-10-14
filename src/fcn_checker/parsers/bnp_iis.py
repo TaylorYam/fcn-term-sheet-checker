@@ -110,16 +110,6 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
     return DetectionResult(not failed, failed, [Evidence.of(x) for x in body(lines)[:2]])
 
 
-def _section(ti: TextIndex, anchors: tuple[str, str]) -> list[Line] | None:
-    """兩個錨點之間（含錨點所在行）的原文行；找不到或開頭錨點重複時為 None。"""
-    start, end = anchors
-    if ti.text.count(start) != 1:
-        return None
-    a = ti.text.index(start)
-    b = ti.text.find(end, a)
-    return None if b < 0 else ti.lines_for(a, b + len(end))
-
-
 def _price_region(lines: list[Line]) -> list[Line]:
     """商品簡介的標的表：「連結標的名稱」那一行起，到「籃子：」或「● 商品年期」之前（同說明書第 11 項）。"""
     start = next((i for i, ln in enumerate(lines) if squash(ln.text).startswith("連結標的名稱")), None)
@@ -254,7 +244,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields.update(_ko_terms(ti))
     # 收益分配事項、自動提前贖回金額及到期贖回金額之計算
     put("monthly_coupon_shown_pct", r"其中C為(\d+(?:\.\d+)?)%", Decimal)
-    redemption = _section(ti, REDEMPTION_SECTION)
+    redemption = iis.section(ti, REDEMPTION_SECTION)
     if redemption is None:
         note = "找不到「收益分配事項、自動提前贖回金額及到期贖回金額之計算」段落"
         fields["ko_memory"] = ParsedField.missing("ko_memory", note)

@@ -27,6 +27,7 @@ __all__ = [
     "occurrences",
     "page_totals",
     "raw",
+    "section",
 ]
 
 DATE = r"(\d{4}年\d{1,2}月\d{1,2}日)"
@@ -70,6 +71,16 @@ def occurrences(name: str, ti: TextIndex, specs: Sequence[tuple[str, str, str, s
         Occurrence(field, label, where, capture(field, ti, pattern, convert)) for field, label, where, pattern in specs
     ]
     return standard_fields.occurrences(name, items)
+
+
+def section(ti: TextIndex, anchors: tuple[str, str]) -> list[Line] | None:
+    """兩個錨點之間（含錨點所在行）的原文行；找不到或開頭錨點重複時為 None（BNP、SG）。"""
+    start, end = anchors
+    if ti.text.count(start) != 1:
+        return None
+    a = ti.text.index(start)
+    b = ti.text.find(end, a)
+    return None if b < 0 else ti.lines_for(a, b + len(end))
 
 
 def page_totals(lines: Sequence[Line]) -> ParsedField:

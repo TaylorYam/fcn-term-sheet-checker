@@ -429,15 +429,15 @@ def test_sg_and_other_issuers_are_never_confused(tmp_path):
     assert all(i.report.status == S.REVIEW_REQUIRED for i in outcome.items)  # 內容上手與檔名不符
 
 
-def test_sg_investor_sheet_is_unsupported_so_nothing_is_filled(tmp_path):
+def test_sg_term_sheet_is_filled_when_its_investor_sheet_also_passes(tmp_path):
+    """SG 投資人須知已有範本（Issue #213）：兩份都通過才打 V、回填（ADR 0007）。"""
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     outcome = check_all(sheet, [pdf])
     ts, iis = sorted(outcome.items, key=lambda i: i.term_sheet.name.endswith("_IIS.pdf"))
-    assert ts.report.status == S.PASS and iis.unsupported
-    assert not ts.fills_sheet
-    assert "SG" in next(r for r in iis.report.results if r.rule_id == "batch.issuer_prefix").message
+    assert ts.report.status == S.PASS and not iis.unsupported and iis.report.status == S.PASS
+    assert ts.fills_sheet
 
 
 # ---------------------------------------------------------------- 金額旁的幣別（Issue #170）
