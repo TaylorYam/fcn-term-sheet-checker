@@ -75,7 +75,10 @@ class PanelOutcome:
         return tuple(sorted(self.batch.items, key=lambda i: i.status.display_rank))
 
     def selection_after_release_change(self, items: Sequence[BatchItem]) -> tuple[BatchItem, ...]:
-        """放行後選清單第一份（下一份要處理的說明書），不跟著放行的那幾份排到下方；取消放行後仍選那幾份。"""
+        """放行後選清單第一份（下一份要處理的說明書），不跟著放行的那幾份排到下方；取消放行後仍選那幾份。
+
+        items 是同一次一起放行或一起取消放行的那幾份，看第一份就知道是哪一種。
+        """
         return (self.ordered_items[0],) if items[0].released else tuple(items)
 
     @staticmethod
@@ -181,10 +184,15 @@ class PanelOutcome:
 
     @staticmethod
     def release_plan_button(plan: ReleasePlan) -> str:
-        """多選時人工放行按鈕的文字：要處理幾份。"""
+        """多選時人工放行按鈕的文字：要處理幾份；沒有可以放行的（按鈕不能按）時不寫份數。"""
         if plan.cancel:
             return f"取消放行（{len(plan.targets)} 份）"
-        return f"人工放行 {len(plan.targets)} 份…"
+        return f"人工放行 {len(plan.targets)} 份…" if plan.targets else "人工放行…"
+
+    @staticmethod
+    def release_plan_confirm(plan: ReleasePlan) -> str:
+        """多選人工放行確認視窗的確認按鈕文字。"""
+        return f"人工放行 {len(plan.targets)} 份"
 
     @staticmethod
     def release_plan_note(plan: ReleasePlan) -> str:

@@ -989,7 +989,9 @@ def test_only_items_of_this_outcome_can_be_released(tmp_path):
     second = checked(tmp_path / "b", [pdf_for(tmp_path, spec)], rows)
     with pytest.raises(IngestionError, match="重新核對"):
         second.release(first.items[0])
-    assert not first.items[0].released and second.status == MISMATCH
+    with pytest.raises(IngestionError, match="選取的文件有些不在這次核對結果中"):
+        second.release(second.items[0], first.items[0])
+    assert not first.items[0].released and not second.items[0].released and second.status == MISMATCH
 
 
 def test_several_documents_are_released_and_cancelled_together(tmp_path):

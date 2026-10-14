@@ -12,7 +12,7 @@ import fitz
 import openpyxl
 import pytest
 
-from fcn_checker.ingestion import IngestionError
+from fcn_checker.ingestion import IngestionError, SourceSnapshot
 from fcn_checker.panel import parse_args, session_from_args
 from fcn_checker.panel_workflow import PanelOutcome, PanelSession
 from harness import ISSUER_PREFIXES, REVIEW_STANDARD, ROOT, with_iis
@@ -485,6 +485,7 @@ def test_release_plan_releases_only_the_releasable_documents(tmp_path):
     }, "已通過的不必說明，不列在略過"
     assert all(reason == item.release_problem for item, reason in plan.skipped)
     assert PanelOutcome.release_plan_button(plan) == "人工放行 2 份…"
+    assert PanelOutcome.release_plan_confirm(plan) == "人工放行 2 份"
     assert PanelOutcome.release_plan_note(plan) == (
         "已選 6 份：可以放行 2 份、已通過 2 份、不能放行 2 份（沒有對到參考條件表的列，沒有地方可以回填）。"
     ), "同一個原因只列一次"
@@ -496,6 +497,7 @@ def test_release_plan_releases_only_the_releasable_documents(tmp_path):
 
     again = session.release_plan(outcome.ordered_items)
     assert not again.cancel and again.targets == (), "已放行的不再放行；沒有可以放行的時按鈕不能按"
+    assert PanelOutcome.release_plan_button(again) == "人工放行…", "不能按時不寫「0 份」"
     assert "已放行 2 份" in PanelOutcome.release_plan_note(again)
 
 
@@ -531,8 +533,16 @@ def test_selecting_only_released_documents_cancels_them_all(tmp_path):
     assert outcome.selection_after_release_change(pair) == pair, "取消放行後仍選那幾份"
 
 
-def test_releasing_several_checks_the_sources_once_and_changes_nothing_when_refused(tmp_path):
+def test_releasing_several_checks_the_sources_once_and_changes_nothing_when_refused(tmp_path, monkeypatch):
     session, outcome, by_name, (_, bad, missing) = mixed_selection(tmp_path)
+    checks, still_valid = [], SourceSnapshot.still_valid
+    monkeypatch.setattr(SourceSnapshot, "still_valid", lambda self: checks.append(1) or still_valid(self))
+    pair = (by_name[f"{bad.product_code}_TS.pdf"], by_name[f"{bad.product_code}_IIS.pdf"])
+    session.release(*pair)
+    session.cancel_release(*pair)
+    assert len(checks) == 2, "放行、取消放行各只檢查一次來源，不是每份檢查一次"
+    monkeypatch.undo()
+
     releasable, refused = by_name[f"{bad.product_code}_TS.pdf"], by_name[f"{missing.product_code}_TS.pdf"]
     with pytest.raises(IngestionError, match=refused.term_sheet.name):
         session.release(releasable, refused)

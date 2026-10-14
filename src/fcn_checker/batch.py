@@ -242,7 +242,8 @@ class BatchOutcome:
 
     def _require_members(self, items: tuple[BatchItem, ...]) -> None:
         if not all(any(i is item for i in self.items) for item in items):
-            raise IngestionError("result_required", "這份文件不在這次核對結果中，請重新核對後再人工放行。")
+            which = "這份文件" if len(items) == 1 else "選取的文件有些"
+            raise IngestionError("result_required", f"{which}不在這次核對結果中，請重新核對後再人工放行。")
 
     def _set_released(self, item: BatchItem, released: bool) -> None:
         item._released = released

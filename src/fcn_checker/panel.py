@@ -234,8 +234,8 @@ class ResultPane(ttk.Frame):
         _write(self.detail, "")
         self._release_state(())
 
-    def show(self, outcome: PanelOutcome, select: tuple = ()):
-        """顯示結果並選取 select 裡的那幾份（沒給或都不在結果中時選第一份）。"""
+    def show(self, outcome: PanelOutcome, select: tuple = (), focus: Any = None):
+        """顯示結果並選取 select 裡的那幾份（沒給或都不在結果中時選第一份）；focus 也在選取中時游標停在那份，否則停在選取的第一份。"""
         self.clear()
         self.outcome = outcome
         self.summary.set(outcome.headline)
@@ -247,9 +247,10 @@ class ResultPane(ttk.Frame):
                 chosen.append(key)
         if self.items:
             chosen = chosen or [next(iter(self.items))]
+            cursor = next((k for k in chosen if self.items[k] is focus), chosen[0])
             self.item_table.selection_set(chosen)
-            self.item_table.focus(chosen[0])
-            self.item_table.see(chosen[0])
+            self.item_table.focus(cursor)
+            self.item_table.see(cursor)
             self._item_selected(None)
 
     def _release_state(self, items: tuple) -> None:
@@ -685,11 +686,10 @@ class PanelWindow:
             cancel, targets = plan.cancel, plan.targets
             if not targets:
                 return
-            prompt = PanelOutcome.release_plan_prompt(plan)
-            if not cancel and not ConfirmDialog.ask(
-                self.root, "人工放行", prompt, f"人工放行 {len(targets)} 份", self.pixels
-            ):
+            prompt, confirm = PanelOutcome.release_plan_prompt(plan), PanelOutcome.release_plan_confirm(plan)
+            if not cancel and not ConfirmDialog.ask(self.root, "人工放行", prompt, confirm, self.pixels):
                 return
+        focus = self.results.focused_item()  # 取消放行後游標留在原本那份
         action = self.session.cancel_release if cancel else self.session.release
 
         def run() -> IngestionError | None:
@@ -703,17 +703,17 @@ class PanelWindow:
         self.status.set("確認來源中…")
         self.release_pending = self.executor.submit(run)
         self.root.after(
-            80, lambda: self._after("release_pending", lambda e: self._show_release(targets, e), "人工放行失敗")
+            80, lambda: self._after("release_pending", lambda e: self._show_release(targets, focus, e), "人工放行失敗")
         )
 
-    def _show_release(self, items, error: IngestionError | None):
+    def _show_release(self, items, focus, error: IngestionError | None):
         if error is not None:
             if self.session.outcome is None:  # 來源已變更、結果失效：清空畫面，不顯示空結果
                 self._clear()
             self.status.set(str(error))
             return
         outcome = self.session.outcome
-        self.results.show(outcome, select=outcome.selection_after_release_change(items))
+        self.results.show(outcome, select=outcome.selection_after_release_change(items), focus=focus)
         self.status.set(self.session.message)
 
     def save(self):
