@@ -15,7 +15,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import money, ms_scenario, ms_tables, ms_wording
-from .common import NUM, Hit, Mention, derived, number
+from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
@@ -406,7 +406,10 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 
 
 def _prices(fields: dict[str, ParsedField]) -> None:
-    """價格表 → 標準欄位：標的（彭博代碼）、各標的價格列與執行／下限／KO 百分比（範本規格 §4.6；第 11 項標的表為交叉驗證）。"""
+    """價格表 → 標準欄位：標的（彭博代碼）、各標的價格列與執行／下限／KO 百分比（範本規格 §4.6；第 11 項標的表為交叉驗證）。
+
+    Non-Call = 天期時價格表沒有 KO 欄：KO 視為期初價格的 100%、KO 價 = 期初價格（`NO_AUTOCALL_KO_PCT`），照常比對。
+    """
     pt, ki, k, tenor = (fields[x] for x in ("price_table", "ki_type", "first_callable_period", "tenor_months"))
     if not pt.ok:
         for key in ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct"):
@@ -417,21 +420,22 @@ def _prices(fields: dict[str, ParsedField]) -> None:
     # 標的名稱取第 11 項標的表（代碼須依序相同才對得上列；投資人須知的標的名稱和它比）
     art11, names = fields["underlyings_art11"], fields["underlying_names_art11"]
     aligned = art11.ok and names.ok and art11.value == tickers and len(names.value) == len(tickers)
+    headers, ev = pt.value["headers"], list(pt.evidence)
+    ko_at_tenor = "ko" not in headers and k.ok and tenor.ok and k.value == tenor.value
     fields["underlying_prices"] = ParsedField(
         "underlying_prices",
         FieldStatus.PRESENT,
         tuple(
             standard_fields.PriceRow(
                 r["ticker"],
-                dict(r["prices"]),
+                ko_at_initial(r["prices"]) if ko_at_tenor else dict(r["prices"]),
                 tuple(Evidence.of(ln) for ln in lns),
                 names.value[i] if aligned else None,
             )
             for i, (r, lns) in enumerate(zip(pt.value["rows"], pt.value["row_lines"], strict=True))
         ),
-        list(pt.evidence),
+        ev,
     )
-    headers, ev = pt.value["headers"], list(pt.evidence)
     fields["strike_pct"] = ParsedField("strike_pct", FieldStatus.PRESENT, headers["strike"], ev)
     if ki.ok and ki.value == "none":
         fields["ki_pct"] = ParsedField("ki_pct", FieldStatus.NOT_APPLICABLE, evidence=list(ki.evidence))
@@ -441,9 +445,9 @@ def _prices(fields: dict[str, ParsedField]) -> None:
         fields["ki_pct"] = ParsedField("ki_pct", FieldStatus.INVALID, evidence=ev, note="價格表沒有下限價格欄")
     if "ko" in headers:
         fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, headers["ko"], ev)
-    elif k.ok and tenor.ok and k.value == tenor.value:
-        note = "說明書沒有自動提前出場價（Non-Call = 天期）"
-        fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.NOT_APPLICABLE, evidence=ev, note=note)
+    elif ko_at_tenor:
+        note = "說明書沒有自動提前出場價（Non-Call = 天期，不會提前出場）：KO 視為期初價格的 100%"
+        fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, NO_AUTOCALL_KO_PCT, ev, note=note)
     else:
         note = "價格表沒有自動提前出場價欄，但第一個可提前出場期早於到期"
         fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.INVALID, evidence=ev, note=note)

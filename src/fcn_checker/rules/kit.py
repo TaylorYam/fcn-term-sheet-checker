@@ -243,7 +243,7 @@ class Check:
         )
 
     def not_applicable(self, pf: ParsedField) -> CheckResult:
-        """被核對文件明確判定不適用的欄位（例：範本沒有、Non-Call = 天期時沒有 KO 價）：不核對，結果為不適用並附說明。"""
+        """被核對文件明確判定不適用的欄位（例：範本沒有）：不核對，結果為不適用並附說明。"""
         first = self.ov[0] if self.ov else None
         return self.result(
             S.NOT_APPLICABLE,
