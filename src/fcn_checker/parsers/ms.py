@@ -421,14 +421,14 @@ def _prices(fields: dict[str, ParsedField]) -> None:
     art11, names = fields["underlyings_art11"], fields["underlying_names_art11"]
     aligned = art11.ok and names.ok and art11.value == tickers and len(names.value) == len(tickers)
     headers, ev = pt.value["headers"], list(pt.evidence)
-    ko_at_tenor = "ko" not in headers and k.ok and tenor.ok and k.value == tenor.value
+    no_ko_column_at_tenor = "ko" not in headers and k.ok and tenor.ok and k.value == tenor.value
     fields["underlying_prices"] = ParsedField(
         "underlying_prices",
         FieldStatus.PRESENT,
         tuple(
             standard_fields.PriceRow(
                 r["ticker"],
-                ko_at_initial(r["prices"]) if ko_at_tenor else dict(r["prices"]),
+                ko_at_initial(r["prices"]) if no_ko_column_at_tenor else dict(r["prices"]),
                 tuple(Evidence.of(ln) for ln in lns),
                 names.value[i] if aligned else None,
             )
@@ -445,7 +445,7 @@ def _prices(fields: dict[str, ParsedField]) -> None:
         fields["ki_pct"] = ParsedField("ki_pct", FieldStatus.INVALID, evidence=ev, note="價格表沒有下限價格欄")
     if "ko" in headers:
         fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, headers["ko"], ev)
-    elif ko_at_tenor:
+    elif no_ko_column_at_tenor:
         note = "說明書沒有自動提前出場價（Non-Call = 天期，不會提前出場）：KO 視為期初價格的 100%"
         fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, NO_AUTOCALL_KO_PCT, ev, note=note)
     else:
