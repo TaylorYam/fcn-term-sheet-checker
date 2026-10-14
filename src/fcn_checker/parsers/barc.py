@@ -839,6 +839,7 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["issuer_name_ch2"] = _ch2_item(doc, "發行機構", "事業名稱", "issuer_name_ch2", sq)
     flds["issuer_name_ch1"] = standard_fields.absent("issuer_name_ch1", "第一章只寫中文的發行機構名稱")
     flds["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
+    flds["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
     flds["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     flds["distributor_name_ch2"] = _ch2_item(doc, "受託或銷售機構", "事業名稱", "distributor_name_ch2", sq)
     flds["distributor_address_ch2"] = _ch2_item(doc, "受託或銷售機構", "營業所在地", "distributor_address_ch2", sq)

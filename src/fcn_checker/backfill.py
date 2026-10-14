@@ -35,7 +35,7 @@ from .config import ReferenceFormat
 from .ingestion import IngestionError
 from .orders.reference import OrderRecord, autocall_date_key, locate, price_key
 from .rules.kit import Context, doc_review, result
-from .rules.reference import PRICE_COLUMNS, is_vwap, standard_field
+from .rules.reference import PRICE_COLUMNS, is_vwap, standard_field, underlying_slots
 from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
 from .schema import CheckStatus as S
 from .standard_fields import AutocallSchedule
@@ -265,9 +265,13 @@ def underlying_prices(ctx: Context) -> tuple[CheckResult | None, list[CellDecisi
         return _column_missing(rid, key, missing, ovs, item), []
     if not table.ok:
         return doc_review(rid, key, table, None, ovs, item=item), []
+    uls = standard_field(ctx, "underlyings")
+    slots = underlying_slots(ctx, list(uls.value) if uls.ok and len(uls.value) == len(table.value) else None)
+    by_slot = {s: row for s, row in zip(slots, table.value, strict=False)}  # 表上第幾檔 → 說明書價格列（Citi 依代號）
     decisions = []
     for i in range(1, n + 1):
-        prices = table.value[i - 1].prices if i <= len(table.value) else {}
+        row_i = by_slot.get(i) if by_slot else (table.value[i - 1] if i <= len(table.value) else None)
+        prices = row_i.prices if row_i is not None else {}
         for col, _ in PRICE_COLUMNS:
             d = _decide(row, price_key(i, col), prices.get(col, empty))
             if d.action == BackfillAction.MISMATCH:

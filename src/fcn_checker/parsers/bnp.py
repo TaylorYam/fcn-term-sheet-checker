@@ -389,6 +389,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     put("redemption_increment", art8, r"並以" + NUM + CCY + r"為增加贖回之單位", number)
     put("minimum_redemption_currency", art8, rf"最低贖回金額為{money.NUMBER}({CCY})")
     put("redemption_increment_currency", art8, rf"並以{money.NUMBER}({CCY})為增加贖回之單位")
+    fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
     fields["distributor_phone_ch4"] = labelled(
         "distributor_phone_ch4", doc.span_lines(ch4.get(16)), "受託機構聯絡方式："
     )
