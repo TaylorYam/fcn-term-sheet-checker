@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.citi import ki_periods
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
@@ -180,7 +179,7 @@ def _has(pf: ParsedField, word: str) -> bool | None:
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """有無自動提前出場：第 13 項自動提前出場界限 ⇔ 名稱字樣 ⇔ 標的表自動提前出場界限欄（與日期表型態、第 12 項(9)
+    """有無自動提前出場：第 13 項自動提前出場界限 ⇔ 名稱字樣 ⇔ 標的表自動提前出場界限欄 ⇔ 第 8 項 (4)（與日期表型態、第 12 項(9)
     的一致由 parser 判定，不一致時 KO 觀察方式與 Non-Call 轉人工覆核）；
     記憶式：第 13 項段名與記憶條款 ⇔ 名稱「記憶式」；非記憶式的第一章不得出現「記憶式」。"""
     f = ctx.ts.f
@@ -200,6 +199,16 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
                 fail_message="名稱有無自動提前出場字樣須與第 13 項有無自動提前出場界限一致",
             )
         )
+    art8 = f("art8_autocall")
+    out.append(
+        kit.doc_check(ctx, "doc.autocall_wording", "art8_autocall", "第 8 項 (4) 發生自動提前出場", has, art8).compare(
+            label.get(has.value) if has.ok else None,
+            label.get(art8.value) if art8.ok else None,
+            fail=S.REVIEW_REQUIRED,
+            reason="document_inconsistent",
+            fail_message="第 8 項有無「(4) 發生自動提前出場」須與第 13 項有無自動提前出場界限一致",
+        )
+    )
     out.append(
         kit.doc_check(ctx, "doc.autocall_wording", "underlying_table", "標的表自動提前出場界限欄", has, table).compare(
             label.get(has.value) if has.ok else None,
@@ -268,9 +277,11 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
     )
     if doc_ki == "P":
         out.append(
-            kit.doc_check(
-                ctx, "doc.ki_consistency", "ki_periods", "觸及下限事件觀察日期數（t=1-n）", tenor, ki
-            ).compare(tenor.value, ki_periods(ki), fail_message="KI 每期觀察「在任t 個觀察日 (t=1-n)」的 n 須等於天期")
+            kit.doc_check(ctx, "doc.ki_consistency", "ki_periods", "觸及下限事件觀察日期數（t=1-n）", tenor, ki)
+            .needs(f("ki_periods"))
+            .compare(
+                tenor.value, f("ki_periods").value, fail_message="KI 每期觀察「在任t 個觀察日 (t=1-n)」的 n 須等於天期"
+            )
         )
     return out
 

@@ -1,7 +1,7 @@
 """Citi 中文投資人須知（docs/templates/citi-zh-iis.md）：段落標題＋標籤定位，一律在去空白的全文上讀。
 
-依 8 份真實樣本建立（同說明書 CT1–CT8）。每頁頁首「第N頁，共4頁」。KO／KI 寫法只在「二、商品事項」到
-「4.受託或發行不成立之情形」之間判斷，KI 句型同說明書第 8 項（parsers/citi.py 的 `ki_type`）；三、投資風險也有類似句子。
+依 8 份真實樣本建立（同說明書 CT1–CT8）。每頁頁首「第N頁，共4頁」。KO／KI 寫法與「記憶式」用字只在「二、商品事項」到
+「三、投資風險」之間判斷，KI 句型同說明書第 8 項（parsers/citi.py 的 `ki_type`）；三、投資風險也有類似句子。
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ SECTIONS = (
     "六、協助投資人權益保護之方式",
     "七發行機構、總代理人及受託或銷售機構與投資人爭議之處理方式",
 )
-PRODUCT = ("二、商品事項", "4.受託或發行不成立之情形")  # 產品條件、KO／KI 寫法所在的段落
+PRODUCT = ("二、商品事項", "三、投資風險")  # 產品條件、KO／KI 寫法與「記憶式」用字（D40）所在的段落
 REDEMPTION = ("3.贖回價金之計算", "4.受託或發行不成立之情形")  # 到期給付金額（KI 型態）
 CCY = money.CURRENCY
 PCT = r"(\d+(?:\.\d+)?)%"
@@ -134,11 +134,11 @@ def _ko_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
     names = ("has_autocall", "ko_observation", "first_callable_period", "ko_memory", "ki_type", "memory_wording")
     found = _section_text(ti, PRODUCT)
     if found is None:
-        fields.update({n: ParsedField.missing(n, "找不到「二、商品事項」段落") for n in names})
+        fields.update({n: ParsedField.missing(n, "找不到「二、商品事項」到「三、投資風險」段落") for n in names})
         return
     sec_ti, sec = found
     text = sec_ti.text
-    has_autocall = "自動提前出場" in text
+    has_autocall = bool(re.search(r"自動提前出場(?:事件|觀察日|配息)", text))
     fields["has_autocall"] = ParsedField.present("has_autocall", has_autocall, sec[:1])
     hits = [sec_ti.lines_for(m.start(), m.end())[0] for m in sec_ti.finditer("記憶式")]
     fields["memory_wording"] = ParsedField.present("memory_wording", len(hits), hits or sec[:1])

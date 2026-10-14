@@ -45,7 +45,7 @@ __all__ = [
     "field_rules",
     "first_callable_period",
     "is_vwap",
-    "underlying_slots",
+    "sheet_slots",
 ]
 
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
@@ -246,32 +246,35 @@ def _unknown_currency(
     )
 
 
-def _sheet_tickers(ctx: Context) -> list[str | None]:
-    """表上 UL_1～UL_5 的代號；空值寫法或空白為 None。"""
+def _sheet_tickers(ctx: Context) -> list[Any]:
+    """表上 UL_1～UL_5 的代號（依欄位順序）；空值寫法或空白為 None（沒有這檔標的）。"""
     empty = ctx.fmt.empty_value
     ovs = [ctx.order.underlying(i) for i in range(1, UNDERLYING_SLOTS + 1)]
     return [o.value if o and o.value not in (None, empty) else None for o in ovs]
 
 
-def underlying_slots(ctx: Context, doc_tickers: list[str | None] | None) -> list[int]:
-    """說明書第 i 檔（順序同 `underlyings`）對到表上第幾檔（從 1 起）。
+def sheet_slots(ctx: Context, rows: int) -> list[int]:
+    """說明書第 i 檔（順序同標準欄位 `underlyings`，共 `rows` 檔）對到表上第幾檔 UL_n（從 1 起）。
 
     標的不看順序的上手（參考條件表格式 `underlyings.any_order_issuers`，Citi）且表上與說明書是同一組代號
-    （數量相同、不重複）時依代號配對；其他情況一律依順序（第 i 檔對第 i 檔）。
+    （數量相同、不重複）時依代號配對，保留表上原本的欄位位置；其他情況（含讀不到代號）一律依順序。
     """
-    identity = list(range(1, len(doc_tickers or []) + 1))
-    if ctx.issuer not in ctx.fmt.underlyings_any_order or not doc_tickers or None in doc_tickers:
+    identity = list(range(1, rows + 1))
+    uls = standard_field(ctx, "underlyings")
+    if ctx.issuer not in ctx.fmt.underlyings_any_order or not uls.ok or len(uls.value) != rows:
         return identity
-    sheet = [t for t in _sheet_tickers(ctx) if t is not None]
-    if sorted(sheet) != sorted(doc_tickers) or len(set(sheet)) != len(sheet):
+    sheet = _sheet_tickers(ctx)
+    filled = [t for t in sheet if t is not None]
+    positions = {t: n for n, t in enumerate(sheet, start=1) if t is not None}
+    if sorted(map(str, filled)) != sorted(uls.value) or len(positions) != len(filled):
         return identity
-    return [sheet.index(t) + 1 for t in doc_tickers]
+    return [positions[t] for t in uls.value]
 
 
 def underlyings(ctx: Context) -> CheckResult:
-    rid, pf, empty = "field.underlyings", standard_field(ctx, "underlyings"), ctx.fmt.empty_value
+    rid, pf = "field.underlyings", standard_field(ctx, "underlyings")
     ovs = [ctx.order.underlying(i) for i in range(1, UNDERLYING_SLOTS + 1)]
-    values = [o.value if o and o.value != empty else None for o in ovs]  # 空值寫法表示沒有這檔標的
+    values = _sheet_tickers(ctx)  # 空值寫法表示沒有這檔標的
     filled = [i for i, v in enumerate(values) if v is not None]
     if not filled:
         return order_review(
@@ -422,12 +425,16 @@ def initial_pricing(ctx: Context) -> CheckResult:
         if (blocked := check.blocked) is not None:
             return blocked
         labels = {v: k for k, v in ctx.fmt.initial_pricing_values.items()}
-        return check.compare(ov.value, labels.get(doc.value, doc.value), ok=mapped == doc.value)
+        return check.compare(
+            ov.value, labels.get(doc.value, doc.value), ok=mapped == doc.value, message=_pricing_message(mapped)
+        )
+    return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=_pricing_message(mapped))
+
+
+def _pricing_message(mapped: str) -> str:
     if mapped == VWAP:
-        message = "VWAP：期初價格以上手報的為準，表上各標的價格不比對，核對通過後以說明書覆寫"
-    else:
-        message = "表上各標的價格與說明書比對"
-    return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=message)
+        return "VWAP：期初價格以上手報的為準，表上各標的價格不比對，核對通過後以說明書覆寫"
+    return "表上各標的價格與說明書比對"
 
 
 SPLIT_SUSPECTED = "split_suspected"  # 同一檔標的各價格與說明書差同一比例：疑似分割調整後的價格，轉人工覆核
@@ -462,7 +469,7 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     if not rows.ok:
         return [Check(rid, "price_table", Item.sheet("價格表"), ctx.document).review(rows)]
     empty, ko = ctx.fmt.empty_value, standard_field(ctx, "ko_pct")
-    slots = underlying_slots(ctx, list(uls.value) if uls.ok and len(uls.value) == len(rows.value) else None)
+    slots = sheet_slots(ctx, len(rows.value))
     out = []
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"

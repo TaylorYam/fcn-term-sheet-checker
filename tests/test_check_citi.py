@@ -168,6 +168,24 @@ def test_non_memory_product_must_not_mention_memory(tmp_path):
     assert problems(r) == [("doc.memory_wording", "memory_wording_ch1", S.MISMATCH)]
 
 
+def test_memory_wording_in_the_name_must_match_article_13(tmp_path):
+    """名稱寫記憶式、第 13 項卻是非記憶式：寫法超出範本規格，轉人工覆核。"""
+    spec = Spec(memory=False)
+    r = check(tmp_path, spec, edits=[Edit("(自動提前出場)", "(記憶式自動提前出場)", "ts.cover")])
+    assert rule(r, "doc.ko_memory")[0].status == S.REVIEW_REQUIRED
+
+
+def test_article_8_item_4_must_agree_with_article_13(tmp_path):
+    r = check(tmp_path, edits=[Edit("(4) 發生記憶式自動提前出場", "(4) 其他給付", "ts.art8")])
+    assert rule(r, "doc.autocall_wording", "art8_autocall")[0].status == S.REVIEW_REQUIRED
+
+
+def test_a_blank_column_between_underlyings_is_not_matched_by_ticker(tmp_path):
+    """表上 UL 中間有空白欄：不依代號配對（價格不會對到錯的那一格），標的轉人工覆核。"""
+    r = check(tmp_path, Spec(count=2), order=(2, 1), UL_2="-", UL_3="ZCA UW")
+    assert rule(r, "field.underlyings")[0].status == S.REVIEW_REQUIRED
+
+
 def test_sheet_memory_flag_is_compared_with_article_13(tmp_path):
     r = check(tmp_path, Spec(), pdf_spec=Spec(memory=False))  # 表上記憶式、說明書非記憶式
     assert rule(r, "field.ko_memory")[0].status == S.MISMATCH

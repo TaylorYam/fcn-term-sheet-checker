@@ -305,6 +305,11 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     put("maturity_redemption_pct", art8, rf"\(a\)若.*?以{CCY}支付本商品每單位商品面額的" + PCT, Decimal)
     put("currency_art8", art8, rf"\(a\)若.*?以({CCY})支付本商品每單位商品面額的")
     fields["ki_type"] = ki_type(t8, art8)
+    put("ki_periods", art8, r"觸及下限事件：在任t個觀察日\(t=1-(\d+)\)", int)  # 只有 KI 每期觀察
+    m4 = re.search(r"\(4\)發生(?:記憶式)?自動提前出場：", t8.text)  # 第 8 項 (4)：只有會提前出場的商品才有
+    fields["art8_autocall"] = ParsedField.present(
+        "art8_autocall", m4 is not None, t8.lines_for(m4.start(), m4.end()) if m4 else art8[:1]
+    )
     ki = fields["ki_type"]
     if ki.ok and ki.value == "none" and not ki_raw.ok:
         fields["ki_pct"] = ParsedField(
@@ -509,14 +514,8 @@ def ki_type(t8: TextIndex, art8: list[Line], where: str = "第 8 項") -> Parsed
         return ParsedField.present(name, "D", lns)
     p = re.match(r"在任t個觀察日\(t=1-(\d+)\)", body)
     if p:
-        return ParsedField(name, FieldStatus.PRESENT, "P", [Evidence.of(x) for x in lns], note=f"t=1-{p[1]}")
+        return ParsedField.present(name, "P", lns)
     return ParsedField.invalid(name, lns, f"{where}觸及下限事件的觀察寫法不在範本規格內")
-
-
-def ki_periods(pf: ParsedField) -> int | None:
-    """KI 每期觀察「在任t 個觀察日 (t=1-n)」的 n（記在 `ki_type` 的 note）。"""
-    m = re.fullmatch(r"t=1-(\d+)", pf.note or "")
-    return int(m[1]) if m else None
 
 
 def ko_memory(t13: TextIndex, art13: list[Line], has_autocall: bool) -> ParsedField:
@@ -787,6 +786,9 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
             invalid("日期表是每期觀察（觀察日），但第 12 項(9)／第 13 項的自動提前出場觀察日不是每期觀察寫法")
             return
         k = k13.value[1]
+        if not 1 <= k <= n:
+            invalid(f"第一個可提前出場期 {k} 不在日期表第 1～{n} 期之間")
+            return
         dates, observation = {r["period"]: r["observation"] for r in rows if r["period"] >= k}, "P"
     else:
         invalid("第 13 項有自動提前出場界限，但日期表只有配息日")
