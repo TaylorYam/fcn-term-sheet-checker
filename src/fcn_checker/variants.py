@@ -108,8 +108,10 @@ def _explicit(pf: ParsedField) -> Any:
 
 
 def _document_terms(value: Callable[[str], Any], first_callable: int | None) -> Terms:
-    """說明書或投資人須知的條件（期初定價文件不寫）：`value` 依欄位名稱取明確的值。"""
+    """說明書或投資人須知的條件（期初定價只有寫明的範本才有，例：Citi）：`value` 依欄位名稱取明確的值。"""
+    pricing = value("initial_pricing")
     return Terms(
+        vwap=None if pricing is None else pricing == VWAP,
         ko_observation=value("ko_observation"),
         ko_memory=value("ko_memory"),
         ki_type=value("ki_type"),

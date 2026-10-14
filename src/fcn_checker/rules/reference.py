@@ -45,6 +45,7 @@ __all__ = [
     "field_rules",
     "first_callable_period",
     "is_vwap",
+    "sheet_slots",
 ]
 
 PCT_TOLERANCE = "依說明書顯示位數四捨五入後比對"
@@ -245,10 +246,35 @@ def _unknown_currency(
     )
 
 
-def underlyings(ctx: Context) -> CheckResult:
-    rid, pf, empty = "field.underlyings", standard_field(ctx, "underlyings"), ctx.fmt.empty_value
+def _sheet_tickers(ctx: Context) -> list[Any]:
+    """表上 UL_1～UL_5 的代號（依欄位順序）；空值寫法或空白為 None（沒有這檔標的）。"""
+    empty = ctx.fmt.empty_value
     ovs = [ctx.order.underlying(i) for i in range(1, UNDERLYING_SLOTS + 1)]
-    values = [o.value if o and o.value != empty else None for o in ovs]  # 空值寫法表示沒有這檔標的
+    return [o.value if o and o.value not in (None, empty) else None for o in ovs]
+
+
+def sheet_slots(ctx: Context, rows: int) -> list[int]:
+    """說明書第 i 檔（順序同標準欄位 `underlyings`，共 `rows` 檔）對到表上第幾檔 UL_n（從 1 起）。
+
+    標的不看順序的上手（參考條件表格式 `underlyings.any_order_issuers`，Citi）且表上與說明書是同一組代號
+    （數量相同、不重複）時依代號配對，保留表上原本的欄位位置；其他情況（含讀不到代號）一律依順序。
+    """
+    identity = list(range(1, rows + 1))
+    uls = standard_field(ctx, "underlyings")
+    if ctx.issuer not in ctx.fmt.underlyings_any_order or not uls.ok or len(uls.value) != rows:
+        return identity
+    sheet = _sheet_tickers(ctx)
+    filled = [t for t in sheet if t is not None]
+    positions = {t: n for n, t in enumerate(sheet, start=1) if t is not None}
+    if sorted(map(str, filled)) != sorted(uls.value) or len(positions) != len(filled):
+        return identity
+    return [positions[t] for t in uls.value]
+
+
+def underlyings(ctx: Context) -> CheckResult:
+    rid, pf = "field.underlyings", standard_field(ctx, "underlyings")
+    ovs = [ctx.order.underlying(i) for i in range(1, UNDERLYING_SLOTS + 1)]
+    values = _sheet_tickers(ctx)  # 空值寫法表示沒有這檔標的
     filled = [i for i, v in enumerate(values) if v is not None]
     if not filled:
         return order_review(
@@ -268,6 +294,15 @@ def underlyings(ctx: Context) -> CheckResult:
     tickers = [str(values[i]) for i in filled]
     used = [ovs[i] for i in filled]
     check = Check(rid, "underlyings", Item.group(UNDERLYINGS, used), ctx.document, ov=tuple(used), expected=tickers)
+    if ctx.issuer in ctx.fmt.underlyings_any_order:  # 不看順序（Citi）：同一組代號（數量相同、不重複）就相符
+        same = pf.ok and sorted(tickers) == sorted(pf.value) and len(set(tickers)) == len(tickers)
+        return check.needs(pf).compare(
+            tickers,
+            pf.value,
+            ok=same,
+            tolerance="不看順序：同一組代號（數量相同、不重複）即相符，價格依代號配對",
+            fail_message="彭博代號須逐字相等（含交易所尾碼），數量也須相同",
+        )
     return check.needs(pf).compare(
         tickers, pf.value, fail_message="彭博代號須依順序逐字相等（含交易所尾碼），數量也須相同"
     )
@@ -375,16 +410,31 @@ def is_vwap(ctx: Context) -> bool:
 
 
 def initial_pricing(ctx: Context) -> CheckResult:
-    """期初定價：說明書沒有對應資料，只檢查表上是允許值（開盤價／收盤價／VWAP）。"""
+    """期初定價：表上須是允許值（開盤價／收盤價／VWAP）；說明書寫明期初定價時（Citi 標的表表頭）另須相同。
+
+    範本沒有期初定價（`absent`）時只檢查允許值；寫明的範本讀不到或寫法未知時轉人工覆核。
+    """
     rid, key, name = "field.initial_pricing", "initial_pricing", "期初定價"
-    mapped, ov, problem = _mapped(ctx, rid, key, None, ctx.fmt.initial_pricing_values, name, name)
+    pf = standard_field(ctx, key)
+    doc = None if pf.status == FieldStatus.NOT_APPLICABLE else pf
+    mapped, ov, problem = _mapped(ctx, rid, key, doc, ctx.fmt.initial_pricing_values, name, name)
     if problem:
         return problem
+    if doc is not None:
+        check = _column(ctx, rid, key, name, ov, ov.value).needs(doc)
+        if (blocked := check.blocked) is not None:
+            return blocked
+        labels = {v: k for k, v in ctx.fmt.initial_pricing_values.items()}
+        return check.compare(
+            ov.value, labels.get(doc.value, doc.value), ok=mapped == doc.value, message=_pricing_message(mapped)
+        )
+    return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=_pricing_message(mapped))
+
+
+def _pricing_message(mapped: str) -> str:
     if mapped == VWAP:
-        message = "VWAP：期初價格以上手報的為準，表上各標的價格不比對，核對通過後以說明書覆寫"
-    else:
-        message = "表上各標的價格與說明書比對"
-    return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=message)
+        return "VWAP：期初價格以上手報的為準，表上各標的價格不比對，核對通過後以說明書覆寫"
+    return "表上各標的價格與說明書比對"
 
 
 SPLIT_SUSPECTED = "split_suspected"  # 同一檔標的各價格與說明書差同一比例：疑似分割調整後的價格，轉人工覆核
@@ -419,14 +469,16 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
     if not rows.ok:
         return [Check(rid, "price_table", Item.sheet("價格表"), ctx.document).review(rows)]
     empty, ko = ctx.fmt.empty_value, standard_field(ctx, "ko_pct")
+    slots = sheet_slots(ctx, len(rows.value))
     out = []
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
+        slot = slots[i - 1] if i <= len(slots) else i  # 表上第幾檔（不看順序的上手依代號配對）
         ev = list(row.evidence)
-        pending: list[tuple[Check, Any, Any]] = []  # 這檔可比對的價格欄：(結果身分, 表上值（4 位）, 說明書值)
+        pending: list[tuple[Check, Decimal, Decimal]] = []  # 這檔可比對的價格欄：(結果身分, 表上值（4 位）, 說明書值)
         for col, zh in PRICE_COLUMNS:
-            field, name = f"{label} {zh}", price_item(i, col)
-            ov = ctx.order.price(i, col)
+            field, name = f"{label} {zh}", price_item(slot, col)
+            ov = ctx.order.price(slot, col)
             check = _column(ctx, rid, field, name, ov)
             if col == "ko" and "ko" not in row.prices:  # 價格表沒有 KO 價：說明書判定不適用才不比對
                 if ko.status == FieldStatus.NOT_APPLICABLE:
@@ -459,23 +511,33 @@ def underlying_prices(ctx: Context) -> list[CheckResult]:
                 out.append(order_review(rid, field, ov, None, "order_invalid", message, name=name))
                 continue
             pending.append((check, v.quantize(Q4, ROUND_HALF_UP), doc_v))
-        ratio = _split_ratio([(shown, doc_v) for _, shown, doc_v in pending])
-        for check, shown, doc_v in pending:
-            if ratio is None:
-                out.append(check.compare(shown, doc_v, evidence=ev, tolerance="表上值四捨五入（half-up）到 4 位"))
-            else:
-                out.append(
-                    check.result(
-                        S.REVIEW_REQUIRED,
-                        expected=shown,
-                        actual=doc_v,
-                        evidence=ev,
-                        reason=SPLIT_SUSPECTED,
-                        message=f"{label} 的各價格欄都與{ctx.document}差同一比例（表上 ÷ 說明書 = {ratio}），"
-                        "疑為股票分割調整後的價格，請人工確認；表上值不改",
-                    )
-                )
+        out += compare_sheet_prices(pending, label=label, document=ctx.document, evidence=ev)
     return out
+
+
+def compare_sheet_prices(
+    pending: list[tuple[Check, Decimal, Decimal]], *, label: str, document: str, evidence: list
+) -> list[CheckResult]:
+    """同一檔標的可比對的價格欄（結果身分, 表上值（4 位）, 文件值）和參考條件表比：說明書與投資人須知共用。
+
+    全部差同一個比例（`_split_ratio`）時各欄轉人工覆核並寫出比例（疑似分割調整，表上值不改），否則逐欄比對。
+    """
+    ratio = _split_ratio([(shown, doc_v) for _, shown, doc_v in pending])
+    if ratio is None:
+        return [
+            check.compare(shown, doc_v, evidence=evidence, tolerance="表上值四捨五入（half-up）到 4 位")
+            for check, shown, doc_v in pending
+        ]
+    message = (
+        f"{label} 的各價格欄都與{document}差同一比例（表上 ÷ {document} = {ratio}），"
+        "疑為股票分割調整後的價格，請人工確認；表上值不改"
+    )
+    return [
+        check.result(
+            S.REVIEW_REQUIRED, expected=shown, actual=doc_v, evidence=evidence, reason=SPLIT_SUSPECTED, message=message
+        )
+        for check, shown, doc_v in pending
+    ]
 
 
 def min_amounts(ctx: Context) -> list[CheckResult]:

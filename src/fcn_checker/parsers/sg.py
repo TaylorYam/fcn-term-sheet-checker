@@ -349,6 +349,7 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
     ch2 = doc.articles(2)
     fields["issuer_name_ch2"] = _labelled("issuer_name_ch2", doc.span_lines(ch2.get(1)), "事業名稱：")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
+    fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
     fields["issuer_name_ch1"] = standard_fields.absent(
         "issuer_name_ch1", "第一章的發行機構名稱（SG 第一章第 3 項寫的是保證機構）"
     )

@@ -33,8 +33,8 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
     meta = report.metadata
     assert len(meta["inputs"]["term_sheet"]["sha256"]) == 64
     assert len(meta["inputs"]["reference_sheet"]["sha256"]) == 64
-    assert meta["review_standard"]["version"] == 14
-    assert meta["reference_format"]["version"] == 9
+    assert meta["review_standard"]["version"] == 15
+    assert meta["reference_format"]["version"] == 10
     assert meta["program_version"] and meta["extractor"].startswith("PyMuPDF")
     assert report.not_covered, "第二階段規則應列在未涵蓋清單"
 
