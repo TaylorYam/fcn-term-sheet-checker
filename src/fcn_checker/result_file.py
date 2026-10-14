@@ -49,10 +49,14 @@ class ErrorRow:
 
     @classmethod
     def of(cls, identification: Identification, messages: Sequence[str]) -> ErrorRow:
-        """一份 PDF 的錯誤清單列。TDCC Code 取辨識結果的商品代號（說明書封面；投資人須知為檔名）；
-        取不到時用檔名前 12 碼（12 位數字才算），否則留白。錯訊多條以換行分隔。"""
-        pdf = identification.pdf
-        return cls(identification.product_code or name_code(pdf), pdf.name, "\n".join(messages))
+        """一份 PDF 的錯誤清單列（TDCC Code 見 `tdcc_code`）。錯訊多條以換行分隔。"""
+        return cls(tdcc_code(identification), identification.pdf.name, "\n".join(messages))
+
+
+def tdcc_code(identification: Identification) -> str | None:
+    """錯誤清單（與回報包）的 TDCC Code：辨識結果的商品代號（說明書封面；投資人須知為檔名）；
+    取不到時用檔名前 12 碼（12 位數字才算），否則為 None。"""
+    return identification.product_code or name_code(identification.pdf)
 
 
 def output_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:

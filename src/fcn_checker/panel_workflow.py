@@ -1,6 +1,6 @@
 """PANEL 公開工作流程：參考條件表＋多份說明書與投資人須知的唯讀預覽、核對、失效檢查、手動儲存與匯出回報包。
 
-核對與儲存都呼叫批量入口（batch.py），PANEL 不另做規則；按「儲存」之前不寫任何檔案。
+核對、儲存與匯出回報包都呼叫批量入口與其輸出模組，PANEL 不另做規則；按「儲存」或「匯出回報包」之前不寫任何檔案。
 PANEL 操作員讀到的預覽列、欄名警告、結果清單列、結果明細、回填決策與放行說明文字都由 PanelOutcome 組好，Tk 視窗只負責顯示。
 每次載入預覽時載入一次核對設定；核對沿用預覽的辨識與讀出，同一份說明書只讀一次。
 """
@@ -32,6 +32,8 @@ from .issuers import REGISTRY, Issuer
 from .messages import STATUS_ZH, problem_message
 from .saving import SaveReceipt, save_batch
 from .schema import CheckResult, CheckStatus
+
+_SOURCES_CHANGED = "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。"
 
 
 def display_value(value: object) -> str:
@@ -322,7 +324,7 @@ class PanelSession:
 
     def _require_sources(self) -> None:
         if not self.check_sources():
-            raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
+            raise IngestionError("source_changed", _SOURCES_CHANGED)
 
     def load_preview(self) -> BatchPreview:
         self._clear()
@@ -413,7 +415,7 @@ class PanelSession:
         receipt = save_batch(outcome.batch, Path(out_dir), root=self.install_root, now=now)  # 儲存前確認整份來源快照
         if receipt.source_changed:
             self.invalidate(outcome.batch.snapshot)
-            raise IngestionError("source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。")
+            raise IngestionError("source_changed", _SOURCES_CHANGED)
         self._receipt = receipt
         return receipt
 
@@ -435,9 +437,7 @@ class PanelSession:
         except IngestionError as e:
             if e.reason_code == "source_changed":
                 self.invalidate(outcome.batch.snapshot)
-                raise IngestionError(
-                    "source_changed", "來源檔案或設定檔已變更，結果已失效，請重新載入預覽與核對。"
-                ) from e
+                raise IngestionError("source_changed", _SOURCES_CHANGED) from e
             raise
         self.message = f"回報包：{path}（含真實交易資料，只能放到 Private Repo）"
         return path
