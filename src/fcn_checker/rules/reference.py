@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from ..orders.reference import UNDERLYING_SLOTS, OrderRecord
+from ..orders.reference import UNDERLYING_SLOTS
 from ..schema import CheckResult, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import AutocallSchedule, Occurrence
@@ -42,7 +42,6 @@ __all__ = [
     "FIELD_CHECKS",
     "AutocallSchedule",
     "FieldCheck",
-    "column_checks",
     "field_rules",
     "first_callable_period",
     "is_vwap",
@@ -556,38 +555,3 @@ def first_callable_period(ctx: Context) -> CheckResult:
         return problem
     s: AutocallSchedule = sched.value
     return check.compare(v, s.first_callable, message="Non-Call(月) = 第一個可以提前出場的期別（最小為 1）")
-
-
-# ---------------------------------------------------------------- 表頭欄位
-
-
-def column_checks(order: OrderRecord) -> list[CheckResult]:
-    """表頭欄名的問題：只寫說明，不附雙方值。"""
-    src = order.source
-    item = Item.note(f"{src}表頭")
-    out = []
-    for col in order.unknown_columns:
-        out.append(
-            Check("order.unknown_column", f"{src}欄位", item, ov=(col,)).result(
-                S.REVIEW_REQUIRED,
-                reason="order_unknown_column",
-                message=f"{src}出現格式設定沒有的欄位「{col.value}」，格式可能已改版",
-            )
-        )
-    for col in order.duplicate_columns:
-        out.append(
-            Check("order.duplicate_column", f"{src}欄位", item, ov=(col,)).result(
-                S.REVIEW_REQUIRED,
-                reason="order_duplicate_column",
-                message=f"{src}欄位「{col.value}」重複出現，無法確定以哪一欄為準",
-            )
-        )
-    for name in order.missing_columns:
-        out.append(
-            Check("order.missing_column", f"{src}欄位", item).result(
-                S.REVIEW_REQUIRED,
-                reason="order_missing_column",
-                message=f"{src}缺少格式設定中的欄位「{name}」",
-            )
-        )
-    return out

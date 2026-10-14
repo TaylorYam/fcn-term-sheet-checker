@@ -1,7 +1,7 @@
 """參考條件表的一列（`OrderRecord`）可以不經 Excel 直接以標準欄位值建立，規則與回填規則只收 `Context`。
 
 測試切點：`OrderRecord.offline` → `Context` → 欄位核對表（`rules/reference.FIELD_CHECKS`）與回填規則（`backfill.*`）。
-離線建的列有格式設定的每一欄，儲存格依 `[columns]` 的順序從 A 欄起編號。
+離線建的列有格式設定的每個標準欄位（同一標準欄位有多個欄名時取先宣告的），儲存格依宣告順序從 A 欄起編號。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 
 from fcn_checker import backfill
 from fcn_checker.backfill import BackfillAction
-from fcn_checker.orders.reference import OrderRecord
+from fcn_checker.orders.reference import OrderRecord, headers_of
 from fcn_checker.rules import reference
 from fcn_checker.rules.kit import Context
 from fcn_checker.schema import ParsedField
@@ -24,8 +24,8 @@ FMT = CONFIG.reference_format
 
 
 def cell_of(header: str, row: int) -> str:
-    """離線建的列裡某 Excel 欄名的儲存格：依格式設定 `[columns]` 的順序從 A 欄起編號。"""
-    return f"{get_column_letter(list(FMT.columns).index(header) + 1)}{row}"
+    """離線建的列裡某 Excel 欄名的儲存格：每個標準欄位一欄（取先宣告的欄名），依宣告順序從 A 欄起編號。"""
+    return f"{get_column_letter(list(headers_of(FMT).values()).index(header) + 1)}{row}"
 
 
 class _TermSheet:
@@ -51,7 +51,7 @@ def test_a_row_built_from_a_dict_drives_the_field_checks():
 
     trade = reference.FIELD_CHECKS["trade_date"].check(ctx)
     assert (trade.status, trade.item.name, trade.item.columns) == (PASS, "交易日", ("交易日",))
-    assert trade.order_source == [f"{FMT.sheet}!{cell_of('交易日', 7)}"]
+    assert trade.order_source == [f"樣本清單!{cell_of('交易日', 7)}"]
 
     strike = reference.FIELD_CHECKS["strike_pct"].check(ctx)
     assert (strike.status, strike.item.name, strike.tolerance) == (PASS, "K(%)", reference.PCT_TOLERANCE)

@@ -455,10 +455,6 @@ class PanelWindow:
             pixels,
         )
         self.preview_table.frame.grid(row=0, column=0, sticky="nsew")
-        self.preview_warnings = tk.StringVar(value="")
-        ttk.Label(preview_frame, textvariable=self.preview_warnings, wraplength=pixels(1000)).grid(
-            row=1, column=0, sticky="w", pady=(8, 0)
-        )
         self.results = ResultPane(self.tabs, pixels, self.session.release_state, self.toggle_release)
         self.tabs.add(self.results, text="核對結果")
         self.not_covered = ttk.Frame(self.tabs, padding=12)
@@ -488,7 +484,6 @@ class PanelWindow:
     def _clear(self):
         self.shown = None
         self.preview_table.delete(*self.preview_table.get_children())
-        self.preview_warnings.set("")
         self.check_button.configure(state="disabled")
         self._clear_results()
 
@@ -571,7 +566,6 @@ class PanelWindow:
         self.shown = preview
         for row in preview.rows:
             self.preview_table.insert("", "end", values=PanelOutcome.preview_row(row))
-        self.preview_warnings.set(PanelOutcome.preview_warnings(preview))
         self.status.set(self.session.message)
         self.tabs.select(0)
 

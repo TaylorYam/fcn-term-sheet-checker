@@ -22,7 +22,7 @@ from harness import CURRENCY_ISO, REFERENCE_FORMAT, STANDARD
 _FORMAT = tomllib.loads(REFERENCE_FORMAT.read_text(encoding="utf-8"))
 # Excel 欄名 → 標準欄位
 REFERENCE_COLUMNS: dict[str, str] = dict(_FORMAT["columns"])
-_COLUMN_OF = {f: h for h, f in REFERENCE_COLUMNS.items()}  # 標準欄位 → Excel 欄名
+_COLUMN_OF = {f: h for h, f in reversed(REFERENCE_COLUMNS.items())}  # 標準欄位 → Excel 欄名（先宣告的；計價幣別是別名）
 
 REFERENCE_HEADERS: list[str] = list(_FORMAT["layout"]["column_order"])  # 參考條件表欄位順序，同真實 樣本清單 第 3 列
 DATE_FORMAT = "mm-dd-yy"
@@ -165,16 +165,23 @@ def reference_row(spec: ProductSpec, **overrides: Any) -> dict[str, Any]:
 
 
 def build_reference_sheet(
-    path: Path, rows: list[dict[str, Any]], headers: list[str] | None = None, extra_sheets: tuple[str, ...] = ()
+    path: Path,
+    rows: list[dict[str, Any]],
+    headers: list[str] | None = None,
+    extra_sheets: tuple[str, ...] = (),
+    *,
+    title: str = "樣本清單",
+    header_row: int = 3,
 ) -> Path:
-    """仿 FCN參考條件 的 `樣本清單`：第 3 列表頭、第 4 列起資料，最右側一個無表頭欄；另有一張其他工作表。"""
+    """仿 FCN參考條件 的 `樣本清單`：第 3 列表頭、第 4 列起資料，最右側一個無表頭欄；另有一張其他工作表。
+    `title`、`header_row` 改成公司原始待建檔表的樣子（例：表頭在第 2 列）。"""
     headers = headers or REFERENCE_HEADERS
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "樣本清單"
+    ws.title = title
     for k, h in enumerate(headers, start=1):
-        ws.cell(row=3, column=k, value=h)
-    for r, row in enumerate(rows, start=4):
+        ws.cell(row=header_row, column=k, value=h)
+    for r, row in enumerate(rows, start=header_row + 1):
         for k, h in enumerate(headers, start=1):
             c = ws.cell(row=r, column=k, value=row.get(h))
             if isinstance(c.value, dt.datetime):  # 空白格維持「通用格式」，回填時要沿用表上日期格式

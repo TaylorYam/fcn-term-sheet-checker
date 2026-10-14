@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 
 import openpyxl
 import pytest
 
 from fcn_checker.backfill import BackfillAction
-from fcn_checker.ingestion import sha256_of
+from fcn_checker.ingestion import IngestionError, sha256_of
 from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.saving import save_batch
 from harness import CONFIG, MISMATCH, PASS, REVIEW, check_all, load_config, results
@@ -84,29 +85,30 @@ def test_other_value_in_ts_is_a_mismatch_kept_and_not_filled(tmp_path, value):
     assert not receipt.filled(item) and wb["回填後"].max_row == 3, "沒回填的商品不出現在「回填後」"
 
 
-def test_sheet_without_ts_column_requires_review_naming_it(tmp_path):
+def test_sheet_without_ts_column_still_passes_and_the_result_file_adds_it_checked(tmp_path):
+    """TS、IIS 不是必要欄（Issue #199）：表上沒有也照常核對；「回填後」補上這一欄並打勾。"""
     headers = [h for h in REFERENCE_HEADERS if h != "TS"]
     outcome = run(tmp_path, headers=headers)
-    assert_column_missing(outcome, "backfill.checked", "TS", tmp_path)
-    assert results(outcome.items[0].report, "order.missing_column")[0].message.endswith("「TS」")
+    item = outcome.items[0]
+    assert item.report.status == PASS and item.fills_sheet
+    r = results(item.report, "backfill.checked")[0]
+    assert r.status == PASS and "表上沒有TS欄" in r.message
+    assert [d.column for d in item.report.backfill if d.column in ("TS", "IIS")] == ["IIS"]
+    receipt, wb = saved_sheet(outcome, tmp_path)
+    assert receipt.filled(item)
+    assert (wb["回填後"]["A3"].value, wb["回填後"]["B3"].value) == ("TS", "IIS"), "照參考條件表欄位順序補在最前面"
+    assert (wb["回填後"]["A4"].value, wb["回填後"]["B4"].value) == ("V", "V")
 
 
 # ---------------------------------------------------------------- 缺欄
 
 
-def test_sheet_without_a_compare_date_column_requires_review_naming_it(tmp_path):
-    headers = [h for h in REFERENCE_HEADERS if h != "比價日_3"]
-    assert_column_missing(run(tmp_path, headers=headers), "backfill.compare_dates", "比價日_3", tmp_path)
-
-
-def test_sheet_without_isin_column_requires_review_naming_it(tmp_path):
-    headers = [h for h in REFERENCE_HEADERS if h != "ISIN Code"]
-    assert_column_missing(run(tmp_path, headers=headers), "backfill.isin", "ISIN Code", tmp_path)
-
-
-def test_sheet_without_issue_date_column_requires_review_naming_it(tmp_path):
-    headers = [h for h in REFERENCE_HEADERS if h != "發行日"]
-    assert_column_missing(run(tmp_path, headers=headers), "backfill.issue_date", "發行日", tmp_path)
+@pytest.mark.parametrize("missing", ["比價日_3", "ISIN Code", "發行日"])
+def test_sheet_without_a_backfill_column_stops_the_whole_batch_naming_it(tmp_path, missing):
+    """表上有值時也要核對的回填欄位是必要欄（Issue #199）：少了就整批不核對。"""
+    headers = [h for h in REFERENCE_HEADERS if h != missing]
+    with pytest.raises(IngestionError, match=f"缺少必要欄：{re.escape(missing)}"):
+        run(tmp_path, headers=headers)
 
 
 def test_format_without_issue_date_column_name_requires_review_naming_the_field(tmp_path):

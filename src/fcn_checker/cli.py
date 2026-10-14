@@ -23,7 +23,7 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="fcn-batch",
         description=(
-            "以參考條件表（FCN參考條件 的「樣本清單」）批量核對多份說明書 PDF；結果存成一份核對結果檔"
+            "以參考條件表（Excel 第一張工作表，必要欄都在即可）批量核對多份說明書 PDF；結果存成一份核對結果檔"
             "（「回填後」：說明書與投資人須知都通過、TS、IIS 打 V 並回填 ISIN、發行日、比價日的列；「錯誤清單」：沒通過的說明書與錯訊），"
             "原檔不動；另在執行目錄的 runtime/核對紀錄/ 寫一份內部核對紀錄（JSON）。"
         ),

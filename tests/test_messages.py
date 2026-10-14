@@ -379,14 +379,6 @@ def test_hsbc_broken_reference_sheet_messages_name_their_items(tmp_path, value):
     assert_every_problem_names_its_item(hsbc_check(tmp_path, overrides=dict.fromkeys(HSBC_KEYS, value)))
 
 
-def test_reference_sheet_header_problems_name_their_items(tmp_path):
-    spec = Spec()
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
-    headers = [h for h in REFERENCE_HEADERS if h != "KO(memo)"] + ["新欄位", "K(%)"]
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers)
-    assert_every_problem_names_its_item(_run(pdf, sheet))
-
-
 @pytest.mark.parametrize("issuer", ["BARC", "HSBC"])
 def test_term_sheet_missing_every_field_messages_name_their_items(tmp_path, issuer):
     base = by_code(issuer)
