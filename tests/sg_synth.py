@@ -79,6 +79,9 @@ class Spec(ProductSpec):
     trustee_code: str | None = None  # 受託或銷售機構商品代號；None 同商品代號，"" 空白
     fx: Decimal | None = None  # quanto：最終匯率定價（每一日圓兌商品幣別）
     agent_head: str = "虛構甲"  # 總代理人負責人（不核對）
+    label_row: int | None = None  # 日期表「（最終評價日）」「（到期日）」標在哪一期；None 為末列（範本寫法）
+    table_page_break: bool = False  # 第 8 項標的表在 k=1 之後、日期表在中間期別之後換頁
+    annex_text: str | None = None  # 第二章後加一頁年報附件（標題＋這段文字）；None 不加
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -258,6 +261,8 @@ def _price_table(d: _Doc, s: Spec, section: str, *, reprint: bool) -> None:
         for _, pct, _ in cols:
             value = u.initial if pct is None else price(u.initial, pct)
             d.cell(290, s.money(value, s.underlying_ccy, 4))
+        if s.table_page_break and not reprint and i == 1:
+            d.w.new_page()
 
 
 def _scenarios(d: _Doc, s: Spec) -> None:
@@ -340,8 +345,9 @@ def _scenarios(d: _Doc, s: Spec) -> None:
             f"總投資金額 = {s.units}單位面額，因此，到期日將獲得最終評價日{worst_of}{whole * s.units:,}單位加上現金{s.money(cash * s.units)}",
         )
         value = s.total * close / strike + cum
-        r = (value / s.total * 100 - 100).quantize(Q2, ROUND_HALF_UP)
-        y = (r * 12 / n).quantize(Q2, ROUND_HALF_UP)
+        exact = value / s.total * 100 - 100
+        r = exact.quantize(Q2, ROUND_HALF_UP)
+        y = (exact * 12 / n).quantize(Q2, ROUND_HALF_UP)  # 年化用未四捨五入的總報酬率（真實樣本皆如此）
         d.text(28, "（如以現金結算到期日收益，本產品總報酬率")
         d.text(
             28,
@@ -481,6 +487,11 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.article(4, "交易架構說明：請見下一頁之圖表說明。")
     d.article(5, "利害關係人揭露：範本說明。")
 
+    if s.annex_text is not None:
+        d.w.new_page()
+        d.section = "annex"
+        d.text(200, f"{APPROVAL.year}年發行機構年報之會計師查核報告")
+        d.text(28, s.annex_text)
     d.chapter("三", "商品風險揭露")
     d.article(1, "基本風險資訊：範本說明。")
     d.article(2, "個別商品風險資訊：範本說明。")
@@ -689,7 +700,10 @@ def _dates(d: _Doc, s: Spec, ends, payments) -> None:
     for t in header:
         d.cell(160, t)
     k = s.first_callable
+    labelled = s.label_row or s.tenor
     for j in range(1, s.tenor + 1):
+        if s.table_page_break and j == s.tenor // 2 + 1:
+            d.w.new_page()
         d.cell(102, f"i={j}")
         if s.autocall and s.ko_obs == "D":
             if j <= k:
@@ -702,10 +716,10 @@ def _dates(d: _Doc, s: Spec, ends, payments) -> None:
             cells = [s.date(ends[j - 1]) if j == s.tenor else "不適用"]
         for c in cells:
             d.cell(200, c)
-        if j == s.tenor:
+        if j == labelled:
             d.cell(316, "（最終評價日）")
         d.cell(450, s.date(payments[j - 1]))
-        if j == s.tenor:
+        if j == labelled:
             d.cell(463, "（到期日）")
     d.section = "art12"
     if s.autocall:
