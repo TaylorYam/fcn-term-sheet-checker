@@ -3,7 +3,7 @@
 各上手只交出說明書標準欄位（standard_fields.py）與提前出場排程；比對在這裡實作一次，所有上手共用。
 單欄比對（表上一欄 = 同名標準欄位）宣告在欄位核對表 `FIELD_CHECKS`，只宣告一次：說明書整張執行，投資人須知依範本挑選。
 空值寫法一律取自參考條件表格式設定（`empty_value`）。回填欄位（TS、IIS、ISIN、發行日、比價日）見 backfill.py。
-說明書明確判定不適用的標準欄位（例：MS 範本沒有年利率、Non-Call = 天期時沒有 KO 價）不核對，結果為不適用並附說明。
+說明書明確判定不適用的標準欄位（例：MS 範本沒有年利率）不核對，結果為不適用並附說明。
 項目名稱：讀到參考條件表某一欄時就是該欄的 Excel 欄名（`Item.column`），沒有這欄時用規則旁寫的中文名稱。
 結果一律經 `kit.Check` 建立：表上的值有問題由 `order_value` 轉人工覆核，說明書的值有問題由 `Check` 轉人工覆核。
 """
@@ -406,8 +406,8 @@ def _split_ratio(compared: list[tuple[Decimal, Decimal]]) -> Decimal | None:
 def underlying_prices(ctx: Context) -> list[CheckResult]:
     """各標的進場／執行／下限／KO 價：表上值四捨五入（half-up）到 4 位後與說明書價格列相等。
 
-    期初定價為 VWAP 時不比對（改由回填規則 `backfill.underlying_prices` 覆寫）。說明書判定 KO 價不適用
-    （`ko_pct` 不適用，例：MS Non-Call = 天期時價格表沒有 KO 欄）時各標的 KO 價不比對。
+    期初定價為 VWAP 時不比對（改由回填規則 `backfill.underlying_prices` 覆寫）。說明書明確判定 KO 價不適用
+    （`ko_pct` 不適用）時各標的 KO 價不比對（退路；Non-Call = 天期的上手一律交出 KO 100%、KO 價 = 期初價格）。
     同一檔標的可比對的價格欄全部與說明書差同一個比例（表上 ÷ 說明書相同且不是 1）時，疑似表上是股票分割調整後的
     價格：該檔的價格欄轉人工覆核並寫出比例，不判不一致（2026-10-13 作業人員決定，所有上手適用）；
     只有部分欄位不同或比例不同時照常判不一致。
