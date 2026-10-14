@@ -467,14 +467,38 @@ def test_non_default_denomination_still_requires_review_by_standard(tmp_path):
     assert not receipt.filled(item)
 
 
-def test_unknown_reference_column_requires_review(tmp_path):
+def test_missing_required_column_is_a_whole_batch_error(tmp_path):
     spec = Spec()
-    sheet = build_reference_sheet(
-        tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=[*REFERENCE_HEADERS, "新欄位"]
-    )
+    headers = [h for h in REFERENCE_HEADERS if h not in ("KO(%)", "UL_2_KO價")]
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=headers)
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
-    r = only(outcome.items[0], "order.unknown_column")
-    assert r.status == REVIEW and "參考條件表" in r.message and "新欄位" in r.message
+    assert outcome.items == [] and receipt.output is None
+    [e] = outcome.errors
+    assert (e.status, e.reason_code) == (ERROR, "reference_columns_invalid")
+    assert "缺少必要欄：KO(%)、UL_2_KO價" in e.message
+
+
+def test_company_original_sheet_checks_by_required_columns_only(tmp_path):
+    """公司原始待建檔表（Issue #199）：工作表名稱不同、表頭在第 2 列、沒有 TS／IIS／發行機構、幣別欄叫計價幣別、
+    多出分公司等欄；只要必要欄都在就照常核對與回填，「回填後」補上 TS、IIS 並打勾。"""
+    spec = Spec()
+    dropped = {"TS", "IIS", "庫存狀態", "當日比價", "發行機構"}
+    headers = ["TS/IIS完成檢核", "交易日期"]
+    headers += ["計價幣別" if h == "承作幣別" else h for h in REFERENCE_HEADERS if h not in dropped]
+    headers += ["分公司_1", "分公司_1_承作金額", "下一比價日"]
+    row = reference_row(spec)
+    row.update({"計價幣別": row["承作幣別"], "TS/IIS完成檢核": "待檢核", "分公司_1": "城中"})
+    sheet = build_reference_sheet(tmp_path / "待建檔.xlsx", [row], headers, title="ELN待建檔_測試", header_row=2)
+    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
+
+    item = outcome.items[0]
+    assert item.report.status == PASS, problems(item)
+    assert receipt.filled(item)
+    ws = openpyxl.load_workbook(receipt.output)["回填後"]
+    header = {c.value: c.column for c in ws[2] if c.value}
+    assert ws.cell(3, header["TDCC Code"]).value == spec.product_code
+    assert (ws.cell(3, header["TS"]).value, ws.cell(3, header["IIS"]).value) == ("V", "V")
+    assert ws.cell(3, header["ISIN Code"]).value == SYNTH_ISIN
 
 
 # ---------------------------------------------------------------- 核對結果檔

@@ -68,7 +68,6 @@ def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config
     report = CheckReport(CheckStatus.ERROR, None, results, [])
     if paired is not None:
         ctx = Context(paired.ts, paired.row, std, rfmt, paired.issuer.code)
-        results.extend(reference.column_checks(paired.row))
         results.extend(reference.field_rules(ctx))
         results.extend(derivation.prices(ctx))
         results.extend(paired.issuer.rules(_issuer_context(paired, std)))

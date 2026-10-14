@@ -1,27 +1,30 @@
-# 參考條件表格式：FCN參考條件 Excel 的「樣本清單」工作表（所有上手共用）
+# 參考條件表格式（所有上手共用）：FCN參考條件 的「樣本清單」或公司原始的待建檔表都可以，只看第一張工作表
 #
 # 核對條件的來源，也是核對後匯入資料庫的格式（ADR 0004）。每列一檔商品、多家上手混在同一張表。
-# 以說明書商品代號找 TDCC Code 相同的列；該列的發行機構必須是對應上手的值。
+# 以說明書商品代號找 TDCC Code 相同的列；表上有發行機構欄時，該列的發行機構必須是對應上手的值。
 # 回填欄位（TS、IIS、ISIN Code、發行日、比價日_1～12）由工具填入；其他欄位由作業人員事先填好，只做核對。
 # TS、IIS：說明書與投資人須知都通過或人工放行的商品打勾（checked_value，Issue #127）。
 # 期初定價為 VWAP 的商品，UL_n 四個價格欄不比對，核對通過後以說明書價格覆寫（Issue #122）。
 # 核對結果檔「回填後」的欄位照 layout.column_order 排，不論表上欄位怎麼排（Issue #173）。
 # 規則說明見 docs/order-formats/reference-sheet.md。
 
-version = 7
-effective_date = 2026-10-13
+version = 8
+effective_date = 2026-10-14
 
 [layout]
-sheet = "樣本清單"
-header_row = 3
-first_data_row = 4
+# 只讀第一張工作表（不看名稱）；表頭是前 header_search_rows 列裡有 key_column 欄名的那一列，下一列起是資料（Issue #199）
+header_search_rows = 10
 key_column = "TDCC Code"  # 商品代號，用來配對說明書；同一代號出現多列 → 轉人工覆核
-issuer_column = "發行機構"
+issuer_column = "發行機構"  # 不是必要欄：表上有才確認該列是對應上手的寫法
+# 必要欄 = [columns] 的欄名扣掉 optional_columns：少了任何一個（同一標準欄位的欄名有一個就算有）或重複 → 整批錯誤。
+# 其他欄（不在 [columns] 的欄）一律略過，不提示。
+optional_columns = ["TS", "IIS"]  # 表上沒有也照常核對；「回填後」補上這兩欄並打勾
 empty_value = "-"         # 空值寫法（比價日不需要填的期別也寫 -）
 checked_value = "V"       # TS、IIS 欄的打勾寫法（半形英文字母 V，同「當日比價」「私銀註記」）
 # 參考條件表欄位順序（Issue #173）：樣本清單全部具名欄的固定左右順序，「回填後」一律照它排。
 # 不在 [columns] 的欄是不核對的欄（存續或內部資訊，說明書沒有對應資料；發行機構只用來確認列屬於哪家上手）；
-# 表上少了不核對的欄不提示，「回填後」在它的位置補一個只有表頭的空白欄。無表頭的欄一律忽略，「回填後」接在最右邊。
+# 同一標準欄位的其他欄名（計價幣別）不必列在這裡。表上少了不是必要欄的欄不提示，「回填後」在它的位置補一個只有表頭的
+# 空白欄（TS、IIS 補上後打勾）。無表頭或不在這裡的欄，「回填後」接在最右邊。
 column_order = [
     "TS", "IIS", "庫存狀態", "當日比價", "Product", "發行機構", "TDCC Code", "ISIN Code", "私銀註記",
     "單位面額", "承作幣別", "交易日", "發行日",
@@ -51,6 +54,7 @@ SG = "SG"
 "ISIN Code" = "isin"
 "單位面額" = "denomination"
 "承作幣別" = "currency"
+"計價幣別" = "currency"  # 公司原始待建檔表的欄名（Issue #199）；與承作幣別同時出現算重複
 "交易日" = "trade_date"
 "發行日" = "issue_date"
 "最終比價日" = "final_valuation_date"

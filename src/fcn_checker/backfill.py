@@ -33,7 +33,7 @@ from openpyxl.workbook.workbook import Workbook
 
 from .config import ReferenceFormat
 from .ingestion import IngestionError
-from .orders.reference import OrderRecord, autocall_date_key, price_key
+from .orders.reference import OrderRecord, autocall_date_key, locate, price_key
 from .rules.kit import Context, doc_review, result
 from .rules.reference import PRICE_COLUMNS, is_vwap, standard_field
 from .schema import CheckReport, CheckResult, Item, OrderValue, ParsedField
@@ -291,14 +291,16 @@ def checked_marks(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
     """TS、IIS：說明書與投資人須知核對沒問題的打勾（打勾寫法 `checked_value`，Issue #127）。
 
     值不取自說明書：兩格都是打勾寫法；只有兩份都通過或人工放行的商品才寫入（批量入口的 `fills_sheet`）。
+    TS、IIS 不是必要欄：表上沒有的欄不產生決策，核對結果檔「回填後」補上該欄並打勾（Issue #199）。
     """
     rid, key, mark, row = "backfill.checked", "checked", ctx.fmt.checked_value, ctx.order
     ovs = [row.get(k) for k in CHECKED_FIELDS]
     item = Item.group("、".join(row.header(k) or k for k in CHECKED_FIELDS), ovs)
-    missing = _missing_columns(row, CHECKED_FIELDS)
-    if missing:
-        return _column_missing(rid, key, missing, ovs, item), []
-    decisions = [_decide(row, k, mark) for k in CHECKED_FIELDS]
+    unset = [k for k in CHECKED_FIELDS if row.header(k) is None]
+    if unset:
+        return _column_missing(rid, key, _missing_columns(row, unset), ovs, item), []
+    decisions = [_decide(row, k, mark) for k in CHECKED_FIELDS if row.has(k)]
+    absent = [row.header(k) or k for k in CHECKED_FIELDS if not row.has(k)]
     bad = [d for d in decisions if d.action == BackfillAction.MISMATCH]
     n = sum(d.action == BackfillAction.FILL for d in decisions)
     message = "；".join(
@@ -306,6 +308,7 @@ def checked_marks(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
         for x in (
             f"表上空白 {n} 格，說明書與投資人須知都通過或人工放行後填 {mark}" if n else "",
             f"表上已有 {mark} 以外的值，保留原值" if bad else "",
+            f"表上沒有{'、'.join(absent)}欄，核對結果檔「回填後」補上並填 {mark}" if absent else "",
         )
         if x
     )
@@ -336,9 +339,9 @@ def open_reference(path: Path) -> Workbook:
         raise IngestionError("reference_unreadable", f"參考條件表無法開啟（可能已損毀或不是 Excel）：{e}") from e
 
 
-def _date_format(ws: Any, rfmt: ReferenceFormat) -> str:
+def _date_format(ws: Any, first_data_row: int) -> str:
     """沿用表上既有日期格的顯示格式。"""
-    for row in ws.iter_rows(min_row=rfmt.first_data_row):
+    for row in ws.iter_rows(min_row=first_data_row):
         for c in row:
             if isinstance(c.value, dt.datetime):
                 return c.number_format
@@ -347,8 +350,9 @@ def _date_format(ws: Any, rfmt: ReferenceFormat) -> str:
 
 def apply(wb: Workbook, rfmt: ReferenceFormat, reports: Sequence[CheckReport]) -> None:
     """把要回填的說明書（呼叫端已決定：整份 PASS 或人工放行）的「回填」格寫進工作表。"""
-    ws = wb[rfmt.sheet]
-    fmt = _date_format(ws, rfmt)
+    layout = locate(wb, rfmt)
+    ws = wb[layout.sheet]
+    fmt = _date_format(ws, layout.first_data_row)
     for report in reports:
         for d in report.backfill:
             if d.action not in WRITE_ACTIONS:

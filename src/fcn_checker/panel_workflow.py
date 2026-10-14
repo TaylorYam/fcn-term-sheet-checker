@@ -92,11 +92,6 @@ class PanelOutcome:
         )
 
     @staticmethod
-    def preview_warnings(preview: BatchPreview) -> str:
-        """預覽表下方的參考條件表欄名問題；沒有問題時不顯示。"""
-        return "參考條件表欄名問題：" + "；".join(preview.warnings) if preview.warnings else ""
-
-    @staticmethod
     def item_row(item: BatchItem) -> tuple[str, ...]:
         """結果清單一列：狀態標籤、種類、PDF 檔名、問題數。"""
         problems = sum(r.status.is_problem for r in item.report.results)

@@ -173,7 +173,7 @@ def test_unknown_or_missing_order_value_requires_review(tmp_path, field, value):
         ("missing_row", "reference_row_missing"),
         ("duplicate_row", "reference_row_duplicate"),
         ("issuer", "reference_issuer_mismatch"),
-        ("missing_key", "reference_key_missing"),
+        ("missing_key", "reference_header_missing"),  # 沒有 TDCC Code 欄名就找不到表頭（Issue #199）
     ],
 )
 def test_table_pairing_failures_stop_rules(tmp_path, change, reason):
@@ -406,15 +406,15 @@ def test_missing_ambiguous_or_unknown_document_requires_review(tmp_path, old, ne
 
 
 @pytest.mark.parametrize(
-    "mode,rule",
+    "mode,problem",
     [
-        ("unknown", "order.unknown_column"),
-        ("missing", "order.missing_column"),
-        ("duplicate", "order.duplicate_column"),
+        ("unknown", None),  # 不在格式設定的欄略過（Issue #199）
+        ("missing", None),  # 第 2 欄是 IIS，不是必要欄
+        ("duplicate", "欄名重複：ISIN Code"),
         ("no_header", None),
     ],
 )
-def test_header_validation(tmp_path, mode, rule):
+def test_header_validation(tmp_path, mode, problem):
     s = Spec()
     pdf = build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s)
     excel = sheet_for(tmp_path, s)
@@ -429,8 +429,8 @@ def test_header_validation(tmp_path, mode, rule):
     wb.save(excel)
     wb.close()
     r = run_check(pdf, excel)
-    if rule:
-        assert any(x.rule_id == rule and x.status == S.REVIEW_REQUIRED for x in r.results)
+    if problem:  # 整批錯誤（run_check 同 CLI 記成整批錯誤）
+        assert r.status == S.ERROR and any(problem in x.message for x in r.results)
     else:
         assert r.status == S.PASS
 

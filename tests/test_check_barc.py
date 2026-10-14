@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import pytest
 
+from fcn_checker.ingestion import IngestionError
 from fcn_checker.messages import problem_message, show
 from harness import ERROR, MISMATCH, NA, PASS, REVIEW, check_sheet, problems, results
 from pdf_writer import Edit, zh_date
@@ -33,7 +34,7 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
     assert len(meta["inputs"]["term_sheet"]["sha256"]) == 64
     assert len(meta["inputs"]["reference_sheet"]["sha256"]) == 64
     assert meta["review_standard"]["version"] == 12
-    assert meta["reference_format"]["version"] == 7
+    assert meta["reference_format"]["version"] == 8
     assert meta["program_version"] and meta["extractor"].startswith("PyMuPDF")
     assert report.not_covered, "第二階段規則應列在未涵蓋清單"
 
@@ -185,7 +186,6 @@ def test_non_default_denomination_requires_review(tmp_path):
         ({"overrides": {"KO(Freq)": "W"}}, "field.ko_observation"),
         ({"overrides": {"KO(memo)": "?"}}, "field.ko_memory"),
         ({"overrides": {"KI(Freq)": "X"}}, "field.ki_type"),
-        ({"headers": [*REFERENCE_HEADERS, "Coupon Freq"]}, "order.unknown_column"),
     ],
 )
 def test_unknown_order_vocabulary_requires_review(tmp_path, kwargs, rule_id):
@@ -194,10 +194,14 @@ def test_unknown_order_vocabulary_requires_review(tmp_path, kwargs, rule_id):
     assert report.status == REVIEW
 
 
-def test_duplicate_order_column_requires_review(tmp_path):
-    report = check(tmp_path, headers=[*REFERENCE_HEADERS, "K(%)"])  # 第二個同名欄位
-    assert ("order.duplicate_column", REVIEW) in problems(report)
-    assert report.status == REVIEW
+def test_extra_order_column_is_ignored(tmp_path):
+    report = check(tmp_path, headers=[*REFERENCE_HEADERS, "Coupon Freq"])  # 不在格式設定的欄（Issue #199）
+    assert report.status == PASS, problems(report)
+
+
+def test_duplicate_order_column_stops_the_whole_batch(tmp_path):
+    with pytest.raises(IngestionError, match=r"欄名重複：K\(%\)"):
+        check(tmp_path, headers=[*REFERENCE_HEADERS, "K(%)"])  # 第二個同名欄位
 
 
 def test_whole_number_excel_values_are_shown_plainly(tmp_path):
