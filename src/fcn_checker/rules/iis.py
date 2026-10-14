@@ -94,7 +94,11 @@ def product_codes(ctx: Context) -> list[CheckResult]:
 
 
 def _prices(ctx: Context) -> list[CheckResult]:
-    """各標的期初價格、執行價、KO 價：表上值四捨五入到 4 位後相等；VWAP 時改和說明書價格表同一列比。"""
+    """各標的期初價格、執行價、KO 價：表上值四捨五入到 4 位後相等；VWAP 時改和說明書價格表同一列比。
+
+    和參考條件表比時，同一檔標的的價格欄全部差同一比例 → 疑似分割調整，轉人工覆核（同說明書，Issue #222）；
+    VWAP 時兩份文件差同一比例不是分割調整，照常判不一致。
+    """
     rid, rows = "iis.underlying_prices", read_iis(ctx.iis, "underlying_prices")
     table = Check(rid, "price_table", Item.sheet("價格表"), ctx.document)
     if not rows.ok:
@@ -115,27 +119,16 @@ def _prices(ctx: Context) -> list[CheckResult]:
     order = ctx.order
     out = []
     for i, row in enumerate(rows.value, start=1):
+        label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
+        ev = list(row.evidence)
+        # 和參考條件表比的價格欄：(結果身分, 表上值（4 位）, 投資人須知值)，整檔一起判斷是否疑似分割調整
+        pending: list[tuple[Check, Decimal, Decimal]] = []
         for col, zh in reference.PRICE_COLUMNS:
             doc_v = row.prices.get(col)
             if doc_v is None:  # 價格表沒有這一欄（例：無 KI）
                 continue
-            field, name, ev = f"UL_{i} {zh}", price_item(i, col), list(row.evidence)
-            if vwap:
-                item = Item.term_sheet(name)
-                if why or i > len(ts_rows) or col not in ts_rows[i - 1].prices:
-                    out.append(
-                        ts_unavailable(
-                            rid,
-                            field,
-                            name,
-                            why or "同商品說明書價格表沒有對應的價格，無法比對",
-                            doc_v,
-                            document=ctx.document,
-                        )
-                    )
-                    continue
-                expected = ts_rows[i - 1].prices[col]
-            else:
+            field, name = f"UL_{i} {zh}", price_item(i, col)
+            if not vwap:
                 ov = order.price(i, col)
                 if ov is None or ov.value is None or to_decimal(ov.value) is None:
                     reason = "order_missing" if ov is None or ov.value is None else "order_invalid"
@@ -146,13 +139,15 @@ def _prices(ctx: Context) -> list[CheckResult]:
                     )
                     out.append(order_review(rid, field, ov, None, reason, message, name=name))
                     continue
-                item = Item.column(name, [ov])
-                expected = to_decimal(ov.value).quantize(Q4, ROUND_HALF_UP)
-            out.append(
-                Check(rid, field, item, ctx.document).compare(
-                    expected, doc_v, evidence=ev, tolerance=None if vwap else "表上值四捨五入（half-up）到 4 位"
-                )
-            )
+                shown = to_decimal(ov.value).quantize(Q4, ROUND_HALF_UP)
+                pending.append((Check(rid, field, Item.column(name, [ov]), ctx.document), shown, doc_v))
+            elif why or i > len(ts_rows) or col not in ts_rows[i - 1].prices:
+                note = why or "同商品說明書價格表沒有對應的價格，無法比對"
+                out.append(ts_unavailable(rid, field, name, note, doc_v, document=ctx.document))
+            else:
+                check = Check(rid, field, Item.term_sheet(name), ctx.document)
+                out.append(check.compare(ts_rows[i - 1].prices[col], doc_v, evidence=ev))
+        out += reference.compare_sheet_prices(pending, label=label, document=ctx.document, evidence=ev)
     return out
 
 

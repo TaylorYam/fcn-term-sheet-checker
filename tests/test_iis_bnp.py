@@ -358,6 +358,30 @@ def test_vwap_iis_prices_are_compared_with_the_term_sheet(tmp_path):
     assert list(iis.problem_messages) == ["UL_2 執行價對不起來：說明書 140.0000／投資人須知 140.0001"]
 
 
+def test_split_adjusted_prices_on_the_sheet_require_review_on_the_iis_too(tmp_path):
+    """表上某檔標的的進場價、執行價、KO 價都是文件的 1/5（分割調整後的價格）→ 投資人須知也和說明書一樣，
+    該檔轉人工覆核並寫出比例（Issue #222）；只有一欄不同時仍判不一致。"""
+    fifth = {"UL_1_進場價": 20.0, "UL_1_執行價": 14.0, "UL_1_KO價": 20.0}  # 期初價 100、執行 70%、KO 100% 的 1/5
+    for name in ("all", "one"):
+        (tmp_path / name).mkdir()
+    ts, iis = check_pair(tmp_path / "all", **fifth)
+    for item in (ts, iis):
+        split = [r for r in item.report.results if r.reason_code == "split_suspected"]
+        assert len(split) == 3 and all(r.status == REVIEW and "0.2000" in r.message for r in split), item.term_sheet
+    assert bad(iis) == {("iis.underlying_prices", f"UL_1 {zh}", REVIEW) for zh in ("進場價", "執行價", "KO 價")}
+    assert all("ZB1 UW 的各價格欄都與投資人須知差同一比例" in m for m in iis.problem_messages)
+    _, iis = check_pair(tmp_path / "one", **{"UL_1_進場價": 20.0})
+    assert bad(iis) == {("iis.underlying_prices", "UL_1 進場價", MISMATCH)}
+
+
+def test_vwap_iis_prices_off_the_term_sheet_by_one_ratio_are_a_mismatch(tmp_path):
+    """VWAP 時投資人須知的價格和說明書比：兩份文件差同一比例不是分割調整，照常判不一致。"""
+    blank = {f"UL_{i}_{c}": None for i in range(1, 4) for c in ("進場價", "執行價", "下限價", "KO價")}
+    edits = [Edit("100.0000", "110.0000", "iis.summary.table"), Edit("70.0000,", "77.0000,", "iis.summary.table")]
+    _, iis = check_pair(tmp_path, edits=edits, **{"期初定價": "VWAP", **blank})
+    assert bad(iis) == {("iis.underlying_prices", f"UL_1 {zh}", MISMATCH) for zh in ("進場價", "執行價", "KO 價")}
+
+
 def test_term_sheet_values_unavailable_require_review_on_the_iis(tmp_path):
     """同商品說明書讀不到最低申購金額時，投資人須知那項轉人工覆核（說明書本身另有錯訊）。"""
     ts, iis = check_pair(tmp_path, edits=[Edit("最低申購金額：", "最低購買金額：", "ts.ch四")])

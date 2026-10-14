@@ -113,7 +113,7 @@ def test_sg_investor_sheets_are_recognised(items):
                 S.MISMATCH,
             ): 6,  # 警語七「為於中華民國境內受託投資」（2026-10-14 決定照現行規則判錯）
             ("standard.fixed_warning", S.MISMATCH): 1,  # 2023 舊範本警語一用「受託投資」，固定警語 0 次
-            ("iis.underlying_prices", S.MISMATCH): 4,  # 同說明書：舊範本一檔標的的四個價格是除權息後的同一比例
+            ("iis.underlying_prices", S.REVIEW_REQUIRED): 4,  # 同說明書：一檔標的四個價格是除權息後的同一比例（#222）
         }
     )
 
