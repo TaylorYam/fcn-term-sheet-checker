@@ -501,29 +501,10 @@ def _guarantor_name(ctx: Context) -> list[CheckResult]:
     沒有該上手分節的上手不核對（沒有保證機構的範本）。"""
     rid = "standard.guarantor_name"
     return [
-        _guarantor_text(ctx, rid, field, standard_field(ctx, field), expected, what, name)
+        _fixed_text(rid, field, standard_field(ctx, field), expected, what, name, document=ctx.document)
         for place, expected in ctx.issuer_std.guarantor_names.items()
         for field, what, name in (GUARANTOR_PLACES[place],)
     ]
-
-
-def _guarantor_text(
-    ctx: Context, rid: str, field: str, pf: ParsedField, expected: str, what: str, name: str
-) -> CheckResult:
-    """一處保證機構名稱 = 審查標準固定值；另接受 guarantor_name_equivalents.<上手> 列出的寫法（忽略空白後相等）。"""
-    listed = ctx.issuer_std.guarantor_name_equivalents
-    if pf.ok and squash(pf.value) in {squash(v) for v in listed}:
-        return (
-            Check(rid, field, Item.standard(name), ctx.document)
-            .needs(pf)
-            .result(
-                S.PASS,
-                expected=expected,
-                actual=pf.value,
-                tolerance=f"審查標準列出的名稱等價寫法（guarantor_name_equivalents.{ctx.issuer.lower()}）",
-            )
-        )
-    return _fixed_text(rid, field, pf, expected, what, name, document=ctx.document)
 
 
 def _agent_name(ctx: Context) -> list[CheckResult]:
@@ -615,15 +596,23 @@ def _iis_occurrences(
     ]
 
 
-def _iis_place_names(ctx: Context, name: str, kind: str, place: str) -> list[CheckResult]:
-    """投資人須知各處保證機構／總代理人名稱 = 審查標準 guarantor_name／agent_name.<上手> 某出處的固定值：
-    保證機構寫全名的出處用 cover、寫簡稱的出處用 ch1（BNP，同說明書封面與第一章）；總代理人用 cover（SG）。
+# 投資人須知寫機構名稱的出處欄位 → (rule_id, 名稱, 審查標準的表, 用哪個出處的固定值, 是否接受等價寫法)
+_IIS_PLACE_NAMES = {
+    "guarantor_names": ("standard.guarantor_name", "保證機構名稱", "guarantor_name", "cover", False),  # BNP、SG 警語
+    "guarantor_names_short": ("standard.guarantor_name", "保證機構名稱", "guarantor_name", "ch1", False),  # BNP 簡稱
+    "guarantor_names_org": ("standard.guarantor_name", "保證機構名稱", "guarantor_name", "cover", True),  # SG 相關機構
+    "agent_names": ("standard.agent_name", "總代理人名稱", "agent_name", "cover", False),  # SG 相關機構
+}
+
+
+def _iis_place_names(ctx: Context, name: str) -> list[CheckResult]:
+    """投資人須知各處保證機構／總代理人名稱 = 審查標準 guarantor_name／agent_name.<上手> 某出處的固定值
+    （出處見 `_IIS_PLACE_NAMES`）；相關機構的保證機構名稱另接受 guarantor_name_equivalents.<上手>（SG 英文名沒有括號）。
     沒有該值時轉人工覆核。"""
     std = ctx.issuer_std
-    rid, what, table, names = {
-        "guarantor": ("standard.guarantor_name", "保證機構名稱", "guarantor_name", std.guarantor_names),
-        "agent": ("standard.agent_name", "總代理人名稱", "agent_name", std.agent_names),
-    }[kind]
+    rid, what, table, place, equivalent = _IIS_PLACE_NAMES[name]
+    names = std.guarantor_names if table == "guarantor_name" else std.agent_names
+    listed = {squash(v) for v in std.guarantor_name_equivalents} if equivalent else set()
     container = read_iis(ctx.iis, name)
     if not container.ok:
         return [Check(rid, name, Item.standard(what), ctx.document).review(container)]
@@ -636,15 +625,23 @@ def _iis_place_names(ctx: Context, name: str, kind: str, place: str) -> list[Che
             .result(S.REVIEW_REQUIRED, reason="standard_missing", message=missing)
             for occ in container.value
         ]
-    if kind == "guarantor":
-        return [
-            _guarantor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name)
-            for occ in container.value
-        ]
-    return [
-        _fixed_text(rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, document=ctx.document)
-        for occ in container.value
-    ]
+    out = []
+    for occ in container.value:
+        if occ.value.ok and squash(occ.value.value) in listed:
+            check = Check(rid, occ.field, Item.standard(occ.name), ctx.document).needs(occ.value)
+            source = f"guarantor_name_equivalents.{ctx.issuer.lower()}"
+            out.append(
+                check.result(
+                    S.PASS,
+                    expected=expected,
+                    actual=occ.value.value,
+                    tolerance=f"審查標準列出的名稱等價寫法（{source}）",
+                )
+            )
+        else:
+            what_here = f"{occ.where}的{what}"
+            out.append(_fixed_text(rid, occ.field, occ.value, expected, what_here, occ.name, document=ctx.document))
+    return out
 
 
 def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[CheckResult]:
@@ -674,11 +671,9 @@ def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[Check
     for name, rid, expected, what, missing, kind in occurrence_checks:
         if provides(name):
             out.extend(_iis_occurrences(ctx, rid, name, expected, what, missing, kind))
-    for name, place in (("guarantor_names", "cover"), ("guarantor_names_short", "ch1")):
+    for name in _IIS_PLACE_NAMES:
         if provides(name):
-            out.extend(_iis_place_names(ctx, name, "guarantor", place))
-    if provides("agent_names"):
-        out.extend(_iis_place_names(ctx, "agent_names", "agent", "cover"))
+            out.extend(_iis_place_names(ctx, name))
     if any(provides(fee_field(label)) for label in ctx.std.fees):
         out.extend(_fees(ctx))
     if provides("subscription_dates"):

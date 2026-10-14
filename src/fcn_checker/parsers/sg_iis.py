@@ -37,7 +37,7 @@ SECTIONS = (
     "柒、",
 )
 CODES = r"TDCC商品代號\d{12}，受託(?:或銷售)?機構商品代號\d{12}，ISIN為[A-Z]{2}[A-Z0-9]{10}"
-COUPON_SECTION = ("收益分配事項，舉例如下：", "贖回價金之計算：")  # KO／KI 寫法與配息率所在的段落
+PAYOUT_SECTION = ("收益分配事項，舉例如下：", "贖回價金之計算：")  # 收益分配事項：配息率與 KO／KI 寫法所在的段落
 MATURITY = "■到期贖回金額："  # 收益分配事項裡到期贖回各款的開頭；之前是自動提前出場的寫法
 NO_AUTOCALL = "主要給付項目為配息金額及到期贖回金額："
 KO_D = r"(?:記憶事件)?觀察期間：自" + iis.DATE + r"起（含）起至最終評價日（含）止之每一個預定交易日"
@@ -74,6 +74,7 @@ PROVIDED = frozenset(
         "ki_type",
         "issuer_names",
         "guarantor_names",
+        "guarantor_names_org",
         "agent_names",
         "distributor_names",
         "distributor_addresses",
@@ -102,16 +103,6 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
         if not ok:
             failed.append(message)
     return DetectionResult(not failed, failed, [Evidence.of(x) for x in lines[:2]])
-
-
-def _section(ti: TextIndex, anchors: tuple[str, str]) -> list[Line] | None:
-    """兩個錨點之間（含錨點所在行）的原文行；找不到或開頭錨點重複時為 None。"""
-    start, end = anchors
-    if ti.text.count(start) != 1:
-        return None
-    a = ti.text.index(start)
-    b = ti.text.find(end, a)
-    return None if b < 0 else ti.lines_for(a, b + len(end))
 
 
 def _table(lines: list[Line], fields: dict[str, ParsedField]) -> None:
@@ -166,37 +157,38 @@ def _ko_terms(sec: list[Line] | None, fields: dict[str, ParsedField]) -> None:
         return
     ti = TextIndex(sec)
     cut = ti.text.find(MATURITY)
-    ko = ti.text[:cut] if cut >= 0 else ti.text
-    if "自動提前出場事件：" in ko:
-        has_autocall = True
-    elif NO_AUTOCALL in ti.text and "自動提前出場" not in ko.replace(NO_AUTOCALL, ""):
-        has_autocall = False
-    else:
-        note = "收益分配事項找不到自動提前出場事件，也不是無自動提前出場的寫法"
+    ko = ti.text[:cut] if cut >= 0 else ti.text  # 到期贖回各款之前：自動提前出場的寫法
+    with_autocall = "自動提前出場事件：" in ko
+    without_autocall = NO_AUTOCALL in ti.text and "自動提前出場" not in ko.replace(NO_AUTOCALL, "")
+    if with_autocall == without_autocall or (with_autocall and NO_AUTOCALL in ti.text):  # 都不是，或兩種都寫了
+        note = "收益分配事項的自動提前出場寫法缺漏、不在範本規格內，或同時寫了有、沒有自動提前出場"
         fields.update({n: ParsedField.invalid(n, sec, note) for n in names})
         return
+    has_autocall = with_autocall
     fields["has_autocall"] = ParsedField.present("has_autocall", has_autocall, sec[:1])
     fields["ko_memory"] = sg.ko_memory(ti, sec, has_autocall, where="收益分配事項")
     fields["ki_type"] = sg.ki_type(ti, sec, where="收益分配事項")
     if not has_autocall:
         return
-    d, d_event = list(re.finditer(KO_D, ko)), list(re.finditer(KO_D_EVENT, ko))
-    p, ranges = list(re.finditer(KO_P, ko)), set(re.findall(P_RANGE, ko))
-    if len(d) == 1 and len(d_event) == 1 and not p:
-        m = d[0]
-        ev = ti.lines_for(m.start(), m.end())
+    daily_periods = list(re.finditer(KO_D, ko))
+    daily_events = list(re.finditer(KO_D_EVENT, ko))
+    periodic_events = list(re.finditer(KO_P, ko))
+    periodic_ranges = set(re.findall(P_RANGE, ko))  # 所有「評價日i (i=k-n)」的 (k, n)，必須只有一種
+    if len(daily_periods) == 1 and len(daily_events) == 1 and not periodic_events:
+        period = daily_periods[0]
+        ev = ti.lines_for(period.start(), period.end())
         fields["ko_observation"] = ParsedField.present("ko_observation", "D", ev)
-        start = parse_date(m[1])
+        start = parse_date(period[1])
         fields["ko_observation_start"] = (
             ParsedField.present("ko_observation_start", start, ev)
             if start
-            else ParsedField.invalid("ko_observation_start", ev, f"「{m[1]}」不是日期")
+            else ParsedField.invalid("ko_observation_start", ev, f"「{period[1]}」不是日期")
         )
-    elif len(p) == 1 and not d and len(ranges) == 1:
-        m = p[0]
-        ev = ti.lines_for(m.start(), m.end())
+    elif len(periodic_events) == 1 and not daily_periods and len(periodic_ranges) == 1:
+        event = periodic_events[0]
+        ev = ti.lines_for(event.start(), event.end())
         fields["ko_observation"] = ParsedField.present("ko_observation", "P", ev)
-        fields["first_callable_period"] = ParsedField.present("first_callable_period", int(m[1]), ev)
+        fields["first_callable_period"] = ParsedField.present("first_callable_period", int(event[1]), ev)
     else:
         note = "自動提前出場的觀察期間或評價日寫法缺漏、重複、前後不一或不在範本規格內"
         fields["ko_observation"] = ParsedField.invalid("ko_observation", sec, note)
@@ -263,7 +255,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (("monthly_coupon_rate", "月配息率", "收益分配事項配息率", r"配息率=(\d+(?:\.\d+)?)%（相當於年率"),),
         iis.number,
     )
-    _ko_terms(_section(ti, COUPON_SECTION), fields)
+    _ko_terms(iis.section(ti, PAYOUT_SECTION), fields)
     has_autocall = fields["has_autocall"].ok and fields["has_autocall"].value
     pay = [("payment_currency_coupon", "配息給付幣別", "收益分配事項配息日", "於配息日")]
     if has_autocall:
@@ -282,13 +274,12 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             ),
         ),
     )
-    provided = set(PROVIDED)
+    # 表頭寫出 % 的欄才核對 %；有自動提前出場才有 KO 觀察方式；只有 P 型寫出第一個可提前出場期
+    # （D 型的觀察起日 `ko_observation_start` 由範本專屬規則核對，不交給共用規則）
+    daily = fields.get("ko_observation") is not None and fields["ko_observation"].value == "D"
+    provided = PROVIDED | {n for n in ("strike_pct", "ki_pct", "ko_pct") if n in fields}
     if has_autocall:
-        provided.add("ko_observation")
-        provided |= {"ko_pct"} if "ko_pct" in fields else set()
-        if fields.get("ko_observation", ParsedField.missing("ko_observation", "")).value != "D":
-            provided.add("first_callable_period")  # 只有 P 型寫出第一個可提前出場期；D 型的觀察起日由範本專屬規則核對
-    provided |= {n for n in ("strike_pct", "ki_pct") if n in fields}
+        provided |= {"ko_observation"} | (set() if daily else {"first_callable_period"})
     # 警語與相關機構（審查標準）
     fields["issuer_names"] = iis.occurrences(
         "issuer_names",
@@ -306,8 +297,12 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             ("guarantor_name_w5a", "保證機構名稱（警語五）", "警語五", r"（發行機構）或([^（]+?)（保證機構）保證"),
             ("guarantor_name_w5b", "保證機構名稱（警語五）", "警語五", r"（發行機構）與([^（]+?)（保證機構）有財務"),
-            ("guarantor_name_org", "保證機構名稱（相關機構）", "相關機構第 2 點", r"2\.保證機構：(.+?)\(地址："),
         ),
+    )
+    fields["guarantor_names_org"] = iis.occurrences(  # 英文名沒有括號的寫法另由審查標準的等價寫法接受
+        "guarantor_names_org",
+        ti,
+        (("guarantor_name_org", "保證機構名稱（相關機構）", "相關機構第 2 點", r"2\.保證機構：(.+?)\(地址："),),
     )
     fields["agent_names"] = iis.occurrences(
         "agent_names",
@@ -343,7 +338,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             ),
         ),
     )
-    fees = _section(ti, ("肆、費用", "伍、"))
+    fees = iis.section(ti, ("肆、費用", "伍、"))
     for label in iis.FEES:
         name = standard_fields.fee_field(label)
         fields[name] = (

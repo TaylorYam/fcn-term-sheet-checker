@@ -92,7 +92,7 @@ class IssuerStandard:
     distributor_name_equivalents: tuple[str, ...] = ()  # 名稱可接受的其他寫法（所有上手適用；SG 第二章簡稱）
     # 下列只有審查標準有該上手分節時才核對（BNP）
     guarantor_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch1／ch2）→ 保證機構名稱
-    guarantor_name_equivalents: tuple[str, ...] = ()  # 保證機構名稱可接受的其他寫法（所有出處；SG 投資人須知）
+    guarantor_name_equivalents: tuple[str, ...] = ()  # 投資人須知相關機構的保證機構名稱其他寫法（SG）
     agent_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch2）→ 總代理人名稱（SG）
     product_type: str | None = None  # 封面商品種類固定值
     minimum_issue_size: str | None = None  # 第四章發行不成立門檻的金額寫法

@@ -11,6 +11,7 @@ import fitz
 import pytest
 
 import bnp_synth
+import hsbc_synth
 import ms_synth
 import synth
 from fcn_checker.extraction import extract_lines
@@ -154,6 +155,13 @@ def test_guarantor_name_without_brackets_is_an_equivalent(tmp_path):
     assert "guarantor_name_equivalents.sg" in (r.tolerance or "")
 
 
+def test_the_equivalent_guarantor_name_is_only_accepted_in_the_institutions(tmp_path):
+    """等價寫法只用在相關機構壹 2.（2026-10-14 決定）；警語五少了括號照常判不一致。"""
+    old = f"或{GUARANTOR['cover']}（保證機構）保證"
+    _, iis = check_pair(tmp_path, edits=[Edit(old, old.replace(GUARANTOR["cover"], GUARANTOR_ORG), "iis.warn")])
+    assert bad(iis) == {("standard.guarantor_name", "guarantor_name_w5a", MISMATCH)}
+
+
 @pytest.mark.parametrize(
     ("spec", "rule", "message"),
     [(Spec(iis_pages=5), "iis.pages", "預期 4 頁／實際 5 頁")],
@@ -254,6 +262,7 @@ def test_each_sg_iis_check_point_reports_a_wrong_value(tmp_path, change, expecte
     status = REVIEW if expected[0] == "standard.issue_price" else MISMATCH  # 發行價格不同時轉人工覆核（同說明書）
     assert bad(iis) == {(*expected, status)}
     assert ts.report.status == PASS and not ts.fills_sheet, "投資人須知沒通過，說明書不回填"
+    assert ts.not_filled_reason == "同商品的投資人須知尚未通過或人工放行，不回填。"
 
 
 NAME_PLACES = {  # 警語裡的名稱各處：投資人須知原文 → (rule_id, 欄位, 改成)
@@ -351,6 +360,14 @@ def test_ko_observation_start_is_compared_with_the_term_sheet(tmp_path):
         (("coupon", "(1) 若於最終評價日", "(1) 若於評價日"), {"ki_type"}),
         (("summary.table", "200.0000美元200.0000美元", "200.0000美元"), {"price_table"}),
         (("fees", "申購價金的", "申購價款的"), {"申購費用", "分銷費用"}),
+        (  # 有自動提前出場的文件又寫了沒有自動提前出場的給付項目：兩種寫法並存，不猜
+            (
+                "coupon",
+                "主要給付項目為配息金額及自動提前出場贖回金額或到期贖回金額：",
+                "主要給付項目為配息金額及到期贖回金額：",
+            ),
+            {"has_autocall", "ko_memory", "ki_type"},  # 判不出有無自動提前出場時，KO 觀察方式不交給共用規則
+        ),
     ],
 )
 def test_wording_outside_the_template_requires_review(tmp_path, change, fields):
@@ -385,7 +402,8 @@ def test_sg_iis_template_is_not_confused_with_other_templates(tmp_path):
     barc = synth.build_iis_pdf(tmp_path / "029199990001_IIS.pdf", synth.Spec())
     ms_ts = ms_synth.build_pdf(tmp_path / "147199990001_TS.pdf", ms_synth.Spec())
     bnp_ts = bnp_synth.build_pdf(tmp_path / "082199990001_TS.pdf", bnp_synth.Spec())
-    for other in (barc, iis_path(ms_ts), iis_path(bnp_ts)):
+    hsbc = hsbc_synth.build_iis_pdf(tmp_path / "325199990001_IIS.pdf", hsbc_synth.Spec())
+    for other in (barc, hsbc, iis_path(ms_ts), iis_path(bnp_ts)):
         assert detect_iis(lines_of(other), (SG,))[0] is None, other.name
 
 
