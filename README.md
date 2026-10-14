@@ -92,6 +92,7 @@ fcn-batch data/orders/FCN參考條件.xlsx data/term-sheets/029*.pdf --out runti
 | `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
 | `--reference-format` | 參考條件表格式設定檔，預設 `config/reference_sheet.toml` |
 | `--issuer-prefixes` | 上手編號對照設定檔，預設 `config/issuer_prefixes.toml` |
+| `--exchange-holidays` | 交易所假日表設定檔，預設 `config/exchange_holidays.toml` |
 | `--out` | 核對結果檔的輸出資料夾，預設 `runtime/reports` |
 
 - 每份說明書用商品代號對參考條件表上的 `TDCC Code`，拿那一列的條件來核對；投資人須知用檔名前 12 碼對同一列，和同商品說明書配成一組；說明書檔名的商品代號也必須等於封面商品代號。同一檔商品要一起選說明書與投資人須知，缺一份時那一份轉人工覆核（「這批缺投資人須知」），不能人工放行；檔名結尾不是 `_TS`／`_IIS` 時「檔名無法辨識」。
@@ -133,7 +134,9 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
 
    未通過以「錯誤清單」為準；未支援上手（例如 BNP、SG 投資人須知）不列入，只算進摘要；人工放行過的也不列入。維護者可以直接用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 重跑（PDF 檔名是辨識依據、不改名；有同名的不同 PDF 時另放 `PDF/同名<n>/`，摘要會註明，重跑時一起帶入）。資料夾已存在時不覆蓋；來源檔案核對後被改過時拒絕匯出。**回報包含真實交易資料，只能推到 Private Repo（`TaylorYam/fcn-oos-samples`），不能放進本 Repo、Issue 或 PR。**
 
-設定檔：PANEL 讀專案根目錄 `config/` 的 `review_standard.toml`、`reference_sheet.toml` 與 `issuer_prefixes.toml`。畫面上方會顯示實際使用的設定檔路徑。
+設定檔：PANEL 讀專案根目錄 `config/` 的 `review_standard.toml`、`reference_sheet.toml`、`issuer_prefixes.toml` 與 `exchange_holidays.toml`。畫面上方會顯示實際使用的設定檔路徑。
+
+**交易所假日表**（`config/exchange_holidays.toml`）：提前出場觀察期的期始日是前一期期末日後的下一個「一籃子預定交易日」（所有標的交易所都開市的日子），要跳過標的交易所的休市日。標的的市場由彭博代號最後的交易所碼決定（例：`GOOGL UW` → 美國）。目前只有美國市場，涵蓋到 `covered_through`；**每年由維護者依交易所官方公告補下一年的休市日並延長 `covered_through`**，同時更新 `version` 與 `effective_date`。標的交易所不在表上、或日期超出涵蓋範圍時，已知市場的休市日照樣跳過；期始日等於推算結果就通過，比推算結果晚就轉需人工覆核並寫出原因（可能是表上沒有的假日），比推算結果早或落在週末仍是不一致（假日只會讓日期往後延）。
 
 **審查通過日期**：受託或銷售機構重新審查後，按設定檔路徑旁的「審查通過日期…」，輸入新的日期（YYYY-MM-DD）按「新增」；新日期須晚於目前最新的一筆，可以先輸入未來的日期。打錯時只能修改或刪除最新一筆，較早的日期不能改。每份說明書依交易日核對「當天或之前最近一次」的審查通過日期，所以舊說明書重新核對時仍以當時的日期為準。存檔時自動把 `review_standard.toml` 的 `version` 加 1、`effective_date` 改為當天，其餘內容與註解不動，並清除已載入的預覽與結果。改完請把設定提交到 main（例如請 Claude 開 PR），避免之後 `git pull` 時衝突。固定風險警語、商品名稱樣板等其他審查標準不在 PANEL 修改，改版時直接修改設定檔。
 

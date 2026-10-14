@@ -19,13 +19,15 @@ from .kit import (
     HEADER_PCT_ITEM,
     PRICE_LABEL,
     Q4,
+    TRADING_DAY_TOLERANCE,
     Check,
     IssuerContext,
-    next_weekday,
     order_value,
+    period_start,
     shown,
     to_decimal,
     to_int,
+    uncertain_start,
 )
 
 MONTHLY_TOLERANCE = Decimal("0.0001")
@@ -247,30 +249,42 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
-    """C4：第 1 期期始日為 N/A 或發行日後 1 個平日；之後各期 = 前一期期末日後 1 個平日。
+    """C4：第 1 期期始日為 N/A 或發行日後的下一個一籃子預定交易日；之後各期 = 前一期期末日後的下一個一籃子預定交易日
+    （跳過週末與標的交易所休市日，Issue #208）。
 
-    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。
+    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。各期判定見 `kit.period_start`：
+    只有「比推算結果晚、而推算結果無法確定」的期別轉人工覆核，其他對不上的都是不一致。
     """
     issue = ctx.ts.f("issue_date")
     check = Check(rid, "start", Item.expected("提前出場期始日"), ctx.document)
     if not issue.ok:
         return check.review(issue)
-    bad = []
+    message = "C4 期始日 = 前一期期末日後的下一個一籃子預定交易日；第 1 期為 N/A 或發行日後的下一個一籃子預定交易日"
+    flagged, notes, sure = [], [], False  # 對不上的期別（依期別順序）、各期說明、是否有確定不一致的
     for k, r in enumerate(kt.rows):
         start = r.get("start")
         prev_end = issue.value if k == 0 else kt.rows[k - 1].get("end")
         if start == NA:
             if k and prev_end != NA:
-                bad.append(r)
-        elif not isinstance(prev_end, dt.date) or start != next_weekday(prev_end):
-            bad.append(r)
+                flagged.append(r)
+                sure = True
+        elif not isinstance(prev_end, dt.date):
+            flagged.append(r)
+            sure = True
+        elif (verdict := period_start(ctx, prev_end, start)).status != S.PASS:
+            flagged.append(r)
+            notes.append(f"第 {r.t} 期{verdict.note}")
+            sure |= verdict.status == S.MISMATCH
+    if flagged and not sure:
+        return uncertain_start(check, notes, actual=_periods(flagged), evidence=_row_ev(flagged))
     return check.compare(
         None,
-        _periods(bad) or None,
-        ok=not bad,
-        evidence=_row_ev(bad) or _header_ev(kt),
-        tolerance="平日只排除週末（無假日曆）",
-        message="C4 期始日 = 前一期期末日後 1 個平日；第 1 期為 N/A 或發行日後 1 個平日",
+        _periods(flagged) or None,
+        ok=not flagged,
+        evidence=_row_ev(flagged) or _header_ev(kt),
+        tolerance=TRADING_DAY_TOLERANCE,
+        message=message,
+        fail_message="".join(f"；{n}" for n in notes),
     )
 
 

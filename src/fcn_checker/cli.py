@@ -49,6 +49,12 @@ def _parser() -> argparse.ArgumentParser:
         help=f"上手編號對照設定檔（預設 {DEFAULTS.issuer_prefixes.as_posix()}）",
     )
     p.add_argument(
+        "--exchange-holidays",
+        type=Path,
+        default=DEFAULTS.exchange_holidays,
+        help=f"交易所假日表設定檔（預設 {DEFAULTS.exchange_holidays.as_posix()}）",
+    )
+    p.add_argument(
         "--out",
         type=Path,
         default=Path("runtime/reports"),
@@ -65,7 +71,9 @@ def _utf8_console() -> None:
 
 def _run(args: argparse.Namespace) -> tuple[BatchOutcome, SaveReceipt]:
     try:
-        config = ConfigPaths(args.review_standard, args.reference_format, args.issuer_prefixes).load()
+        config = ConfigPaths(
+            args.review_standard, args.reference_format, args.issuer_prefixes, args.exchange_holidays
+        ).load()
     except IngestionError as e:  # 設定檔有問題：整批錯誤，不核對任何說明書
         outcome = failed_batch(args.reference_sheet, e)
         return outcome, SaveReceipt.nothing_to_save(outcome)

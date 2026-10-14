@@ -13,6 +13,7 @@ from typing import Any
 
 from .ingestion import IngestionError
 from .standard_fields import AGENT_PLACES, GUARANTOR_PLACES
+from .trading_calendar import Market, TradingCalendar
 
 # 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）、
 # autocall（Non-Call < 天期，BNP），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）
@@ -499,3 +500,51 @@ def load_issuer_prefixes(path: Path) -> dict[str, str]:
     if bad:
         raise IngestionError("config_invalid", f"上手編號必須是三位數字：{'、'.join(bad)}")
     return prefixes
+
+
+def _holiday_dates(values: Iterable[object], what: str) -> frozenset[dt.date]:
+    out = set()
+    for v in values:
+        if not isinstance(v, dt.date) or isinstance(v, dt.datetime):
+            raise IngestionError("config_invalid", f"交易所假日表的{what}必須是日期（YYYY-MM-DD）：{v}")
+        out.add(v)
+    return frozenset(out)
+
+
+def _holiday_date(value: object, what: str) -> dt.date:
+    (d,) = _holiday_dates([value], what)
+    return d
+
+
+def load_exchange_holidays(path: Path) -> TradingCalendar:
+    """載入交易所假日表；缺檔、格式錯誤或同一個交易所碼對到兩個市場時丟出 IngestionError。"""
+    d = load_toml(path, "交易所假日表")
+    try:
+        version = int(d["version"])
+        markets = tuple(
+            Market(
+                code=str(code),
+                name=str(m["name"]),
+                bloomberg_codes=frozenset(str(c).upper() for c in m["bloomberg_codes"]),
+                covered_from=_holiday_date(m["covered_from"], f"{code} 涵蓋起日"),
+                covered_through=_holiday_date(m["covered_through"], f"{code} 涵蓋迄日"),
+                holidays=_holiday_dates(m["holidays"], f"{code} 休市日"),
+            )
+            for code, m in d["markets"].items()
+        )
+    except (KeyError, TypeError, AttributeError, ValueError) as e:
+        raise IngestionError("config_invalid", f"交易所假日表設定檔缺少或格式錯誤的項目：{e}") from e
+    seen: dict[str, str] = {}
+    for m in markets:
+        if m.covered_through < m.covered_from:
+            raise IngestionError("config_invalid", f"交易所假日表 {m.code} 的涵蓋迄日早於起日")
+        outside = sorted(h for h in m.holidays if not m.covers(h, h))
+        if outside:
+            raise IngestionError(
+                "config_invalid", f"交易所假日表 {m.code} 有休市日不在涵蓋範圍內：{'、'.join(map(str, outside))}"
+            )
+        for c in m.bloomberg_codes:
+            if c in seen:
+                raise IngestionError("config_invalid", f"交易所碼 {c} 同時出現在 {seen[c]} 與 {m.code}")
+            seen[c] = m.code
+    return TradingCalendar(version, markets)
