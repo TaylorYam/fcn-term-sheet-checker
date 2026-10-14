@@ -10,7 +10,7 @@ PANEL「匯出回報包…」呼叫 `export_bundle`，不需要先儲存核對�
 - `PDF/`：這些商品的說明書與投資人須知（同商品兩份都附，就算只有一份未通過）。檔名是辨識的依據，不改名；同名的不同檔案
   （例：多份對到同一列）另放 `PDF/同名<n>/`，重跑時一起帶入（`PDF/*.pdf PDF/同名*/*.pdf`），摘要會註明。
 
-「未通過」以錯誤清單為準（沒通過、也沒人工放行）；已知不支援的（未支援上手）不列入，只算進摘要。
+「未通過」以錯誤清單為準（沒通過、也沒人工放行）；已知不支援的（未支援上手、不支援樣態）不列入，只算進摘要（Issue #212）。
 回報包含真實交易資料，只能放 Private Repo，不能放進本 Repo。
 """
 
@@ -49,14 +49,20 @@ REPORT_COLUMNS = (("上手", 10), ("TDCC Code", 16), ("PDF 檔名", 32), ("錯�
 JUDGEMENT_COLUMN = "我的判斷"
 JUDGEMENTS = ("誤報", "真錯", "不確定")
 UNSUPPORTED_LABEL = "未支援上手（已知不支援，未列入回報包）"
-FAILED = (Category.MISMATCH, Category.REVIEW, Category.ERROR)  # 摘要的「未通過」
+VARIANT_LABEL = "不支援樣態（已知不支援，未列入回報包）"
+FAILED = (Category.MISMATCH, Category.REVIEW, Category.ERROR)  # 摘要的「未通過」（不支援樣態另計）
 SAME_NAME_DIR = "同名"
 RENAME_ATTEMPTS = 5  # 改名成回報包時，防毒或索引服務可能還抓著剛寫好的檔案：稍等重試
 
 
+def _known_unsupported(item: BatchItem) -> bool:
+    """已知不支援、不是規則誤報：未支援上手或不支援樣態。"""
+    return item.unsupported or item.identification.unsupported_variant
+
+
 def reportable(outcome: BatchOutcome) -> tuple[BatchItem, ...]:
     """要列入回報包的 PDF（依輸入順序）：錯誤清單上的，扣掉已知不支援的。"""
-    return tuple(i for i in outcome.items if not i.fillable and not i.unsupported)
+    return tuple(i for i in outcome.items if not i.fillable and not _known_unsupported(i))
 
 
 def bundle_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:
@@ -194,14 +200,17 @@ def _report_book(
 def _summary_sheet(
     ws, outcome: BatchOutcome, failing: Sequence[BatchItem], pdfs: Sequence[tuple[Path, Path]], now: dt.datetime
 ) -> None:
-    """各類別的份數（以 PDF 計）；「未通過」= 不一致＋需人工覆核＋執行錯誤。"""
-    items = outcome.items
+    """各類別的份數（以 PDF 計）；不支援樣態另列一列、不算進需人工覆核；「未通過」= 不一致＋需人工覆核＋執行錯誤。"""
+    items, variants = outcome.items, [i for i in outcome.items if i.identification.unsupported_variant]
+    counted = [i for i in items if not i.identification.unsupported_variant]
     ws.append(("參考條件表", outcome.reference_sheet.name))
     ws.append(("匯出時間", f"{now:%Y-%m-%d %H:%M:%S}"))
     ws.append(("PDF 總數", len(items)))
     for c in Category:
-        ws.append((UNSUPPORTED_LABEL if c == Category.UNSUPPORTED else c.value, sum(i.category == c for i in items)))
-    ws.append(("未通過", sum(i.category in FAILED for i in items)))
+        ws.append((UNSUPPORTED_LABEL if c == Category.UNSUPPORTED else c.value, sum(i.category == c for i in counted)))
+        if c == Category.UNSUPPORTED:
+            ws.append((VARIANT_LABEL, len(variants)))
+    ws.append(("未通過", sum(i.category in FAILED for i in counted)))
     ws.append(("列入回報包", len(failing)))
     if any(rel.parent.name.startswith(SAME_NAME_DIR) for rel, _ in pdfs):
         ws.append(("注意", f"有同名的不同 PDF，另放在 {PDF_DIR}/{SAME_NAME_DIR}<n>/，重跑時一起帶入"))
