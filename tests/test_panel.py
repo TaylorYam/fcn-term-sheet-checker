@@ -457,9 +457,91 @@ def test_release_selects_the_top_item_and_cancel_keeps_the_same_one(tmp_path):
     item = outcome.ordered_items[1]
     session.release(item)
     assert outcome.ordered_items[0] is not item, "前提：放行那份已排到下方"
-    assert outcome.selection_after_release_change(item) is outcome.ordered_items[0], "放行後改選清單第一份"
+    assert outcome.selection_after_release_change((item,)) == (outcome.ordered_items[0],), "放行後改選清單第一份"
     session.cancel_release(item)
-    assert outcome.selection_after_release_change(item) is item, "取消放行後仍選那份"
+    assert outcome.selection_after_release_change((item,)) == (item,), "取消放行後仍選那份"
+
+
+# ---------------------------------------------------------------- 多選人工放行（Issue #219）
+
+
+def mixed_selection(tmp_path):
+    """通過、不一致、條件表找不到各一檔商品（說明書＋投資人須知），全部選取。"""
+    ok, bad, missing = Spec(), Spec(product_code="029199990002"), Spec(product_code="029199990003")
+    rows = [reference_row(ok), reference_row(bad, **{"K(%)": 71})]
+    session, outcome = checked(tmp_path, ok, bad, missing, rows=rows)
+    by_name = {i.term_sheet.name: i for i in outcome.batch.items}
+    return session, outcome, by_name, (ok, bad, missing)
+
+
+def test_release_plan_releases_only_the_releasable_documents(tmp_path):
+    session, outcome, by_name, (ok, bad, missing) = mixed_selection(tmp_path)
+    plan = session.release_plan(outcome.ordered_items)
+    assert not plan.cancel
+    assert {i.term_sheet.name for i in plan.targets} == {f"{bad.product_code}_TS.pdf", f"{bad.product_code}_IIS.pdf"}
+    assert {i.term_sheet.name for i, _ in plan.skipped} == {
+        f"{missing.product_code}_TS.pdf",
+        f"{missing.product_code}_IIS.pdf",
+    }, "已通過的不必說明，不列在略過"
+    assert all(reason == item.release_problem for item, reason in plan.skipped)
+    assert PanelOutcome.release_plan_button(plan) == "人工放行 2 份…"
+    assert PanelOutcome.release_plan_note(plan) == (
+        "已選 6 份：可以放行 2 份、已通過 2 份、不能放行 2 份（沒有對到參考條件表的列，沒有地方可以回填）。"
+    ), "同一個原因只列一次"
+
+    session.release(*plan.targets)
+    assert all(i.released for i in plan.targets) and not any(i.released for i, _ in plan.skipped)
+    assert "2 份通過、2 份人工放行" in session.message
+    assert outcome.selection_after_release_change(plan.targets) == (outcome.ordered_items[0],)
+
+    again = session.release_plan(outcome.ordered_items)
+    assert not again.cancel and again.targets == (), "已放行的不再放行；沒有可以放行的時按鈕不能按"
+    assert "已放行 2 份" in PanelOutcome.release_plan_note(again)
+
+
+def test_release_plan_prompt_lists_every_problem_and_the_skipped_reasons(tmp_path):
+    session, outcome, by_name, (_, bad, missing) = mixed_selection(tmp_path)
+    plan = session.release_plan(outcome.ordered_items)
+    prompt = PanelOutcome.release_plan_prompt(plan)
+    head, *documents, skipped, tail = prompt.split("\n\n")
+    assert head == "將人工放行以下 2 份，放行後視同通過：儲存時回填，不列入錯誤清單。"
+    assert tail == "確認人工放行這 2 份？"
+    for n, (block, item) in enumerate(zip(documents, plan.targets, strict=True), 1):
+        assert block.split("\n") == [
+            f"{n}. {item.term_sheet.name}（{item.document}）",
+            *(f"・{m}" for m in item.problem_messages),
+        ]
+    reason = by_name[f"{missing.product_code}_TS.pdf"].release_problem
+    assert skipped.split("\n") == [
+        "略過以下 2 份（不能人工放行）：",
+        *(f"・{i.term_sheet.name}：{reason}" for i, _ in plan.skipped),
+    ]
+
+
+def test_selecting_only_released_documents_cancels_them_all(tmp_path):
+    session, outcome, by_name, (_, bad, _) = mixed_selection(tmp_path)
+    pair = (by_name[f"{bad.product_code}_TS.pdf"], by_name[f"{bad.product_code}_IIS.pdf"])
+    session.release(*pair)
+    plan = session.release_plan(pair)
+    assert plan.cancel and plan.targets == pair
+    assert PanelOutcome.release_plan_button(plan) == "取消放行（2 份）"
+    assert PanelOutcome.release_plan_note(plan) == "已選 2 份，都已人工放行：儲存時視同通過並回填，不列入錯誤清單。"
+    session.cancel_release(*plan.targets)
+    assert not any(i.released for i in pair)
+    assert outcome.selection_after_release_change(pair) == pair, "取消放行後仍選那幾份"
+
+
+def test_releasing_several_checks_the_sources_once_and_changes_nothing_when_refused(tmp_path):
+    session, outcome, by_name, (_, bad, missing) = mixed_selection(tmp_path)
+    releasable, refused = by_name[f"{bad.product_code}_TS.pdf"], by_name[f"{missing.product_code}_TS.pdf"]
+    with pytest.raises(IngestionError, match=refused.term_sheet.name):
+        session.release(releasable, refused)
+    assert not releasable.released, "不會只放行一半"
+
+    build_reference_sheet(session.reference_sheet, [reference_row(bad, **{"K(%)": 72})])
+    with pytest.raises(IngestionError):
+        session.release(releasable, by_name[f"{bad.product_code}_IIS.pdf"])
+    assert not releasable.released and session.outcome is None, "來源已變更：結果失效"
 
 
 @pytest.mark.parametrize("action", ["recheck", "reload", "source_changed"])
