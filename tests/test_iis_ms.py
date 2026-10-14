@@ -15,7 +15,7 @@ import synth
 from fcn_checker.extraction import extract_lines
 from fcn_checker.issuers import MS, detect_iis
 from fcn_checker.parsers import ms as ms_parser
-from harness import MISMATCH, NA, PASS, REVIEW, iis_path
+from harness import ALL_VARIANTS, MISMATCH, NA, PASS, REVIEW, iis_path
 from ms_synth import DIST, ISSUE, TRADE, WARNING, Spec, build_pdf, check_pair
 from pdf_writer import Edit, zh_date
 
@@ -48,7 +48,7 @@ VARIANTS = {
 
 @pytest.mark.parametrize("spec", VARIANTS.values(), ids=VARIANTS.keys())
 def test_consistent_ms_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tmp_path, spec):
-    ts, iis = check_pair(tmp_path, spec)
+    ts, iis = check_pair(tmp_path, spec, config=ALL_VARIANTS)  # 每期觀察 KI 是 MS 的不支援樣態：這裡測範本本身
     assert iis.report.template == "ms-zh-iis"
     assert bad(iis) == set() and iis.report.status == PASS
     assert ts.report.status == PASS and ts.fills_sheet

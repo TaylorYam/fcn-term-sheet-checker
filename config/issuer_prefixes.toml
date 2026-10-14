@@ -1,27 +1,58 @@
-# 上手編號對照：商品代號（＝說明書 PDF 檔名）前三碼 → 上手代號
+# 上手編號對照：商品代號（＝說明書 PDF 檔名）前三碼 → 上手代號，以及各上手的支援樣態表
 #
 # 批量核對依檔名前三碼選擇上手範本，再與說明書內容辨識結果、說明書商品代號前三碼互相確認。
-# 新增上手時在這裡登記一筆，並在上手註冊表（src/fcn_checker/issuers.py）登記範本。
+# 新增上手時在這裡登記一筆（[prefixes] 與 [unsupported_variants] 都要），並在上手註冊表（src/fcn_checker/issuers.py）登記範本。
 # 對照表有、但註冊表還沒有範本的上手 → 標示「未支援上手」，錯訊寫出上手代號。
 # 前三碼依作業人員提供的「發行機構 → TDCC 開頭」對照（2026-10-09 確認，Issue #149）。
 
-version = 3
-effective_date = 2026-10-09
+version = 4
+effective_date = 2026-10-14
 
 [prefixes]
 # 已有範本
 "029" = "BARC"
 "325" = "HSBC"
 "147" = "MS"
-# 尚無範本（未支援上手）
 "082" = "BNP"
+"037" = "SG"
+# 尚無範本（未支援上手）
 "086" = "CA"
 "159" = "CITI"
 "148" = "GS"
 "076" = "JPM"
 "328" = "NATIXIS"
 "156" = "NOMURA"
-"037" = "SG"
 "092" = "UBS"
 "326" = "BBVA"
 "078" = "DBS"
+
+# 上手支援樣態表：各上手不支援的樣態（黑名單，Issue #207）
+#
+# 依作業人員提供的「上手支援樣態清單」（2026-10-14）：只列表上標 N 的樣態，沒列的組合一律算支援
+# （例：KO 每日觀察＋記憶式、KI 到期觀察、無 KI）。參考條件表該列或說明書、投資人須知讀出的值任一邊是
+# 該上手的不支援樣態 → 配對問題「不支援樣態」：不核對、不能人工放行。
+# [prefixes] 的每家上手都要登記，沒有不支援樣態時寫空清單。
+#
+# 樣態名稱：
+#   vwap                   期初定價 VWAP
+#   ko_daily               KO 每日觀察（非記憶式）
+#   ko_periodic_memory     KO 每期觀察（記憶式）
+#   ko_periodic            KO 每期觀察（非記憶式）
+#   ki_daily               KI 每日觀察
+#   ki_periodic            KI 每期觀察
+#   non_call_equals_tenor  Non-Call(月) = 天期(月)（整段期間都不會提前出場）
+[unsupported_variants]
+BARC = ["ki_periodic"]
+HSBC = ["ki_periodic"]
+MS = ["ki_periodic"]
+BNP = []
+SG = []
+CA = ["ki_periodic"]
+CITI = []
+GS = ["ko_periodic_memory", "ko_periodic", "ki_periodic", "non_call_equals_tenor"]
+JPM = ["ki_periodic"]
+NATIXIS = []
+NOMURA = []
+UBS = ["vwap", "non_call_equals_tenor"]
+BBVA = ["ko_periodic", "ki_daily", "ki_periodic", "non_call_equals_tenor"]
+DBS = ["vwap", "ko_daily", "ko_periodic_memory", "ko_periodic", "ki_daily", "ki_periodic", "non_call_equals_tenor"]

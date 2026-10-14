@@ -7,8 +7,10 @@
 1. 檔名前三碼（上手編號）查上手編號對照 → 上手；不在對照表或上手沒有該種文件的範本 → 未支援上手。
 2. 內容辨識出的上手必須與檔名一致；說明書封面商品代號也要等於檔名的商品代號，否則轉人工覆核。
 3. 以商品代號找參考條件表的列（TDCC Code）；表上有發行機構欄時，該列發行機構必須是此上手的寫法。
-4. 同一商品代號（檔名）的說明書與投資人須知配成一組；同種文件有多份時，對到列的全部轉人工覆核，不核對也不回填。
-5. 這批只有說明書或只有投資人須知、且已對到列時，那一份轉人工覆核（這批缺另一份），不能人工放行。
+4. 對到列後判斷樣態（variants.py）：參考條件表該列、這份與同商品另一份明確讀出的值，任一邊是該上手的不支援樣態
+   → 不支援樣態（人工覆核、不跑規則、不能放行；同商品兩份都是）。
+5. 同一商品代號（檔名）的說明書與投資人須知配成一組；同種文件有多份時，對到列的全部轉人工覆核，不核對也不回填。
+6. 這批只有說明書或只有投資人須知、且已對到列時，那一份轉人工覆核（這批缺另一份），不能人工放行。
    另一份在這批裡但本身配對失敗（例：未支援上手、範本不符）時不算缺，但那份沒通過，說明書就不回填。
 
 辨識遇到問題就停，每份 PDF 最多一個配對問題。`identify` 分兩段：先對每份 PDF 累積事實（種類、上手、商品代號、讀出結果、
@@ -31,10 +33,11 @@ from .extraction import extract_lines
 from .ingestion import IngestionError, error_result, open_pdf
 from .investor_sheet import IisSheet
 from .issuers import Issuer, by_code, detect, detect_iis
-from .orders.reference import OrderRecord, ReferenceSheet
+from .orders.reference import SOURCE, OrderRecord, ReferenceSheet
 from .rules.kit import doc_review, read_standard
 from .schema import CheckResult, CheckStatus, DocKind, Evidence, Item, ParsedField
 from .standard_fields import TermSheet
+from .variants import Terms, Variant, investor_sheet_terms, row_terms, term_sheet_terms, unsupported
 
 
 class PairingProblem(StrEnum):
@@ -55,6 +58,7 @@ class PairingProblem(StrEnum):
     ROW_MISSING = "reference_row_missing"
     ROW_DUPLICATE = "reference_row_duplicate"
     ISSUER_MISMATCH = "reference_issuer_mismatch"
+    UNSUPPORTED_VARIANT = "variant_unsupported"  # 上手支援樣態表標為不支援的樣態（Issue #207）
     SHARED_ROW = "reference_row_shared"
     MISSING_IIS = "counterpart_missing_iis"  # 這批有說明書、沒有同商品的投資人須知
     MISSING_TS = "counterpart_missing_ts"  # 這批有投資人須知、沒有同商品的說明書
@@ -96,7 +100,7 @@ class Identification:
     product_code: str | None = None  # 說明書封面商品代號；投資人須知是檔名的商品代號
     reference_row: int | None = None  # 對到的參考條件表列號
     problem: PairingProblem | None = None  # 唯一的配對問題；None 表示配對乾淨
-    checked: bool = False  # 規則有沒有跑：有對到列、且不是多份對到同一列（缺另一份時仍為 True）
+    checked: bool = False  # 規則有沒有跑：有對到列、且不是多份對到同一列或不支援樣態（缺另一份時仍為 True）
     pdf: Path | None = field(default=None, kw_only=True)  # 這份 PDF（說明書或投資人須知）
     product_code_evidence: tuple[Evidence, ...] = field(default=(), kw_only=True)
     results: tuple[CheckResult, ...] = field(
@@ -118,6 +122,7 @@ class Identification:
 
 # 辨識與配對結果的項目：只寫說明，不附雙方值
 _ISSUER_ITEM, _PRODUCT_CODE_ITEM, _FILE_NAME_ITEM = Item.note("上手"), Item.note("商品代號"), Item.note("檔名")
+_VARIANT_ITEM = Item.note("樣態")
 
 
 def unexpected_result(e: Exception, kind: DocKind | None) -> CheckResult:
@@ -165,6 +170,9 @@ class _Draft:
     investor_sheet: IisSheet | None = None
     pages: int | None = None
     template: CheckResult | None = None  # 範本辨識命中的結果
+    terms: tuple[str, Terms] | None = None  # 這份讀出的樣態條件（出處稱呼, 條件）：讀出成功才有
+    row_terms: Terms | None = None  # 對到的參考條件表列的樣態條件
+    unsupported_variants: frozenset[Variant] = frozenset()  # 這家上手的不支援樣態（上手支援樣態表）
     problem: PairingProblem | None = None  # 遇到就停的配對問題
     stopped: CheckResult | None = None  # 該問題對應的結果
     shared: tuple[str, str] | None = None  # 多份對到同一列：（哪種文件有多份, 其他文件的檔名）
@@ -225,6 +233,10 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
             out.term_sheet = issuer.read(lines)
     except Exception as e:  # 上手讀出失敗：這份轉執行錯誤，不中斷整批（預覽也一樣）
         return out.stop(PairingProblem.UNEXPECTED, unexpected_result(e, out.kind))
+    terms = (
+        investor_sheet_terms(out.investor_sheet) if out.investor_sheet is not None else term_sheet_terms(out.term_sheet)
+    )
+    out.terms, out.unsupported_variants = (what, terms), config.unsupported_variants.get(issuer.code, frozenset())
 
     if out.kind == DocKind.IIS:  # 投資人須知以檔名前 12 碼配對（HSBC 範本沒有商品代號；封面有的另由規則核對）
         pc = out.product_code = ParsedField.present("product_code", file_code(pdf), [])
@@ -270,7 +282,7 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
         )
         r.expected, r.order_source = expected_issuer, [row.issuer.source]
         return out.stop(problem, r)
-    out.row = row
+    out.row, out.row_terms = row, row_terms(row, config.reference_format)
     return out
 
 
@@ -349,6 +361,21 @@ def _counterpart(d: _Draft) -> tuple[PairingProblem, CheckResult]:
     return problem, _review("batch.counterpart", "counterpart", Item.note(missing.value), problem, msg)
 
 
+def _variant(d: _Draft) -> CheckResult | None:
+    """對到列後的樣態：參考條件表該列、這份與同商品另一份讀出的條件，任一邊是不支援樣態就人工覆核（不能放行）。
+
+    同商品另一份本身有配對問題（例：檔名商品代號不符，可能放錯檔）時，它讀出的條件不算，避免蓋掉真正的原因。
+    """
+    docs = [x for x in (d, d.partner) if x is not None and x.terms is not None and x.problem is None]
+    docs.sort(key=lambda x: x.kind != DocKind.TERM_SHEET)  # 出處依參考條件表、說明書、投資人須知
+    found = unsupported([(SOURCE, d.row_terms), *(x.terms for x in docs)], d.unsupported_variants)
+    if not found:
+        return None
+    parts = "、".join(f"「{v.label}」（{'、'.join(names)}）" for v, names in found.items())
+    msg = f"{d.issuer} 不支援{parts}；這個樣態沒有範本可以核對，不能人工放行"
+    return _review("batch.variant", "variant", _VARIANT_ITEM, PairingProblem.UNSUPPORTED_VARIANT, msg)
+
+
 def _freeze(d: _Draft) -> Identification:
     """由累積的事實產生這份的辨識／配對結果並凍結（同商品另一份的引用由 `identify` 補上）。"""
     results = [d.template] if d.template is not None else []
@@ -358,7 +385,10 @@ def _freeze(d: _Draft) -> Identification:
             results.append(d.stopped)
     else:
         results.append(_pairing(d))
-        if d.shared is not None:
+        if (variant := _variant(d)) is not None:
+            problem = PairingProblem.UNSUPPORTED_VARIANT
+            results.append(variant)
+        elif d.shared is not None:
             problem = PairingProblem.SHARED_ROW
         elif d.alone:
             problem, counterpart = _counterpart(d)
@@ -370,7 +400,7 @@ def _freeze(d: _Draft) -> Identification:
         pc.value if pc is not None and pc.ok else None,
         d.row.row if d.row is not None else None,
         problem,
-        d.row is not None and problem != PairingProblem.SHARED_ROW,
+        d.row is not None and problem not in (PairingProblem.SHARED_ROW, PairingProblem.UNSUPPORTED_VARIANT),
         pdf=d.pdf,
         product_code_evidence=tuple(pc.evidence) if pc is not None else (),
         results=tuple(results),
