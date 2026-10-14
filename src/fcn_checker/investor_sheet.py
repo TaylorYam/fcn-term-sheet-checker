@@ -41,6 +41,7 @@ IIS_FIELDS: dict[str, str] = {
     "ko_observation_end": "date：期間每日觀察的 KO 觀察迄日（期末定價日）",
     "product_type": "str：商品種類",
     "redemption_start": "date：開始受理贖回日期",
+    "memory_wording": "int：商品事項段「記憶式」出現的次數（Citi：非記憶式商品不得出現）",
 }
 
 

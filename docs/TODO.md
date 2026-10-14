@@ -57,7 +57,7 @@
   - [x] SG：說明書探勘與規格完成（Issue #192；作業人員決定跳過雙方螢光取交集；[範本規格](templates/sg-zh-product-description.md)、[核對規則](rules/sg-check-rules.md)）。
   - [x] SG 說明書實作（Issue #194）：parser 含兩種版面、`issuers.py` 登記、審查標準 SG 分節（警語與 `[RRn]` 變體、`autocall_memory_zh`、保證機構與總代理人名稱、最低申購依幣別倍數、受託機構簡稱與地址等價寫法）。
   - [x] SG 投資人須知（Issue #213）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；警語七「受託投資」照現行規則判錯，所以現有 6 份樣本都不通過；[範本規格](templates/sg-zh-iis.md)、[核對規則](rules/iis-check-rules.md) §3 SG 欄）。本機真實樣本測試用含 SG 列的 `data/核對表格式..xlsx`，核對結果與回填都已斷言。
-  - [ ] Citi 說明書與投資人須知（Issue #220）：說明書已實作（標的依代號配對、期初定價欄核對、Citi 版本固定警語、兩個「受託投資」允許片語）；投資人須知待實作。探勘與規格（作業人員決定不畫螢光、逐項決定；Citi 版本固定警語、兩個「受託投資」允許片語、標的依代號配對；[說明書範本規格](templates/citi-zh-product-description.md)、[投資人須知範本規格](templates/citi-zh-iis.md)、[核對規則](rules/citi-check-rules.md)），待實作；探勘用 `data/核對表格式..xlsx`（8 列 Citi）。
+  - [x] Citi 說明書與投資人須知（Issue #220）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；Citi 版本固定警語、兩個「受託投資」允許片語、標的依代號配對、期初定價欄核對、非記憶式不得寫「記憶式」；[說明書範本規格](templates/citi-zh-product-description.md)、[投資人須知範本規格](templates/citi-zh-iis.md)、[核對規則](rules/citi-check-rules.md)）；本機 8 組樣本中說明書與投資人須知都通過的 5 組回填。
   - [ ] UBS：樣本與參考條件表列已就位（2026-10-13），尚未探勘。
   - [x] 上手編號對照補齊尚無範本的 11 家（Issue #149）：未支援上手的錯訊寫出上手代號。
   - [x] 其他幣別：可承作的八種幣別（USD、JPY、CNH、HKD、AUD、EUR、GBP、ZAR）審查標準 `[currency]`、`[denomination]` 都有了；澳幣、歐元、英鎊、南非幣在有樣本確認中文寫法後於 2026-10-13 加入（Issue #185）。表裡沒有的寫法（例：澳元、南非蘭特）仍轉人工覆核。

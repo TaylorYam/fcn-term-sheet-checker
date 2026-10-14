@@ -5,8 +5,9 @@ x 42、標題同一列 x 67（`legacy=True` 舊文件：「N. 標題」同一行
 子項「(n)」x 42、內容同一列 x 67；表格一格一行。
 改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`、第一章各條 `ts.art{n}`（標的表
 `ts.art9.table`、日期表 `ts.art12.table`、假設價格表 `ts.art15.table`）、其他各章 `ts.ch二`～`ts.ch五`。
-`build_pdf` 旁邊另寫一份只有標題的 `_IIS.pdf`（`iis=False` 時不寫）：Citi 投資人須知範本另做（Issue #220 第二段），
-在那之前它是未支援上手，同商品說明書不會因「這批缺投資人須知」轉人工覆核。
+投資人須知（docs/templates/citi-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
+每頁頁首「第N頁，共M頁」；段落代號 `iis.cover`、`iis.warn`（警語 1.～13.）、`iis.org`（一、相關機構）、`iis.summary`
+（商品簡介）、`iis.coupon`（收益分配事項）、`iis.redeem`（贖回價金之計算、不成立之情形）、`iis.fees`、`iis.rest`。
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from typing import Any
 import fitz
 
 from harness import CONFIG, STANDARD, check_all, iis_path
-from pdf_writer import Edit, PdfWriter, require_used, zh_date
+from pdf_writer import FONT, Edit, PdfWriter, require_used, zh_date
 from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row, weekday_on_or_after
 
 NAME = STANDARD["product_name"]["citi"]
@@ -32,6 +33,7 @@ AGENT = STANDARD["agent_name"]["citi"]
 PRODUCT_TYPE = STANDARD["product_type"]["citi"]
 MINIMUM_ISSUE = STANDARD["minimum_issue_size"]["citi"]
 DIST = STANDARD["distributor"]
+IIS_GUARANTOR = STANDARD["guarantor_name_equivalents"]["citi"][0]  # 投資人須知相關機構 2. 只寫中文
 PHONE = "(+886)2-5556-1313"  # 審查標準 phone_equivalents 的 Citi 封面寫法
 APPROVAL = dt.date(2026, 6, 11)
 ZH_NUM = "一二三四五六七八九十"
@@ -81,6 +83,7 @@ class Spec(ProductSpec):
     legacy: bool = False  # 舊文件版面（2024）
     trustee_code: str | None = None  # 受託或銷售機構商品代號；None 同商品代號，"" 為 `[ ]`
     units: int = 10  # 情境假設的投資單位數
+    iis_pages: int = 4  # 投資人須知頁數（不足補空白頁、多的刪掉最後幾頁）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -136,8 +139,8 @@ class Spec(ProductSpec):
 class _Doc:
     """逐行排版；文字依目前段落代號（`section`）套用改字，超過寬度時換行（數字不拆開）。"""
 
-    def __init__(self, edits: Sequence[Edit], used: set[Edit]):
-        self.w = PdfWriter(edits, "ts", used)
+    def __init__(self, edits: Sequence[Edit], used: set[Edit], kind: str = "ts"):
+        self.w = PdfWriter(edits, kind, used)
         self.section = "cover"
 
     @property
@@ -382,18 +385,167 @@ def _article13(d: _Doc, s: Spec) -> None:
     )
 
 
-def _iis_placeholder(path: Path) -> Path:
-    """只有標題的投資人須知（Citi 投資人須知範本另做，在那之前是未支援上手）。"""
-    w = PdfWriter(kind="iis")
-    w.line(48, "中文投資人須知")
+def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[Edit] | None = None) -> Path:
+    """Citi 中文投資人須知（docs/templates/citi-zh-iis.md）：與 `s` 的說明書、參考條件表列一致，預設 4 頁；`edits` 改字。"""
+    d = _Doc(edits, set() if used is None else used, "iis")
+    w = d.w
+    unit, worst = s.currency_zh, ("表現最差連結標的" if s.count > 1 else "連結標的")
+    trustee = (s.product_code if s.trustee_code is None else s.trustee_code) or "[ ]"
+    memo = "記憶式" if s.autocall and s.memory else ""
+    w.line(48, "中文投資人須知", gap=14)
+    d.text(48, f"刊印日期：{zh_date(s.trade_date)}")
+    d.text(48, s.name_zh)
+    d.text(
+        48,
+        f"(下稱「商品」) {s.name_en} 商品種類：{PRODUCT_TYPE}；ISIN：XS1999900001；受託或銷售機構商品代號：{trustee}；"
+        f"集保商品代號：{s.product_code}",
+    )
+    w.line(48, "本商品之投資風險警語：")
+    d.section = "warn"
+    for n, text in enumerate(_iis_warnings(), 1):
+        d.text(48, f"{n}. {text}", 60)
+    d.section = "org"
+    w.line(48, "一、 相關機構事業概況")
+    d.text(48, f"1. 發行機構：{ISSUER}(“CGMHI”) (營業所在地：1 Fictional Street, New York)")
+    d.text(48, f"2. 保證機構：{IIS_GUARANTOR}(營業所在地：1 Fictional Street, New York)")
+    d.text(48, f"3. 總代理人：{AGENT['cover']}（營業所在地：臺北市信義區虛構路1 號）")
+    d.text(48, f"4. 受託或銷售機構：{DIST['name']}（營業所在地：{DIST['address']}）")
+    d.section = "summary"
+    w.line(48, "二、商品事項")
+    w.line(48, "1. 商品簡介：")
+    names = "； ".join(
+        f"{i}. {u.name}（Fictional {i} Inc）(彭博代碼：{u.ticker})" for i, u in enumerate(s.underlyings, 1)
+    )
+    k = s.first_callable
+    table = "配息日" if not s.autocall else "配息觀察期間及配息日" if s.ko_obs == "D" else "觀察日及配息日"
+    tenor = f"商品年期：{s.tenor} 個月，惟受限於發行機構得提前贖回之條件" + (
+        f"以及{memo}自動提前出場事件是否發生" if s.autocall else ""
+    )
+    lines = [
+        "受託或銷售對象：專業投資人",
+        "本商品之風險程度：RR4",
+        f"計價幣別：{unit}",
+        "原計價幣別本金保本率：不保本。",
+        f"連結標的資產：{names}",
+        tenor,
+        f"交易日：{zh_date(s.trade_date)}；期初評價日：{zh_date(s.trade_date)}；發行日：{zh_date(s.issue_date)}",
+        f"期末評價日：{zh_date(s.final_date)}；到期日：{zh_date(s.maturity_date)}；{table}：詳細日期請見中文產品說明書第一章第12 項。",
+    ]
+    if s.autocall and s.ko_obs == "D":
+        lines.append(
+            f"自動提前出場觀察日：就所有連結標的而言，於第{k} 個配息觀察期間結束日（含當日）起至期末評價日（含當日）"
+            "止之期間內，每一個預定交易日（干擾日除外）。"
+        )
+    lines.append(f"開始受理贖回日期：{zh_date(weekday_on_or_after(s.issue_date + dt.timedelta(days=1)))}")
+    for text in lines:
+        d.text(48, f"• {text}", 60)
+    d.section = "coupon"
+    w.line(48, "2. 收益分配事項：")
+    m, a = s.monthly, s.annual
+    if s.autocall and s.ko_obs == "D":
+        d.text(
+            48,
+            f"配息金額：第1 期配息日應支付下列固定配息金額：每單位商品面額× {m}%(約等同年息為{a:.2f}%)；第1 期配息日之後的"
+            f"固定配息金額，應於每一期配息日(t)支付，支付金額為：每單位商品面額× {m}%，惟若發生{memo}自動提前出場事件，"
+            f"則支付自動提前出場配息，為每單位商品面額× m/M × {m}%。",
+        )
+    else:
+        d.text(
+            48, f"配息金額：固定配息金額應於配息日，以{unit}支付下列金額：每單位商品面額x{m}%(約等同年息為{a:.2f}%)。"
+        )
+        if s.autocall:
+            d.text(
+                48,
+                f"{memo}自動提前出場事件：(i)於任一觀察日，所有連結標的之收盤價格均等於或大於其各自的自動提前出場界限。",
+            )
+    d.section = "redeem"
+    w.line(48, "3. 贖回價金之計算")
+    lead = f"本商品若未發生{memo}自動提前出場事件，且未經" if s.autocall else "本商品若未經"
+    if s.ki == "none":
+        cases = (
+            f"(a) 若在期末評價日{worst}之最終收盤價等於或大於執行價，以{unit}支付本商品每單位商品面額的100%之金額 或"
+            f"(b) 若在期末評價日{worst}之最終收盤價小於執行價，將以實物交付{worst}之股數。"
+        )
+    elif s.ki == "AM":
+        cases = f"(a) 若觸及下限事件從未發生，以{unit}支付本商品每單位商品面額的100%之金額 或(b) 若觸及下限事件曾發生，將以實物交付。"
+    else:
+        cases = (
+            f"(a) 若觸及下限事件從未發生或觸及下限事件曾發生但在期末評價日{worst}之最終收盤價等於或大於執行價，"
+            f"以{unit}支付本商品每單位商品面額的100%之金額 或(b) 若觸及下限事件曾發生且…小於執行價，將以實物交付。"
+        )
+    text = f"• 到期給付金額：{lead}發行機構提前贖回或投資人提前贖回，本商品將於到期日以下列方式給付：{cases}"
+    text += f"執行價係指相關連結標的之期初股價的{s.strike:.2f}%。"
+    if s.ki != "none":
+        watch = {
+            "AM": f"在期末評價日，若{worst}之收盤價低於其下限價",
+            "D": f"於期初評價日（不含當日）起至期末評價日（含當日）止之期間內，每一個預定交易日（干擾日除外），若{worst}之收盤價曾低於其下限價",
+            "P": f"在任t 個觀察日 (t=1-{s.tenor})，若{worst}之收盤價曾低於其下限價",
+        }[s.ki]
+        text += (
+            f"觸及下限事件：{watch}，則視同觸及下限事件曾經發生。下限價：係指相關連結標的之期初股價的{s.ki_pct:.2f}%。"
+        )
+    d.text(48, text, 60)
+    w.line(48, "4. 受託或發行不成立之情形：")
+    d.text(48, f"(1) 需發行機構於交易截止日或之前收到本商品有效申購金額至少達{MINIMUM_ISSUE}之總申購價值。")
+    d.section = "rest"
+    w.line(48, "三、 投資風險（詳細風險資訊，請參閱中文產品說明書第三章「商品風險揭露」）")
+    d.text(48, "1. 基本風險資訊 (1) 最低收益風險：本商品不保本。")
+    d.section = "fees"
+    w.line(48, "四、 投資人應負擔的各項費用（除通路服務費外，發行機構並無其他與本商品有關的費用。）")
+    for cell in (
+        "費用項目",
+        "費率(百分比)",
+        "申購費用",
+        "申購價金的",
+        "0%~5%",
+        "提前贖回費用",
+        "投資人提前贖",
+        "回價金的",
+        "0%~5%",
+    ):
+        d.cell(60, cell)
+    for cell in (
+        "分銷費用(如屬發行",
+        "機構或發行人給予受",
+        "託或銷售機構之報",
+        "酬、費用、折讓等各",
+        "項利益應單獨列示)",
+        "報",
+        "酬 無",
+        "費",
+        "用",
+        "申購價金的",
+        "0%~5%",
+        "折",
+        "讓 無",
+    ):
+        d.cell(60, cell)
+    d.section = "rest"
+    w.line(48, "五、 相關機構之權利、義務及責任")
+    d.text(48, "1. 本商品係依境外結構型商品管理規則受託投資或受託買賣時，發行機構應依照中文產品說明書支付有關款項。")
+    w.line(48, "六、 協助投資人權益保護之方式")
+    w.line(48, "七 發行機構、總代理人及受託或銷售機構與投資人爭議之處理方式")
+    while len(w.doc) < s.iis_pages:
+        w.new_page()
+    while len(w.doc) > s.iis_pages:
+        w.doc.delete_page(len(w.doc) - 1)
+    for n, page in enumerate(w.doc, 1):
+        page.insert_text((250, 40), f"第{n}頁，共{s.iis_pages}頁", fontname=FONT, fontsize=10)
     return w.save(path)
 
 
+def _iis_warnings() -> list[str]:
+    """投資人須知警語 1.～13.：1. 為固定警語；4.、5. 有受託機構簡稱；5. 有發行機構與保證機構；7.、9. 含允許的「受託投資」片語。"""
+    out = _warnings()
+    out[8] = "當受託投資或銷售本商品予任何投資人時，受託或銷售機構將不會對美國人士為銷售之要約。"
+    return out
+
+
 def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
-    """合成 Citi 說明書 `<商品代號>_TS.pdf`；`edits` 依段落代號改字；`iis` 時旁邊另寫一份只有標題的投資人須知。"""
+    """合成 Citi 說明書 `<商品代號>_TS.pdf`；`edits` 依段落代號改字（兩份都套用）；`iis` 時旁邊另寫一份投資人須知。"""
+    used: set[Edit] = set()  # 說明書與投資人須知共用：改字換到哪一份都算
     if iis and path.stem.endswith("_TS"):
-        _iis_placeholder(iis_path(path))
-    used: set[Edit] = set()
+        build_iis_pdf(iis_path(path), s, edits=edits, used=used)
     d = _Doc(edits, used)
     w = d.w
     unit = s.currency_zh
@@ -587,7 +739,7 @@ def _warnings() -> list[str]:
         WARNING,
         "本商品係複雜的金融商品，必須經過符合資格的人員解說後再進行投資。",
         "本商品並非存款，投資不受存款保險之保障，最大損失為全部本金及配息(如有)。",
-        "本商品雖經玉山證券審查，惟並不代表保證本商品之價值，且玉山證券對本商品投資盈虧不負任何責任。",
+        "本商品雖經玉山證券審查，惟並不代表保證本商品之價值，且玉山證券對本商品投資盈虧不負任何責任。玉山證券依法不得承諾擔保原計價幣別投資本金或最低收益率。",
         f"本商品持有期間如有保證配息收益或保證保本率，係由{ISSUER}（發行機構）及{GUARANTOR['cover']}（保證機構）保證，"
         "而非由玉山證券（受託或銷售機構）所保證。",
         "本中文產品說明書之內容如有虛偽或隱匿之情事者，其餘內容應由發行機構、總代理人及其負責人依法負責。",

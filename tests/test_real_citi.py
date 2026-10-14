@@ -4,7 +4,8 @@
 舊文件（2024）的受託或銷售機構商品代號空白、審查通過日期早於審查標準最早的日期；一檔日本 ETF 表上四個價格都是說明書的
 1/100（作業人員確認表填錯；各價格同一比例，依共用規則轉人工覆核、不會通過）。表上標的排序和說明書不同的 5 份依代號
 配對後通過；期初定價 VWAP 的 1 份表頭寫明 VWAP、和表上相同。參考條件表用含 Citi 列的 data/核對表格式..xlsx。
-投資人須知範本另做（Issue #220 第二段），在那之前是未支援上手。
+投資人須知（docs/templates/citi-zh-iis.md）：8 份都辨識為 Citi 投資人須知；只有舊文件受託或銷售機構商品代號空白、
+非記憶式那份商品事項寫了「記憶式」（2026-10-14 確認判不一致）。說明書與投資人須知都通過的 5 份回填。
 """
 
 from collections import Counter
@@ -72,7 +73,19 @@ def test_initial_pricing_is_read_from_the_table_header(items):
     )
 
 
-def test_investor_sheets_are_not_supported_yet(items):
+def test_investor_sheets_only_differ_where_the_exploration_said(items):
     _, investor_sheets = items
     assert len(investor_sheets) == 8
-    assert all(i.report.template is None for i in investor_sheets)
+    assert all(i.report.template == CITI.iis.template_id for i in investor_sheets)
+    bad = Counter((r.rule_id, r.reason_code) for i in investor_sheets for r in i.report.results if r.status in PROBLEMS)
+    assert bad == Counter(
+        {
+            ("iis.product_code", "value_mismatch"): 1,  # 2024 舊文件：受託或銷售機構商品代號 [ ]
+            ("iis.memory_wording", "value_mismatch"): 1,  # 非記憶式商品的 m／M 定義句寫「記憶式」
+        }
+    )
+
+
+def test_products_whose_two_documents_pass_are_filled(items):
+    term_sheets, _ = items
+    assert sum(i.fills_sheet for i in term_sheets) == 5
