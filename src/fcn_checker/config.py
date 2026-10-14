@@ -477,7 +477,7 @@ def load_reference_format(path: Path) -> ReferenceFormat:
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e
-    _check_columns(fmt)
+    _check_column_settings(fmt)
     return fmt
 
 
@@ -491,7 +491,7 @@ def _import_format(d: dict[str, Any]) -> ImportFormat:
     )
 
 
-def _check_columns(fmt: ReferenceFormat) -> None:
+def _check_column_settings(fmt: ReferenceFormat) -> None:
     """optional_columns 要是 [columns] 的欄名；匯入格式的欄名不重複、表頭在第 1 列以下、涵蓋 checked_column 與
     fallbacks，且每個必要的標準欄位至少有一個欄名在匯入格式裡（核對與回填的值都會進「回填後」）。"""
     unknown = [h for h in fmt.optional_columns if h not in fmt.columns]

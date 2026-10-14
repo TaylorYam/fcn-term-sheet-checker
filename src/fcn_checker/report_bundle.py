@@ -35,7 +35,7 @@ from . import reporting
 from .batch import BatchItem, BatchOutcome, Category
 from .config import ReferenceFormat
 from .ingestion import IngestionError
-from .orders.reference import locate, normalize_cell
+from .orders.reference import header_columns, locate
 from .result_file import tdcc_code
 from .schema import overall_status
 
@@ -218,13 +218,7 @@ def _reference_extract(reference_sheet: Path, rfmt: ReferenceFormat, members: Se
     layout = locate(wb, rfmt)
     src = wb[layout.sheet]
     known = {*rfmt.import_format.columns, *rfmt.columns, rfmt.issuer_column}
-    cols: list[int] = []
-    seen: set[str] = set()
-    for col in range(1, src.max_column + 1):
-        header = normalize_cell(src.cell(layout.header_row, col).value)
-        if header is not None and str(header) in known and str(header) not in seen:
-            seen.add(str(header))
-            cols.append(col)
+    cols = sorted(found[0] for header, found in header_columns(src, layout).items() if header in known)
     rows = sorted({i.reference_row for i in members if i.reference_row is not None})
     wb = Workbook()
     ws = wb.active

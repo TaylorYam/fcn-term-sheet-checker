@@ -69,6 +69,8 @@ def test_company_original_sheet_gives_a_clean_import_format(tmp_path):
     dv.add("AU2")
     ws.add_data_validation(dv)
     ws.auto_filter.ref = "A2:CB20"
+    memo = ws.cell(3, IMPORT_HEADERS.index("UL_1_Memo") + 1)
+    memo.value, memo.data_type = "=見附件", "s"  # 「=」開頭的文字不是公式
     ws.column_dimensions["D"].width = 14
     wb.save(sheet)
 
@@ -84,6 +86,7 @@ def test_company_original_sheet_gives_a_clean_import_format(tmp_path):
     assert (d["交易日期"], d["發行日"]) == (_xl(spec.trade_date), _xl(spec.issue_date))
     assert (d["分公司_1"], d["分公司_1_承作金額"], d["下一比價日"]) == ("城中", 340000, "-")
     assert not any(c.data_type == "f" for r in out.iter_rows() for c in r), "不帶公式"
+    assert d["UL_1_Memo"] == "=見附件", "「=」開頭的文字照文字寫"
     assert not list(out.conditional_formatting) and not out.data_validations.dataValidation
     assert out.auto_filter.ref is None
     assert out.column_dimensions["D"].width == 14, "欄寬取同名欄（TDCC Code）"

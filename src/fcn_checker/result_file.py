@@ -27,7 +27,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from .config import ReferenceFormat
 from .identification import Identification, name_code
 from .ingestion import write_new
-from .orders.reference import SheetLayout, header_names, locate, normalize_cell
+from .orders.reference import SheetLayout, header_columns, header_names, locate
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
@@ -82,11 +82,7 @@ def _build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Seq
 def _filled_sheet(ws: Worksheet, src: Worksheet, layout: SheetLayout, rfmt: ReferenceFormat, rows: list[int]) -> None:
     """照匯入格式寫「回填後」：每格取參考條件表 `rows` 各列對應欄的值與顯示格式。"""
     imp = rfmt.import_format
-    by_header: dict[str, int] = {}  # 參考條件表欄名 → 欄號（重複時取第一個）
-    for col in range(1, src.max_column + 1):
-        header = normalize_cell(src.cell(layout.header_row, col).value)
-        if header is not None:
-            by_header.setdefault(str(header), col)
+    by_header = {h: cols[0] for h, cols in header_columns(src, layout).items()}  # 欄名 → 欄號（重複時取第一個）
     names = header_names(rfmt)
     sources = [None if h == imp.checked_column else _source(h, by_header, rfmt, names) for h in imp.columns]
 
@@ -104,7 +100,10 @@ def _filled_sheet(ws: Worksheet, src: Worksheet, layout: SheetLayout, rfmt: Refe
                 ws.cell(r_out, k, rfmt.checked_value)
             elif col is not None:
                 cell = src.cell(r_src, col)
-                ws.cell(r_out, k, cell.value).number_format = cell.number_format
+                target = ws.cell(r_out, k, cell.value)
+                target.number_format = cell.number_format
+                if target.data_type == "f":  # 讀值開啟不會有公式：「=」開頭的是文字，照文字寫
+                    target.data_type = "s"
     dims = _dim_columns(src, src.max_column)
     for k, col in enumerate(sources, start=1):
         if col is not None and col in dims and dims[col].width:
