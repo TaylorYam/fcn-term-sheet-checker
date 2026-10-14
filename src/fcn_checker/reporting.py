@@ -113,9 +113,14 @@ def save_record(batch: BatchRecord, root: Path, now: dt.datetime) -> Path:
     檔案已存在（不覆蓋）或無法寫入時丟出 IngestionError。
     """
     path = root / RECORD_DIR / f"{now:%Y%m%d-%H%M%S}.json"
-    text = json.dumps(_record(batch, root, now), ensure_ascii=False, indent=2, default=str) + "\n"
-    write_new(path, text.encode("utf-8"), "核對紀錄")
+    write_new(path, record_bytes(batch, root, now), "核對紀錄")
     return path
+
+
+def record_bytes(batch: BatchRecord, root: Path, now: dt.datetime) -> bytes:
+    """核對紀錄的 JSON 內容（UTF-8）；回報包的核對紀錄也用它，格式相同。"""
+    text = json.dumps(_record(batch, root, now), ensure_ascii=False, indent=2, default=str) + "\n"
+    return text.encode("utf-8")
 
 
 def _record(batch: BatchRecord, root: Path, now: dt.datetime) -> dict[str, Any]:
