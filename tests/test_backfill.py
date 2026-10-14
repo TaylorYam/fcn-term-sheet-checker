@@ -60,7 +60,7 @@ def test_passing_product_gets_v_in_ts_and_iis(tmp_path):
     assert marks == [("TS", "A4", None, "V", BackfillAction.FILL), ("IIS", "B4", None, "V", BackfillAction.FILL)]
     receipt, wb = saved_sheet(outcome, tmp_path)
     assert receipt.filled(item)
-    assert (wb["回填後"]["A4"].value, wb["回填後"]["B4"].value) == ("V", "V")
+    assert (wb["回填後"]["A2"].value, wb["回填後"]["A3"].value) == ("TS/IIS完成檢核", "V")
 
 
 def test_existing_v_is_the_same_value(tmp_path):
@@ -69,7 +69,7 @@ def test_existing_v_is_the_same_value(tmp_path):
     assert item.report.status == PASS
     assert [d.action for d in item.report.backfill[:2]] == [BackfillAction.MATCH, BackfillAction.MATCH]
     _, wb = saved_sheet(outcome, tmp_path)
-    assert wb["回填後"]["A4"].value == "V"
+    assert wb["回填後"]["A3"].value == "V"
 
 
 @pytest.mark.parametrize("value", ["X", "v", "-", "✓"])
@@ -82,11 +82,11 @@ def test_other_value_in_ts_is_a_mismatch_kept_and_not_filled(tmp_path, value):
     assert f"TS對不起來：參考條件表 {value}／說明書 V" in item.problem_messages
     assert item.release_problem == "參考條件表回填欄位已有不同的值，請先修正參考條件表再核對"
     receipt, wb = saved_sheet(outcome, tmp_path)
-    assert not receipt.filled(item) and wb["回填後"].max_row == 3, "沒回填的商品不出現在「回填後」"
+    assert not receipt.filled(item) and wb["回填後"].max_row == 2, "沒回填的商品不出現在「回填後」"
 
 
-def test_sheet_without_ts_column_still_passes_and_the_result_file_adds_it_checked(tmp_path):
-    """TS、IIS 不是必要欄（Issue #199）：表上沒有也照常核對；「回填後」補上這一欄並打勾。"""
+def test_sheet_without_ts_column_still_passes_and_the_result_file_is_checked(tmp_path):
+    """TS、IIS 不是必要欄（Issue #199）：表上沒有也照常核對；「回填後」的 TS/IIS完成檢核 照樣打勾（Issue #203）。"""
     headers = [h for h in REFERENCE_HEADERS if h != "TS"]
     outcome = run(tmp_path, headers=headers)
     item = outcome.items[0]
@@ -96,8 +96,7 @@ def test_sheet_without_ts_column_still_passes_and_the_result_file_adds_it_checke
     assert [d.column for d in item.report.backfill if d.column in ("TS", "IIS")] == ["IIS"]
     receipt, wb = saved_sheet(outcome, tmp_path)
     assert receipt.filled(item)
-    assert (wb["回填後"]["A3"].value, wb["回填後"]["B3"].value) == ("TS", "IIS"), "照參考條件表欄位順序補在最前面"
-    assert (wb["回填後"]["A4"].value, wb["回填後"]["B4"].value) == ("V", "V")
+    assert (wb["回填後"]["A2"].value, wb["回填後"]["A3"].value) == ("TS/IIS完成檢核", "V")
 
 
 # ---------------------------------------------------------------- 缺欄

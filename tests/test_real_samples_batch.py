@@ -120,20 +120,19 @@ def test_vwap_rows_skip_price_comparison_and_take_the_document_prices(outcome):
 
 
 def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
+    """TDCC Code → 該列；「回填後」是匯入格式（第 2 列表頭），真實 樣本清單 是第 3 列表頭。"""
     ws = openpyxl.load_workbook(path, data_only=True)[sheet]
-    headers = [c.value for c in ws[3]]
-    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=4, values_only=True))
+    header_row = 2 if sheet == "回填後" else 3
+    headers = [c.value for c in ws[header_row]]
+    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=header_row + 1, values_only=True))
     return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
 
 
-def test_column_order_is_the_real_sheet_header_and_the_result_keeps_it(saved):
-    """參考條件表欄位順序 = 真實 樣本清單 第 3 列的具名欄；「回填後」照它排，沒有表頭的欄留在後面（Issue #173）。"""
-    fmt = CONFIG.reference_format
-    real = [c.value for c in openpyxl.load_workbook(REFERENCE)["樣本清單"][3]]
-    assert [h for h in real if h is not None] == list(fmt.column_order)
-    out = [c.value for c in openpyxl.load_workbook(saved[1].output)["回填後"][3]]
-    assert out[: len(fmt.column_order)] == list(fmt.column_order)
-    assert not any(out[len(fmt.column_order) :])
+def test_the_result_is_the_import_format(saved):
+    """真實 樣本清單 核對後，「回填後」是匯入格式（第 2 列表頭，Issue #203），不是 樣本清單 的欄位。"""
+    imp = CONFIG.reference_format.import_format
+    out = [c.value for c in openpyxl.load_workbook(saved[1].output)["回填後"][imp.header_row]]
+    assert out == list(imp.columns)
 
 
 @requires(TO_FILL)  # 回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）
@@ -147,7 +146,7 @@ def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
     assert set(got) == set(codes), "「回填後」只有通過且回填的列"
     for code in codes:
         assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code
-        assert [got[code][c] for c in CHECKED_COLUMNS] == ["V", "V"], code
+        assert got[code]["TS/IIS完成檢核"] == "V", code
     # 期初定價 VWAP：價格欄在待回補表上空白，回填後等於已確認表上的價格（四捨五入到 4 位，Issue #122）
     vwap = vwap_codes(TO_FILL) & set(codes)
     assert len(vwap) >= 1, "BARC 的期初定價 VWAP 那列有回填"

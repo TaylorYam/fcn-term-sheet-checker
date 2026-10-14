@@ -17,6 +17,7 @@ from typing import Any
 import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.workbook import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from ..config import ReferenceFormat
 from ..ingestion import IngestionError
@@ -206,6 +207,16 @@ def locate(wb: Workbook, fmt: ReferenceFormat) -> SheetLayout:
     return SheetLayout(ws.title, rows[0])
 
 
+def header_columns(ws: Worksheet, layout: SheetLayout) -> dict[str, list[int]]:
+    """表頭的欄名 → 欄號（由左到右；同名欄有多個欄號，無表頭的欄略過）。讀檔、核對結果檔與回報包共用。"""
+    out: dict[str, list[int]] = {}
+    for col in range(1, ws.max_column + 1):
+        header = normalize_cell(ws.cell(row=layout.header_row, column=col).value)
+        if header is not None:
+            out.setdefault(str(header), []).append(col)
+    return out
+
+
 def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
     if not path.is_file():
         raise IngestionError("reference_not_found", f"找不到參考條件表檔案：{path.name}")
@@ -219,11 +230,7 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
     def ref(cell: str) -> str:
         return f"{layout.sheet}!{cell}"
 
-    by_header: dict[str, list[int]] = {}  # 欄名 → 欄號（無表頭的欄一律忽略）
-    for col in range(1, ws.max_column + 1):
-        header = normalize_cell(ws.cell(row=layout.header_row, column=col).value)
-        if header is not None:
-            by_header.setdefault(str(header), []).append(col)
+    by_header = header_columns(ws, layout)
     problems = _column_problems(fmt, by_header)
     if problems:
         raise IngestionError(
@@ -269,9 +276,9 @@ def _column_problems(fmt: ReferenceFormat, by_header: Mapping[str, Sequence[int]
     """表頭（欄名 → 欄號）的必要欄問題：缺少必要欄、會讀到的欄（[columns] 的欄與發行機構）重複；沒有問題時為空。
 
     同一標準欄位的欄名（例：承作幣別、計價幣別）合起來算一欄：有一個就不缺，出現兩次以上就算重複。
-    不在格式設定的欄一律不管。依參考條件表欄位順序列出。"""
+    不在格式設定的欄一律不管。依匯入格式的欄位順序列出（不在匯入格式的 TS、IIS、發行機構排最後）。"""
     groups = [*header_names(fmt).values(), [fmt.issuer_column]]  # 每組是同一欄的各種欄名
-    rank = {h: i for i, h in enumerate(fmt.column_order)}
+    rank = {h: i for i, h in enumerate(fmt.import_format.columns)}
     ordered = sorted(groups, key=lambda hs: min(rank.get(h, len(rank)) for h in hs))
     optional = {*fmt.optional_columns, fmt.issuer_column}
     missing = [

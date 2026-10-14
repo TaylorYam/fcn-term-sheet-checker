@@ -26,6 +26,7 @@ from harness import CONFIG, ISSUER_PREFIXES, REVIEW_STANDARD, check_all, load_co
 from pdf_writer import Edit
 from reference_synth import DATE_FORMAT, REFERENCE_FORMAT, REFERENCE_HEADERS, build_reference_sheet, reference_row
 from synth import SYNTH_ISIN, Spec, barc_adapter, build_iis_pdf, build_pdf, schedule_rows
+from test_import_format import IMPORT_HEADERS
 
 PASS, MISMATCH, REVIEW, ERROR = (
     CheckStatus.PASS,
@@ -47,10 +48,12 @@ def batch(tmp_path: Path, pdfs: list[Path], rows: list[dict], *, sheet: Path | N
 
 
 def sheet_rows(path: Path, sheet: str = "回填後") -> dict[str, dict]:
-    """TDCC Code → 該列（第 3 列表頭、第 4 列起資料）；預設讀核對結果檔的「回填後」。"""
+    """TDCC Code → 該列；預設讀核對結果檔的「回填後」（匯入格式：第 2 列表頭、第 3 列起資料），
+    其他工作表（合成的 樣本清單）是第 3 列表頭、第 4 列起資料。"""
     ws = openpyxl.load_workbook(path)[sheet]
-    headers = [c.value for c in ws[3]]
-    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=4, values_only=True))
+    header_row = 2 if sheet == "回填後" else 3
+    headers = [c.value for c in ws[header_row]]
+    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=header_row + 1, values_only=True))
     return {d["TDCC Code"]: d for d in rows if d.get("TDCC Code")}
 
 
@@ -67,7 +70,9 @@ def error_rows(path: Path) -> list[dict]:
 
 
 def header_cell(ws, header: str, row: int):
-    return ws.cell(row, next(c.column for c in ws[3] if c.value == header))
+    """某欄名在第 `row` 列的格子；「回填後」表頭在第 2 列，合成的 樣本清單 在第 3 列。"""
+    header_row = 2 if ws.title == "回填後" else 3
+    return ws.cell(row, next(c.column for c in ws[header_row] if c.value == header))
 
 
 def problems(item) -> list[tuple[str, str, str]]:
@@ -166,7 +171,7 @@ def test_already_filled_matching_values_pass_and_stay_unchanged(tmp_path):
     assert item.report.status == PASS, problems(item)
     assert {d.action for d in item.report.backfill} == {"match"}
     d = row_of(receipt.output, spec.product_code)
-    assert (d["TS"], d["IIS"], d["ISIN Code"], d["發行日"]) == ("V", "V", SYNTH_ISIN, issue)
+    assert (d["TS/IIS完成檢核"], d["ISIN Code"], d["發行日"]) == ("V", SYNTH_ISIN, issue)
     assert slots(d) == [first] + ["-"] * 4 + [spec.final_date] + ["-"] * 6
 
 
@@ -484,7 +489,7 @@ def test_missing_required_column_is_a_whole_batch_error(tmp_path):
 
 def test_company_original_sheet_checks_by_required_columns_only(tmp_path):
     """公司原始待建檔表（Issue #199）：工作表名稱不同、表頭在第 2 列、沒有 TS／IIS／發行機構、幣別欄叫計價幣別、
-    多出分公司等欄；只要必要欄都在就照常核對與回填，「回填後」補上 TS、IIS 並打勾。"""
+    多出分公司等欄；只要必要欄都在就照常核對與回填，「回填後」的 TS/IIS完成檢核 打勾。"""
     spec = Spec()
     dropped = {"TS", "IIS", "庫存狀態", "當日比價", "發行機構"}
     headers = ["TS/IIS完成檢核", "交易日期"]
@@ -508,24 +513,18 @@ def test_company_original_sheet_checks_by_required_columns_only(tmp_path):
     assert ws.sheet_state == "visible"
     header = {c.value: c.column for c in ws[2] if c.value}
     assert ws.cell(3, header["TDCC Code"]).value == spec.product_code
-    assert (ws.cell(3, header["TS"]).value, ws.cell(3, header["IIS"]).value) == ("V", "V")
+    assert ws.cell(3, header["TS/IIS完成檢核"]).value == "V"
     assert ws.cell(3, header["ISIN Code"]).value == SYNTH_ISIN
 
 
 # ---------------------------------------------------------------- 核對結果檔
 
 
-def test_result_file_keeps_only_passing_rows_in_sheet_order_with_the_original_layout(tmp_path):
+def test_result_file_keeps_only_passing_rows_in_sheet_order(tmp_path):
     a, b, c, d = (Spec(product_code=f"02919999000{n}") for n in (1, 2, 3, 4))
     rows = [reference_row(a), reference_row(b, **{"K(%)": 71}), reference_row(c), reference_row(d)]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
-    wb = openpyxl.load_workbook(sheet)
-    ws = wb["樣本清單"]
-    ws["A1"] = "FCN 參考條件"
-    ws.column_dimensions["E"].width = 17
-    for r in range(4, 8):
-        ws.row_dimensions[r].height = 20 + r
-    wb.save(sheet)
+    edit_sheet(sheet, lambda wb: setattr(wb["樣本清單"].column_dimensions["E"], "width", 17))  # Product
     before = sheet.read_bytes()
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, s) for s in (c, b, a)], [], sheet=sheet)  # d 這批沒選到
 
@@ -535,52 +534,42 @@ def test_result_file_keeps_only_passing_rows_in_sheet_order_with_the_original_la
     assert list(tmp_path.glob("*_回填_*.xlsx")) == []
     out = openpyxl.load_workbook(receipt.output)
     assert out.sheetnames == ["回填後", "錯誤清單"], "原檔其他工作表不帶入"
-    ws, original = out["回填後"], openpyxl.load_workbook(sheet)["樣本清單"]
-    assert [[x.value for x in r] for r in ws.iter_rows(max_row=3)] == [
-        [x.value for x in r] for r in original.iter_rows(max_row=3)
-    ]
-    assert ws.column_dimensions["E"].width == 17
+    ws = out["回填後"]
     assert list(sheet_rows(receipt.output)) == [a.product_code, c.product_code], "只留通過的列，順序照原表"
-    assert ws.max_row == 5
-    assert [ws.row_dimensions[r].height for r in (4, 5)] == [24, 26], "列高跟著列走"
-    for r in (4, 5):
+    assert ws.max_row == 4
+    assert ws.column_dimensions[header_cell(ws, "Product", 3).column_letter].width == 17, "欄寬取同名欄"
+    for r in (3, 4):
         assert header_cell(ws, "發行日", r).number_format == DATE_FORMAT, "回填的日期沿用表上既有日期格式"
         assert header_cell(ws, "比價日_2", r).value == "-"
 
 
-def test_result_file_puts_columns_in_the_reference_column_order_whatever_the_sheet_order(tmp_path):
+def test_result_file_is_the_import_format_whatever_the_sheet_order(tmp_path):
     spec = Spec()
     shuffled = list(reversed(REFERENCE_HEADERS))
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=shuffled)
 
     def change(wb):
         ws = wb["樣本清單"]
-        ws.cell(1, shuffled.index("發行日") + 1, "標題跟著欄走")
         ws.column_dimensions[ws.cell(3, shuffled.index("發行日") + 1).column_letter].width = 23
-        ws.column_dimensions[ws.cell(3, shuffled.index("TS") + 1).column_letter].width = 4
 
     edit_sheet(sheet, change)
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
 
     assert receipt.filled(outcome.items[0])
     ws = openpyxl.load_workbook(receipt.output)["回填後"]
-    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS, "表頭照參考條件表欄位順序"
-    issue = header_cell(ws, "發行日", 4)
-    assert ws.cell(1, issue.column).value == "標題跟著欄走", "表頭以上的列跟著欄走"
-    assert ws.column_dimensions[issue.column_letter].width == 23, "欄寬跟著欄走"
-    assert ws.column_dimensions["A"].width == 4
+    assert [c.value for c in ws[2]] == IMPORT_HEADERS, "表頭照匯入格式"
+    issue = header_cell(ws, "發行日", 3)
+    assert ws.column_dimensions[issue.column_letter].width == 23, "欄寬取同名欄"
     assert issue.value.date() == spec.issue_date and issue.number_format == DATE_FORMAT
     row = row_of(receipt.output, spec.product_code)
-    assert (row["TS"], row["IIS"], row["ISIN Code"]) == ("V", "V", SYNTH_ISIN)
-    assert row["UL_1"] == spec.underlyings[0].ticker and row["發行機構"] == "Barclays"
+    assert (row["TS/IIS完成檢核"], row["ISIN Code"], row["UL_1"]) == ("V", SYNTH_ISIN, spec.underlyings[0].ticker)
     filled = slots(row)
     assert isinstance(filled[0], dt.date) and filled[6:] == ["-"] * 6, "回填的比價日落在各自的欄"
 
 
-def test_column_format_running_to_the_sheet_edge_does_not_blow_up_the_reorder(tmp_path):
+def test_column_format_running_to_the_sheet_edge_does_not_blow_up_the_result(tmp_path):
     spec = Spec()
-    shuffled = list(reversed(REFERENCE_HEADERS))
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=shuffled)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
 
     def change(wb):
         ws = wb["樣本清單"]
@@ -590,44 +579,36 @@ def test_column_format_running_to_the_sheet_edge_does_not_blow_up_the_reorder(tm
     edit_sheet(sheet, change)
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
     ws = openpyxl.load_workbook(receipt.output)["回填後"]
-    assert receipt.filled(outcome.items[0]) and ws.max_column < 100
-    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS
+    assert receipt.filled(outcome.items[0]) and ws.max_column == len(IMPORT_HEADERS)
 
 
-def test_missing_unchecked_column_is_not_a_problem_and_comes_back_blank_in_its_standard_place(tmp_path):
+def test_missing_unchecked_column_is_not_a_problem_and_comes_back_blank(tmp_path):
     spec = Spec()
     headers = [h for h in REFERENCE_HEADERS if h not in ("UF", "UL_3_Memo")]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=headers)
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
 
     assert problems(outcome.items[0]) == [] and receipt.filled(outcome.items[0]), "少了不核對的欄不提示"
-    ws = openpyxl.load_workbook(receipt.output)["回填後"]
-    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS, "補回的欄在原位，其他欄不動"
-    uf = header_cell(ws, "UF", 4)
-    assert uf.value is None and ws.cell(1, uf.column).value is None, "補回的欄只有表頭"
-    assert header_cell(ws, "UL_3_Memo", 4).value is None
-    assert header_cell(ws, "Coupon p.a. (%)", 4).value == float(spec.annual)
+    row = row_of(receipt.output, spec.product_code)
+    assert (row["UF"], row["UL_3_Memo"]) == (None, None), "表上沒有的欄只有表頭"
+    assert row["Coupon p.a. (%)"] == float(spec.annual)
 
 
-def test_columns_without_a_standard_header_go_to_the_right_in_their_original_order(tmp_path):
+def test_columns_the_import_format_does_not_have_are_left_out(tmp_path):
     spec = Spec()
-    shuffled = list(reversed(REFERENCE_HEADERS))
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=shuffled)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, 庫存狀態="已到期")])
 
     def change(wb):
         ws = wb["樣本清單"]
         ws.insert_cols(10)  # 夾在中間、沒有表頭的欄
         ws.cell(4, 10, "中間的註記")
-        ws.cell(4, ws.max_column + 2, "最右的註記")
 
     edit_sheet(sheet, change)
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
 
     assert receipt.filled(outcome.items[0])
-    ws = openpyxl.load_workbook(receipt.output)["回填後"]
-    assert [c.value for c in ws[3]][: len(REFERENCE_HEADERS)] == REFERENCE_HEADERS
-    notes = [c.value for c in ws[4][len(REFERENCE_HEADERS) :] if c.value is not None]
-    assert notes == ["中間的註記", "最右的註記"], "沒有表頭的欄接在最右邊，保持原相對順序"
+    values = [c.value for r in openpyxl.load_workbook(receipt.output)["回填後"].iter_rows() for c in r]
+    assert "中間的註記" not in values and "已到期" not in values and "庫存狀態" not in values
 
 
 def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
@@ -663,74 +644,40 @@ def edit_sheet(sheet: Path, change) -> None:
     wb.save(sheet)
 
 
-def test_filter_range_shrinks_with_the_kept_rows_and_the_file_opens_on_the_filled_sheet(tmp_path):
-    a, b = Spec(), Spec(product_code="029199990002")
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(a), reference_row(b, **{"K(%)": 71})])
-
-    def change(wb):
-        wb["樣本清單"].auto_filter.ref = "A3:F5"
-        wb.active = wb["詢價表格"]
-
-    edit_sheet(sheet, change)
-    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, s) for s in (a, b)], [], sheet=sheet)
-    out = openpyxl.load_workbook(receipt.output)
-    assert out["回填後"].auto_filter.ref == "A3:F4"
-    assert out.active.title == "回填後"
-
-
 @pytest.mark.parametrize(
-    "feature,change",
+    "change",
     [
-        ("合併儲存格", lambda ws: ws.merge_cells("C4:D4")),  # 庫存狀態、當日比價（不回填）
-        ("合併儲存格", lambda ws: ws.merge_cells("A4:B4")),  # 蓋到回填欄 IIS：回填前就要擋下
-        ("合併儲存格", lambda ws: ws.merge_cells("G4:H4")),  # 蓋到回填欄 ISIN Code
-        ("格式化條件", lambda ws: ws.conditional_formatting.add("H4:H9", CellIsRule(operator="equal", formula=["0"]))),
-        ("資料驗證", lambda ws: ws.add_data_validation(DataValidation(type="list", formula1='"Y,N"', sqref="T4:T9"))),
-        ("公式", lambda ws: ws.cell(1, 1, "=COUNTA(E4:E9)")),
+        lambda ws: ws.merge_cells("C4:D4"),  # 庫存狀態、當日比價（不回填）
+        lambda ws: ws.merge_cells("A4:B4"),  # 蓋到回填欄 IIS
+        lambda ws: ws.merge_cells("G4:H4"),  # 蓋到回填欄 ISIN Code
+        lambda ws: ws.merge_cells("A1:C1"),  # 表頭以上
+        lambda ws: ws.conditional_formatting.add("H4:H9", CellIsRule(operator="equal", formula=["0"])),
+        lambda ws: ws.add_data_validation(DataValidation(type="list", formula1='"Y,N"', sqref="T4:T9")),
+        lambda ws: ws.cell(1, 1, "=COUNTA(E4:E9)"),
+        lambda ws: (setattr(ws.auto_filter, "ref", "A3:F4"), ws.auto_filter.add_filter_column(0, ["-"])),
     ],
 )
-def test_layout_that_cannot_be_trimmed_safely_writes_no_result_file(tmp_path, feature, change):
+def test_any_sheet_layout_still_gives_a_clean_result_file(tmp_path, change):
+    """「回填後」照匯入格式重新產生（Issue #203）：合併儲存格、格式化條件、資料驗證、公式、篩選都不影響、也不帶入。"""
     spec = Spec()
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
-    edit_sheet(sheet, lambda wb: change(wb["樣本清單"]))
+
+    def edit(wb):
+        change(wb["樣本清單"])
+        wb.active = wb["詢價表格"]
+
+    edit_sheet(sheet, edit)
+    before = sheet.read_bytes()
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
-    assert receipt.output is None and receipt.status == ERROR and not receipt.filled(outcome.items[0])
-    e = receipt.errors[0]
-    assert (e.rule_id, e.reason_code) == ("output.result_file", "result_layout_unsupported")
-    assert feature in e.message
-    assert list((tmp_path / "reports").glob("*_核對結果_*.xlsx")) == []
-    assert receipt.record is not None and receipt.record.exists()
-
-
-@pytest.mark.parametrize("shuffled", [True, False])
-def test_merged_title_cells_block_the_result_file_only_when_columns_must_move(tmp_path, shuffled):
-    spec = Spec()
-    headers = list(reversed(REFERENCE_HEADERS)) if shuffled else None
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=headers)
-    edit_sheet(sheet, lambda wb: wb["樣本清單"].merge_cells("A1:C1"))
-    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
-    if shuffled:
-        assert receipt.output is None and not receipt.filled(outcome.items[0])
-        e = receipt.errors[0]
-        assert (e.reason_code, "合併儲存格" in e.message) == ("result_layout_unsupported", True)
-    else:
-        assert receipt.filled(outcome.items[0]), "已照參考條件表欄位順序，不用重排，照舊產生"
-
-
-def test_filter_criteria_block_the_result_file_when_columns_must_move(tmp_path):
-    spec = Spec()
-    shuffled = list(reversed(REFERENCE_HEADERS))
-    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers=shuffled)
-
-    def change(wb):
-        ws = wb["樣本清單"]
-        ws.auto_filter.ref = f"A3:{get_column_letter(len(shuffled))}4"
-        ws.auto_filter.add_filter_column(0, ["-"])
-
-    edit_sheet(sheet, change)
-    outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
-    assert receipt.output is None and not receipt.filled(outcome.items[0])
-    assert "篩選或排序條件" in receipt.errors[0].message
+    assert receipt.status == PASS and receipt.filled(outcome.items[0])
+    assert sheet.read_bytes() == before, "原檔不動"
+    out = openpyxl.load_workbook(receipt.output)
+    ws = out["回填後"]
+    assert out.active.title == "回填後"
+    assert row_of(receipt.output, spec.product_code)["ISIN Code"] == SYNTH_ISIN
+    assert not ws.merged_cells.ranges and not list(ws.conditional_formatting)
+    assert not ws.data_validations.dataValidation and ws.auto_filter.ref is None
+    assert not any(c.data_type == "f" for r in ws.iter_rows() for c in r)
 
 
 def test_existing_result_file_is_never_overwritten(tmp_path):
@@ -755,19 +702,21 @@ def test_config_problem_is_reported_when_loading_the_config_and_nothing_is_writt
 @pytest.mark.parametrize(
     "old,new,named",
     [
-        ('"ISIN Code", ', "", "ISIN Code"),  # 核對欄沒排進參考條件表欄位順序
-        ('"發行機構", ', "", "發行機構"),  # 配對上手用的欄也要在
+        ('"ISIN Code", ', "", "ISIN Code"),  # 核對欄沒排進匯入格式
+        ('"KO(%)", ', "", "KO(%)"),
+        ('"TS/IIS完成檢核", ', "", "TS/IIS完成檢核"),  # checked_column 要在
         ('"UF",', '"UF", "UF",', "UF"),  # 重複
+        ("header_row = 2", "header_row = 1", "header_row"),  # 第 1 列是標題
     ],
 )
-def test_column_order_that_disagrees_with_the_column_map_is_a_config_problem(tmp_path, old, new, named):
+def test_import_format_that_disagrees_with_the_column_map_is_a_config_problem(tmp_path, old, new, named):
     text = REFERENCE_FORMAT.read_text(encoding="utf-8")
-    start = text.index("column_order = [")
+    start = text.index("[import_format]")
     bad = tmp_path / "reference_sheet.toml"
     bad.write_text(text[:start] + text[start:].replace(old, new, 1), encoding="utf-8")
     with pytest.raises(IngestionError) as raised:
         load_config(reference_format=bad)
-    assert raised.value.reason_code == "config_invalid" and "參考條件表欄位順序" in str(raised.value)
+    assert raised.value.reason_code == "config_invalid" and "匯入格式" in str(raised.value)
     assert named in str(raised.value)
 
 
@@ -1003,7 +952,7 @@ def test_released_term_sheet_is_filled_like_a_pass(tmp_path, row, original):
     result = receipt.output
     assert list(sheet_rows(result)) == [spec.product_code], "回填後只有這一列"
     row = row_of(result, spec.product_code)
-    assert (row["TS"], row["IIS"], row["ISIN Code"]) == ("V", "V", SYNTH_ISIN), "人工放行的也打勾"
+    assert (row["TS/IIS完成檢核"], row["ISIN Code"]) == ("V", SYNTH_ISIN), "人工放行的也打勾"
     assert error_rows(result) == [], "人工放行的說明書不列入錯誤清單"
     assert receipt.filled(item)
     entry, iis_entry = record["items"]

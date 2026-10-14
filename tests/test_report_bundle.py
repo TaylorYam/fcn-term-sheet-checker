@@ -134,8 +134,12 @@ def test_known_unsupported_and_released_documents_are_left_out(tmp_path):
     assert not (tmp_path / "out").exists()
 
 
+# 認得的欄：匯入格式、核對欄與發行機構（Issue #203）；舊 樣本清單 的庫存狀態、當日比價不在其中
+KNOWN_HEADERS = [h for h in REFERENCE_HEADERS if h not in ("庫存狀態", "當日比價")]
+
+
 def test_reference_extract_keeps_only_the_known_columns(tmp_path):
-    """合成表最右側另有一個無表頭欄（不在參考條件表欄位順序）：匯出時拿掉。"""
+    """合成表最右側另有一個無表頭欄（不在匯入格式）：匯出時拿掉。"""
     ok, bad, rows = failing_pair()
     rows[1]["庫存狀態"] = "存續"  # 讓最右側的無表頭欄有值
     outcome, sheet = checked(tmp_path, [ok, bad], rows)
@@ -144,13 +148,13 @@ def test_reference_extract_keeps_only_the_known_columns(tmp_path):
     out = export(outcome, tmp_path)
 
     ws = openpyxl.load_workbook(out / "參考條件表_未通過.xlsx")["樣本清單"]
-    assert [c.value for c in ws[3]] == REFERENCE_HEADERS
-    assert ws.max_column == len(REFERENCE_HEADERS)
-    assert ws.cell(4, REFERENCE_HEADERS.index("交易日") + 1).is_date
+    assert [c.value for c in ws[3]] == KNOWN_HEADERS
+    assert ws.max_column == len(KNOWN_HEADERS)
+    assert ws.cell(4, KNOWN_HEADERS.index("交易日") + 1).is_date
 
 
 def test_reference_extract_drops_named_columns_the_tool_does_not_know(tmp_path):
-    """公司原始待建檔表的其他欄（例：分公司）不帶出去。"""
+    """工具不認得的欄（例：不在匯入格式的「分公司」）不帶出去。"""
     ok, bad, rows = failing_pair()
     for r in rows:
         r["分公司"] = "台北"
@@ -160,12 +164,13 @@ def test_reference_extract_drops_named_columns_the_tool_does_not_know(tmp_path):
     out = export(outcome, tmp_path)
 
     ws = openpyxl.load_workbook(out / "參考條件表_未通過.xlsx")["樣本清單"]
-    assert [c.value for c in ws[3]] == REFERENCE_HEADERS
+    assert [c.value for c in ws[3]] == KNOWN_HEADERS
     assert all(v != "台北" for row in ws.iter_rows(values_only=True) for v in row)
 
 
 def test_company_original_sheet_keeps_its_layout_and_reruns_the_same(tmp_path):
-    """公司原始待建檔表（Issue #199）：工作表名稱、表頭列照原表，「計價幣別」照樣帶出，其他欄拿掉；重跑結果相同。"""
+    """公司原始待建檔表（Issue #199）：工作表名稱、表頭列照原表，匯入格式的欄（交易日期、計價幣別、分公司）照樣帶出；
+    重跑結果相同。"""
     ok, bad, rows = failing_pair()
     dropped = {"TS", "IIS", "庫存狀態", "當日比價", "發行機構", "承作幣別"}
     headers = ["交易日期", *(h for h in REFERENCE_HEADERS if h not in dropped), "計價幣別", "分公司_1"]
@@ -181,7 +186,7 @@ def test_company_original_sheet_keeps_its_layout_and_reruns_the_same(tmp_path):
     extract = out / "參考條件表_未通過.xlsx"
     ws = openpyxl.load_workbook(extract).worksheets[0]
     assert ws.title == "ELN待建檔_測試"
-    assert [c.value for c in ws[2]] == [h for h in headers if h not in ("交易日期", "分公司_1")]
+    assert [c.value for c in ws[2]] == headers
     assert [r["TDCC Code"] for r in sheet_dicts(extract, "ELN待建檔_測試", header_row=2)] == [bad.product_code]
     again = check_all(extract, sorted((out / "PDF").glob("*.pdf")), CONFIG)
     assert sorted((i.term_sheet.name, i.report.status, i.problem_messages) for i in again.items) == before
