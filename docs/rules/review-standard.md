@@ -163,7 +163,7 @@
 - **禁用語允許片語**（`wording.allowed_phrases`，所有上手生效）：加入「受託投資、受託買賣之投資標的」（警語 7.）、「受託投資或銷售本商品」（投資人須知警語 9.）。片語刻意寫窄：未支援的 CA 樣本有「受託投資或銷售時」「受託投資或銷售或OSU」，不連帶放過；已支援上手的樣本都沒有這兩種寫法，結果不變。
 - **商品名稱樣板**（`product_name.citi`）：中文 `CGMHI {天期} 個月{幣別中文}計價{autocall_zh}連結{underlying_zh}並由花旗集團保證之固定配息結構型商品(無擔保) (不保本)（下稱「本商品」）`，`autocall_memory_zh = "(記憶式自動提前出場)"`、`autocall_zh = "(自動提前出場)"`（無自動提前出場空白）、`single_zh = "單一連結標的"`、`basket_zh = "一籃子連結標的中表現最差"`；英文 `{天期}-Month {幣別代碼} Fixed Coupon {autocall_en}Note linked to {underlying_en} issued by Citigroup Global Markets Holdings Inc. and guaranteed by Citigroup Inc. (Unsecured) (Non-principal protected)`，`autocall_en = "Autocall "`（記憶式同）、`single_en = "Single Underlying"`、`basket_en = "the Worst Performing Underlying in the basket"`；CNH 英文名稱寫 `CNH`。比對時忽略空白、括號全半形。只用 §2.3 現有佔位符，不需要新機制。
 - **發行機構全名**（`issuer_name.citi`）：`Citigroup Global Markets Holdings Inc.`（只有英文法人名）；封面、第一章 §3、第二章 §1(1) 三處相同；封面名稱後的 `(“CGMHI”)` 不算名稱。
-- **保證機構名稱**（`guarantor_name.citi`，cover／ch1／ch2）：三處皆 `Citigroup Inc.花旗集團`；地址不核對。投資人須知警語 5. 用 cover；相關機構 2. 只寫中文 `花旗集團`，建議比中文部分（待作業人員確認）。
+- **保證機構名稱**（`guarantor_name.citi`，cover／ch1／ch2）：三處皆 `Citigroup Inc.花旗集團`；地址不核對。投資人須知警語 5. 用 cover；相關機構 2. 只寫中文 `花旗集團`，比中文部分（2026-10-14 確認）。
 - **總代理人名稱**（`agent_name.citi`，cover／ch2）：`花旗環球證券股份有限公司`；地址電話、負責人不核對。
 - **商品種類**（`product_type.citi`）：`連結股權結構型商品`，不隨標的數改變。
 - **發行不成立門檻**（`minimum_issue_size.citi`）：第四章 §7 `等值30 萬美元`（JPY、CNH 商品也寫美元；2026-10-14 確認納入）。

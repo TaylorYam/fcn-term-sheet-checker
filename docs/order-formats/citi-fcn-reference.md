@@ -11,7 +11,7 @@
 
 實作時要登記：
 
-- `config/reference_sheet.toml` `[issuer_values]`：Citi 在 `發行機構` 欄的寫法。待建檔表沒有這欄（不是必要欄，以商品代號前 3 碼判定），樣本看不到寫法；實作時先問作業人員，未確認前不登記也不影響核對（表上沒有這欄就不確認）。
+- `config/reference_sheet.toml` `[issuer_values]`：`CITI = "Citi"`（`發行機構` 欄的寫法，2026-10-14 作業人員確認；待建檔表沒有這欄時以商品代號前 3 碼判定）。
 - `src/fcn_checker/issuers.py`：Citi 範本（`citi-zh-pd`、投資人須知 `citi-zh-iis`）。
 
 ## 2. 欄位對照
