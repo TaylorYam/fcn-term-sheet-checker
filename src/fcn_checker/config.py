@@ -92,6 +92,7 @@ class IssuerStandard:
     distributor_name_equivalents: tuple[str, ...] = ()  # 名稱可接受的其他寫法（所有上手適用；SG 第二章簡稱）
     # 下列只有審查標準有該上手分節時才核對（BNP）
     guarantor_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch1／ch2）→ 保證機構名稱
+    guarantor_name_equivalents: tuple[str, ...] = ()  # 保證機構名稱可接受的其他寫法（所有出處；SG 投資人須知）
     agent_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch2）→ 總代理人名稱（SG）
     product_type: str | None = None  # 封面商品種類固定值
     minimum_issue_size: str | None = None  # 第四章發行不成立門檻的金額寫法
@@ -130,6 +131,7 @@ class ReviewStandard:
     risk_level_formats: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 風險等級寫法
     issuer_name_ignore: dict[str, frozenset[str]] = field(default_factory=dict)  # 上手 → 全名比對另外忽略的差異
     guarantor_names: dict[str, dict[str, str]] = field(default_factory=dict)  # 上手 → 出處 → 保證機構名稱
+    guarantor_name_equivalents: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 其他寫法
     agent_names: dict[str, dict[str, str]] = field(default_factory=dict)  # 上手 → 出處 → 總代理人名稱
     product_types: dict[str, str] = field(default_factory=dict)  # 上手 → 封面商品種類固定值
     minimum_issue_sizes: dict[str, str] = field(default_factory=dict)  # 上手 → 發行不成立門檻寫法
@@ -167,6 +169,7 @@ class ReviewStandard:
             distributor_name_equivalents=self.distributor_name_equivalents,
             iis_fixed_warning_occurrences=self.iis_fixed_warning_occurrences.get(key),
             guarantor_names=dict(self.guarantor_names.get(key, {})),
+            guarantor_name_equivalents=self.guarantor_name_equivalents.get(key, ()),
             agent_names=dict(self.agent_names.get(key, {})),
             product_type=self.product_types.get(key),
             minimum_issue_size=self.minimum_issue_sizes.get(key),
@@ -446,6 +449,9 @@ def load_review_standard(path: Path) -> ReviewStandard:
             iis_pages=int(d["iis"]["pages"]),
             iis_fixed_warning_occurrences={k: int(v) for k, v in d["iis"]["fixed_warning_occurrences"].items()},
             guarantor_names=_place_texts(d.get("guarantor_name", {}), "guarantor_name", GUARANTOR_PLACES),
+            guarantor_name_equivalents=_per_issuer_lists(
+                d.get("guarantor_name_equivalents", {}), "guarantor_name_equivalents"
+            ),
             agent_names=_place_texts(d.get("agent_name", {}), "agent_name", AGENT_PLACES),
             product_types=_per_issuer_text(d.get("product_type", {}), "product_type"),
             minimum_issue_sizes=_per_issuer_text(d.get("minimum_issue_size", {}), "minimum_issue_size"),

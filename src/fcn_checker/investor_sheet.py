@@ -29,6 +29,8 @@ IIS_FIELDS: dict[str, str] = {
     "issuer_names_zh": "tuple[Occurrence, ...]：各處只寫中文的發行機構名稱（只比審查標準全名括號前的中文部分）",
     "guarantor_names": "tuple[Occurrence, ...]：寫保證機構全名的出處（= 審查標準 guarantor_name.<上手>.cover，BNP）",
     "guarantor_names_short": "tuple[Occurrence, ...]：寫保證機構簡稱的出處（= 審查標準 guarantor_name.<上手>.ch1，BNP）",
+    "agent_names": "tuple[Occurrence, ...]：寫總代理人全名的出處（= 審查標準 agent_name.<上手>.cover，SG）",
+    "has_autocall": "bool：有沒有自動提前出場（SG；須等於同商品說明書）",
     "distributor_names": "tuple[Occurrence, ...]：各處受託或銷售機構名稱",
     "distributor_addresses": "tuple[Occurrence, ...]：各處受託或銷售機構地址",
     "distributor_phones": "tuple[Occurrence, ...]：各處受託或銷售機構電話",

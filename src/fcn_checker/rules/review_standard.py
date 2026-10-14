@@ -501,10 +501,29 @@ def _guarantor_name(ctx: Context) -> list[CheckResult]:
     沒有該上手分節的上手不核對（沒有保證機構的範本）。"""
     rid = "standard.guarantor_name"
     return [
-        _fixed_text(rid, field, standard_field(ctx, field), expected, what, name, document=ctx.document)
+        _guarantor_text(ctx, rid, field, standard_field(ctx, field), expected, what, name)
         for place, expected in ctx.issuer_std.guarantor_names.items()
         for field, what, name in (GUARANTOR_PLACES[place],)
     ]
+
+
+def _guarantor_text(
+    ctx: Context, rid: str, field: str, pf: ParsedField, expected: str, what: str, name: str
+) -> CheckResult:
+    """一處保證機構名稱 = 審查標準固定值；另接受 guarantor_name_equivalents.<上手> 列出的寫法（忽略空白後相等）。"""
+    listed = ctx.issuer_std.guarantor_name_equivalents
+    if pf.ok and squash(pf.value) in {squash(v) for v in listed}:
+        return (
+            Check(rid, field, Item.standard(name), ctx.document)
+            .needs(pf)
+            .result(
+                S.PASS,
+                expected=expected,
+                actual=pf.value,
+                tolerance=f"審查標準列出的名稱等價寫法（guarantor_name_equivalents.{ctx.issuer.lower()}）",
+            )
+        )
+    return _fixed_text(rid, field, pf, expected, what, name, document=ctx.document)
 
 
 def _agent_name(ctx: Context) -> list[CheckResult]:
@@ -596,20 +615,30 @@ def _iis_occurrences(
     ]
 
 
-def _iis_guarantor_names(ctx: Context, name: str, place: str) -> list[CheckResult]:
-    """投資人須知各處保證機構名稱 = 審查標準 guarantor_name.<上手> 的固定值：寫全名的出處用 cover 的寫法、
-    寫簡稱的出處用 ch1 的寫法（BNP，同說明書封面與第一章）；沒有該值時轉人工覆核。"""
-    rid, what = "standard.guarantor_name", "保證機構名稱"
+def _iis_place_names(ctx: Context, name: str, kind: str, place: str) -> list[CheckResult]:
+    """投資人須知各處保證機構／總代理人名稱 = 審查標準 guarantor_name／agent_name.<上手> 某出處的固定值：
+    保證機構寫全名的出處用 cover、寫簡稱的出處用 ch1（BNP，同說明書封面與第一章）；總代理人用 cover（SG）。
+    沒有該值時轉人工覆核。"""
+    std = ctx.issuer_std
+    rid, what, table, names = {
+        "guarantor": ("standard.guarantor_name", "保證機構名稱", "guarantor_name", std.guarantor_names),
+        "agent": ("standard.agent_name", "總代理人名稱", "agent_name", std.agent_names),
+    }[kind]
     container = read_iis(ctx.iis, name)
     if not container.ok:
         return [Check(rid, name, Item.standard(what), ctx.document).review(container)]
-    expected = ctx.issuer_std.guarantor_names.get(place)
+    expected = names.get(place)
     if expected is None:
-        missing = f"審查標準沒有 {ctx.issuer} 的保證機構名稱（guarantor_name.{ctx.issuer.lower()}.{place}）"
+        missing = f"審查標準沒有 {ctx.issuer} 的{what}（{table}.{ctx.issuer.lower()}.{place}）"
         return [
             Check(rid, occ.field, Item.standard(occ.name), ctx.document)
             .needs(occ.value)
             .result(S.REVIEW_REQUIRED, reason="standard_missing", message=missing)
+            for occ in container.value
+        ]
+    if kind == "guarantor":
+        return [
+            _guarantor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name)
             for occ in container.value
         ]
     return [
@@ -647,7 +676,9 @@ def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[Check
             out.extend(_iis_occurrences(ctx, rid, name, expected, what, missing, kind))
     for name, place in (("guarantor_names", "cover"), ("guarantor_names_short", "ch1")):
         if provides(name):
-            out.extend(_iis_guarantor_names(ctx, name, place))
+            out.extend(_iis_place_names(ctx, name, "guarantor", place))
+    if provides("agent_names"):
+        out.extend(_iis_place_names(ctx, "agent_names", "agent", "cover"))
     if any(provides(fee_field(label)) for label in ctx.std.fees):
         out.extend(_fees(ctx))
     if provides("subscription_dates"):
