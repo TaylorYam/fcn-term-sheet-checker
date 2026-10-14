@@ -231,15 +231,29 @@ def test_blank_trustee_product_code_is_a_mismatch(tmp_path):
     assert "受託機構商品代號" in problem_message(x) and x.document_evidence
 
 
-def test_non_call_equal_to_tenor_without_ko_column_marks_ko_fields_not_applicable(tmp_path):
-    spec = Spec(ko_obs="P", memory=False, ki="none", count=2, tenor=6, first_callable=6)
-    r = check(tmp_path, spec, **{"KO(%)": 150, "UL_1_KO價": 150, "UL_2_KO價": 300})
+NON_CALL_AT_TENOR = Spec(ko_obs="P", memory=False, ki="none", count=2, tenor=6, first_callable=6)
+
+
+def test_non_call_equal_to_tenor_without_ko_column_checks_ko_at_the_initial_price(tmp_path):
+    """Non-Call = 天期時價格表沒有 KO 欄：KO 視為期初價格的 100%、KO 價 = 進場價，照常比對（Issue #202）。"""
+    r = check(tmp_path, NON_CALL_AT_TENOR, **{"KO(%)": 100, "UL_1_KO價": 100, "UL_2_KO價": 200})
     assert r.status == S.PASS, problems(r)
     ko = rule(r, "field.ko_pct")[0]
-    assert ko.status == S.NOT_APPLICABLE and "沒有自動提前出場價" in ko.message
+    assert ko.status == S.PASS and ko.document_evidence
     kos = [x for x in rule(r, "field.underlying_prices") if x.item.name.endswith("KO價")]
-    assert len(kos) == 2 and all(x.status == S.NOT_APPLICABLE and "沒有自動提前出場價" in x.message for x in kos)
-    assert all(x.status == S.PASS for x in rule(r, "field.underlying_prices") if "執行價" in x.item.name)
+    assert len(kos) == 2 and all(x.status == S.PASS for x in kos)
+
+
+@pytest.mark.parametrize(
+    "overrides, broken",
+    [
+        ({"KO(%)": 150}, "field.ko_pct"),
+        ({"UL_2_KO價": 300}, "field.underlying_prices"),
+    ],
+)
+def test_non_call_equal_to_tenor_flags_a_wrong_ko_on_the_sheet(tmp_path, overrides, broken):
+    r = check(tmp_path, NON_CALL_AT_TENOR, **{"KO(%)": 100, "UL_1_KO價": 100, "UL_2_KO價": 200, **overrides})
+    assert {(rule_id, status) for rule_id, _, status in problems(r)} == {(broken, S.MISMATCH)}, problems(r)
 
 
 def test_ko_column_missing_before_maturity_requires_review(tmp_path):
@@ -248,15 +262,14 @@ def test_ko_column_missing_before_maturity_requires_review(tmp_path):
     assert rule(r, "doc.ko_column")[0].status == S.REVIEW_REQUIRED
 
 
-def test_vwap_without_ko_column_overwrites_ko_prices_with_the_empty_value(tmp_path):
-    """期初定價 VWAP 的價格欄一律以說明書覆寫；說明書沒有 KO 價（Non-Call = 天期）時 KO 價寫空值寫法（同沒有 KI 的下限價）。"""
-    spec = Spec(ko_obs="P", memory=False, ki="none", count=2, tenor=6, first_callable=6)
-    r = check(tmp_path, spec, **{"期初定價": "VWAP", "UL_1_KO價": 150})
+def test_vwap_without_ko_column_overwrites_ko_prices_with_the_initial_price(tmp_path):
+    """期初定價 VWAP 的價格欄一律以說明書覆寫；說明書沒有 KO 欄（Non-Call = 天期）時 KO 價 = 期初價格（Issue #202）。"""
+    r = check(tmp_path, NON_CALL_AT_TENOR, **{"期初定價": "VWAP", "UL_1_KO價": 150})
     assert r.status == S.PASS, problems(r)
     cells = {d.column: d for d in r.backfill}
     assert cells["UL_1_進場價"].expected == Decimal("100.0000")
-    for column in ("UL_1_KO價", "UL_2_KO價"):  # 表上原有的 KO 價（150、200）都覆寫成空值寫法
-        assert cells[column].expected == "-" and cells[column].action == BackfillAction.OVERWRITE, column
+    assert cells["UL_1_KO價"].expected == Decimal("100.0000") and cells["UL_1_KO價"].action == BackfillAction.OVERWRITE
+    assert cells["UL_2_KO價"].expected == Decimal("200.0000")
     assert cells["UL_1_下限價"].expected == "-" and cells["UL_1_下限價"].action == BackfillAction.MATCH
     assert cells["UL_3_KO價"].expected == "-"  # 說明書沒有的標的
 

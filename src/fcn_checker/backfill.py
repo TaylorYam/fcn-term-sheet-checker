@@ -249,7 +249,7 @@ def underlying_prices(ctx: Context) -> tuple[CheckResult | None, list[CellDecisi
     """期初定價為 VWAP：UL_1～UL_5 的四個價格欄一律以說明書價格表覆寫。
 
     說明書價格表上有的標的寫說明書的值（無 KI 時下限價為空值寫法）；沒有的標的四欄都寫空值寫法。
-    說明書沒有 KO 價（MS Non-Call = 天期時沒有 KO 欄）時 KO 價也寫空值寫法（2026-10-09 確認照此規則）。
+    說明書明確判定 KO 價不適用時 KO 價也寫空值寫法（Non-Call = 天期時說明書交出 KO 價 = 期初價格，照寫）。
     不是 VWAP 時沒有結果也沒有決策（價格欄由 `field.underlying_prices` 比對）。
     """
     if not is_vwap(ctx):

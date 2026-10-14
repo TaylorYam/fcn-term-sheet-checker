@@ -119,6 +119,11 @@ class Identification:
     def unsupported(self) -> bool:
         return self.problem == PairingProblem.UNSUPPORTED
 
+    @property
+    def unsupported_variant(self) -> bool:
+        """上手支援樣態表標為不支援的樣態（Issue #207）。"""
+        return self.problem == PairingProblem.UNSUPPORTED_VARIANT
+
 
 # 辨識與配對結果的項目：只寫說明，不附雙方值
 _ISSUER_ITEM, _PRODUCT_CODE_ITEM, _FILE_NAME_ITEM = Item.note("上手"), Item.note("商品代號"), Item.note("檔名")

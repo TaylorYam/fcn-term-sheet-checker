@@ -132,7 +132,7 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
    - `核對紀錄_未通過.json`：核對紀錄中這些商品的部分。
    - `PDF/`：這些商品的說明書與投資人須知。
 
-   未通過以「錯誤清單」為準；未支援上手（例如 SG 投資人須知）不列入，只算進摘要；人工放行過的也不列入。維護者可以直接用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 重跑（PDF 檔名是辨識依據、不改名；有同名的不同 PDF 時另放 `PDF/同名<n>/`，摘要會註明，重跑時一起帶入）。資料夾已存在時不覆蓋；來源檔案核對後被改過時拒絕匯出。**回報包含真實交易資料，只能推到 Private Repo（`TaylorYam/fcn-oos-samples`），不能放進本 Repo、Issue 或 PR。**
+   未通過以「錯誤清單」為準；未支援上手（例如 SG 投資人須知）與不支援樣態不列入，只算進摘要；人工放行過的也不列入。維護者可以直接用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 重跑（PDF 檔名是辨識依據、不改名；有同名的不同 PDF 時另放 `PDF/同名<n>/`，摘要會註明，重跑時一起帶入）。資料夾已存在時不覆蓋；來源檔案核對後被改過時拒絕匯出。**回報包含真實交易資料，只能推到 Private Repo（`TaylorYam/fcn-oos-samples`），不能放進本 Repo、Issue 或 PR。**
 
 設定檔：PANEL 讀專案根目錄 `config/` 的 `review_standard.toml`、`reference_sheet.toml`、`issuer_prefixes.toml` 與 `exchange_holidays.toml`。畫面上方會顯示實際使用的設定檔路徑。
 
@@ -170,7 +170,7 @@ ruff check src tests
 - MS（已實作說明書與投資人須知）：[範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)
 - BNP（說明書與投資人須知已實作）：[範本規格](docs/templates/bnp-zh-product-description.md)、[下單資料格式](docs/order-formats/bnp-fcn-reference.md)、[核對規則](docs/rules/bnp-check-rules.md)
 - SG（已實作說明書）：[範本規格](docs/templates/sg-zh-product-description.md)、[下單資料格式](docs/order-formats/sg-fcn-reference.md)、[核對規則](docs/rules/sg-check-rules.md)
-- 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)、[MS 範本規格](docs/templates/ms-zh-iis.md)、[BNP 範本規格](docs/templates/bnp-zh-iis.md)
+- 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)、[MS 範本規格](docs/templates/ms-zh-iis.md)、[BNP 範本規格](docs/templates/bnp-zh-iis.md)、[SG 範本規格](docs/templates/sg-zh-iis.md)（待實作）
 - ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)、[0007 投資人須知與說明書成對核對](docs/adr/0007-iis-paired-with-term-sheet.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。

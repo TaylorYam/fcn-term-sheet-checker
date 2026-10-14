@@ -17,7 +17,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money, sg_scenario, sg_tables
-from .common import NUM, Hit, Mention, derived, number
+from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "sg-zh-pd"
@@ -57,8 +57,6 @@ PLAIN_WORDING = re.compile(r"(當日最差表現之連結標的|連結標的)收
 KO_D = r"觀察期間：自" + D + r"（含）起至最終評價日（含）止之每一個預定交易日"
 KO_P = r"自動提前出場事件：若於任一評價日i\(i=(\d+)-(\d+)\)"
 ABSENT_KO = "說明書沒有自動提前出場（第 8 項沒有自動提前出場事件、自動提前出場價）"
-# 無自動提前出場 = Non-Call 等於天期：機制仍在、只是不會觸發，KO 視為期初價格的 100%（參考條件表填 100／進場價）
-NO_AUTOCALL_KO_PCT = Decimal(100)
 NO_AUTOCALL_KO_NOTE = "說明書沒有自動提前出場事件（Non-Call = 天期，不會提前出場）：KO 視為期初價格的 100%"
 
 
@@ -299,7 +297,11 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
         put("autocall_redemption_pct", art8, r"自動提前出場贖回金額＝每單位面額×" + PCT, Decimal)
     else:
         fields["ko_pct"] = ParsedField(
-            "ko_pct", FieldStatus.PRESENT, NO_AUTOCALL_KO_PCT, [Evidence.of(x) for x in art8[:1]], NO_AUTOCALL_KO_NOTE
+            "ko_pct",
+            FieldStatus.PRESENT,
+            NO_AUTOCALL_KO_PCT,
+            [Evidence.of(x) for x in art8[:1]],
+            note=NO_AUTOCALL_KO_NOTE,
         )
         fields["autocall_redemption_pct"] = _absent("autocall_redemption_pct", ABSENT_KO)
     put("strike_pct", art8, r"執行價：連結標的期初價格的" + PCT, Decimal)
@@ -521,19 +523,15 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, tickers: ParsedF
         FieldStatus.PRESENT,
         tuple(
             standard_fields.PriceRow(
-                ticker, _with_ko(row["prices"], has_autocall), tuple(Evidence.of(ln) for ln in lns), name=f"k={i}"
+                ticker,
+                dict(row["prices"]) if has_autocall else ko_at_initial(row["prices"]),
+                tuple(Evidence.of(ln) for ln in lns),
+                name=f"k={i}",
             )
             for i, (ticker, row, lns) in enumerate(zip(names, rows, table.value["row_lines"], strict=True), start=1)
         ),
         list(table.evidence),
     )
-
-
-def _with_ko(prices: dict, has_autocall: bool) -> dict:
-    out = dict(prices)
-    if not has_autocall and "ko" not in out and "initial" in out:
-        out["ko"] = out["initial"]
-    return out
 
 
 # ---------------------------------------------------------------- 第 12 項
