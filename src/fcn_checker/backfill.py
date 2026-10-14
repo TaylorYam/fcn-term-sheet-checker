@@ -296,11 +296,11 @@ def checked_marks(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
     rid, key, mark, row = "backfill.checked", "checked", ctx.fmt.checked_value, ctx.order
     ovs = [row.get(k) for k in CHECKED_FIELDS]
     item = Item.group("、".join(row.header(k) or k for k in CHECKED_FIELDS), ovs)
-    unset = [k for k in CHECKED_FIELDS if row.header(k) is None]
-    if unset:
-        return _column_missing(rid, key, _missing_columns(row, unset), ovs, item), []
+    undeclared = [k for k in CHECKED_FIELDS if row.header(k) is None]  # 格式設定沒有欄名
+    if undeclared:
+        return _column_missing(rid, key, _missing_columns(row, undeclared), ovs, item), []
     decisions = [_decide(row, k, mark) for k in CHECKED_FIELDS if row.has(k)]
-    absent = [row.header(k) or k for k in CHECKED_FIELDS if not row.has(k)]
+    not_on_sheet = [row.header(k) for k in CHECKED_FIELDS if not row.has(k)]
     bad = [d for d in decisions if d.action == BackfillAction.MISMATCH]
     n = sum(d.action == BackfillAction.FILL for d in decisions)
     message = "；".join(
@@ -308,7 +308,7 @@ def checked_marks(ctx: Context) -> tuple[CheckResult, list[CellDecision]]:
         for x in (
             f"表上空白 {n} 格，說明書與投資人須知都通過或人工放行後填 {mark}" if n else "",
             f"表上已有 {mark} 以外的值，保留原值" if bad else "",
-            f"表上沒有{'、'.join(absent)}欄，核對結果檔「回填後」補上並填 {mark}" if absent else "",
+            f"表上沒有{'、'.join(not_on_sheet)}欄，核對結果檔「回填後」補上並填 {mark}" if not_on_sheet else "",
         )
         if x
     )

@@ -1,14 +1,13 @@
 """單份核對：一份說明書從配對結果到整體狀態的完整順序，所有上手共用（ADR 0005）。
 
 1. 接收批量入口的配對結果（上手、讀出的說明書、對到的參考條件表列；配對失敗時只有辨識結果）
-2. 表頭欄位檢查（rules/reference.py）
-3. 參考條件表欄位規則（rules/reference.py）
-4. 各上手共用的說明書推算規則（rules/derivation.py：價格推算）
-5. 上手說明書內部規則（Issuer.rules；只拿到讀出結果、審查標準與上手宣告的參考條件表欄位）
-6. 審查標準規則（rules/review_standard.py）
-7. Non-Call(月)、TS、IIS、ISIN、發行日、比價日、VWAP 商品的各標的價格
-8. 回填決策（backfill.py）
-9. 整體狀態
+2. 參考條件表欄位規則（rules/reference.py；表頭缺必要欄或重複時讀檔就整批錯誤，Issue #199）
+3. 各上手共用的說明書推算規則（rules/derivation.py：價格推算）
+4. 上手說明書內部規則（Issuer.rules；只拿到讀出結果、審查標準與上手宣告的參考條件表欄位）
+5. 審查標準規則（rules/review_standard.py）
+6. Non-Call(月)、TS、IIS、ISIN、發行日、比價日、VWAP 商品的各標的價格
+7. 回填決策（backfill.py）
+8. 整體狀態
 
 投資人須知（ADR 0007）另有 `check_investor_sheet`：配對結果 → 投資人須知規則（rules/iis.py：頁數、文件本身、
 參考條件表、同商品說明書）→ 範本專屬規則（IisTemplate.rules，例：MS）→ 審查標準規則（只核對範本有的項目）→ 整體狀態；

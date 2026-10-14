@@ -489,12 +489,19 @@ def test_company_original_sheet_checks_by_required_columns_only(tmp_path):
     row = reference_row(spec)
     row.update({"計價幣別": row["承作幣別"], "TS/IIS完成檢核": "待檢核", "分公司_1": "城中"})
     sheet = build_reference_sheet(tmp_path / "待建檔.xlsx", [row], headers, title="ELN待建檔_測試", header_row=2)
+
+    def hide_first(wb):  # 第一張工作表隱藏也照讀
+        wb.active = 1
+        wb["ELN待建檔_測試"].sheet_state = "hidden"
+
+    edit_sheet(sheet, hide_first)
     outcome, receipt, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [], sheet=sheet)
 
     item = outcome.items[0]
     assert item.report.status == PASS, problems(item)
     assert receipt.filled(item)
     ws = openpyxl.load_workbook(receipt.output)["回填後"]
+    assert ws.sheet_state == "visible"
     header = {c.value: c.column for c in ws[2] if c.value}
     assert ws.cell(3, header["TDCC Code"]).value == spec.product_code
     assert (ws.cell(3, header["TS"]).value, ws.cell(3, header["IIS"]).value) == ("V", "V")

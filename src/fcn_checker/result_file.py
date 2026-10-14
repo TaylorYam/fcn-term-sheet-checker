@@ -93,6 +93,7 @@ def _build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Seq
             del wb[name]
     ws = wb[layout.sheet]
     ws.title = FILLED_SHEET
+    ws.sheet_state = "visible"  # 第一張工作表隱藏時也讀它（Issue #199），「回填後」要看得到
     ws.sheet_view.tabSelected = True
     wb.active = ws
     kept = sorted(set(keep))

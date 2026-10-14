@@ -61,12 +61,17 @@ def normalize_cell(v: Any) -> Any:
     return v
 
 
+def header_names(fmt: ReferenceFormat) -> dict[str, list[str]]:
+    """標準欄位 → 格式設定的全部 Excel 欄名，依宣告順序（例：currency → 承作幣別、計價幣別）。"""
+    out: dict[str, list[str]] = {}
+    for header, std in fmt.columns.items():
+        out.setdefault(std, []).append(header)
+    return out
+
+
 def headers_of(fmt: ReferenceFormat) -> dict[str, str]:
     """標準欄位 → 格式設定的 Excel 欄名（同一標準欄位對到多個欄名時取先宣告的）。"""
-    out: dict[str, str] = {}
-    for header, std in fmt.columns.items():
-        out.setdefault(std, header)
-    return out
+    return {std: names[0] for std, names in header_names(fmt).items()}
 
 
 @dataclass
@@ -261,15 +266,13 @@ def load_reference_sheet(path: Path, fmt: ReferenceFormat) -> ReferenceSheet:
 
 
 def _column_problems(fmt: ReferenceFormat, by_header: Mapping[str, Sequence[int]]) -> list[str]:
-    """表頭（欄名 → 欄號）的必要欄問題：缺少必要欄、會讀到的欄（核對欄、回填欄、發行機構）重複；沒有問題時為空。
+    """表頭（欄名 → 欄號）的必要欄問題：缺少必要欄、會讀到的欄（[columns] 的欄與發行機構）重複；沒有問題時為空。
 
     同一標準欄位的欄名（例：承作幣別、計價幣別）合起來算一欄：有一個就不缺，出現兩次以上就算重複。
     不在格式設定的欄一律不管。依參考條件表欄位順序列出。"""
-    groups: dict[str, list[str]] = {}  # 標準欄位（發行機構欄以欄名代替）→ 欄名，依宣告順序
-    for header, std in (*fmt.columns.items(), (fmt.issuer_column, fmt.issuer_column)):
-        groups.setdefault(std, []).append(header)
+    groups = [*header_names(fmt).values(), [fmt.issuer_column]]  # 每組是同一欄的各種欄名
     rank = {h: i for i, h in enumerate(fmt.column_order)}
-    ordered = sorted(groups.values(), key=lambda hs: min(rank.get(h, len(rank)) for h in hs))
+    ordered = sorted(groups, key=lambda hs: min(rank.get(h, len(rank)) for h in hs))
     optional = {*fmt.optional_columns, fmt.issuer_column}
     missing = [
         hs[0] + (f"（或 {'、'.join(hs[1:])}）" if len(hs) > 1 else "")
