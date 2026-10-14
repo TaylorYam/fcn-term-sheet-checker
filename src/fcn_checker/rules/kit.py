@@ -20,6 +20,7 @@ from ..orders.reference import OrderRecord
 from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import Occurrence, TermSheet, is_standard, not_provided
+from ..trading_calendar import NextTradingDay, TradingCalendar
 
 
 class RuleContext(Protocol):
@@ -96,6 +97,7 @@ class IssuerContext(_IssuerStandardOf):
     issuer: str
     declared: Mapping[str, OrderValue | None]  # 上手宣告的參考條件表欄位 → 該列的值
     sheet_source: str
+    calendar: TradingCalendar  # 交易所假日表：推算一籃子預定交易日（Issue #208）
     document: DocKind = DocKind.TERM_SHEET  # 上手說明書內部規則只核對說明書
     pages: int | None = None  # 說明書 PDF 頁數（含沒有文字層的頁；頁首總頁數規則用）
 
@@ -129,8 +131,20 @@ Q4 = Decimal("0.0001")  # 價格與月配息率四捨五入到 4 位
 Q2 = Decimal("0.01")  # 金額（情境配息與損益）四捨五入到 2 位
 
 
+TRADING_DAY_TOLERANCE = "一籃子預定交易日：跳過週末與所有標的交易所的休市日（交易所假日表）"
+
+
+def next_trading_day(ctx: IssuerContext, after: dt.date) -> NextTradingDay:
+    """`after` 之後的下一個一籃子預定交易日（所有標的交易所都開市的日子；標的取自標準欄位 `underlyings`）。
+
+    提前出場觀察期的期始日用它（Issue #208）；讀不到標的、標的交易所不在假日表或超出涵蓋範圍時另附原因，
+    規則在期始日不等於它時轉人工覆核，不判不一致。"""
+    u = ctx.ts.f("underlyings")
+    return ctx.calendar.next_trading_day(after, u.value if u.ok else None)
+
+
 def next_weekday(d: dt.date) -> dt.date:
-    """後 1 個平日（只排除週末；沒有假日曆）。"""
+    """後 1 個平日（只排除週末；沒有假日曆）。交易所交易日用 `next_trading_day`。"""
     d += dt.timedelta(days=1)
     while d.weekday() >= 5:
         d += dt.timedelta(days=1)

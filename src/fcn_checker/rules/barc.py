@@ -19,9 +19,10 @@ from .kit import (
     HEADER_PCT_ITEM,
     PRICE_LABEL,
     Q4,
+    TRADING_DAY_TOLERANCE,
     Check,
     IssuerContext,
-    next_weekday,
+    next_trading_day,
     order_value,
     shown,
     to_decimal,
@@ -247,30 +248,51 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
-    """C4：第 1 期期始日為 N/A 或發行日後 1 個平日；之後各期 = 前一期期末日後 1 個平日。
+    """C4：第 1 期期始日為 N/A 或發行日後的下一個一籃子預定交易日；之後各期 = 前一期期末日後的下一個一籃子預定交易日
+    （跳過週末與標的交易所休市日，Issue #208）。
 
-    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。
+    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。標的交易所沒有假日表等無法確定的情況，
+    期始日不等於推算結果時轉人工覆核。
     """
     issue = ctx.ts.f("issue_date")
     check = Check(rid, "start", Item.expected("提前出場期始日"), ctx.document)
     if not issue.ok:
         return check.review(issue)
-    bad = []
+    message = "C4 期始日 = 前一期期末日後的下一個一籃子預定交易日；第 1 期為 N/A 或發行日後的下一個一籃子預定交易日"
+    bad, unsure, wants = [], [], []
     for k, r in enumerate(kt.rows):
         start = r.get("start")
         prev_end = issue.value if k == 0 else kt.rows[k - 1].get("end")
         if start == NA:
             if k and prev_end != NA:
                 bad.append(r)
-        elif not isinstance(prev_end, dt.date) or start != next_weekday(prev_end):
+        elif not isinstance(prev_end, dt.date):
             bad.append(r)
+        elif start != (nd := next_trading_day(ctx, prev_end)).day:
+            want = f"第 {r.t} 期應為 {nd.day}"
+            if nd.uncertain:
+                unsure.append(r)
+                wants.append(f"{want}（{nd.uncertain}）")
+            else:
+                bad.append(r)
+                wants.append(want)
+    if not bad and unsure:
+        return check.result(
+            S.REVIEW_REQUIRED,
+            actual=_periods(unsure),
+            reason="trading_calendar_uncertain",
+            message=f"{message}；無法確認是否因交易所假日順延：{'；'.join(wants)}",
+            tolerance=TRADING_DAY_TOLERANCE,
+            evidence=_row_ev(unsure),
+        )
     return check.compare(
         None,
         _periods(bad) or None,
         ok=not bad,
         evidence=_row_ev(bad) or _header_ev(kt),
-        tolerance="平日只排除週末（無假日曆）",
-        message="C4 期始日 = 前一期期末日後 1 個平日；第 1 期為 N/A 或發行日後 1 個平日",
+        tolerance=TRADING_DAY_TOLERANCE,
+        message=message,
+        fail_message="".join(f"；{w}" for w in wants),
     )
 
 

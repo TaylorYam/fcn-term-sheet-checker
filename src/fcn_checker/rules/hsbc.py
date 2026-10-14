@@ -75,24 +75,40 @@ def schedules(ctx):
     if obs.value == "D":
         k = first.value
         valid = all(a["end"] < b["end"] for a, b in zip(rows, rows[1:], strict=False))
+        unsure: list[str] = []  # 期始日不等於下一個一籃子預定交易日、但無法確定假日（Issue #208）
         for i, row in enumerate(rows):
             valid &= row["end"] < row["payment"]
             if row["period"] <= k:
                 valid &= row["start"] is None and row["nt"] is None
             else:
-                valid &= row["start"] == kit.next_weekday(rows[i - 1]["end"]) and row["nt"] is not None
+                nd = kit.next_trading_day(ctx, rows[i - 1]["end"])
+                if row["start"] is not None and row["start"] != nd.day and nd.uncertain:
+                    unsure.append(f"第 {row['period']} 期期始日應為 {nd.day}（{nd.uncertain}）")
+                else:
+                    valid &= row["start"] == nd.day
+                valid &= row["nt"] is not None
                 valid &= row["start"] is not None and row["start"] <= row["end"]
-        out.append(
-            Check(
-                "schedule.autocall_dates",
-                "daily",
-                Item.expected("期間每日觀察的提前出場表"),
-                ctx.document,
-                expected=final.value,
+        daily = Check(
+            "schedule.autocall_dates",
+            "daily",
+            Item.expected("期間每日觀察的提前出場表"),
+            ctx.document,
+            expected=final.value,
+        ).needs(c, first, final)
+        ok = valid and final.ok and rows[-1]["end"] == final.value
+        if ok and unsure and daily.blocked is None:
+            out.append(
+                daily.result(
+                    S.REVIEW_REQUIRED,
+                    expected=final.value,
+                    actual=rows[-1]["end"],
+                    reason="trading_calendar_uncertain",
+                    message="期始日無法確認是否因交易所假日順延：" + "；".join(unsure),
+                    tolerance=kit.TRADING_DAY_TOLERANCE,
+                )
             )
-            .needs(c, first, final)
-            .compare(final.value, rows[-1]["end"], ok=valid and final.ok and rows[-1]["end"] == final.value)
-        )
+        else:
+            out.append(daily.compare(final.value, rows[-1]["end"], ok=ok, tolerance=kit.TRADING_DAY_TOLERANCE))
     else:
         ko = ctx.ts.f("ko_table")
         autocall = Check(

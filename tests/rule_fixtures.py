@@ -43,4 +43,4 @@ def context(ts: TermSheetOf, issuer: str = "BARC", *, document: DocKind = DocKin
 def issuer_context(ts: TermSheetOf, issuer: str = "BARC", **declared: Any) -> IssuerContext:
     """上手說明書內部規則的輸入：`declared` 為宣告過的參考條件表欄位 → 值。"""
     values = {key: OrderValue(v, f"{SHEET_SOURCE}!?4", key) for key, v in declared.items()}
-    return IssuerContext(ts, CONFIG.review_standard, issuer, values, SHEET_SOURCE)
+    return IssuerContext(ts, CONFIG.review_standard, issuer, values, SHEET_SOURCE, CONFIG.exchange_calendar)

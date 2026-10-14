@@ -21,7 +21,6 @@ from dataclasses import dataclass
 
 from . import backfill
 from .check_config import CheckConfig
-from .config import ReviewStandard
 from .identification import Identification
 from .investor_sheet import IisSheet
 from .issuers import Issuer
@@ -50,11 +49,19 @@ class Paired:
         return cls(ident.adapter, ident.term_sheet, ident.row, ident.pages)
 
 
-def _issuer_context(paired: Paired, std: ReviewStandard) -> IssuerContext:
-    """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0005）。"""
+def _issuer_context(paired: Paired, config: CheckConfig) -> IssuerContext:
+    """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0005）與交易所假日表。"""
     row = paired.row
     declared = {key: row.get(key) for key in paired.issuer.reference_fields}
-    return IssuerContext(paired.ts, std, paired.issuer.code, declared, row.source, pages=paired.pages)
+    return IssuerContext(
+        paired.ts,
+        config.review_standard,
+        paired.issuer.code,
+        declared,
+        row.source,
+        config.exchange_calendar,
+        pages=paired.pages,
+    )
 
 
 def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config: CheckConfig) -> CheckReport:
@@ -69,7 +76,7 @@ def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config
         ctx = Context(paired.ts, paired.row, std, rfmt, paired.issuer.code)
         results.extend(reference.field_rules(ctx))
         results.extend(derivation.prices(ctx))
-        results.extend(paired.issuer.rules(_issuer_context(paired, std)))
+        results.extend(paired.issuer.rules(_issuer_context(paired, config)))
         results.extend(review_standard_rules(ctx))
         results.append(reference.first_callable_period(ctx))
         decisions, backfill_results = [], []
