@@ -57,13 +57,30 @@ PLAIN_WORDING = re.compile(r"(當日最差表現之連結標的|連結標的)收
 KO_D = r"觀察期間：自" + D + r"（含）起至最終評價日（含）止之每一個預定交易日"
 KO_P = r"自動提前出場事件：若於任一評價日i\(i=(\d+)-(\d+)\)"
 ABSENT_KO = "說明書沒有自動提前出場（第 8 項沒有自動提前出場事件、自動提前出場價）"
+# 無自動提前出場 = Non-Call 等於天期：機制仍在、只是不會觸發，KO 視為期初價格的 100%（參考條件表填 100／進場價）
+NO_AUTOCALL_KO_PCT = Decimal(100)
+NO_AUTOCALL_KO_NOTE = "說明書沒有自動提前出場事件（Non-Call = 天期，不會提前出場）：KO 視為期初價格的 100%"
+
+
+# 第二章之後的「YYYY年發行機構年報之會計師查核報告」附件（範本規格 §1：空白頁或掃描，不核對）
+ANNEX_TITLE = re.compile(r"\d{4}年發行機構年報之會計師查核報告")
+CHAPTER3 = "三、商品風險揭露"
 
 
 def document(lines: Sequence[Line]) -> Document:
-    """版面結構；頁尾註腳（從註腳開頭那一行到頁底）不算內文。"""
+    """版面結構；頁尾註腳（從註腳開頭那一行到頁底）與第二章後的年報附件（標題到第三章章名之前）不算內文。"""
     kept: list[Line] = []
     skipping_page: int | None = None
+    in_annex = False
     for ln in lines:
+        text = squash(ln.text)
+        if in_annex:
+            if text != CHAPTER3:
+                continue
+            in_annex = False
+        elif ANNEX_TITLE.fullmatch(text):
+            in_annex = True
+            continue
         if skipping_page is not None and ln.page == skipping_page:
             continue
         skipping_page = None
@@ -302,7 +319,9 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
         put("ko_pct", art8, r"自動提前出場價：連結標的之期初價格的" + PCT, Decimal)
         put("autocall_redemption_pct", art8, r"自動提前出場贖回金額＝每單位面額×" + PCT, Decimal)
     else:
-        fields["ko_pct"] = _absent("ko_pct", ABSENT_KO)
+        fields["ko_pct"] = ParsedField(
+            "ko_pct", FieldStatus.PRESENT, NO_AUTOCALL_KO_PCT, [Evidence.of(x) for x in art8[:1]], NO_AUTOCALL_KO_NOTE
+        )
         fields["autocall_redemption_pct"] = _absent("autocall_redemption_pct", ABSENT_KO)
     put("strike_pct", art8, r"執行價：連結標的期初價格的" + PCT, Decimal)
     ki_raw = capture("ki_pct", t8, r"下限價：連結標的期初價格的" + PCT, Decimal, whole_match=True)
@@ -327,12 +346,12 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
     else:
         fields["ki_pct"] = ki_raw
     fields["worst_k"] = _worst_k(t8, art8)
-    tickers = _tickers(article(9))
+    tickers = _tickers(doc.span_lines(doc.subitems(arts.get(9)).get(1)))
     fields["underlyings"] = tickers
     n = len(tickers.value) if tickers.ok else None
     table = sg_tables.price_table("underlying_table", _table_region(art8), n, reprint=False)
     fields["underlying_table"] = table
-    _prices(fields, table, tickers)
+    _prices(fields, table, tickers, has_autocall)
 
     art12 = article(12)
     t12 = TextIndex(art12)
@@ -498,17 +517,20 @@ def _table_region(art8: list[Line]) -> list[Line]:
     return art8[start + 1 :] if start is not None else []
 
 
-def _tickers(art9: list[Line]) -> ParsedField:
+def _tickers(item1: list[Line]) -> ParsedField:
     """第 9 項(1) 表「彭博代碼」欄：代號與交易所碼同一行（`1234 JT`），依 k 順序。"""
     name = "underlyings"
-    hits = [ln for ln in art9 if TICKER.fullmatch(ln.text.strip())]
+    hits = [ln for ln in item1 if TICKER.fullmatch(ln.text.strip())]
     if not hits:
         return ParsedField.missing(name, "第 9 項(1) 找不到彭博代碼（代號 空白 交易所碼）")
     return ParsedField.present(name, [re.sub(r"\s+", " ", ln.text.strip()) for ln in hits], hits)
 
 
-def _prices(fields: dict[str, ParsedField], table: ParsedField, tickers: ParsedField) -> None:
-    """第 8 項標的表 → 標準欄位 `underlying_prices`（無自動提前出場時沒有 KO 價、無 KI 時沒有下限價）。"""
+def _prices(fields: dict[str, ParsedField], table: ParsedField, tickers: ParsedField, has_autocall: bool) -> None:
+    """第 8 項標的表 → 標準欄位 `underlying_prices`（無 KI 時沒有下限價）。
+
+    無自動提前出場時表上沒有 KO 欄：KO 價 = 期初價格（KO 100%，見 `NO_AUTOCALL_KO_PCT`），照常與參考條件表比對。
+    """
     if not table.ok:
         fields["underlying_prices"] = _derived("underlying_prices", table)
         return
@@ -518,11 +540,20 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, tickers: ParsedF
         "underlying_prices",
         FieldStatus.PRESENT,
         tuple(
-            standard_fields.PriceRow(ticker, dict(row["prices"]), tuple(Evidence.of(ln) for ln in lns), name=f"k={i}")
+            standard_fields.PriceRow(
+                ticker, _with_ko(row["prices"], has_autocall), tuple(Evidence.of(ln) for ln in lns), name=f"k={i}"
+            )
             for i, (ticker, row, lns) in enumerate(zip(names, rows, table.value["row_lines"], strict=True), start=1)
         ),
         list(table.evidence),
     )
+
+
+def _with_ko(prices: dict, has_autocall: bool) -> dict:
+    out = dict(prices)
+    if not has_autocall and "ko" not in out and "initial" in out:
+        out["ko"] = out["initial"]
+    return out
 
 
 # ---------------------------------------------------------------- 第 12 項
@@ -544,7 +575,7 @@ def _autocall_day(t12: TextIndex, art12: list[Line], has_autocall: bool) -> Pars
 
 def _schedule(fields: dict[str, ParsedField]) -> None:
     """KO 觀察方式、第一個可提前出場期、提前出場排程與最終評價日（範本規格 §4.1、§4.3）。"""
-    table, wording, tenor = fields["date_table"], fields["ko_wording"], fields["tenor_months"]
+    table, wording = fields["date_table"], fields["ko_wording"]
     keys = ("ko_observation", "first_callable_period", "autocall_schedule", "final_valuation_date")
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
@@ -556,8 +587,10 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     wtype = wording.value["type"]
     last = rows[-1]
     final = last["end"] if kind == "D" else last["pricing"]
-    fields["final_valuation_date"] = ParsedField(
-        "final_valuation_date", FieldStatus.PRESENT, final, list(table.evidence)
+    fields["final_valuation_date"] = (
+        ParsedField("final_valuation_date", FieldStatus.PRESENT, final, list(table.evidence))
+        if final is not None
+        else ParsedField.invalid("final_valuation_date", table.value["row_lines"][-1], "日期表末列的評價日是「不適用」")
     )
 
     def invalid(note: str) -> None:
@@ -593,7 +626,6 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     fields["autocall_schedule"] = ParsedField(
         "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(observation, k, len(rows), dates), ev
     )
-    _ = tenor
 
 
 # ---------------------------------------------------------------- 第二章、幣別出處、出處清單

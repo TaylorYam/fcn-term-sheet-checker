@@ -3,7 +3,7 @@
 - 文件側：[SG 範本規格](../templates/sg-zh-product-description.md)
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [SG 下單資料格式](../order-formats/sg-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.8（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #192）；已實作（Issue #194）。rule_id 對照：§3.3 `derive.monthly_coupon`／`derive.annualized_return`；§3.4 `derive.prices`（共用）、`doc.scenario_table`／`doc.scenario_header_pct`；§3.5 `doc.trustee_product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_observation`、`doc.ko_memory`、`doc.ki_consistency`、`doc.worst_of_count`、`doc.redemption_pct`、`schedule.coupon_dates`／`schedule.period_starts`／`schedule.autocall_dates`；§3.6 `standard.fixed_warning`（含 `risk.fixed_warning_variants.sg`）、`standard.risk_level`、`standard.product_name`、`standard.issuer_name`、`standard.guarantor_name`、`standard.agent_name`、`standard.product_type`、`standard.distributor`（`name_equivalents`、`address_equivalents`）；§3.1 最低申購倍數 `field.min_amounts`（`min_amount_multiples.sg` 依幣別，沒列的幣別 `multiple_not_configured` 轉人工覆核）；§3.7 `doc.scenario_parameters`、`doc.scenario_calculations`（欄位 `情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_strike`／`_shares`／`_cash`／`_assumed`）。無自動提前出場時 `ko_pct` 與各標的 KO 價交出不適用（結果為不適用，不比對表上的 100／進場價）
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #192）；已實作（Issue #194）。rule_id 對照：§3.3 `derive.monthly_coupon`／`derive.annualized_return`；§3.4 `derive.prices`（共用）、`doc.scenario_table`／`doc.scenario_header_pct`；§3.5 `doc.trustee_product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_observation`、`doc.ko_memory`、`doc.ki_consistency`、`doc.worst_of_count`、`doc.redemption_pct`、`schedule.coupon_dates`／`schedule.period_starts`／`schedule.autocall_dates`；§3.6 `standard.fixed_warning`（含 `risk.fixed_warning_variants.sg`）、`standard.risk_level`、`standard.product_name`、`standard.issuer_name`、`standard.guarantor_name`、`standard.agent_name`、`standard.product_type`、`standard.distributor`（`name_equivalents`、`address_equivalents`）；§3.1 最低申購倍數 `field.min_amounts`（`min_amount_multiples.sg` 依幣別，沒列的幣別 `multiple_not_configured` 轉人工覆核）；§3.7 `doc.scenario_parameters`、`doc.scenario_calculations`（欄位 `情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_strike`／`_shares`／`_cash`／`_annualized`／`_assumed`）。無自動提前出場（Non-Call = 天期：機制仍在、只是不會觸發）時 `ko_pct` 交出 100、各標的 KO 價 = 期初價格，與表上 `100`／進場價照常比對（2026-10-14 確認）。第二章後的年報附件（`YYYY年發行機構年報之會計師查核報告` 到第三章章名之前）不算內文
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP 核對規則](bnp-check-rules.md)不同或 SG 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -34,7 +34,7 @@
 | 標準欄位 | 規則（rule_id） | SG 差異 |
 |---|---|---|
 | 商品代號、ISIN、幣別、面額、各日期、天期、年利率、百分比、標的、各標的價格、KO／KI 型態、Non-Call、比價日 | 共用（`field.*`、`backfill.*`） | 年利率在 §8 `(年率 Y%)`，共用規則直接適用；KI(Freq) `D` 有新版面樣本、`P` 只有舊版面樣本 |
-| KO %、各標的 KO 價 | 共用 | 無自動提前出場（SG6）時說明書沒有自動提前出場價：adapter 交出 `ko_pct` = 不適用、各標的 KO 價 = 期初價格，與表上 `100`／進場價相符（2026-10-13 確認照此對照） |
+| KO %、各標的 KO 價 | 共用 | 無自動提前出場（SG6）時說明書沒有自動提前出場價：Non-Call = 天期，機制仍在、只是不會觸發，adapter 交出 `ko_pct` = 100、各標的 KO 價 = 期初價格，與表上 `100`／進場價照常比對，表上填錯就不一致（2026-10-13 確認照此對照；2026-10-14 確認要比對） |
 | 最低金額 `min_amounts` | **SG 專屬倍數**（2026-10-13 確認依幣別） | 第四章 §4 最低申購金額 = 倍數 × 單位面額（USD 10、其他幣別 1；放審查標準 SG 分節，沒有該幣別的倍數轉人工覆核）、最低加購金額 = 單位面額；§8 最低贖回金額 = 單位面額（`（即1單位）`）。實作方式同 BNP：adapter 隨出處交出倍數，規則只實作一次 |
 | 金額旁的幣別 `currency_others` | 共用 `field.currency`（Issue #170） | §5(1) 面額、§8 `以{幣別}為計價單位給付`（三處）、§15 假設 `總投資金額`、第四章 §4、§8 各一筆；每個情境一筆。商品幣別不必等於標的幣別：SG6 境外人民幣計價連結日圓股票，§8 標的表與情境算式內的 `日圓` 不列入 |
 | 期初定價 `VWAP` | 共用（Issue #122） | 說明書沒有 VWAP 字樣；價格欄不比對、通過後覆寫 |
@@ -131,7 +131,7 @@
 | 累積總配息金額 | `= A × 期數`，完全相等 |
 | 贖回金額 | `自動提前出場贖回金額`／`到期贖回金額 = U單位面額x{面額}x100%` → `= N x100%` → `= N 幣別` = 總投資金額 |
 | 獲利情境總報酬率 | `= (N+累積 / N)-1` → `= r%(平均年化報酬率：Y%)`：r = 累積 ÷ N（4 位）；Y = 年利率（2 位） |
-| 較差／最差情境 | 每期配息、累積同上；`數額計算 = 每單位面額 / …執行價` → `= 面額 / 執行價` → `= s`（無條件進入 4 位）；`應實際交付數 = 數額向下調整至最接近的整數位 = S單位`；`加上現金交割 = 假設收盤價 x 畸零數 = R`（無條件進入 2 位）；`總投資金額 = U單位面額，因此…連結標的 U×S單位加上現金 U×R`；括號內 `總報酬率 = {[N x(收盤價 / 執行價) + 累積]/ N} -1 = r%（平均年化報酬率：y%）`：r 以文件的假設收盤價驗算（2 位），y = r × 12 ÷ 天期（2 位）。SG6 型（quanto）另有 `最終匯率定價 = …` 行與匯率換算：匯率是試算值，用文件的匯率驗算 |
+| 較差／最差情境 | 每期配息、累積同上；`數額計算 = 每單位面額 / …執行價` → `= 面額 / 執行價` → `= s`（無條件進入 4 位）；`應實際交付數 = 數額向下調整至最接近的整數位 = S單位`；`加上現金交割 = 假設收盤價 x 畸零數 = R`（無條件進入 2 位）；`總投資金額 = U單位面額，因此…連結標的 U×S單位加上現金 U×R`；括號內 `總報酬率 = {[N x(收盤價 / 執行價) + 累積]/ N} -1 = r%（平均年化報酬率：y%）`：r 以文件的假設收盤價驗算（2 位），y = 未四捨五入的 r × 12 ÷ 天期（依文件位數四捨五入；6 份樣本 11 個情境皆如此）。SG6 型（quanto）另有 `最終匯率定價 = …` 行與匯率換算：匯率是試算值，用文件的匯率驗算 |
 
 情境標題與期別寫法未知、或算式找不到時轉人工覆核，不跳過後宣稱通過。
 
@@ -187,7 +187,7 @@
 
 | 階段 | 內容 |
 |---|---|
-| 1 | 上手登記（`issuers.py`、`reference_sheet.toml` 的 `SG`）；SG `LayoutSpec`（中文數字＋頓號、五章）與兩種版面的空白正規化；範本辨識；`read` 交出全部標準欄位（含無自動提前出場的 `ko_pct` 不適用、`issuer_name_ch1` absent）；審查標準 SG 分節（警語與 `[RRn]` 寫法、名稱樣板與三值 `{autocall_zh}`、發行機構全名、保證機構名稱、總代理人名稱、商品種類、最低申購倍數、受託機構簡稱與地址等價寫法、CNY）；§3.3 配息率 4 位；§3.5 內部交叉驗證（情境以外） |
+| 1 | 上手登記（`issuers.py`、`reference_sheet.toml` 的 `SG`）；SG `LayoutSpec`（中文數字＋頓號、五章）與兩種版面的空白正規化；範本辨識；`read` 交出全部標準欄位（含無自動提前出場的 `ko_pct` = 100、`issuer_name_ch1` absent）；審查標準 SG 分節（警語與 `[RRn]` 寫法、名稱樣板與三值 `{autocall_zh}`、發行機構全名、保證機構名稱、總代理人名稱、商品種類、最低申購倍數、受託機構簡稱與地址等價寫法、CNY）；§3.3 配息率 4 位；§3.5 內部交叉驗證（情境以外） |
 | 2 | §3.7 情境分析；§3.4 價格表重印與較差情境執行價 |
 
 兩階段都要有合成 PDF 測試（D／P／無自動提前出場、記憶式與否、KI 無／AM／D／P、單一／多標的、兩種版面、JPY 與 CNH、quanto）、本機 6 份真實樣本測試（結果與 §5 一致），以及 BARC、HSBC、MS、BNP、UBS 樣本與 SG 投資人須知的負面測試。

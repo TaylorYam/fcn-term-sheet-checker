@@ -60,19 +60,21 @@ def test_samples_only_differ_where_the_exploration_said(items):
         assert len(found) == 6 and all(r.status == S.PASS and "equivalents" in (r.tolerance or "") for r in found), (
             field
         )
-    # 無自動提前出場的 1 份：KO % 與各標的 KO 價不適用，其餘參考條件表欄位照常核對
+    # 無自動提前出場（Non-Call = 天期）的 1 份：KO % = 100、各標的 KO 價 = 進場價，與表上照常比對且相符
     no_autocall = [
         i
         for i in term_sheets
-        if any(r.rule_id == "field.ko_pct" and r.status == S.NOT_APPLICABLE for r in i.report.results)
+        if any(
+            r.rule_id == "doc.redemption_pct" and r.field == "autocall_redemption_pct" and r.status == S.NOT_APPLICABLE
+            for r in i.report.results
+        )
     ]
     assert len(no_autocall) == 1
-    assert all(
-        r.status in (S.PASS, S.NOT_APPLICABLE)
-        for i in no_autocall
-        for r in i.report.results
-        if r.rule_id.startswith("field.")
-    )
+    results = no_autocall[0].report.results
+    assert [r.status for r in results if r.rule_id == "field.ko_pct"] == [S.PASS]
+    ko_prices = [r for r in results if r.rule_id == "field.underlying_prices" and r.item.name.endswith("KO價")]
+    assert ko_prices and all(r.status == S.PASS for r in ko_prices)
+    assert all(r.status in (S.PASS, S.NOT_APPLICABLE) for r in results if r.rule_id.startswith("field."))
 
 
 def test_sg_investor_sheets_are_unsupported_and_nothing_is_filled(items):

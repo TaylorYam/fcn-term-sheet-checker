@@ -160,6 +160,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             "strike": Item.expected(f"{tag}執行價"),
             "shares": Item.expected(f"{tag}數額與應實際交付數"),
             "cash": Item.expected(f"{tag}現金交割"),
+            "annualized": Item.expected(f"{tag}平均年化報酬率"),
             "assumed": Item.expected(f"{tag}假設的自動提前出場時點"),
         }
         bad = next((p for p in (denom, tenor, k, has) if not p.ok), None)
@@ -193,7 +194,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             _redemption(out, rid, tag, items["redemption"], s, denom.value, units)
             _profit_return(out, rid, tag, items["return"], s)
         else:
-            _worse(out, rid, tag, items, s, denom.value, units, rows)
+            _worse(out, rid, tag, items, s, denom.value, units, rows, tenor.value)
     return out
 
 
@@ -302,9 +303,10 @@ def _profit_return(out, rid, tag, item, s) -> None:
     out.append(_result(rid, field, item, issues, _ev(s.total_return.lines), expected=expected, actual=r))
 
 
-def _worse(out, rid, tag, items, s, denom, units, rows) -> None:
+def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
     """較差／最差情境：執行價 = 第 8 項該檔執行價；數額 = 面額 ÷ 執行價（÷ 匯率換算）無條件進入 4 位；應實際交付數 = 向下取整；
-    現金交割 = 收盤價 × 畸零數（× 匯率）無條件進入 2 位；總單位 = 單位數 × 應實際交付數；總報酬率 = [總投資 × 收盤價 ÷ 執行價 + 累積] ÷ 總投資 − 1。"""
+    現金交割 = 收盤價 × 畸零數（× 匯率）無條件進入 2 位；總單位 = 單位數 × 應實際交付數；總報酬率 = [總投資 × 收盤價 ÷ 執行價 + 累積] ÷ 總投資 − 1；
+    平均年化報酬率 = 未四捨五入的總報酬率 × 12 ÷ 天期（依文件顯示位數四捨五入）。"""
     if s.close is None:
         out.append(
             _result(
@@ -325,7 +327,8 @@ def _worse(out, rid, tag, items, s, denom, units, rows) -> None:
         if 0 <= idx < len(prices):
             strike_expected = prices[idx].prices.get("strike")
     if s.shares is None:
-        out.append(_result(rid, f"{tag}_shares", items["shares"], ["找不到數額算式"], _ev(s.lines[:1]), review=True))
+        for key in ("strike", "shares"):
+            out.append(_result(rid, f"{tag}_{key}", items[key], ["找不到數額算式"], _ev(s.lines[:1]), review=True))
         return
     d, _, strike, _, fx, quantity = s.shares.values
     issues = []
@@ -425,7 +428,7 @@ def _worse(out, rid, tag, items, s, denom, units, rows) -> None:
     if s.worse_return is None:
         out.append(_result(rid, field, items["return"], ["找不到現金結算總報酬率算式"], _ev(s.lines[:1]), review=True))
         return
-    total, _, close3, _, strike3, _, cum, _, total2, _, r, _ = s.worse_return.values
+    total, _, close3, _, strike3, _, cum, _, total2, _, r, annualized = s.worse_return.values
     issues = []
     if close3 != close:
         issues.append(f"總報酬率算式的收盤價 {close3} 與假設句的 {close} 不同")
@@ -435,10 +438,27 @@ def _worse(out, rid, tag, items, s, denom, units, rows) -> None:
         issues.append(f"總報酬率算式的累積配息 {cum} 與累積總配息金額 {s.cumulative.values[0]} 不同")
     if total != total2 or (units is not None and total != Decimal(denom) * units):
         issues.append(f"總報酬率算式的總投資金額 {total}／{total2} 應為單位數 × 面額")
-    expected = kit.shown((total * close3 / strike3 + cum) / total2 * 100 - 100, r) if strike3 and total2 else None
+    exact = (total * close3 / strike3 + cum) / total2 * 100 - 100 if strike3 and total2 else None
+    expected = kit.shown(exact, r) if exact is not None else None
     if expected != r:
         issues.append(f"總報酬率 {r}% 應為 [{total} × ({close3} ÷ {strike3}) + {cum}] ÷ {total2} − 1 = {expected}%")
     out.append(_result(rid, field, items["return"], issues, _ev(s.worse_return.lines), expected=expected, actual=r))
+
+    expected = kit.shown(exact * 12 / tenor, annualized) if exact is not None and tenor else None
+    issues = []
+    if expected != annualized:
+        issues.append(f"平均年化報酬率 {annualized}% 應為總報酬率 × 12 ÷ {tenor} = {expected}%")
+    out.append(
+        _result(
+            rid,
+            f"{tag}_annualized",
+            items["annualized"],
+            issues,
+            _ev(s.worse_return.lines),
+            expected=expected,
+            actual=annualized,
+        )
+    )
 
 
 def run(ctx: IssuerContext) -> list[CheckResult]:

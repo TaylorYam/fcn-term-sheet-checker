@@ -140,7 +140,8 @@ def date_table(lines: list[Line]) -> ParsedField:
     """§12 日期表：表頭「配息週期(i)」之後的表頭格決定表型（D：配息週期起始日／終止日／配息日；P：評價日／配息日），
     資料列從「i=1」起到第一個不是日期、「不適用」或末列標籤的行為止。
 
-    值：{"type": "D"|"P", "rows": [...], "row_lines": [...], "final_labelled": bool, "maturity_labelled": bool}；
+    值：{"type": "D"|"P", "rows": [...], "row_lines": [...], "final_label_rows": [...], "maturity_label_rows": [...]}
+    （標「（最終評價日）」「（到期日）」的期別；範本只標在末列）；
     D 列為 period／start／end／payment（第 1～Non-Call 期起始與終止日為 None），P 列為 period／pricing／payment。
     """
     name = "date_table"
@@ -159,7 +160,7 @@ def date_table(lines: list[Line]) -> ParsedField:
         return ParsedField.invalid(name, lines[heads[0] : first], "日期表表頭不是已知的兩種寫法")
     rows: list[dict] = []
     row_lines: list[list[Line]] = []
-    labels: set[str] = set()
+    labels: dict[str, list[int]] = {FINAL_LABEL: [], MATURITY_LABEL: []}
     end = first
     for i in range(first, len(lines)):
         t = squash(lines[i].text)
@@ -167,7 +168,9 @@ def date_table(lines: list[Line]) -> ParsedField:
             rows.append({"period": int(t[2:]), "cells": []})
             row_lines.append([lines[i]])
         elif t in (FINAL_LABEL, MATURITY_LABEL):
-            labels.add(t)
+            if not rows:
+                return ParsedField.invalid(name, [lines[i]], "日期表在第一列之前出現末列標籤")
+            labels[t].append(rows[-1]["period"])
             row_lines[-1].append(lines[i])
         elif t == NOT_APPLICABLE or DATE_RE.fullmatch(t):
             if not rows:
@@ -194,8 +197,8 @@ def date_table(lines: list[Line]) -> ParsedField:
         "type": kind,
         "rows": out,
         "row_lines": row_lines,
-        "final_labelled": FINAL_LABEL in labels,
-        "maturity_labelled": MATURITY_LABEL in labels,
+        "final_label_rows": labels[FINAL_LABEL],
+        "maturity_label_rows": labels[MATURITY_LABEL],
     }
     return ParsedField.present(name, value, lines[first:end])
 

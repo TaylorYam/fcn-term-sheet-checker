@@ -210,6 +210,8 @@ S0 = Spec()
         (("scen.三", "x0.8572", "x0.8573"), "doc.scenario_calculations", S.MISMATCH),
         (("scen.三", "= 12.01美元", "= 12.00美元"), "doc.scenario_calculations", S.MISMATCH),
         (("scen.三", "-73.40%", "-73.41%"), "doc.scenario_calculations", S.MISMATCH),
+        (("scen.四", "（平均年化報酬率：-", "（平均年化報酬率：-1"), "doc.scenario_calculations", S.MISMATCH),
+        (("scen.三", "= 每單位面額 / 於", "= 每單位面額 ÷ 於"), "doc.scenario_calculations", S.REVIEW_REQUIRED),
         (("scen.三", "較差情況", "保守情況"), "doc.scenario_parameters", S.REVIEW_REQUIRED),
         # 第四章
         (("ch四", "最低加購金額：10,000美元", "最低加購金額：50,000美元"), "field.min_amounts", S.MISMATCH),
@@ -314,12 +316,15 @@ def test_blank_trustee_product_code_is_a_mismatch(tmp_path):
 
 
 def test_no_autocall_maps_to_p_and_non_call_equals_tenor(tmp_path):
-    """無自動提前出場：名稱沒有自動提前出場字樣、表上 KO(Freq)=P、KO(%)=100、Non-Call=天期；說明書沒有 KO 價 → 不適用。"""
+    """無自動提前出場（Non-Call = 天期，機制仍在只是不會觸發）：名稱沒有自動提前出場字樣；
+    表上 KO(Freq)=P、KO(%)=100、Non-Call=天期、各標的 KO 價 = 進場價，照常比對。"""
     spec = Spec(autocall=False, ki="none", tenor=3)
     r = check(tmp_path, spec)
     assert r.status == S.PASS, problems(r)
-    assert rule(r, "field.ko_pct")[0].status == S.NOT_APPLICABLE
-    assert all(x.status == S.NOT_APPLICABLE for x in rule(r, "field.underlying_prices") if x.item.name.endswith("KO價"))
+    ko = rule(r, "field.ko_pct")[0]
+    assert ko.status == S.PASS and ko.actual == 100
+    ko_prices = [x for x in rule(r, "field.underlying_prices") if x.item.name.endswith("KO價")]
+    assert ko_prices and all(x.status == S.PASS for x in ko_prices)
     assert rule(r, "field.ko_observation")[0].status == S.PASS
     assert rule(r, "field.first_callable_period")[0].actual == 3
     assert rule(r, "doc.redemption_pct", "autocall_redemption_pct")[0].status == S.NOT_APPLICABLE
@@ -330,6 +335,54 @@ def test_no_autocall_maps_to_p_and_non_call_equals_tenor(tmp_path):
     r = check(other, spec, edits=[Edit("固定配息股權", "固定配息可自動提前出場股權", "ts.cover")])
     assert rule(r, "standard.product_name", "name_zh")[0].status == S.MISMATCH
     assert rule(r, "doc.autocall_wording", "name_zh")[0].status == S.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize("column,value", [("KO(%)", 95), ("UL_1_KO價", 1)])
+def test_no_autocall_sheet_ko_must_be_100_pct_of_initial(tmp_path, column, value):
+    """無自動提前出場時表上 KO(%) 不是 100、或 KO 價不是進場價 → 不一致。"""
+    r = check(tmp_path, Spec(autocall=False, ki="none", tenor=3), **{column: value})
+    rid = "field.ko_pct" if column == "KO(%)" else "field.underlying_prices"
+    assert flagged(r, rid)
+
+
+def test_tables_split_across_pages_still_read(tmp_path):
+    r = check(tmp_path, Spec(table_page_break=True))
+    assert r.status == S.PASS, problems(r)
+
+
+def test_end_labels_on_a_non_final_row_are_a_mismatch(tmp_path):
+    r = check(tmp_path, Spec(label_row=5))
+    x = rule(r, "schedule.coupon_dates")[0]
+    assert x.status == S.MISMATCH
+    assert "末列沒有標「（最終評價日）」" in problem_message(x) and "第 5 期不是末列" in problem_message(x)
+
+
+def test_p_table_final_row_without_valuation_date_is_reviewed(tmp_path):
+    spec = Spec(ko_obs="P", memory=False, ki="AM", tenor=6, first_callable=2)
+    r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "不適用", "ts.art12.table")])
+    assert rule(r, "field.final_valuation_date")[0].status == S.REVIEW_REQUIRED
+
+
+def test_scenario_strike_is_reviewed_when_share_formula_is_unreadable(tmp_path):
+    r = check(tmp_path, edits=[Edit("= 每單位面額 / 於", "= 每單位面額 ÷ 於", "ts.scen.三")])
+    for field in ("情境三_strike", "情境三_shares"):
+        assert rule(r, "doc.scenario_calculations", field)[0].status == S.REVIEW_REQUIRED
+
+
+def test_price_table_ko_column_without_autocall_event_is_flagged(tmp_path):
+    r = check(tmp_path, edits=[Edit("自動提前出場事件：", "提前出場條件：", "ts.art8")])
+    assert flagged(r, "doc.autocall_wording")
+
+
+def test_legacy_layout_with_old_wording_is_a_mismatch(tmp_path):
+    spec = Spec(ko_obs="P", memory=False, ki="P", tenor=7, first_callable=1, legacy=True)
+    r = check(tmp_path, spec, edits=[Edit("為於中華民國境內受託買賣", "為於中華民國境內受託投資", "ts.cover")])
+    assert rule(r, "standard.forbidden_wording")[0].status == S.MISMATCH
+
+
+def test_annual_report_annex_is_not_scanned(tmp_path):
+    r = check(tmp_path, Spec(annex_text="附件內容提到受託投資，不屬於說明書內文。"))
+    assert r.status == S.PASS, problems(r)
 
 
 def test_observation_wording_must_be_known(tmp_path):

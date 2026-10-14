@@ -33,7 +33,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_worse_details",
-        "description": "較差／最差情境的假設收盤價、匯率與平均年化報酬率不核對（數額、應實際交付數、現金交割、總報酬率依文件寫的收盤價與匯率驗算）",
+        "description": "較差／最差情境的假設收盤價與匯率不核對（數額、應實際交付數、現金交割、總報酬率與平均年化報酬率依文件寫的收盤價與匯率驗算）",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -178,16 +178,14 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         if sec.tenor
         else ParsedField.missing("scenario_tenor", "第 15 項假設找不到「天期：N個月」")
     )
+    zh_months = months(zh, r"計價(\d+)個月", "商品中文名稱")
+    en_months = months(en, r"(\d+)-month", "商品英文名稱")
     return [
         _doc(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
             tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
         ),
-        _doc(
-            ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, months(zh, r"計價(\d+)個月", "商品中文名稱")
-        ).compare(tenor.value, months(zh, r"計價(\d+)個月", "商品中文名稱").value),
-        _doc(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, months(en, r"(\d+)-month", "商品英文名稱")).compare(
-            tenor.value, months(en, r"(\d+)-month", "商品英文名稱").value
-        ),
+        _doc(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(tenor.value, zh_months.value),
+        _doc(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(tenor.value, en_months.value),
         _doc(ctx, rid, "scenario_tenor", "第 15 項假設天期", tenor, scen).compare(tenor.value, scen.value),
     ]
 
@@ -328,9 +326,7 @@ def _structure_check(ctx: IssuerContext, rid: str, field: str, name: str, deps, 
 
 def schedule(ctx: IssuerContext) -> list[CheckResult]:
     f = ctx.ts.f
-    table, maturity, wording, k, tenor = (
-        f(x) for x in ("date_table", "maturity_date", "ko_wording", "first_callable_period", "tenor_months")
-    )
+    table, maturity, wording, k = (f(x) for x in ("date_table", "maturity_date", "ko_wording", "first_callable_period"))
     names = {
         "schedule.coupon_dates": "日期表配息日與末期標籤",
         "schedule.period_starts": "日期表配息週期起始日",
@@ -350,10 +346,13 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
     late = [r["period"] for r in rows if r[observed] is not None and r[observed] >= r["payment"]]
     if late:
         issues.append(f"第 {'、'.join(map(str, late))} 期{label}沒有早於配息日")
-    if not table.value["final_labelled"]:
-        issues.append("末列沒有標「（最終評價日）」")
-    if not table.value["maturity_labelled"]:
-        issues.append("末列沒有標「（到期日）」")
+    last = rows[-1]["period"]
+    for key, text in (("final_label_rows", "（最終評價日）"), ("maturity_label_rows", "（到期日）")):
+        marked = table.value[key]
+        if last not in marked:
+            issues.append(f"末列沒有標「{text}」")
+        if other := sorted({p for p in marked if p != last}):
+            issues.append(f"第 {'、'.join(map(str, other))} 期不是末列卻標「{text}」")
     if maturity.ok and payments[-1] != maturity.value:
         issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
     out.append(
@@ -428,7 +427,6 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
             issues,
         )
     )
-    _ = tenor
     return out
 
 
