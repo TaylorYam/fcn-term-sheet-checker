@@ -75,19 +75,22 @@ def schedules(ctx):
     if obs.value == "D":
         k = first.value
         valid = all(a["end"] < b["end"] for a, b in zip(rows, rows[1:], strict=False))
-        unsure: list[str] = []  # 期始日不等於下一個一籃子預定交易日、但無法確定假日（Issue #208）
+        notes: list[str] = []  # 期始日對不上的說明（應為哪一天；無法確認時附原因，Issue #208）
+        unsure = False
         for i, row in enumerate(rows):
             valid &= row["end"] < row["payment"]
             if row["period"] <= k:
                 valid &= row["start"] is None and row["nt"] is None
-            else:
-                nd = kit.next_trading_day(ctx, rows[i - 1]["end"])
-                if row["start"] is not None and row["start"] != nd.day and nd.uncertain:
-                    unsure.append(f"第 {row['period']} 期期始日應為 {nd.day}（{nd.uncertain}）")
-                else:
-                    valid &= row["start"] == nd.day
-                valid &= row["nt"] is not None
-                valid &= row["start"] is not None and row["start"] <= row["end"]
+                continue
+            valid &= row["nt"] is not None and row["start"] is not None
+            if row["start"] is None:
+                continue
+            valid &= row["start"] <= row["end"]
+            verdict = kit.period_start(ctx, rows[i - 1]["end"], row["start"])
+            if verdict.status != S.PASS:
+                notes.append(f"第 {row['period']} 期期始日{verdict.note}")
+                valid &= verdict.status != S.MISMATCH
+                unsure |= verdict.status == S.REVIEW_REQUIRED
         daily = Check(
             "schedule.autocall_dates",
             "daily",
@@ -97,18 +100,17 @@ def schedules(ctx):
         ).needs(c, first, final)
         ok = valid and final.ok and rows[-1]["end"] == final.value
         if ok and unsure and daily.blocked is None:
+            out.append(kit.uncertain_start(daily, notes, expected=final.value, actual=rows[-1]["end"]))
+        else:
             out.append(
-                daily.result(
-                    S.REVIEW_REQUIRED,
-                    expected=final.value,
-                    actual=rows[-1]["end"],
-                    reason="trading_calendar_uncertain",
-                    message="期始日無法確認是否因交易所假日順延：" + "；".join(unsure),
+                daily.compare(
+                    final.value,
+                    rows[-1]["end"],
+                    ok=ok,
                     tolerance=kit.TRADING_DAY_TOLERANCE,
+                    fail_message="；".join(notes),
                 )
             )
-        else:
-            out.append(daily.compare(final.value, rows[-1]["end"], ok=ok, tolerance=kit.TRADING_DAY_TOLERANCE))
     else:
         ko = ctx.ts.f("ko_table")
         autocall = Check(

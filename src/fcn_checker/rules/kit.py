@@ -12,7 +12,7 @@ import datetime as dt
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from ..config import IssuerStandard, ReferenceFormat, ReviewStandard
 from ..investor_sheet import IisSheet
@@ -20,7 +20,7 @@ from ..orders.reference import OrderRecord
 from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import Occurrence, TermSheet, is_standard, not_provided
-from ..trading_calendar import NextTradingDay, TradingCalendar
+from ..trading_calendar import TradingCalendar
 
 
 class RuleContext(Protocol):
@@ -134,13 +134,41 @@ Q2 = Decimal("0.01")  # 金額（情境配息與損益）四捨五入到 2 位
 TRADING_DAY_TOLERANCE = "一籃子預定交易日：跳過週末與所有標的交易所的休市日（交易所假日表）"
 
 
-def next_trading_day(ctx: IssuerContext, after: dt.date) -> NextTradingDay:
-    """`after` 之後的下一個一籃子預定交易日（所有標的交易所都開市的日子；標的取自標準欄位 `underlyings`）。
+UNCERTAIN_TRADING_DAY = "trading_calendar_uncertain"  # 原因碼：無法確認期始日是否因交易所假日順延
 
-    提前出場觀察期的期始日用它（Issue #208）；讀不到標的、標的交易所不在假日表或超出涵蓋範圍時另附原因，
-    規則在期始日不等於它時轉人工覆核，不判不一致。"""
+
+class StartVerdict(NamedTuple):
+    """一個期始日的判定：通過、不一致或需人工覆核，以及不通過時的說明（「應為 <日期>」，無法確認時附原因）。"""
+
+    status: S
+    note: str = ""
+
+
+def period_start(ctx: IssuerContext, prev_end: dt.date, start: dt.date) -> StartVerdict:
+    """提前出場觀察期的期始日 vs 前一期期末日後的下一個一籃子預定交易日（標的取自標準欄位 `underlyings`，Issue #208）。
+
+    相等 → 通過。假日只會讓期始日往後延，所以比推算結果早、或落在週末或已知休市日，一定不一致；
+    比推算結果晚、而推算結果無法確定（讀不到標的、標的交易所不在假日表、超出涵蓋範圍）時轉人工覆核。"""
     u = ctx.ts.f("underlyings")
-    return ctx.calendar.next_trading_day(after, u.value if u.ok else None)
+    tickers = u.value if u.ok else None
+    following = ctx.calendar.next_trading_day(prev_end, tickers)
+    if start == following.day:
+        return StartVerdict(S.PASS)
+    note = f"應為 {following.day}"
+    if following.uncertain and start > following.day and not ctx.calendar.closed(start, tickers):
+        return StartVerdict(S.REVIEW_REQUIRED, f"{note}（{following.uncertain}）")
+    return StartVerdict(S.MISMATCH, note)
+
+
+def uncertain_start(check: Check, notes: Sequence[str], **detail: Any) -> CheckResult:
+    """期始日都只是無法確認（沒有確定不一致的）：轉人工覆核並寫出各期應為哪一天與原因；`detail` 同 `Check.result`。"""
+    return check.result(
+        S.REVIEW_REQUIRED,
+        reason=UNCERTAIN_TRADING_DAY,
+        message="無法確認期始日是否因交易所假日順延：" + "；".join(notes),
+        tolerance=TRADING_DAY_TOLERANCE,
+        **detail,
+    )
 
 
 def next_weekday(d: dt.date) -> dt.date:

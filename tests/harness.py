@@ -16,7 +16,7 @@ import datetime as dt
 import json
 import shutil
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ from fcn_checker.batch import BatchOutcome, check_batch, preview_batch
 from fcn_checker.check_config import CheckConfig, ConfigPaths
 from fcn_checker.issuers import REGISTRY, Issuer
 from fcn_checker.schema import CheckReport, CheckStatus
+from fcn_checker.trading_calendar import Market
 
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_STANDARD = ROOT / "config" / "review_standard.toml"
@@ -52,9 +53,13 @@ def load_config(
 def cover_synthetic_years(config: CheckConfig) -> CheckConfig:
     """合成說明書的日期在 2030 年前後，超出 repo 假日表的涵蓋範圍：延長到 `SYNTHETIC_THROUGH`（延長的年份沒有休市日），
     期始日規則才判得出不一致，而不是一律轉人工覆核。repo 假日表原有的休市日不變（真實樣本仍照它）。"""
+    return with_markets(config, lambda m: replace(m, covered_through=max(m.covered_through, SYNTHETIC_THROUGH)))
+
+
+def with_markets(config: CheckConfig, change: Callable[[Market], Market]) -> CheckConfig:
+    """核對設定：交易所假日表的每個市場套用 `change`（測試延長涵蓋範圍、加休市日用）。"""
     cal = config.exchange_calendar
-    markets = tuple(replace(m, covered_through=max(m.covered_through, SYNTHETIC_THROUGH)) for m in cal.markets)
-    return replace(config, exchange_calendar=replace(cal, markets=markets))
+    return replace(config, exchange_calendar=replace(cal, markets=tuple(map(change, cal.markets))))
 
 
 CONFIG = load_config()  # 核對設定 fixture：repo config 只載入一次

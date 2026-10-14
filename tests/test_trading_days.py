@@ -18,20 +18,28 @@ from fcn_checker.check_config import ConfigPaths
 from fcn_checker.config import load_exchange_holidays
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.schema import CheckStatus as S
-from harness import CONFIG, EXCHANGE_HOLIDAYS, ISSUER_PREFIXES, REFERENCE_FORMAT, REVIEW_STANDARD, check_sheet
+from harness import (
+    CONFIG,
+    EXCHANGE_HOLIDAYS,
+    ISSUER_PREFIXES,
+    REFERENCE_FORMAT,
+    REVIEW_STANDARD,
+    check_sheet,
+    with_markets,
+)
 from pdf_writer import Edit, zh_date
 from reference_synth import UL, build_reference_sheet, reference_row
-from synth import Spec, build_pdf
+from synth import Spec, build_pdf, next_weekday
 
 REPO = load_exchange_holidays(EXCHANGE_HOLIDAYS)
+PATHS = ConfigPaths(REVIEW_STANDARD, REFERENCE_FORMAT, ISSUER_PREFIXES, EXCHANGE_HOLIDAYS)
+REPO_CONFIG = PATHS.load()  # 不延長涵蓋範圍：合成說明書的 2030 年超出假日表
 D = dt.date
 
 
 def with_holidays(*days: dt.date):
     """核對設定：美國市場另加休市日（合成說明書的年份）。"""
-    cal = CONFIG.exchange_calendar
-    markets = tuple(replace(m, holidays=m.holidays | set(days)) if m.code == "US" else m for m in cal.markets)
-    return replace(CONFIG, exchange_calendar=replace(cal, markets=markets))
+    return with_markets(CONFIG, lambda m: replace(m, holidays=m.holidays | set(days)) if m.code == "US" else m)
 
 
 def report(tmp_path: Path, spec, *, edits=(), config=CONFIG, builder=build_pdf):
@@ -110,15 +118,14 @@ def test_invalid_table_stops_loading(tmp_path, market, message):
 
 
 def test_config_records_the_table_and_panel_falls_back_to_the_builtin_one(tmp_path):
-    paths = ConfigPaths(REVIEW_STANDARD, REFERENCE_FORMAT, ISSUER_PREFIXES, EXCHANGE_HOLIDAYS)
-    record = paths.load().record()["exchange_holidays"]
+    record = REPO_CONFIG.record()["exchange_holidays"]
     assert record["version"] == REPO.version and record["sha256"]
-    assert ("交易所假日表", EXCHANGE_HOLIDAYS) in paths.labelled
+    assert ("交易所假日表", EXCHANGE_HOLIDAYS) in PATHS.labelled
     (tmp_path / "config").mkdir()  # 舊安裝的根目錄 config 沒有交易所假日表：用程式內建的
     fallback = ConfigPaths.with_fallback(REVIEW_STANDARD, tmp_path / "config", EXCHANGE_HOLIDAYS.parent)
     assert fallback.exchange_holidays == EXCHANGE_HOLIDAYS.resolve()
     with pytest.raises(IngestionError, match="交易所假日表"):
-        replace(paths, exchange_holidays=tmp_path / "沒有.toml").load()
+        replace(PATHS, exchange_holidays=tmp_path / "沒有.toml").load()
 
 
 # ---------------------------------------------------------------- BARC：第 3 期期始日 2030-03-11（週一），前期期末 03-08
@@ -143,17 +150,42 @@ def test_barc_start_that_skips_a_trading_day_or_lands_on_a_holiday_is_mismatch(t
     assert "第 3 期應為 2030-03-12" in starts(on_holiday)[0].message
 
 
-def test_barc_start_with_an_unknown_exchange_requires_review_only_when_shifted(tmp_path):
-    spec = Spec(underlyings=(UL("甲乙丙控股", "香港交易所", "ABC HK", Decimal("50.0000")),))
-    assert [x.status for x in starts(report(tmp_path, spec))] == [S.PASS], "剛好是下一個平日：照舊通過"
-    (result,) = starts(report(tmp_path / "s", spec, edits=[START]))
+HK = Spec(underlyings=(UL("甲乙丙控股", "香港交易所", "ABC HK", Decimal("50.0000")),))
+
+
+def test_barc_start_with_an_unknown_exchange_requires_review_only_when_later(tmp_path):
+    assert [x.status for x in starts(report(tmp_path, HK))] == [S.PASS], "剛好是下一個平日：照舊通過"
+    (result,) = starts(report(tmp_path / "s", HK, edits=[START]))
     assert result.status == S.REVIEW_REQUIRED and result.reason_code == "trading_calendar_uncertain"
     assert "ABC HK" in result.message and "第 3 期應為 2030-03-11" in result.message
 
 
+@pytest.mark.parametrize(
+    "new",
+    ["2030 年3 月10 日", "2030 年3 月16 日", "2030 年3 月8 日"],
+    ids=["sunday-before", "saturday-after", "same-as-previous-end"],
+)
+def test_barc_start_that_cannot_be_a_holiday_shift_is_mismatch_even_when_uncertain(tmp_path, new):
+    """假日只會讓期始日往後延：比推算結果早、或落在週末，不論假日表確不確定都是不一致。"""
+    (result,) = starts(report(tmp_path, HK, edits=[Edit("2030 年3 月11 日", new, "ts.art13.ko.3.start")]))
+    assert result.status == S.MISMATCH and "第 3 期應為 2030-03-11" in result.message
+
+
+def test_barc_mixed_basket_skips_known_holidays_and_reviews_the_rest(tmp_path):
+    """美股＋港股：美股休市日照樣跳過（落在美股休市日一定不一致），晚於推算結果才轉人工覆核。"""
+    mixed = Spec(underlyings=(*Spec().underlyings[:1], *HK.underlyings))
+    config = with_holidays(D(2030, 3, 11))
+    shifted = report(tmp_path, mixed, edits=[START], config=config)
+    assert [x.status for x in starts(shifted)] == [S.PASS], "跳過美股休市日：期始日 = 推算結果"
+    (on_holiday,) = starts(report(tmp_path / "h", mixed, config=config))
+    assert on_holiday.status == S.MISMATCH and "第 3 期應為 2030-03-12" in on_holiday.message
+    later = Edit("2030 年3 月11 日", "2030 年3 月13 日", "ts.art13.ko.3.start")
+    (unsure,) = starts(report(tmp_path / "l", mixed, edits=[later], config=config))
+    assert unsure.status == S.REVIEW_REQUIRED and "ABC HK" in unsure.message
+
+
 def test_barc_start_outside_the_table_requires_review(tmp_path):
-    repo = ConfigPaths(REVIEW_STANDARD, REFERENCE_FORMAT, ISSUER_PREFIXES, EXCHANGE_HOLIDAYS).load()
-    (result,) = starts(report(tmp_path, Spec(), edits=[START], config=repo))
+    (result,) = starts(report(tmp_path, Spec(), edits=[START], config=REPO_CONFIG))
     assert result.status == S.REVIEW_REQUIRED and "涵蓋範圍" in result.message
 
 
@@ -163,13 +195,8 @@ def test_barc_start_outside_the_table_requires_review(tmp_path):
 def hsbc_shift():
     s = hsbc_synth.Spec(ko_obs="D")
     i = s.first_callable + 1  # 第一個有期始日的期別
-    start = s.ends[i - 2] + dt.timedelta(days=1)
-    while start.weekday() >= 5:
-        start += dt.timedelta(days=1)
-    shifted = start + dt.timedelta(days=1)
-    while shifted.weekday() >= 5:
-        shifted += dt.timedelta(days=1)
-    return s, start, Edit(zh_date(start), zh_date(shifted), "ts.art11")
+    start = next_weekday(s.ends[i - 2])
+    return s, start, Edit(zh_date(start), zh_date(next_weekday(start)), "ts.art11")
 
 
 def test_hsbc_daily_start_after_an_exchange_holiday_passes(tmp_path):
@@ -181,8 +208,7 @@ def test_hsbc_daily_start_after_an_exchange_holiday_passes(tmp_path):
 
 def test_hsbc_daily_start_without_a_holiday_is_mismatch_or_review_outside_the_table(tmp_path):
     s, _, edit = hsbc_shift()
-    r = report(tmp_path, s, edits=[edit], builder=hsbc_synth.build_pdf)
-    assert [x.status for x in starts(r)] == [S.MISMATCH]
-    repo = ConfigPaths(REVIEW_STANDARD, REFERENCE_FORMAT, ISSUER_PREFIXES, EXCHANGE_HOLIDAYS).load()
-    (result,) = starts(report(tmp_path / "r", s, edits=[edit], config=repo, builder=hsbc_synth.build_pdf))
+    (mismatch,) = starts(report(tmp_path, s, edits=[edit], builder=hsbc_synth.build_pdf))
+    assert mismatch.status == S.MISMATCH and "期始日應為" in mismatch.message, "錯訊寫出應為哪一天"
+    (result,) = starts(report(tmp_path / "r", s, edits=[edit], config=REPO_CONFIG, builder=hsbc_synth.build_pdf))
     assert result.status == S.REVIEW_REQUIRED and "涵蓋範圍" in result.message

@@ -5,7 +5,7 @@
 
 標的的市場由彭博代號最後的交易所碼決定（`config/exchange_holidays.toml` 的 `bloomberg_codes`）。
 有標的的交易所不在假日表、或要推算的日期不在假日表涵蓋範圍時，結果帶著「不確定」的原因：
-規則在期始日剛好等於推算結果時照樣通過，不一致時轉人工覆核，不判不一致。
+規則怎麼用這個原因見 `rules/kit.period_start`：只有期始日比推算結果晚時才轉人工覆核。
 """
 
 from __future__ import annotations
@@ -51,6 +51,11 @@ class TradingCalendar:
         code = parts[-1] if len(parts) >= 2 else None
         return next((m for m in self.markets if code in m.bloomberg_codes), None)
 
+    def closed(self, day: dt.date, tickers: Sequence[str] | None) -> bool:
+        """週末，或籃子裡已知市場的休市日（不在假日表的市場不算）。"""
+        markets = {self.market_of(t) for t in tickers or ()} - {None}
+        return day.weekday() >= 5 or any(day in m.holidays for m in markets)
+
     def next_trading_day(self, after: dt.date, tickers: Sequence[str] | None) -> NextTradingDay:
         """`after` 之後的下一個一籃子預定交易日。讀不到標的、標的交易所不在假日表或超出涵蓋範圍時另附原因。"""
         markets: list[Market] = []
@@ -58,7 +63,8 @@ class TradingCalendar:
         for t in tickers or ():
             m = self.market_of(t)
             if m is None:
-                unknown.append(t)
+                if t not in unknown:
+                    unknown.append(t)
             elif m not in markets:
                 markets.append(m)
         day = after + dt.timedelta(days=1)

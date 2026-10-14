@@ -22,11 +22,12 @@ from .kit import (
     TRADING_DAY_TOLERANCE,
     Check,
     IssuerContext,
-    next_trading_day,
     order_value,
+    period_start,
     shown,
     to_decimal,
     to_int,
+    uncertain_start,
 )
 
 MONTHLY_TOLERANCE = Decimal("0.0001")
@@ -251,48 +252,39 @@ def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
     """C4：第 1 期期始日為 N/A 或發行日後的下一個一籃子預定交易日；之後各期 = 前一期期末日後的下一個一籃子預定交易日
     （跳過週末與標的交易所休市日，Issue #208）。
 
-    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。標的交易所沒有假日表等無法確定的情況，
-    期始日不等於推算結果時轉人工覆核。
+    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。各期判定見 `kit.period_start`：
+    只有「比推算結果晚、而推算結果無法確定」的期別轉人工覆核，其他對不上的都是不一致。
     """
     issue = ctx.ts.f("issue_date")
     check = Check(rid, "start", Item.expected("提前出場期始日"), ctx.document)
     if not issue.ok:
         return check.review(issue)
     message = "C4 期始日 = 前一期期末日後的下一個一籃子預定交易日；第 1 期為 N/A 或發行日後的下一個一籃子預定交易日"
-    bad, unsure, wants = [], [], []
+    flagged, notes, sure = [], [], False  # 對不上的期別（依期別順序）、各期說明、是否有確定不一致的
     for k, r in enumerate(kt.rows):
         start = r.get("start")
         prev_end = issue.value if k == 0 else kt.rows[k - 1].get("end")
         if start == NA:
             if k and prev_end != NA:
-                bad.append(r)
+                flagged.append(r)
+                sure = True
         elif not isinstance(prev_end, dt.date):
-            bad.append(r)
-        elif start != (nd := next_trading_day(ctx, prev_end)).day:
-            want = f"第 {r.t} 期應為 {nd.day}"
-            if nd.uncertain:
-                unsure.append(r)
-                wants.append(f"{want}（{nd.uncertain}）")
-            else:
-                bad.append(r)
-                wants.append(want)
-    if not bad and unsure:
-        return check.result(
-            S.REVIEW_REQUIRED,
-            actual=_periods(unsure),
-            reason="trading_calendar_uncertain",
-            message=f"{message}；無法確認是否因交易所假日順延：{'；'.join(wants)}",
-            tolerance=TRADING_DAY_TOLERANCE,
-            evidence=_row_ev(unsure),
-        )
+            flagged.append(r)
+            sure = True
+        elif (verdict := period_start(ctx, prev_end, start)).status != S.PASS:
+            flagged.append(r)
+            notes.append(f"第 {r.t} 期{verdict.note}")
+            sure |= verdict.status == S.MISMATCH
+    if flagged and not sure:
+        return uncertain_start(check, notes, actual=_periods(flagged), evidence=_row_ev(flagged))
     return check.compare(
         None,
-        _periods(bad) or None,
-        ok=not bad,
-        evidence=_row_ev(bad) or _header_ev(kt),
+        _periods(flagged) or None,
+        ok=not flagged,
+        evidence=_row_ev(flagged) or _header_ev(kt),
         tolerance=TRADING_DAY_TOLERANCE,
         message=message,
-        fail_message="".join(f"；{w}" for w in wants),
+        fail_message="".join(f"；{n}" for n in notes),
     )
 
 
