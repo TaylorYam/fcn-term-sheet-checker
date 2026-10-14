@@ -123,6 +123,10 @@ class BatchItem:
         return self.identification.unsupported
 
     @property
+    def unsupported_variant(self) -> bool:
+        return self.identification.unsupported_variant
+
+    @property
     def category(self) -> Category:
         if self.unsupported:
             return Category.UNSUPPORTED

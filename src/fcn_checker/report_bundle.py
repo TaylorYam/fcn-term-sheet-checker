@@ -57,7 +57,7 @@ RENAME_ATTEMPTS = 5  # 改名成回報包時，防毒或索引服務可能還抓
 
 def _known_unsupported(item: BatchItem) -> bool:
     """已知不支援、不是規則誤報：未支援上手或不支援樣態。"""
-    return item.unsupported or item.identification.unsupported_variant
+    return item.unsupported or item.unsupported_variant
 
 
 def reportable(outcome: BatchOutcome) -> tuple[BatchItem, ...]:
@@ -201,15 +201,15 @@ def _summary_sheet(
     ws, outcome: BatchOutcome, failing: Sequence[BatchItem], pdfs: Sequence[tuple[Path, Path]], now: dt.datetime
 ) -> None:
     """各類別的份數（以 PDF 計）；不支援樣態另列一列、不算進需人工覆核；「未通過」= 不一致＋需人工覆核＋執行錯誤。"""
-    items, variants = outcome.items, [i for i in outcome.items if i.identification.unsupported_variant]
-    counted = [i for i in items if not i.identification.unsupported_variant]
+    items = outcome.items
+    counted = [i for i in items if not i.unsupported_variant]  # 不支援樣態另列，不算進各類別
     ws.append(("參考條件表", outcome.reference_sheet.name))
     ws.append(("匯出時間", f"{now:%Y-%m-%d %H:%M:%S}"))
     ws.append(("PDF 總數", len(items)))
     for c in Category:
-        ws.append((UNSUPPORTED_LABEL if c == Category.UNSUPPORTED else c.value, sum(i.category == c for i in counted)))
-        if c == Category.UNSUPPORTED:
-            ws.append((VARIANT_LABEL, len(variants)))
+        label = UNSUPPORTED_LABEL if c == Category.UNSUPPORTED else c.value
+        ws.append((label, sum(i.category == c for i in counted)))
+    ws.append((VARIANT_LABEL, len(items) - len(counted)))
     ws.append(("未通過", sum(i.category in FAILED for i in counted)))
     ws.append(("列入回報包", len(failing)))
     if any(rel.parent.name.startswith(SAME_NAME_DIR) for rel, _ in pdfs):
