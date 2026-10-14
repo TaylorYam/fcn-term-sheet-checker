@@ -52,16 +52,25 @@ def test_new_samples_only_differ_where_the_exploration_said(items):
             ("standard.approval_date", "approval_date_not_configured"): 4,
             ("standard.approval_date", "value_mismatch"): 1,
             ("batch.pairing", "reference_row_missing"): 1,  # 參考條件表沒有這一列
+            # Non-Call = 天期的 1 份表上 KO(%) 填 150、4 檔 KO 價都是進場價的 1.5 倍：KO 視為 100%、KO 價 = 期初價格（Issue #202）
+            ("field.ko_pct", "value_mismatch"): 1,
+            ("field.underlying_prices", "value_mismatch"): 4,
         }
     )
     # 第二章受託機構營業所在地都少「松山區」：審查標準的地址等價寫法（2026-10-09 確認視為正確）；沒有參考條件表列的不核對
     ch2 = [r for i in new for r in i.report.results if r.field == "distributor_address_ch2"]
     assert len(ch2) == 9 and all(r.status == S.PASS and "address_equivalents" in r.tolerance for r in ch2)
-    # Non-Call = 天期的 2 份：價格表沒有 KO 欄，KO(%) 與各標的 KO 價為不適用
-    no_ko = [
-        i for i in new if any(r.rule_id == "field.ko_pct" and r.status == S.NOT_APPLICABLE for r in i.report.results)
-    ]
-    assert len(no_ko) == 2
+    # Non-Call = 天期的 2 份價格表沒有 KO 欄：KO 視為 100%、KO 價 = 期初價格，照常比對，不再是不適用（Issue #202）
+    ko = [r for i in new for r in i.report.results if r.rule_id == "field.ko_pct"]
+    assert ko and all(r.status != S.NOT_APPLICABLE for r in ko)
+    ko_bad = {
+        i.term_sheet.name
+        for i in new
+        for r in i.report.results
+        if r.status == S.MISMATCH
+        and (r.field == "ko_pct" or (r.rule_id == "field.underlying_prices" and "KO" in r.field))
+    }
+    assert len(ko_bad) == 1
 
 
 def test_new_investor_sheets_pass_and_rows_are_filled_only_when_the_term_sheet_passes_too(items):

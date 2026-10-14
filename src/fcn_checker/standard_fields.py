@@ -106,7 +106,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "underlyings": "list[str]：標的彭博代號，依說明書順序",
     "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據、標的名稱）",
     "strike_pct": "Decimal：執行價為最初價格的 N%，保留說明書顯示位數",
-    "ko_pct": "Decimal：KO 價為最初價格的 N%，保留說明書顯示位數；說明書沒有 KO 價（MS Non-Call = 天期）時不適用",
+    "ko_pct": "Decimal：KO 價為最初價格的 N%，保留說明書顯示位數；說明書沒有 KO 價（Non-Call = 天期）時為 100",
     "ki_pct": "Decimal：下限價為最初價格的 N%，保留說明書顯示位數；無 KI 時不讀",
     "coupon_pa_pct": "Decimal：年利率 %，保留說明書顯示位數",
     "tenor_months": "int：天期（月）",

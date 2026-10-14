@@ -1,4 +1,4 @@
-"""各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處。
+"""各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
 """
@@ -16,6 +16,8 @@ from .layout import TextIndex
 
 NUM = r"([\d,]+(?:\.\d+)?)"  # 數字（可有千分位與小數）
 SCENARIO_HEAD = re.compile(r"^情境([一二三四五六七八九十]+)[:：](.*)$")  # 情境標題「情境X：標題」（去空白後）
+# 說明書沒有自動提前出場價（Non-Call = 天期）：機制仍在、只是不會觸發，KO 視為期初價格的 100%（參考條件表填 100／進場價）
+NO_AUTOCALL_KO_PCT = Decimal(100)
 
 T = TypeVar("T")
 
@@ -29,6 +31,14 @@ def number(s: str) -> int | Decimal:
     """金額：整數值回傳 int，否則 Decimal。"""
     d = dec(s)
     return int(d) if d == d.to_integral_value() else d
+
+
+def ko_at_initial(prices: dict) -> dict:
+    """一列標的價格補上 KO 價 = 期初價格（說明書沒有 KO 價時，見 `NO_AUTOCALL_KO_PCT`）。"""
+    out = dict(prices)
+    if "ko" not in out and "initial" in out:
+        out["ko"] = out["initial"]
+    return out
 
 
 def derived(name: str, src: ParsedField, value=None) -> ParsedField:
