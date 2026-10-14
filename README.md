@@ -170,7 +170,7 @@ ruff check src tests
 - MS（已實作說明書與投資人須知）：[範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)
 - BNP（說明書已實作；投資人須知待另開 Issue）：[範本規格](docs/templates/bnp-zh-product-description.md)、[下單資料格式](docs/order-formats/bnp-fcn-reference.md)、[核對規則](docs/rules/bnp-check-rules.md)
 - SG（已實作說明書）：[範本規格](docs/templates/sg-zh-product-description.md)、[下單資料格式](docs/order-formats/sg-fcn-reference.md)、[核對規則](docs/rules/sg-check-rules.md)
-- 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)、[MS 範本規格](docs/templates/ms-zh-iis.md)
+- 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)、[MS 範本規格](docs/templates/ms-zh-iis.md)、[SG 範本規格](docs/templates/sg-zh-iis.md)（待實作）
 - ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)、[0007 投資人須知與說明書成對核對](docs/adr/0007-iis-paired-with-term-sheet.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
 - `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
