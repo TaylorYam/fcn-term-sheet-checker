@@ -10,6 +10,7 @@ from decimal import Decimal
 import fitz
 import pytest
 
+import hsbc_synth
 import ms_synth
 import synth
 from bnp_synth import ADDRESS, DIST, GUARANTOR, ISSUER, PHONE, SPLIT, WARNING, Spec, build_pdf, check_pair
@@ -390,7 +391,8 @@ def test_bnp_iis_template_is_not_confused_with_other_templates(tmp_path):
     assert detect_iis(lines_of(ts), (BNP,))[0] is None, "BNP 說明書不是 BNP 投資人須知"
     barc = synth.build_iis_pdf(tmp_path / "029199990001_IIS.pdf", synth.Spec())
     ms_ts = ms_synth.build_pdf(tmp_path / "147199990001_TS.pdf", ms_synth.Spec())
-    for other in (barc, iis_path(ms_ts)):
+    hsbc = hsbc_synth.build_iis_pdf(tmp_path / "325199990001_IIS.pdf", hsbc_synth.Spec())
+    for other in (barc, hsbc, iis_path(ms_ts)):
         assert detect_iis(lines_of(other), (BNP,))[0] is None, other.name
 
 
@@ -418,3 +420,48 @@ def test_a_wrong_ko_pct_on_one_underlying_requires_review(tmp_path):
         tmp_path, edits=[Edit("200.0000,即期初價格之100.00%", "200.0000,即期初價格之101.00%", "iis.summary.table")]
     )
     assert bad(iis) == {("field.ko_pct", "ko_pct", REVIEW)}
+
+
+@pytest.mark.parametrize(
+    ("spec", "change", "expected"),
+    [
+        (Spec(), ("summary.table", "即期初價格之70.00%", "即期初價格之71.00%"), ("field.strike_pct", "strike_pct")),
+        (Spec(ki="D"), ("summary.table", "即期初價格之60.00%", "即期初價格之61.00%"), ("field.ki_pct", "ki_pct")),
+        (Spec(ki="D"), ("summary.table", "120.0000,", "120.0001,"), ("iis.underlying_prices", "UL_2 下限價")),
+        (
+            Spec(),
+            ("summary", "最低申購金額：50,000美元", "最低申購金額：50,000英鎊"),
+            ("field.currency", "min_subscription_currency"),
+        ),
+    ],
+    ids=["strike-pct", "ki-pct", "ki-price", "min-subscription-currency"],
+)
+def test_more_reference_sheet_check_points_report_a_wrong_value(tmp_path, spec, change, expected):
+    section, old, new = change
+    ts, iis = check_pair(tmp_path, spec, edits=[Edit(old, new, f"iis.{section}")])
+    assert bad(iis) == {(*expected, MISMATCH)}
+    assert ts.report.status == PASS and not ts.fills_sheet
+
+
+def test_ki_type_on_the_iis_is_compared_with_the_reference_sheet(tmp_path):
+    """投資人須知寫到期觀察，參考條件表 KI(Freq) 為每日：投資人須知報 KI 型態不一致。"""
+    _, iis = check_pair(
+        tmp_path,
+        Spec(ki="D"),
+        edits=[
+            Edit(
+                "「觸及生效事件觀察日」：指自期初訂價日(不含)起至期末評價日(含)止之每一個預定交易日",
+                "「觸及生效事件觀察日」：指期末評價日",
+                "iis.coupon",
+            )
+        ],
+    )
+    assert bad(iis) == {("field.ki_type", "ki_type", MISMATCH)}
+
+
+def test_guarantor_name_in_the_split_sentence_of_warning_5_is_checked(tmp_path):
+    """警語 5 第二句（一字一行那段）的保證機構簡稱寫錯：只報那一處。"""
+    old = f"{ISSUER}{SPLIT}間有"
+    new = old.replace(SPLIT, SPLIT.replace(SHORT, "巴黎銀行"))
+    _, iis = check_pair(tmp_path, edits=[Edit(old, new, "iis.warn")])
+    assert bad(iis) == {("standard.guarantor_name", "guarantor_name_w5b", MISMATCH)}
