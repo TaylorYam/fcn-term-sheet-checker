@@ -53,7 +53,7 @@
   - [x] MS 投資人須知：範本規格 `docs/templates/ms-zh-iis.md`、核對規則 §3 MS 欄（Issue #137，已實作；只支援新版範本）。
   - [x] BNP：說明書探勘、BN4 雙方螢光範圍與規格完成（Issue #189；[範本規格](templates/bnp-zh-product-description.md)、[核對規則](rules/bnp-check-rules.md)）。
   - [x] BNP 說明書實作（Issue #191）：parser、`issuers.py` 登記、審查標準 BNP 分節與 `{autocall_*}` 佔位符、最低金額倍數、保證機構名稱、分割調整轉人工（所有上手）。
-  - [ ] BNP 投資人須知（4 頁）：探勘、範本規格與實作另開 Issue；在那之前 BNP 商品不打 `TS`／`IIS`、不回填。
+  - [x] BNP 投資人須知（Issue #197）：探勘、範本規格與實作（[範本規格](templates/bnp-zh-iis.md)）；兩份都通過才回填。本機參考條件表沒有 BNP 的列，先以同商品說明書驗證；有列後補「兩份都通過才回填」的本機真實樣本斷言。
   - [x] SG：說明書探勘與規格完成（Issue #192；作業人員決定跳過雙方螢光取交集；[範本規格](templates/sg-zh-product-description.md)、[核對規則](rules/sg-check-rules.md)）。
   - [x] SG 說明書實作（Issue #194）：parser 含兩種版面、`issuers.py` 登記、審查標準 SG 分節（警語與 `[RRn]` 變體、`autocall_memory_zh`、保證機構與總代理人名稱、最低申購依幣別倍數、受託機構簡稱與地址等價寫法）。
   - [ ] SG 投資人須知：另開 Issue（其警語七同樣寫「受託投資」，屆時再決定）。

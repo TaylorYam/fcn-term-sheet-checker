@@ -4,8 +4,9 @@
 標題在下一行；子項「(n)」；表格一格一行（標籤格與第一格有時同一行）。`breaks` 在表格某列之後強制換頁。
 改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`、第一章各條 `ts.art{n}`
 （標的表 `ts.art11.table`、日期表 `ts.art14.table`、重印表 `ts.art18.table`、情境 `ts.scen.一`…）、其他各章 `ts.ch二`～`ts.ch五`。
-BNP 投資人須知尚無範本：`build_pdf` 旁邊只寫一份一頁的佔位 `_IIS.pdf`（未支援上手），讓說明書不因「這批缺投資人須知」
-轉人工覆核；`iis=False` 時不寫。
+投資人須知（docs/templates/bnp-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
+段落代號 `iis.cover`、`iis.warn`（警語 5 的「(發行機構)與法國巴黎銀行(保證機構)」一字一個文字單位，同真實樣本）、`iis.org`、
+`iis.summary`（標的表 `iis.summary.table`）、`iis.coupon`、`iis.issue`、`iis.risk`、`iis.fees`、`iis.rest`。
 """
 
 from __future__ import annotations
@@ -66,6 +67,8 @@ class Spec(ProductSpec):
     breaks: dict[str, int] = field(default_factory=dict)  # 表格（date／price）第 n 列之後換頁
     fx: Decimal | None = None  # 標的幣別（美元）≠ 商品幣別時的匯率（每一商品幣別兌美元）
     page_total: int | None = None  # 頁首「共M頁」的 M；None 同 PDF 頁數
+    iis_pages: int = 4  # 投資人須知頁數（多的頁只有頁首）
+    iis_page_total: int | None = None  # 投資人須知頁首「共M頁」的 M；None 同實際頁數
     blank_pages: int = 0  # 文末沒有文字層的附件頁數（真實樣本的附件是圖）
 
     def __post_init__(self) -> None:
@@ -150,8 +153,8 @@ class Spec(ProductSpec):
 class _Doc:
     """逐行排版；文字依目前段落代號（`section`）套用改字，超過寬度時在非數字處換行。"""
 
-    def __init__(self, edits: Sequence[Edit]):
-        self.w = PdfWriter(edits, "ts")
+    def __init__(self, edits: Sequence[Edit], kind: str = "ts", used: set[Edit] | None = None):
+        self.w = PdfWriter(edits, kind, used)
         self.section = "cover"
 
     @property
@@ -202,10 +205,11 @@ def _price_cell(v: Decimal) -> str:
     return f"{v:,.4f}"
 
 
-def _underlying_table(d: _Doc, s: Spec, section: str, *, reprint: bool) -> None:
-    """第 11 項標的表（`reprint` 為第 18 項重印：沒有彭博代碼與交易所列、價格格寫「N，即期初價格之X%」）。"""
+def _underlying_table(d: _Doc, s: Spec, section: str, *, reprint: bool, sep: str | None = None) -> None:
+    """第 11 項標的表（`reprint` 為第 18 項重印：沒有彭博代碼與交易所列、價格格寫「N，即期初價格之X%」）。
+    `sep` 另給價格與百分比之間的寫法（投資人須知「N,即期初價格之X%」）。"""
     d.section = section
-    sep = "，即期初價格之" if reprint else " 即期初價格之"
+    sep = sep or ("，即期初價格之" if reprint else " 即期初價格之")
     d.cell(50, "連結標的名稱：")
     for u in s.underlyings:
         d.cell(150, u.name)
@@ -314,19 +318,211 @@ def _scenarios(d: _Doc, s: Spec) -> None:
         )
 
 
-def build_iis_stub(path: Path) -> Path:
-    """BNP 投資人須知的佔位檔（一頁；BNP 投資人須知尚無範本，批量核對時為未支援上手）。"""
-    w = PdfWriter()
-    w.line(130, "中文投資人須知(專業投資人/國際證券業務分公司受託買賣客戶)")
-    w.line(18, "範本說明：BNP 投資人須知尚未支援。")
+SPLIT = "(發行機構)與法國巴黎銀行(保證機構)"  # 警語 5 第二句一字一個文字單位的那一段（真實樣本的版面）
+
+
+def _split_line(d: _Doc, text: str) -> None:
+    """警語 5 第二句：`SPLIT` 那一段每個字各寫成一個文字單位，排在同一行（真實樣本匯出成一字一行）。"""
+    text = d.w.edit(text)
+    before, split, after = text.partition(SPLIT)
+    with d.w.verbatim():
+        if not split:
+            d.text(34, text)
+            return
+        d.w.need(13)
+        x = 34.0
+        for chunk in (before, *split):
+            d.w.put(x, d.w.y, chunk)
+            # 字間留空：太近時 PyMuPDF 會把同一基線的字併成一行
+            x += sum(fitz.get_text_length(c, fontname="helv", fontsize=10) if ord(c) < 256 else 10 for c in chunk) + 12
+        d.w.y += 13
+        d.text(34, after)
+
+
+def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[Edit] | None = None) -> Path:
+    """BNP 中文投資人須知（docs/templates/bnp-zh-iis.md）：與 `s` 的說明書、參考條件表列一致，預設 4 頁；`edits` 改字。"""
+    d = _Doc(edits, "iis", used)
+    w = d.w
+    dist, unit, short = DIST["name"], s.currency_zh, GUARANTOR["ch1"]
+    worst = "表現最差連結標的" if s.count > 1 else "連結標的"
+    w.line(197, "中文投資人須知 (適用於專業投資人及OSU客戶)")
+    w.line(400, f"刊印日期：{zh_date(s.trade_date)}")
+    d.text(18, f"{s.name_zh}(下稱「商品」){s.name_en}")
+    d.text(
+        18,
+        f"商品種類：{PRODUCT_TYPE}，TDCC 商品代號為{s.product_code}，受託機構商品代號為{s.product_code}，ISIN 為XS1999900001",
+    )
+    d.section = "warn"
+    w.line(18, "本商品之投資風險警語：")
+    for n, t in enumerate(
+        [
+            WARNING,
+            "本商品係複雜的金融商品，必須經過符合資格的人員解說後再進行投資。",
+            "本商品並非存款，投資不受存款保險之保障，最大損失為全部本金及利息。",
+            f"本商品雖經{dist}(受託機構)審查，並不代表或保證本商品之價值，且{dist}(受託機構)不負本商品投資盈虧之責。"
+            f"{dist}(受託機構)依法不得承諾擔保原計價幣別投資本金或最低收益率。",
+            f"本商品持有期間如有保證配息收益或保證保本率，係由{ISSUER}(發行機構)與{short}(保證機構)保證，"
+            f"而非由{dist}(受託機構)所保證。",
+        ],
+        1,
+    ):
+        d.text(18, f"{n} {t}", 34)
+    _split_line(d, f"{ISSUER}{SPLIT}間有財務會計準則公報第六號所定之關係人或實質關係人之情事。")
+    for n, t in enumerate(
+        [
+            "本中文投資人須知之內容如有虛偽或隱匿之情事者，除商品風險程度、受託對象、受託機構收取之費用及由受託機構另行訂定者，"
+            f"係由受託機構(即{dist})負責外，其餘內容應由虛構總代理人台北分行(總代理人)及其負責人依法負責。",
+            "本商品係依中華民國境外結構型商品管理規則規定，於中華民國境內受託投資、受託買賣或為投資型保單之投資標的。"
+            f"本商品乃依據發行機構於{zh_date(PROSPECTUS)}公告之基本公開說明書發行。",
+            "本商品係依中華民國境外結構型商品管理規則規定於中華民國境內受託投資或受託買賣之投資標的。",
+            "受託機構應提供專業投資人及OSU 客戶相關契約審閱期間。",
+        ],
+        6,
+    ):
+        d.text(18, f"{n} {t}", 34)
+    d.section = "org"
+    w.line(18, "壹、相關機構")
+    for t in (
+        f"1 發行機構：{ISSUER}(註冊辦公地點：1 Fictional Street, Amsterdam)",
+        "2 總代理人：虛構總代理人台北分公司(下稱「虛構台北分行」)(地址：臺北市110 虛構路1 號)",
+        f"3 保證機構：{GUARANTOR['cover']}(下稱「法國巴黎銀行」)(地址：1 Fictional Boulevard, Paris)",
+        f"4 受託機構：{dist}(地址：{ADDRESS})",
+    ):
+        d.text(18, t, 34)
+    d.section = "summary"
+    w.line(18, "貳、商品事項")
+    w.line(18, "1 商品簡介")
+    for t in (
+        "銷售對象：專業投資人及OSU 客戶",
+        "發行機構之長期債務信用評等(截至本中文投資人須知刊印日期)：虛構評等。",
+        f"商品風險程度：{WARNING}",
+        f"商品之發行評等：無 ●計價幣別：{unit}",
+        f"商品面額：每單位商品{s.denom:,} {unit} ●最低申購金額：{s.denom * MULTIPLES['minimum_subscription']:,}{unit}",
+        "計價貨幣本金保本率：不保本。",
+        "連結標的資產價格：",
+    ):
+        d.text(18, f"● {t}", 34)
+    _underlying_table(d, s, "summary.table", reprint=False, sep=",即期初價格之")
+    d.section = "summary"
+    if s.count > 1:
+        d.text(18, "籃子：指由上表列示的連結標的組成的一籃子。")
+    if s.ko_obs == "D":
+        evaluation = (
+            f"自第{s.first_callable} 個配息期結束日(含該日)起至期末評價日(含該日)的每一個預定交易日"
+            "(惟可於發生市場中斷事件時調整)，詳細日期請參閱中文產品說明書第一章第14 項之說明。"
+        )
+    else:
+        evaluation = ("每1 個月一次，" if s.autocall else "") + "詳細日期請參閱中文產品說明書第一章第14 項之說明。"
+    for t in (
+        f"商品年期：{s.tenor} 個月期(商品依據中文產品說明書第一章第20 項被發行機構提前買回/投資人提前贖回除外)",
+        f"商品開始受理申購日期：{zh_date(s.trade_date)}至{zh_date(s.trade_date)}",
+        f"期初訂價日：{zh_date(s.trade_date)}，若該日並非所有連結標的之預定交易日，則遞延至下一個預定交易日。"
+        f" ●發行日：{zh_date(s.issue_date)}，若該日並非營業日，則遞延至該日後之第一個營業日。"
+        f" ●期末評價日：{zh_date(s.ends[-1])}，若該日並非所有連結標的之預定交易日，則遞延至下一個預定交易日。"
+        f" ●到期日：最後出現的期末評價日後第三個營業日，預定為{zh_date(s.payments[-1])}(惟商品依據中文產品說明書"
+        "第一章第20 項被提前買回/提前贖回除外)。●配息日：詳細日期請參閱中文產品說明書第一章第14 項之說明。",
+        f"自動提前贖回評價日：{evaluation}自動提前贖回日：發生自動提前贖回事件之自動提前贖回評價日後第三個營業日。",
+        "開始受理贖回日：投資人得於發行日之次一營業日起，向受託機構申請贖回。",
+    ):
+        d.text(18, f"● {t}", 34)
+    w.new_page()
+    d.section = "coupon"
+    w.line(18, "2 收益分配事項、自動提前贖回金額及到期贖回金額之計算")
+    d.text(18, f"● 配息：配息將於每個配息日支付。配息金額為商品面額 × C，其中C 為{s.monthly}%。", 34)
+    d.text(
+        18,
+        "● 自動提前贖回事件計算公式：若發生自動提前贖回事件，就每單位商品，發行機構將於自動提前贖回日支付依下列公式計算之"
+        f"{unit}金額(「自動提前贖回金額」) 提前贖回本商品：自動提前贖回金額 = 商品面額 × 100%。其中，",
+        34,
+    )
+    d.text(
+        18,
+        "「自動提前贖回事件」：計算代理機構將依專業合理的方式釐定，若於任一自動提前贖回評價日，"
+        f"{_ko_clause(s)}，則視為發生自動提前贖回事件。",
+    )
+    lead = (
+        "● 到期贖回金額：若無自動提前贖回事件且商品並無投資人提前贖回或發行機構提前買回且註銷，就每單位商品，"
+        f"發行機構將於到期日支付或交付依下列公式計算之{unit}金額或實體連結標的："
+    )
+    if s.ki == "none":
+        d.text(
+            18,
+            lead
+            + f"(1)若於期末評價日，{worst}之收盤價格大於或等於其執行價格，則投資人就每單位商品可領回：商品面額 × 100%；"
+            f"或(2)若於期末評價日，{worst}之收盤價格小於其執行價格，則投資人將會收到發行機構以實體交付{worst}股數。",
+            34,
+        )
+    else:
+        when = {
+            "AM": "期末評價日",
+            "D": "自期初訂價日(不含)起至期末評價日(含)止之每一個預定交易日",
+            "P": "每一個配息期結束日，若該日並非預定交易日，則遞延至下一個預定交易日",
+        }[s.ki]
+        d.text(
+            18,
+            lead + "(1)若不曾發生觸及生效事件，則投資人就每單位商品可領回：商品面額 × 100%；或(2)若曾發生觸及生效事件，"
+            f"則投資人將會收到發行機構以實體交付{worst}股數。其中，",
+            34,
+        )
+        d.text(18, f"「觸及生效事件觀察日」：指{when}。")
+        d.text(
+            18, "「觸及生效事件」：若任一連結標的收盤價格於觸及生效事件觀察日小於其下限價格，則被視為發生觸及生效事件。"
+        )
+    d.section = "issue"
+    w.line(18, "3 發行不成立之處理")
+    d.text(
+        18,
+        f"發行不成立之情形：需發行機構於受理申購截止日或之前收到之本商品有效申購金額至少達{ISSUE_SIZE}之總申購價值。",
+    )
+    d.section = "risk"
+    w.line(18, "叁、投資風險")
+    d.text(18, f"● 信用風險：本商品之保證機構為{short}。投資人要承擔發行機構及保證機構之信用風險。", 34)
+    d.text(
+        18, "● 本金轉換風險：若曾發生觸及生效事件或表現最差連結標的之收盤價格小於其執行價格，投資人將收到連結標的。", 34
+    )
+    w.new_page()
+    d.section = "fees"
+    w.line(18, "肆、投資人應負擔的各項費用")
+    w.row([(18, "費用項目"), (109, "費率(百分比)"), (205, "收取時點"), (496, "收取人")], gap=14)
+    tail = ("機構或發行人給予受", "託或銷售機構之報", "酬、費用、折讓等各", "項利益應單獨列示)")
+    for label, rate, rest in (
+        (("申購費用",), "申購價金的 0%~5%", ()),
+        (("提前贖回費用",), "投資人提前贖回價金的0%~5%", ()),
+        (("管理費用(信託管理", "費或管銷費用)"), "無", ()),
+        (("分銷費用(如屬發行",), "申購價金的 0%~5%", tail),  # 列首的續行排在費率之後（同真實樣本的擷取順序）
+        (("保費費用",), "不適用", ()),
+    ):
+        for t in label:
+            d.cell(18, t)
+        d.cell(109, rate)
+        for t in rest:
+            d.cell(18, t)
+    d.section = "rest"
+    w.line(18, "伍、相關機構之權利、義務及責任")
+    d.text(18, "1 範本說明。")
+    w.line(18, "陸、協助投資人權益保護之方式")
+    d.text(18, "1 投資人與總代理人或受託機構發生爭議、訴訟之處理方式：")
+    d.text(34, f"受託機構聯絡方式：{PHONE}")
+    d.text(18, "2 投資人與總代理人發生爭議、國外訴訟之處理方式：請參見上述第一項之說明。")
+    w.line(18, "柒、發行機構、總代理人及受託機構與投資人爭議之處理方式")
+    while len(w.doc) < s.iis_pages:
+        w.new_page()
+    while len(w.doc) > s.iis_pages:
+        w.doc.delete_page(-1)
+    total = s.iis_page_total or len(w.doc)
+    for i, page in enumerate(w.doc):
+        page.insert_text((268, 40), f"第{i + 1}頁，共{total}頁", fontname=FONT, fontsize=8)
+    if used is None:
+        require_used(edits, w.used)
     return w.save(path)
 
 
 def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
-    """合成 BNP 說明書 `<商品代號>_TS.pdf`；`edits` 依段落代號改字；`iis` 時旁邊另寫一份佔位投資人須知。"""
+    """合成 BNP 說明書 `<商品代號>_TS.pdf`；`edits` 依段落代號改字（兩份都套用）；`iis` 時旁邊另寫一份投資人須知。"""
+    used: set[Edit] = set()  # 說明書與投資人須知共用：改字換到哪一份都算
     if iis and path.stem.endswith("_TS"):
-        build_iis_stub(iis_path(path))
-    d = _Doc(edits)
+        build_iis_pdf(iis_path(path), s, edits=edits, used=used)
+    d = _Doc(edits, "ts", used)
     w = d.w
     ends, payments, starts = s.ends, s.payments, s.starts
     trustee = s.product_code if s.trustee_code is None else s.trustee_code
@@ -684,3 +880,21 @@ def check(
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
     outcome = check_all(sheet, [pdf], config)
     return next(i.report for i in outcome.items if i.term_sheet == pdf)
+
+
+def check_pair(
+    tmp_path: Path,
+    spec: Spec | None = None,
+    *,
+    pdf_spec: Spec | None = None,
+    edits: Sequence[Edit] = (),
+    config=CONFIG,
+    **overrides: Any,
+):
+    """同 `check`，回傳（說明書, 投資人須知）兩份的批量核對項目（BatchItem）。"""
+    spec = spec or Spec()
+    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", pdf_spec or spec, edits=edits)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec, **overrides)])
+    outcome = check_all(sheet, [pdf, iis_path(pdf)], config)
+    ts = next(i for i in outcome.items if i.term_sheet == pdf)
+    return ts, next(i for i in outcome.items if i.term_sheet != pdf)

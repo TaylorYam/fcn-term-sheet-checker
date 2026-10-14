@@ -468,15 +468,15 @@ def test_bnp_and_other_issuers_are_never_confused(tmp_path):
     assert all(i.report.status == S.REVIEW_REQUIRED for i in outcome.items)  # 內容上手與檔名不符
 
 
-def test_bnp_investor_sheet_is_unsupported_so_nothing_is_filled(tmp_path):
+def test_bnp_term_sheet_is_filled_once_its_investor_sheet_also_passes(tmp_path):
+    """BNP 投資人須知有範本（Issue #197）：兩份都通過才回填；投資人須知的核對見 test_iis_bnp.py。"""
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)])
     outcome = check_all(sheet, [pdf])
     ts, iis = sorted(outcome.items, key=lambda i: i.term_sheet.name.endswith("_IIS.pdf"))
-    assert ts.report.status == S.PASS and iis.unsupported
-    assert not ts.fills_sheet
-    assert "BNP" in next(r for r in iis.report.results if r.rule_id == "batch.issuer_prefix").message
+    assert ts.report.status == S.PASS and iis.report.status == S.PASS and not iis.unsupported
+    assert ts.fills_sheet
 
 
 # ---------------------------------------------------------------- 金額旁的幣別（Issue #170）
