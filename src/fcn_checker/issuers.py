@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, hsbc_iis, ms_iis
+from .parsers import barc_iis, bnp_iis, hsbc_iis, ms_iis, sg_iis
 from .parsers import bnp as bnp_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
@@ -24,6 +24,7 @@ from .rules import hsbc as hsbc_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
 from .rules import sg as sg_rules
+from .rules import sg_iis as sg_iis_rules
 from .rules.iis import IisIssuerContext
 from .rules.kit import IssuerContext
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Item, Line
@@ -164,7 +165,15 @@ SG = Issuer(
     read=sg_parser.read,
     rules=sg_rules.run_all,
     reference_fields=sg_rules.REFERENCE_FIELDS,
-    iis=None,  # SG 投資人須知尚無範本（另開 Issue）：未支援上手，SG 商品不打 V、不回填（ADR 0007）
+    iis=IisTemplate(
+        template_id=sg_iis.TEMPLATE_ID,
+        label="SG 中文投資人須知",
+        parser_version=sg_iis.PARSER_VERSION,
+        detect=sg_iis.detect,
+        read=sg_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=sg_iis_rules.run_all,
+    ),
 )
 
 REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG)

@@ -1,6 +1,6 @@
 """本機 BNP 真實樣本（Issue #191、#197、#222）；交易資料不進 Git，CI 自動略過。測試碼不含真實商品代號或數值。
 
-參考條件表用公司原始待建檔格式、有 BNP 列的 `核對表格式..xlsx`（`real_data.BNP_REFERENCE`，回填欄位空白）。
+參考條件表用公司原始待建檔格式、有 BNP 列的 `核對表格式..xlsx`（`real_data.CHECK_FORMAT`，回填欄位空白）。
 斷言與探勘結論一致（docs/rules/bnp-check-rules.md §5）：6 組說明書＋投資人須知都辨識為 BNP、都有參考條件表列；
 只有一組有差異（一檔標的的價格欄疑似分割調整，說明書與投資人須知都轉人工覆核；同一份說明書情境一累積配息與每期配息
 × 期數不符），這組不回填；其餘 5 組兩份都通過才回填，回填值與說明書一致。
@@ -25,11 +25,11 @@ from fcn_checker.schema import CheckStatus as S
 from fcn_checker.standard_fields import Occurrence
 from fcn_checker.text import squash
 from harness import CONFIG
-from real_data import BNP_REFERENCE, TERM_SHEETS, pdfs, requires
+from real_data import CHECK_FORMAT, TERM_SHEETS, pdfs, requires
 
 pytestmark = [
     pytest.mark.real_samples,
-    requires(TERM_SHEETS / "082*_TS.pdf", BNP_REFERENCE),
+    requires(TERM_SHEETS / "082*_TS.pdf", CHECK_FORMAT),
 ]
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
 BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
@@ -41,7 +41,7 @@ SPLIT = Counter({("iis.underlying_prices", "split_suspected"): 3})  # 一檔標�
 def saved(tmp_path_factory):
     """BNP 說明書與投資人須知整批核對並儲存一次：(批量核對結果, 儲存收據)。"""
     tmp = tmp_path_factory.mktemp("real_bnp")
-    sheet = shutil.copy(BNP_REFERENCE, tmp / BNP_REFERENCE.name)  # 不在 data/ 產生檔案
+    sheet = shutil.copy(CHECK_FORMAT, tmp / CHECK_FORMAT.name)  # 不在 data/ 產生檔案
     return run_batch(CONFIG, Path(sheet), pdfs("082*.pdf"), tmp / "reports", root=tmp)
 
 

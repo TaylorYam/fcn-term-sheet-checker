@@ -2,7 +2,7 @@
 
 - 適用：BARC（[`barc-zh-iis`](../templates/barc-zh-iis.md)）、HSBC（[`hsbc-zh-iis`](../templates/hsbc-zh-iis.md)）、MS（[`ms-zh-iis`](../templates/ms-zh-iis.md)）、BNP（[`bnp-zh-iis`](../templates/bnp-zh-iis.md)）、SG（[`sg-zh-iis`](../templates/sg-zh-iis.md)）中文投資人須知
 - 決策：[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)；名詞見 [CONTEXT.md](../../CONTEXT.md)
-- 狀態：2026-10-08 與使用者確認（grill-with-docs）；已實作（Issue #124：`rules/iis.py`、`rules/review_standard.py` 的 `iis_review_standard_rules`）。MS 欄與 D 類為 2026-10-09 確認並實作（Issue #137：`parsers/ms_iis.py`、範本專屬規則 `rules/ms_iis.py`）；BNP 欄為 2026-10-14 確認並實作（Issue #197：`parsers/bnp_iis.py`，沒有範本專屬規則）。SG 欄為 2026-10-14 確認（Issue #213），待實作
+- 狀態：2026-10-08 與使用者確認（grill-with-docs）；已實作（Issue #124：`rules/iis.py`、`rules/review_standard.py` 的 `iis_review_standard_rules`）。MS 欄與 D 類為 2026-10-09 確認並實作（Issue #137：`parsers/ms_iis.py`、範本專屬規則 `rules/ms_iis.py`）；BNP 欄為 2026-10-14 確認並實作（Issue #197：`parsers/bnp_iis.py`，沒有範本專屬規則）。SG 欄為 2026-10-14 確認並實作（Issue #213：`parsers/sg_iis.py`、範本專屬規則 `rules/sg_iis.py`）
 - 依據：SOP「結構債TS、IIS 核對SOP」（IIS 共 4 頁；產品條件、風險等級、警語、受託機構等與說明書相同）＋ BARC、HSBC、MS 各 8 份、BNP 與 SG 各 6 份樣本探勘（MS 只支援新版 6 份的範本）
 
 ## 1. 檔名、配對與結果
@@ -93,8 +93,8 @@ MS 投資人須知另外寫出交易日、期末定價日與提前出場、觸�
 | D35 | KI 型態（觸及下限事件的觀察寫法；沒有 KI 時由到期贖回寫法明確判定） | — | — | ✓ | ✓ | ✓ | 參考條件表 KI(Freq) | 同說明書規則 | `field.ki_type` |
 | D36 | 開始受理贖回日期 | — | — | ✓ | — | — | 說明書開始受理贖回日期 | 相等 | `iis.redemption_start`（MS 範本專屬規則） |
 | D37 | 商品種類 | — | — | ✓ | —（見 C20b） | —（見 C20b） | 依投資人須知的標的數：1 檔、2 檔以上寫法不同（同 MS 說明書封面 6 規則） | 忽略空白後相等 | `iis.product_type`（MS 範本專屬規則） |
-| D38 | 期間每日觀察的 KO 觀察起日（`(記憶事件)觀察期間：自…起`） | — | — | — | — | D 型 ✓ | 說明書第 8 項觀察期間起日 | 相等；迄日寫「最終評價日」文字，不另核對 | SG 範本專屬規則 |
-| D39 | 有無自動提前出場 | — | — | — | — | ✓ | 說明書第 8 項有無 `自動提前出場事件` | 相同；沒有自動提前出場時 D31、D33、B19 不核對（說明書那份已依 Non-Call = 天期、KO 100% 和參考條件表比） | SG 範本專屬規則 |
+| D38 | 期間每日觀察的 KO 觀察起日（`(記憶事件)觀察期間：自…起`） | — | — | — | — | D 型 ✓ | 說明書第 8 項觀察期間起日 | 相等；迄日寫「最終評價日」文字，不另核對 | `iis.ko_observation_start`（SG 範本專屬規則） |
+| D39 | 有無自動提前出場 | — | — | — | — | ✓ | 說明書第 8 項有無 `自動提前出場事件` | 相同；沒有自動提前出場時 D31、D33、B19 不核對（說明書那份已依 Non-Call = 天期、KO 100% 和參考條件表比） | `iis.has_autocall`（SG 範本專屬規則） |
 
 
 ## 4. 不核對項目
@@ -138,3 +138,5 @@ MS 投資人須知另外寫出交易日、期末定價日與提前出場、觸�
 | 2026-10-14 | SG 投資人須知（Issue #213）：兩種版面同一範本；作業人員決定比照 SG 說明書不畫螢光，依開發者凍結的建議清單逐項決定；警語七「受託投資」照現行規則判不一致（C26），6 份樣本因此都不通過 |
 | 2026-10-14 | SG 投資人須知固定警語只在警語一出現 1 次；另核對保證機構名稱（壹 2. 少括號為等價寫法）、總代理人全名（簡稱不核對）、商品種類、受理申購日期、P 型 Non-Call、D 型觀察起日與有無自動提前出場；標的中文名稱與開始受理贖回日期不核對 |
 | 2026-10-14 | 本機參考條件表沒有 SG 的列：SG 投資人須知探勘以同商品說明書為基準，參考條件表那一側由合成測試涵蓋（使用者決定） |
+| 2026-10-14 | SG 投資人須知實作（Issue #213）：保證機構名稱的等價寫法放審查標準 `guarantor_name_equivalents.sg`，只用在投資人須知相關機構壹 2.（警語五與說明書仍須等於固定值；code review 後收斂）；總代理人名稱的投資人須知出處用共用規則（`agent_names`，= `agent_name.<上手>.cover`）；本機參考條件表沒有 SG 的列，真實樣本測試先和說明書比（實作時決定） |
+| 2026-10-14 | SG 投資人須知以含 SG 列的 `data/核對表格式..xlsx` 實跑：只有警語七「受託投資」（6 份）、舊範本固定警語 0 次與一檔標的除權息的價格（SG5）；說明書通過的 3 份在投資人須知人工放行後回填並打 `V` |
