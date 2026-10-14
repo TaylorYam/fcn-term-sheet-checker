@@ -4,6 +4,7 @@
 
     orders/FCN參考條件.xlsx          完整參考條件表
     orders/FCN參考條件_待回補.xlsx   同一張表，回填欄位與 VWAP 商品的價格欄空白
+    核對表格式..xlsx                 公司原始待建檔格式，有 BNP（082）的列、回填欄位空白（Issue #222）
     term-sheets/                     說明書與投資人須知（<商品代號>_TS.pdf、<商品代號>_IIS.pdf）
 
 缺檔時測試略過，略過原因寫出缺的路徑；CI 沒有 data/，一律略過。
@@ -22,6 +23,7 @@ ORDERS = DATA / "orders"
 TERM_SHEETS = DATA / "term-sheets"
 REFERENCE = ORDERS / "FCN參考條件.xlsx"
 TO_FILL = ORDERS / "FCN參考條件_待回補.xlsx"
+BNP_REFERENCE = DATA / "核對表格式..xlsx"
 
 
 def pdfs(pattern: str = "*.pdf") -> list[Path]:

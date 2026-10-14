@@ -70,7 +70,7 @@
 
 - 共用 `derive.prices`：§11 各標的執行價／KO 價／下限價 = 期初價格 × 該列百分比，half-up 到 4 位；列數 = 標的數；有無「下限價格」列與 KI 型態一致（7 份成立）。
 - 每列的百分比每檔都寫，須全部相同（否則轉人工覆核）。
-- **疑似股票分割**（2026-10-13 作業人員決定）：參考條件表某一檔標的的進場價、執行價、KO 價（有 KI 時含下限價）**全部**與說明書的值差同一個比例（表上值 ÷ 說明書值相同，4 位比較），且比例不是 1 → 該檔標的的價格欄轉人工覆核（錯訊註明疑為分割調整後的價格、寫出比例），不判不一致；只有部分欄位不同或比例不同時照常判不一致。表上值不改。這條適用於共用的價格比對，實作時放在共用規則，各上手同樣適用。
+- **疑似股票分割**（2026-10-13 作業人員決定）：參考條件表某一檔標的的進場價、執行價、KO 價（有 KI 時含下限價）**全部**與說明書的值差同一個比例（表上值 ÷ 說明書值相同，4 位比較），且比例不是 1 → 該檔標的的價格欄轉人工覆核（錯訊註明疑為分割調整後的價格、寫出比例），不判不一致；只有部分欄位不同或比例不同時照常判不一致。表上值不改。這條適用於共用的價格比對，實作時放在共用規則，各上手同樣適用；投資人須知的價格和參考條件表比時也套用（Issue #222）。
 - §18 重印表逐格 = §11（期初、執行、自動提前贖回、下限價格與 %）；較差／最差情境的 `執行價格N` 與 `÷ N` = §11 表現最差標的（情境假設的那一檔）的執行價。
 
 ### 3.5 說明書內部交叉驗證（BNP 專屬）
@@ -172,12 +172,14 @@
 | 情境一 `累積總月配息金額` ≠ 每期配息 × 期數（差 2 日圓；其餘三個情境相符） | BN1 | 文件本身不一致（上手以年利率推算而非已進位配息 × 期數）；規則照 §3.7 判不一致，2026-10-13 作業人員確認屬預期 |
 | 較差情境執行價重印只找到部分 | BN6 | 探勘腳本沒處理 `執行價\n格` 換行；正式 parser 用跨行文字索引 |
 
+2026-10-14 以有 BNP 列的公司原始待建檔表（本機 `data/核對表格式..xlsx`，回填欄位空白）實跑 6 組說明書＋投資人須知：BN1 說明書與投資人須知照上表轉人工（投資人須知同樣是分割 ×3，Issue #222），不回填；其餘 5 組兩份都通過並回填 ISIN、發行日、比價日（BN5 為 VWAP，另以說明書覆寫各標的價格），與說明書一致（`tests/test_real_bnp.py`）。
+
 其餘全部成立：參考條件表欄位（含 ISIN、各日期、百分比、各標的價格、KO／KI 型態、Non-Call、比價日填法、VWAP 樣本的價格）、月配息率位數規則、年利率三處、價格推算、日期表結構、名稱樣板（含單一／一籃子、有無自動提前贖回）、固定警語 3 次、RR4、「受託投資」0 次（片語外）、受理申購日期 = 交易日、刊印日期 = 交易日、審查通過日期依交易日、費率、最低金額倍數、發行不成立門檻、負責人、頁首總頁數。
 
 ## 6. 待確認事項與樣本缺口
 
 - 單一標的記憶式、P 型 Non-Call > 1 且 < 天期、5 檔標的、CNH／HKD／AUD／EUR／ZAR 計價：沒有樣本，依規則推得。
-- BN4 沒有參考條件表列、沒有投資人須知；要當驗收樣本時需補列。
+- BN4 沒有參考條件表列、沒有投資人須知；要當驗收樣本時需補列（2026-10-14 起本機也沒有 BN4 說明書）。
 - BNP 投資人須知：已實作（Issue #197，同 MS #137 流程）。
 
 ## 7. 實作方式
@@ -220,7 +222,7 @@
 | §3.2 審查標準共用項目 | `standard.approval_date`、`standard.chairman`、`standard.distributor`（含第四章 §16 電話：標準欄位 `distributor_phone_ch4`，由共用規則核對，Issue #196）、`standard.issuer_name`、`standard.fixed_warning`、`standard.risk_level`、`standard.forbidden_wording`、`standard.product_name`、`standard.fees`、`standard.issue_price`（三處重印）、`doc.denomination`、`doc.print_date`、`doc.subscription_start_date` | 共用 `rules/review_standard.py` |
 | §3.2 商品種類、發行不成立門檻 | `standard.product_type`、`standard.minimum_issue_size` | 共用 `rules/review_standard.py`（有該上手分節才核對） |
 | §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
-| §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`（`split_suspected`） | 共用 |
+| §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`、投資人須知 `iis.underlying_prices`（`split_suspected`，Issue #222） | 共用 `rules/reference.py` 的 `sheet_prices` |
 | §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike`（表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/bnp_scenario.py` |
 | §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.coupon_dates`、`schedule.period_starts`、`schedule.autocall_dates` | `rules/bnp.py` |
 | §3.6 保證機構名稱 | `standard.guarantor_name`（`guarantor_name.bnp` 三處） | 共用 `rules/review_standard.py` |

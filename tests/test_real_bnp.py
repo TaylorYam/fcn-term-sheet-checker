@@ -1,48 +1,72 @@
-"""本機 BNP 真實樣本（Issue #191）；交易資料不進 Git，CI 自動略過。測試碼不含真實商品代號或數值。
+"""本機 BNP 真實樣本（Issue #191、#197、#222）；交易資料不進 Git，CI 自動略過。測試碼不含真實商品代號或數值。
 
-斷言與探勘結論一致（docs/rules/bnp-check-rules.md §5）：7 份都辨識為 BNP 範本；有參考條件表列的 6 份只有 §5 列出的差異
-（一份一檔標的的價格欄疑似分割調整轉人工覆核、同一份情境一累積配息與每期配息 × 期數不符）；沒有列的 1 份為找不到列。
-投資人須知（Issue #197，docs/templates/bnp-zh-iis.md）：6 份都辨識為 BNP 投資人須知、每個範本欄位都讀得到，
-和同商品說明書讀出的值一致（2026-10-14 起本機參考條件表沒有 BNP 的列，先和說明書比；有列後再補兩份都通過才回填的斷言）。
+參考條件表用公司原始待建檔格式、有 BNP 列的 `核對表格式..xlsx`（`real_data.BNP_REFERENCE`，回填欄位空白）。
+斷言與探勘結論一致（docs/rules/bnp-check-rules.md §5）：6 組說明書＋投資人須知都辨識為 BNP、都有參考條件表列；
+只有一組有差異（一檔標的的價格欄疑似分割調整，說明書與投資人須知都轉人工覆核；同一份說明書情境一累積配息與每期配息
+× 期數不符），這組不回填；其餘 5 組兩份都通過才回填，回填值與說明書一致。
+投資人須知（docs/templates/bnp-zh-iis.md）每個範本欄位都讀得到，和同商品說明書讀出的值一致。
 """
 
+import datetime as dt
+import shutil
 from collections import Counter
+from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
 import fitz
+import openpyxl
 import pytest
 
+from fcn_checker.batch import DocKind
 from fcn_checker.extraction import extract_lines
 from fcn_checker.issuers import BNP, detect, detect_iis
+from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus as S
 from fcn_checker.standard_fields import Occurrence
 from fcn_checker.text import squash
-from harness import check_all
-from real_data import REFERENCE, TERM_SHEETS, pdfs, requires
+from harness import CONFIG
+from real_data import BNP_REFERENCE, TERM_SHEETS, pdfs, requires
 
 pytestmark = [
     pytest.mark.real_samples,
-    requires(TERM_SHEETS / "082*_TS.pdf", REFERENCE),
+    requires(TERM_SHEETS / "082*_TS.pdf", BNP_REFERENCE),
 ]
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
+BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
+SPLIT = Counter({("iis.underlying_prices", "split_suspected"): 3})  # 一檔標的的進場價、執行價、KO 價
 
 
 @pytest.fixture(scope="module")
-def items():
-    outcome = check_all(REFERENCE, pdfs("082*.pdf"))
-    return [i for i in outcome.items if i.term_sheet.name.endswith("_TS.pdf")], [
-        i for i in outcome.items if i.term_sheet.name.endswith("_IIS.pdf")
+def saved(tmp_path_factory):
+    """BNP 說明書與投資人須知整批核對並儲存一次：(批量核對結果, 儲存收據)。"""
+    tmp = tmp_path_factory.mktemp("real_bnp")
+    sheet = shutil.copy(BNP_REFERENCE, tmp / BNP_REFERENCE.name)  # 不在 data/ 產生檔案
+    return run_batch(CONFIG, Path(sheet), pdfs("082*.pdf"), tmp / "reports", root=tmp)
+
+
+@pytest.fixture(scope="module")
+def items(saved):
+    outcome, _ = saved
+    return [i for i in outcome.items if i.kind == DocKind.TERM_SHEET], [
+        i for i in outcome.items if i.kind == DocKind.IIS
     ]
 
 
+def problems(item) -> Counter[tuple[str, str]]:
+    return Counter((r.rule_id, r.reason_code) for r in item.report.results if r.status in PROBLEMS)
+
+
 def test_every_sample_is_recognised_as_bnp(items):
-    term_sheets, _ = items
-    assert len(term_sheets) == 7
+    term_sheets, investor_sheets = items
+    assert len(term_sheets) == len(investor_sheets) == 6
     assert all(i.report.template == BNP.template_id for i in term_sheets)
+    assert all(i.report.template == BNP.iis.template_id and not i.unsupported for i in investor_sheets)
+    assert all(i.report.results and i.partner is not None for i in (*term_sheets, *investor_sheets)), "都有列、都成對"
 
 
 def test_samples_only_differ_where_the_exploration_said(items):
     term_sheets, _ = items
-    bad = Counter((r.rule_id, r.reason_code) for i in term_sheets for r in i.report.results if r.status in PROBLEMS)
+    bad = sum((problems(i) for i in term_sheets), Counter())
     assert bad == Counter(
         {
             (
@@ -53,11 +77,10 @@ def test_samples_only_differ_where_the_exploration_said(items):
                 "doc.scenario_calculations",
                 "value_mismatch",
             ): 1,  # 同一份情境一累積總月配息金額 ≠ 每期配息 × 期數（文件錯誤）
-            ("batch.pairing", "reference_row_missing"): 1,  # 參考條件表沒有這一列
         }
     )
     passed = [i for i in term_sheets if i.report.status == S.PASS]
-    assert len(passed) == 5  # 有列的 6 份只有 1 份（分割調整＋累積配息）不是全部通過
+    assert len(passed) == 5  # 只有 1 份（分割調整＋累積配息）不是全部通過
     # 封面與第二章的受託機構電話、地址都是審查標準的等價寫法
     for field in ("distributor_phone_cover", "distributor_address_cover", "distributor_address_ch2"):
         found = [r for i in term_sheets for r in i.report.results if r.field == field]
@@ -65,16 +88,69 @@ def test_samples_only_differ_where_the_exploration_said(items):
             field
         )
     # Non-Call = 天期的 1 份：KO % 與各標的 KO 價照常核對（與 MS 不同）
-    with_row = [i for i in term_sheets if i.report.results and len(i.report.results) > 2]
-    assert all(any(r.rule_id == "field.ko_pct" and r.status == S.PASS for r in i.report.results) for i in with_row)
+    assert all(any(r.rule_id == "field.ko_pct" and r.status == S.PASS for r in i.report.results) for i in term_sheets)
 
 
-def test_bnp_investor_sheets_are_recognised_and_only_miss_their_reference_rows(items):
-    _, investor_sheets = items
-    assert len(investor_sheets) == 6
-    assert all(i.report.template == BNP.iis.template_id and not i.unsupported for i in investor_sheets)
-    bad = Counter((r.rule_id, r.reason_code) for i in investor_sheets for r in i.report.results if r.status in PROBLEMS)
-    assert bad == Counter({("batch.pairing", "reference_row_missing"): 6})
+def test_bnp_investor_sheets_only_differ_by_the_split_adjusted_prices(items):
+    """分割調整那一檔，投資人須知也和說明書一樣轉人工覆核（Issue #222），其餘 5 份全部通過。"""
+    term_sheets, investor_sheets = items
+    flagged = [i for i in investor_sheets if problems(i)]
+    assert len(flagged) == 1 and problems(flagged[0]) == SPLIT
+    assert all("分割" in m for m in flagged[0].problem_messages)
+    split_ts = next(i for i in term_sheets if problems(i)[("field.underlying_prices", "split_suspected")])
+    assert flagged[0].product_code == split_ts.product_code
+    assert sum(i.report.status == S.PASS for i in investor_sheets) == 5
+
+
+def test_only_products_whose_two_documents_pass_are_filled(saved, items):
+    outcome, receipt = saved
+    term_sheets, _ = items
+    filled = [i for i in term_sheets if receipt.filled(i)]
+    assert len(filled) == 5
+    assert all(i.report.status == S.PASS and i.partner.report.status == S.PASS for i in filled)
+    got = rows_by_code(receipt.output)
+    assert set(got) == {i.product_code for i in filled}, "「回填後」只有兩份都通過的 5 列"
+    for item in filled:
+        row, ts = got[item.product_code], BNP.read(_lines(item.term_sheet))
+        assert row["TS/IIS完成檢核"] == "V"
+        assert row["ISIN Code"] == ts.f("isin").value
+        assert as_date(row["發行日"]) == ts.f("issue_date").value
+        decisions = {d.column: d for d in item.report.backfill}
+        assert set(BACKFILL_COLUMNS) <= set(decisions), item.term_sheet.name
+        for column in BACKFILL_COLUMNS:  # 表上空白 → 依說明書與比價日規則回填（D 型 Non-Call 那期與最後一期、P 型每期）
+            d = decisions[column]
+            assert d.sheet_value is None and d.action == "fill", (item.term_sheet.name, column)
+            assert as_date(row[column]) == d.expected, (item.term_sheet.name, column)
+
+
+def test_vwap_rows_take_the_term_sheet_prices(saved, items):
+    """期初定價 VWAP 的 1 列：表上進場價空白，回填後各標的價格 = 說明書價格表（Issue #122）。"""
+    _, receipt = saved
+    term_sheets, _ = items
+    got = rows_by_code(receipt.output)
+    vwap = [i for i in term_sheets if got.get(i.product_code, {}).get("期初定價") == "VWAP"]
+    assert len(vwap) == 1
+    for item in vwap:
+        row, table = got[item.product_code], BNP.read(_lines(item.term_sheet)).f("underlying_prices").value
+        for n, prices in enumerate((r.prices for r in table), 1):
+            for col, name in (("initial", "進場價"), ("strike", "執行價"), ("ko", "KO價")):
+                assert rounded(row[f"UL_{n}_{name}"]) == prices[col], (n, name)
+
+
+def rows_by_code(path: Path) -> dict[str, dict]:
+    """「回填後」（匯入格式，第 2 列表頭）：TDCC Code → 該列。"""
+    ws = openpyxl.load_workbook(path, data_only=True)["回填後"]
+    headers = [c.value for c in ws[2]]
+    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=3, values_only=True))
+    return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
+
+
+def as_date(v):
+    return v.date() if isinstance(v, dt.datetime) else v
+
+
+def rounded(v):
+    return Decimal(repr(round(v, 9))).quantize(Decimal("0.0001"), ROUND_HALF_UP) if isinstance(v, float | int) else v
 
 
 def _lines(path):
