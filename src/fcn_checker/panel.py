@@ -360,6 +360,7 @@ class PanelWindow:
         self.pending: Future | None = None
         self.check_pending: Future[PanelOutcome] | None = None
         self.save_pending: Future[SaveReceipt] | None = None
+        self.export_pending: Future[str] | None = None
         self.release_pending: Future[IngestionError | None] | None = None
         self.has_result = False
         self.validation: Future[bool] | None = None  # 背景只計算來源快照是否仍一致，不改工作階段
@@ -426,6 +427,8 @@ class PanelWindow:
         self.check_button.pack(side="left")
         self.save_button = ttk.Button(actions, text="儲存核對結果…", command=self.save, state="disabled")
         self.save_button.pack(side="left", padx=(12, 0))
+        self.export_button = ttk.Button(actions, text="匯出回報包…", command=self.export_bundle, state="disabled")
+        self.export_button.pack(side="left", padx=(12, 0))
         self.controls += [self.reload]
         configs = "；".join(f"{label}：{path}" for label, path in session.config_paths)
         ttk.Label(frame, text="使用的設定檔：" + configs, style="Small.TLabel", wraplength=pixels(1000)).grid(
@@ -479,7 +482,8 @@ class PanelWindow:
             self.status_label.configure(wraplength=max(300, event.width - 60))
 
     def _busy_any(self) -> bool:
-        return any(f is not None for f in (self.pending, self.check_pending, self.save_pending, self.release_pending))
+        pending = (self.pending, self.check_pending, self.save_pending, self.release_pending, self.export_pending)
+        return any(f is not None for f in pending)
 
     def _clear(self):
         self.shown = None
@@ -490,6 +494,7 @@ class PanelWindow:
     def _clear_results(self):
         self.has_result = False
         self.save_button.configure(state="disabled")
+        self.export_button.configure(state="disabled")
         self.results.clear()
         self.tabs.tab(self.not_covered, text="待處理")
         _write(self.pending_text, "")
@@ -529,6 +534,8 @@ class PanelWindow:
 
     def _busy(self, busy):
         self.save_button.configure(state="disabled" if busy or not self.has_result else "normal")
+        exportable = not busy and self.has_result and self.session.can_export_bundle
+        self.export_button.configure(state="normal" if exportable else "disabled")
         for control in self.controls:
             control.configure(state="disabled" if busy else "normal")
         self.check_button.configure(state="disabled" if busy or self.shown is None else "normal")
@@ -640,6 +647,30 @@ class PanelWindow:
         if self.session.outcome is None:
             self._clear()
         self.status.set(receipt.summary)
+
+    def export_bundle(self):
+        """未通過的商品匯出成回報包；資料夾已存在或寫不進去時只顯示原因，來源已變更時清空結果。"""
+        if not self.has_result or self._busy_any():
+            return
+        self._busy(True)
+        destination = filedialog.askdirectory(parent=self.root, title="選取回報包的保存資料夾")
+        if not destination:
+            self.status.set("已取消匯出回報包，核對結果仍保留。")
+            self._busy(False)
+            return
+
+        def run() -> str:
+            try:
+                self.session.export_bundle(Path(destination))
+            except IngestionError as e:
+                if self.session.outcome is None:  # 來源已變更、結果失效：交給 _after 清空畫面
+                    raise
+                return f"回報包未匯出：{e}"
+            return self.session.message
+
+        self.status.set("匯出回報包中…")
+        self.export_pending = self.executor.submit(run)
+        self.root.after(80, lambda: self._after("export_pending", self.status.set, "匯出回報包失敗，核對結果仍保留"))
 
     def edit_approval_dates(self):
         if self._busy_any():
