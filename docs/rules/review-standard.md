@@ -34,6 +34,8 @@
 | `wording.forbidden` ／ `allowed_phrases` | 禁用「受託投資」；允許「受託投資或受託買賣」「受託投資、受託買賣或為投資型保單」（HSBC）；Citi 實作時加入「受託投資、受託買賣之投資標的」「受託投資或銷售本商品」（2026-10-14 確認，Issue #220） | 全文 | 片語以外出現「受託投資」即為錯誤（SOP：須改為「受託買賣」） |
 | `product_name.<上手>.zh` ／ `en` | 名稱樣板（依上手分節，例如 `product_name.barc`；缺該上手分節時轉人工覆核） | 封面「商品中文名稱」「商品英文名稱」 | 用說明書欄位填佔位符組出預期名稱後逐字比對（§2.3）；全形／半形括號差異不算錯 |
 | `guarantor_name.<上手>` | BNP：`cover`、`ch1`、`ch2` 三處各一個寫法 | 封面「保證機構之名稱及地址」、第一章「保證機構：」、第二章「保證機構」事業名稱；BNP 投資人須知寫全名處（相關機構 3）用 `cover`、寫簡稱處（警語 5 兩處、投資風險「信用風險」）用 `ch1`（2026-10-14，Issue #197） | 忽略空白後逐字相等；沒有該上手分節的上手不核對（沒有保證機構） |
+| `guarantor_name_equivalents.<上手>` | SG：`法商法國興業銀行股份有限公司Societe Generale`（投資人須知相關機構壹 2.，2026-10-14，Issue #213） | 投資人須知相關機構的保證機構名稱（只有這一處；說明書與投資人須知警語仍用 `guarantor_name` 的固定值） | 除 `cover` 的固定值外，忽略空白後與其中之一相等也視為相符 |
+| `agent_name.<上手>` | SG：`cover`、`ch2` | 封面「總代理人」、第二章總代理人事業名稱；投資人須知相關機構壹 3.（用 `cover`） | 忽略空白後逐字相等；沒有該上手分節的上手不核對 |
 | `product_type.<上手>` | BNP：`股權連結結構型商品` | 封面「商品種類」 | 忽略空白後逐字相等；沒有設定的上手不核對（MS 依標的數由上手規則核對） |
 | `minimum_issue_size.<上手>` | BNP：`(等值)300,000 美元` | 第四章「發行不成立之情形」的最低有效申購金額 | 忽略空白後逐字相等；沒有設定的上手不核對 |
 | `min_amount_multiples.<上手>` | BNP：最低申購、最低贖回 5，最低加購、增加贖回單位 1 | 第四章各最低金額（`field.min_amounts`） | 各出處 = 參考條件表單位面額 × 倍數；沒列的出處倍數為 1（BARC、HSBC、MS 不變） |
@@ -41,7 +43,7 @@
 | `denomination` | USD／AUD／EUR／GBP 10,000；JPY 1,000,000；CNH／HKD／ZAR 100,000（2026-10-10 使用者提供的承作幣別表） | §6 商品面額 | 等於該幣別預設值；不等於時**轉人工審查**（客戶可要求不同面額，不直接判錯） |
 | `dates.print_date_max_days_after_trade` | 1 | 「中文產品說明書刊印日期」 | 刊印日期在交易日當天到交易日後 1 天之內 |
 | `iis.pages` | 4 | 投資人須知（Issue #124） | 頁數剛好等於設定值（比外規「不超過 5 頁」嚴格） |
-| `iis.fixed_warning_occurrences.<上手>` | BARC 1、HSBC 2、MS 1（警語 1)，2026-10-09，Issue #137）、BNP 2（警語 1 與商品簡介「商品風險程度」，2026-10-14，Issue #197）、SG 1（警語一，2026-10-14，Issue #213；待實作）、Citi 1（警語 1.，2026-10-14，Issue #220；待實作） | 投資人須知全文 | 固定警語（依上手版本）出現次數；沒列出的上手轉人工覆核 |
+| `iis.fixed_warning_occurrences.<上手>` | BARC 1、HSBC 2、MS 1（警語 1)，2026-10-09，Issue #137）、BNP 2（警語 1 與商品簡介「商品風險程度」，2026-10-14，Issue #197）、SG 1（警語一，2026-10-14，Issue #213）、Citi 1（警語 1.，2026-10-14，Issue #220；待實作） | 投資人須知全文 | 固定警語（依上手版本）出現次數；沒列出的上手轉人工覆核 |
 
 ### 2.1 商品名稱樣板（BARC，依最新 5 份說明書）
 
@@ -153,7 +155,7 @@
 - **受託機構地址**：封面寫 `台北市松山區民生東路3段158號6樓`（阿拉伯數字「3段」）→ `address_equivalents` 加入；第二章寫 `三段` 與現行值相同。
 - **配息率**：= 年利率 ÷ 12，固定四捨五入 4 位（JPY 也 4 位）；情境配息金額 2 位。
 - 發行不成立門檻、發行機構／總代理人／保證機構地址電話、基本公開說明書日期、參考條件表「期初定價」欄不核對。
-- **投資人須知**（2026-10-14 確認，Issue #213；待實作）：固定警語只在警語一出現 1 次（`iis.fixed_warning_occurrences.sg = 1`）；風險等級沒有 `[RRn]` 寫法；保證機構名稱在警語五 = `guarantor_name.sg`，相關機構壹 2. 寫 `法商法國興業銀行股份有限公司Societe Generale`（英文名沒有括號）視為等價寫法；總代理人只核對相關機構壹 3. 全名；受託機構簡稱 `玉山證券`、地址「3段」沿用上面的等價寫法。細節見[投資人須知核對規則](iis-check-rules.md) §3。
+- **投資人須知**（2026-10-14 確認並實作，Issue #213）：固定警語只在警語一出現 1 次（`iis.fixed_warning_occurrences.sg = 1`）；風險等級沒有 `[RRn]` 寫法；保證機構名稱在警語五 = `guarantor_name.sg`，相關機構壹 2. 寫 `法商法國興業銀行股份有限公司Societe Generale`（英文名沒有括號）視為等價寫法；總代理人只核對相關機構壹 3. 全名；受託機構簡稱 `玉山證券`、地址「3段」沿用上面的等價寫法。細節見[投資人須知核對規則](iis-check-rules.md) §3。
 
 ### 2.9 Citi 的差異（2026-10-14 確認，Issue #220；待實作）
 
@@ -163,7 +165,7 @@
 - **禁用語允許片語**（`wording.allowed_phrases`，所有上手生效）：加入「受託投資、受託買賣之投資標的」（警語 7.）、「受託投資或銷售本商品」（投資人須知警語 9.）。片語刻意寫窄：未支援的 CA 樣本有「受託投資或銷售時」「受託投資或銷售或OSU」，不連帶放過；已支援上手的樣本都沒有這兩種寫法，結果不變。
 - **商品名稱樣板**（`product_name.citi`）：中文 `CGMHI {天期} 個月{幣別中文}計價{autocall_zh}連結{underlying_zh}並由花旗集團保證之固定配息結構型商品(無擔保) (不保本)（下稱「本商品」）`，`autocall_memory_zh = "(記憶式自動提前出場)"`、`autocall_zh = "(自動提前出場)"`（無自動提前出場空白）、`single_zh = "單一連結標的"`、`basket_zh = "一籃子連結標的中表現最差"`；英文 `{天期}-Month {幣別代碼} Fixed Coupon {autocall_en}Note linked to {underlying_en} issued by Citigroup Global Markets Holdings Inc. and guaranteed by Citigroup Inc. (Unsecured) (Non-principal protected)`，`autocall_en = "Autocall "`（記憶式同）、`single_en = "Single Underlying"`、`basket_en = "the Worst Performing Underlying in the basket"`；CNH 英文名稱寫 `CNH`。比對時忽略空白、括號全半形。只用 §2.3 現有佔位符，不需要新機制。
 - **發行機構全名**（`issuer_name.citi`）：`Citigroup Global Markets Holdings Inc.`（只有英文法人名）；封面、第一章 §3、第二章 §1(1) 三處相同；封面名稱後的 `(“CGMHI”)` 不算名稱。
-- **保證機構名稱**（`guarantor_name.citi`，cover／ch1／ch2）：三處皆 `Citigroup Inc.花旗集團`；地址不核對。投資人須知警語 5. 用 cover；相關機構 2. 只寫中文 `花旗集團`，比中文部分（2026-10-14 確認）。
+- **保證機構名稱**（`guarantor_name.citi`，cover／ch1／ch2）：三處皆 `Citigroup Inc.花旗集團`；地址不核對。投資人須知警語 5. 用 cover；相關機構 2. 只寫中文 `花旗集團`，視為等價寫法（`guarantor_name_equivalents.citi`，2026-10-14 確認）。
 - **總代理人名稱**（`agent_name.citi`，cover／ch2）：`花旗環球證券股份有限公司`；地址電話、負責人不核對。
 - **商品種類**（`product_type.citi`）：`連結股權結構型商品`，不隨標的數改變。
 - **發行不成立門檻**（`minimum_issue_size.citi`）：第四章 §7 `等值30 萬美元`（JPY、CNH 商品也寫美元；2026-10-14 確認納入）。

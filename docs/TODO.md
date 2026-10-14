@@ -56,7 +56,7 @@
   - [x] BNP 投資人須知（Issue #197）：探勘、範本規格與實作（[範本規格](templates/bnp-zh-iis.md)）；兩份都通過才回填。本機參考條件表沒有 BNP 的列，先以同商品說明書驗證；有列後補「兩份都通過才回填」的本機真實樣本斷言。
   - [x] SG：說明書探勘與規格完成（Issue #192；作業人員決定跳過雙方螢光取交集；[範本規格](templates/sg-zh-product-description.md)、[核對規則](rules/sg-check-rules.md)）。
   - [x] SG 說明書實作（Issue #194）：parser 含兩種版面、`issuers.py` 登記、審查標準 SG 分節（警語與 `[RRn]` 變體、`autocall_memory_zh`、保證機構與總代理人名稱、最低申購依幣別倍數、受託機構簡稱與地址等價寫法）。
-  - [ ] SG 投資人須知（Issue #213）：探勘與規格完成（作業人員決定不畫螢光、逐項決定；警語七「受託投資」照現行規則判錯；[範本規格](templates/sg-zh-iis.md)、[核對規則](rules/iis-check-rules.md) §3 SG 欄），待實作；在那之前 SG 商品不打 `TS`／`IIS`、不回填。
+  - [x] SG 投資人須知（Issue #213）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；警語七「受託投資」照現行規則判錯，所以現有 6 份樣本都不通過；[範本規格](templates/sg-zh-iis.md)、[核對規則](rules/iis-check-rules.md) §3 SG 欄）。本機真實樣本測試用含 SG 列的 `data/核對表格式..xlsx`，核對結果與回填都已斷言。
   - [ ] Citi 說明書與投資人須知（Issue #220）：探勘與規格完成（作業人員決定不畫螢光、逐項決定；Citi 版本固定警語、兩個「受託投資」允許片語、標的依代號配對；[說明書範本規格](templates/citi-zh-product-description.md)、[投資人須知範本規格](templates/citi-zh-iis.md)、[核對規則](rules/citi-check-rules.md)），待實作；探勘用 `data/核對表格式..xlsx`（8 列 Citi）。
   - [ ] UBS：樣本與參考條件表列已就位（2026-10-13），尚未探勘。
   - [x] 上手編號對照補齊尚無範本的 11 家（Issue #149）：未支援上手的錯訊寫出上手代號。

@@ -308,7 +308,7 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
     ki_raw = capture("ki_pct", t8, r"下限價：連結標的期初價格的" + PCT, Decimal, whole_match=True)
     put("maturity_redemption_pct", art8, r"到期贖回金額＝每單位面額×" + PCT, Decimal)
     put("currency_art8", art8, rf"以({CCY})為計價單位給付")
-    fields["ko_memory"] = _ko_memory(t8, art8, has_autocall)
+    fields["ko_memory"] = ko_memory(t8, art8, has_autocall)
     fields["ko_wording"] = _ko_wording(t8, art8, has_autocall)
     prorate = re.search(r"惟若自動提前出場事件發生於第(\d+)-(\d+)個配息週期", t8.text)
     fields["prorate_range"] = (
@@ -318,7 +318,7 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
         if prorate
         else ParsedField.missing("prorate_range", "找不到配息按比例條款「惟若自動提前出場事件發生於第k-n個配息週期」")
     )
-    fields["ki_type"] = _ki_type(t8, art8)
+    fields["ki_type"] = ki_type(t8, art8)
     ki = fields["ki_type"]
     if ki.ok and ki.value == "none" and not ki_raw.ok:
         fields["ki_pct"] = ParsedField(
@@ -421,8 +421,10 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
 # ---------------------------------------------------------------- 第 8 項
 
 
-def _ko_memory(t8: TextIndex, art8: list[Line], has_autocall: bool) -> ParsedField:
-    """第 8 項有「記憶事件：」定義 → 記憶式；非記憶式寫「…連結標的收盤價大於或等於自動提前出場價」；無自動提前出場為非記憶式。"""
+def ko_memory(t8: TextIndex, art8: list[Line], has_autocall: bool, where: str = "第 8 項") -> ParsedField:
+    """第 8 項有「記憶事件：」定義 → 記憶式；非記憶式寫「…連結標的收盤價大於或等於自動提前出場價」；無自動提前出場為非記憶式。
+
+    投資人須知收益分配事項的句型相同（parsers/sg_iis.py），`where` 是錯訊裡的出處。"""
     name = "ko_memory"
     if not has_autocall:
         return ParsedField.present(name, False, art8[:1])
@@ -430,11 +432,11 @@ def _ko_memory(t8: TextIndex, art8: list[Line], has_autocall: bool) -> ParsedFie
     if MEMORY_EVENT in text:
         m = re.search(re.escape(MEMORY_WORDING), text)
         if m is None:
-            return ParsedField.invalid(name, art8, "第 8 項有記憶事件，但自動提前出場事件的寫法不在範本規格內")
+            return ParsedField.invalid(name, art8, f"{where}有記憶事件，但自動提前出場事件的寫法不在範本規格內")
         return ParsedField.present(name, True, t8.lines_for(m.start(), m.end()))
     m = PLAIN_WORDING.search(text)
     if m is None:
-        return ParsedField.invalid(name, art8, "第 8 項自動提前出場事件的寫法不在範本規格內")
+        return ParsedField.invalid(name, art8, f"{where}自動提前出場事件的寫法不在範本規格內")
     return ParsedField.present(name, False, t8.lines_for(m.start(), m.end()))
 
 
@@ -459,13 +461,15 @@ def _ko_wording(t8: TextIndex, art8: list[Line], has_autocall: bool) -> ParsedFi
     return ParsedField.invalid(name, art8, "第 8 項自動提前出場的觀察期間寫法缺漏或不在範本規格內")
 
 
-def _ki_type(t8: TextIndex, art8: list[Line]) -> ParsedField:
-    """第 8 項到期贖回款數與觀察寫法 → KI 型態（範本規格 §4.4）；無 KI 以 present「none」交出。"""
+def ki_type(t8: TextIndex, art8: list[Line], where: str = "第 8 項") -> ParsedField:
+    """第 8 項到期贖回款數與觀察寫法 → KI 型態（範本規格 §4.4）；無 KI 以 present「none」交出。
+
+    投資人須知收益分配事項的各款相同（parsers/sg_iis.py），`where` 是錯訊裡的出處。"""
     name = "ki_type"
     text = t8.text
     a, b = text.find("到期贖回金額："), text.find("應實際交付數")
     if a < 0 or b <= a:
-        return ParsedField.invalid(name, art8, "找不到第 8 項到期贖回金額的各款")
+        return ParsedField.invalid(name, art8, f"找不到{where}到期贖回金額的各款")
     red = text[a:b]
     lns = t8.lines_for(a, b)
     cases = len(re.findall(r"\(\d\)若於", red))
@@ -479,7 +483,7 @@ def _ki_type(t8: TextIndex, art8: list[Line]) -> ParsedField:
         return ParsedField.present(name, "D", lns)
     if cases == 3 and re.search(r"\(1\)若於每一個評價日i", red) and "不曾小於下限價" in red:
         return ParsedField.present(name, "P", lns)
-    return ParsedField.invalid(name, lns, "第 8 項到期贖回的款數或觀察寫法不在範本規格內")
+    return ParsedField.invalid(name, lns, f"{where}到期贖回的款數或觀察寫法不在範本規格內")
 
 
 def _worst_k(t8: TextIndex, art8: list[Line]) -> ParsedField:
