@@ -50,11 +50,6 @@ AUTOCALL_DAY_LAG = 3  # D 型「自動提前出場日：為發生自動提前出
 RATE_Q = kit.Q4  # 配息率 = 年利率 ÷ 12，固定四捨五入 4 位（JPY 也 4 位）
 
 
-def _doc(ctx: IssuerContext, rid: str, field: str, name: str, *deps: ParsedField) -> Check:
-    """文件內部比對的結果身分：項目名稱為 `name`（預期值來自同一份文件其他位置），依賴欄位有問題轉人工覆核。"""
-    return Check(rid, field, Item.expected(name), ctx.document).needs(*deps)
-
-
 def _norm_name(value: str) -> str:
     """名稱比對：忽略空白與全形／半形括號（2026-10-13 確認）。"""
     return re.sub(r"[()（）]", "", squash(value))
@@ -63,35 +58,9 @@ def _norm_name(value: str) -> str:
 # ---------------------------------------------------------------- 配息率與平均年化報酬率（核對規則 §3.3，讀參考條件表）
 
 
-def _rate_mentions(ctx: IssuerContext, rid, field, what, mentions, compare, tolerance, message) -> list[CheckResult]:
-    annual, ov, problem = sg_scenario.annual_rate(ctx, rid, field)
-    if problem:
-        return [problem]
-    out = []
-    for m in mentions:
-        check = Check(rid, field, Item.derived(f"{what} %（{m.where}）", [ov]), ctx.document, ov=(ov,))
-        if m.value is None:
-            out.append(
-                check.result(
-                    S.REVIEW_REQUIRED,
-                    evidence=list(m.evidence),
-                    reason="document_missing",
-                    message=f"說明書{m.where}找不到{what}或出現多個",
-                )
-            )
-            continue
-        ok, shown = compare(annual, m.value)
-        out.append(
-            check.compare(
-                shown, m.value, ok=ok, evidence=list(m.evidence), tolerance=tolerance, message=message(annual)
-            )
-        )
-    return out
-
-
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
     """第 8 項配息率、第 15 項假設配息率與各情境算式的配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位。"""
-    return _rate_mentions(
+    return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
         "monthly_coupon_pct",
@@ -105,7 +74,7 @@ def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
 
 def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
     """第 15 項獲利情境（較佳、中間）每處平均年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
-    return _rate_mentions(
+    return kit.rate_mentions(
         ctx,
         "derive.annualized_return",
         "annualized_return_pct",
@@ -124,7 +93,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     f = ctx.ts.f
     code, trustee = f("product_code"), f("trustee_product_code")
     out = [
-        _doc(ctx, "doc.trustee_product_code", "trustee_product_code", "受託或銷售機構商品代號", code, trustee).compare(
+        kit.doc_check(
+            ctx, "doc.trustee_product_code", "trustee_product_code", "受託或銷售機構商品代號", code, trustee
+        ).compare(
             code.value,
             trustee.value or "（空白）",
             ok=code.ok and trustee.ok and trustee.value == code.value,
@@ -133,7 +104,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     ]
     isin, isin26 = f("isin"), f("isin_art26")
     out.append(
-        _doc(ctx, "doc.isin_consistency", "isin_art26", "第一章第 26 項 ISIN", isin, isin26).compare(
+        kit.doc_check(ctx, "doc.isin_consistency", "isin_art26", "第一章第 26 項 ISIN", isin, isin26).compare(
             isin.value, isin26.value, fail_message="第一章第 26 項 ISIN 代碼須等於封面 ISIN"
         )
     )
@@ -144,7 +115,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     ):
         pf = f(field)
         out.append(
-            _doc(ctx, "doc.name_consistency", field, name, zh, pf).compare(
+            kit.doc_check(ctx, "doc.name_consistency", field, name, zh, pf).compare(
                 _norm_name(zh.value) if zh.ok else None,
                 _norm_name(pf.value) if pf.ok else None,
                 tolerance="忽略空白與全形／半形括號",
@@ -153,7 +124,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
         )
     cz, c5 = f("currency_zh"), f("currency_art5")
     out.append(
-        _doc(ctx, "doc.currency_consistency", "currency_art5", "第一章第 5 項計價幣別", cz, c5).compare(
+        kit.doc_check(ctx, "doc.currency_consistency", "currency_art5", "第一章第 5 項計價幣別", cz, c5).compare(
             squash(cz.value) if cz.ok else None, squash(c5.value) if c5.ok else None
         )
     )
@@ -174,19 +145,23 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
     sec = ctx.ts.scenarios
     scen = (
-        ParsedField.present("scenario_tenor", sec.tenor.values[0], list(sec.tenor.lines))
+        ParsedField.present("scenario_tenor", sec.tenor.value, list(sec.tenor.lines))
         if sec.tenor
         else ParsedField.missing("scenario_tenor", "第 15 項假設找不到「天期：N個月」")
     )
     zh_months = months(zh, r"計價(\d+)個月", "商品中文名稱")
     en_months = months(en, r"(\d+)-month", "商品英文名稱")
     return [
-        _doc(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
+        kit.doc_check(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
             tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
         ),
-        _doc(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(tenor.value, zh_months.value),
-        _doc(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(tenor.value, en_months.value),
-        _doc(ctx, rid, "scenario_tenor", "第 15 項假設天期", tenor, scen).compare(tenor.value, scen.value),
+        kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
+            tenor.value, zh_months.value
+        ),
+        kit.doc_check(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(
+            tenor.value, en_months.value
+        ),
+        kit.doc_check(ctx, rid, "scenario_tenor", "第 15 項假設天期", tenor, scen).compare(tenor.value, scen.value),
     ]
 
 
@@ -208,7 +183,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
         ("name_en", en, "Autocallable", "商品英文名稱的 Autocallable 字樣"),
     ):
         out.append(
-            _doc(ctx, "doc.autocall_wording", field, name, has, pf).compare(
+            kit.doc_check(ctx, "doc.autocall_wording", field, name, has, pf).compare(
                 label.get(has.value) if has.ok else None,
                 label.get(_has(pf, word)) if pf.ok else None,
                 fail=S.REVIEW_REQUIRED,
@@ -217,7 +192,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
             )
         )
     out.append(
-        _doc(ctx, "doc.autocall_wording", "underlying_table", "標的表自動提前出場價欄", has, table).compare(
+        kit.doc_check(ctx, "doc.autocall_wording", "underlying_table", "標的表自動提前出場價欄", has, table).compare(
             label.get(has.value) if has.ok else None,
             label.get("ko" in table.value["columns"]) if table.ok else None,
             fail=S.REVIEW_REQUIRED,
@@ -227,7 +202,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
     )
     kinds = {"D": "每日觀察", "P": "每期觀察", "none": "無自動提前出場"}
     out.append(
-        _doc(
+        kit.doc_check(
             ctx, "doc.ko_observation", "ko_observation", "KO 觀察方式（第 8 項寫法與日期表）", wording, dtable
         ).compare(
             kinds.get(wording.value["type"]) if wording.ok else None,
@@ -245,7 +220,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
         ("name_en", en, "Memory", "商品英文名稱的 Memory 字樣"),
     ):
         out.append(
-            _doc(ctx, "doc.ko_memory", field, name, mem, pf).compare(
+            kit.doc_check(ctx, "doc.ko_memory", field, name, mem, pf).compare(
                 mem_label.get(mem.value) if mem.ok else None,
                 mem_label.get(_has(pf, word)) if pf.ok else None,
                 fail=S.REVIEW_REQUIRED,
@@ -280,7 +255,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
             )
         )
         out.append(
-            _doc(ctx, "doc.ki_consistency", "underlying_table", "標的表下限價欄", ki, table).compare(
+            kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "標的表下限價欄", ki, table).compare(
                 label[doc_ki != "none"],
                 label["ki" in table.value["columns"]] if table.ok else None,
                 fail=S.REVIEW_REQUIRED,
@@ -289,7 +264,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
             )
         )
     out.append(
-        _doc(ctx, "doc.worst_of_count", "worst_k", "最差表現之連結標的 k 數", uls, k).compare(
+        kit.doc_check(ctx, "doc.worst_of_count", "worst_k", "最差表現之連結標的 k 數", uls, k).compare(
             len(uls.value) if uls.ok else None,
             k.value,
             fail_message="第 8 項「連結標的(k)(k=1、2…)」的個數須等於標的數",
@@ -316,12 +291,6 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
 
 
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）
-
-
-def _structure_check(ctx: IssuerContext, rid: str, field: str, name: str, deps, issues, tolerance=None) -> CheckResult:
-    return _doc(ctx, rid, field, name, *deps).compare(
-        None, None, ok=not issues, reason="schedule_inconsistent", message="；".join(issues), tolerance=tolerance
-    )
 
 
 def schedule(ctx: IssuerContext) -> list[CheckResult]:
@@ -356,7 +325,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
     if maturity.ok and payments[-1] != maturity.value:
         issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
     out.append(
-        _structure_check(
+        kit.structure_check(
             ctx, "schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], [table, maturity], issues
         )
     )
@@ -376,7 +345,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
             if prev["end"] is not None and row["start"] is not None and row["start"] != prev["end"]:
                 issues.append(f"第 {row['period']} 期起始日 {row['start']} 不等於前期終止日 {prev['end']}")
         out.append(
-            _structure_check(
+            kit.structure_check(
                 ctx,
                 "schedule.period_starts",
                 "period_starts",
@@ -418,7 +387,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
                         f"無自動提前出場：第 {r['period']} 期評價日{'應有日期' if want else '應為「不適用」'}"
                     )
     out.append(
-        _structure_check(
+        kit.structure_check(
             ctx,
             "schedule.autocall_dates",
             "autocall_dates",

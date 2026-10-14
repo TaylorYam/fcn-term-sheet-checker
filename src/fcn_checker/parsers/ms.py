@@ -15,6 +15,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import money, ms_scenario, ms_tables, ms_wording
+from .common import NUM, Hit, Mention, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
@@ -37,7 +38,6 @@ LAYOUT = LayoutSpec(
     CHAPTER_NAMES,
 )
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
-NUM = r"([\d,]+(?:\.\d+)?)"
 FEES = ("申購費用", "提前贖回費用", "分銷費用")
 
 
@@ -132,15 +132,6 @@ def product_code(lines: Sequence[Line]) -> ParsedField:
 # ---------------------------------------------------------------- 讀出
 
 
-@dataclass(frozen=True)
-class Mention:
-    """月配息率或年化報酬率的一個出處；值讀不到時為 None。"""
-
-    where: str
-    value: Decimal | None
-    evidence: tuple[Evidence, ...]
-
-
 @dataclass
 class MsTermSheet:
     fields: dict[str, ParsedField]
@@ -152,18 +143,6 @@ class MsTermSheet:
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
-
-
-def _number(x: str) -> int | Decimal:
-    d = Decimal(x.replace(",", ""))
-    return int(d) if d == d.to_integral_value() else d
-
-
-def _derived(name: str, src: ParsedField, value=None) -> ParsedField:
-    """由另一個欄位推得（證據沿用來源）：來源有問題時沿用來源的狀態與說明。"""
-    if not src.ok:
-        return ParsedField(name, src.status, None, list(src.evidence), list(src.candidates), src.note)
-    return ParsedField(name, FieldStatus.PRESENT, value, list(src.evidence))
 
 
 def _ki_type(lines: list[Line]) -> ParsedField:
@@ -221,7 +200,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     fields["approval_date"] = (
         ParsedField("approval_date", FieldStatus.INVALID, evidence=approval.evidence, note="審查通過日期不是日期")
         if approval.ok and approved is None
-        else _derived("approval_date", approval, approved)
+        else derived("approval_date", approval, approved)
     )
     distributor = _item(items, 14, "distributor", "受託機構之名稱、電話及地址")
     parts = (
@@ -237,7 +216,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
             note = "封面第 14 項無法切出名稱、電話、地址"
             fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=list(distributor.evidence), note=note)
         else:
-            fields[key] = _derived(key, distributor, parts[k].strip() if parts else None)
+            fields[key] = derived(key, distributor, parts[k].strip() if parts else None)
     put("print_date", doc.before_chapter1(), r"中文產品說明書刊印日期：" + D, parse_date)
 
     # 第一章
@@ -248,7 +227,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     )
     put("issuer_name_ch1", article(3), r"本商品發行機構為(.+?)，")
     put("currency_art5", article(5), r"計價幣別：(.+?)（[A-Z]{3}）")
-    put("denomination", article(6), r"每單位商品面額：\D*?" + NUM + r"元", _number)
+    put("denomination", article(6), r"每單位商品面額：\D*?" + NUM + r"元", number)
     put("denomination_currency", article(6), rf"每單位商品面額：({money.CURRENCY}){money.NUMBER}元")
     put("issue_price_pct", article(7), r"發行價格：商品面額之(\d+(?:\.\d+)?)%", Decimal)
     fields["underlyings_art11"] = ms_tables.underlying_table(article(11))
@@ -273,7 +252,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     )
     fields["ko_memory"], fields["ko_observation_art17"] = _art17(article(17))
     zh = fields["name_zh"]
-    fields["name_memory"] = _derived(
+    fields["name_memory"] = derived(
         "name_memory", zh, zh.ok and ms_wording.MEMORY_NAME in full_brackets(squash(zh.value))
     )
     _schedule(fields)
@@ -292,10 +271,10 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     put("redemption_start", ch4, r"（1）開始受理贖回日期：" + D, parse_date)
     for label in FEES:
         fields[standard_fields.fee_field(label)] = ms_tables.fee(label, standard_fields.fee_field(label), ch4)
-    put("minimum_subscription", ch4, r"最低申購金額為[^，。]*，即\D{0,4}?" + NUM + r"元", _number)
-    put("minimum_additional", ch4, r"並以\D{0,4}?" + NUM + r"元(?:（[^）]*）)?為最低加購單位", _number)
-    put("minimum_redemption", ch4, r"最低贖回金額為[^，。]*，即\D{0,4}?" + NUM + r"元", _number)
-    put("redemption_increment", ch4, r"並以\D{0,4}?" + NUM + r"元(?:（[^）]*）)?為累加贖回單位", _number)
+    put("minimum_subscription", ch4, r"最低申購金額為[^，。]*，即\D{0,4}?" + NUM + r"元", number)
+    put("minimum_additional", ch4, r"並以\D{0,4}?" + NUM + r"元(?:（[^）]*）)?為最低加購單位", number)
+    put("minimum_redemption", ch4, r"最低贖回金額為[^，。]*，即\D{0,4}?" + NUM + r"元", number)
+    put("redemption_increment", ch4, r"並以\D{0,4}?" + NUM + r"元(?:（[^）]*）)?為累加贖回單位", number)
     put("issue_price_ch4", ch4, r"發行價格（商品面額的(\d+(?:\.\d+)?)%）", Decimal)
     ccy, amount = money.CURRENCY, money.NUMBER
     put("minimum_subscription_currency", ch4, rf"最低申購金額為[^，。]*，即({ccy}){amount}元")
@@ -326,6 +305,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
         "subscription_dates", "受理申購日（MS 改核對第四章開始受理贖回日期）"
     )
     fields["coupon_pa_pct"] = standard_fields.absent("coupon_pa_pct", "年利率（MS 改核對月配息率與情境年化報酬率）")
+    fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
 
     coupons, annualized = _mentions(fields, scenarios)
     return MsTermSheet(fields, TextIndex(doc.lines), doc, scenarios, coupons, annualized)
@@ -376,7 +356,7 @@ def _currency_occurrences(
             name,
             "情境假設總投資金額幣別",
             where,
-            ParsedField.present(name, hit.values[0], list(hit.lines))
+            ParsedField.present(name, hit.value, list(hit.lines))
             if hit
             else ParsedField.missing(name, "第 18 項假設找不到總投資金額或出現多次"),
         )
@@ -407,7 +387,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     bad = next((p for p in (table, obs17) if not p.ok), None)
     if bad is not None:
         for key in ("ko_observation", "first_callable_period", "autocall_schedule"):
-            fields[key] = _derived(key, bad)
+            fields[key] = derived(key, bad)
         return
     if table.value["type"] != obs17.value["type"]:
         note = "第 14 項(6) 日期表型與第 17 項觀察日寫法不一致"
@@ -430,10 +410,10 @@ def _prices(fields: dict[str, ParsedField]) -> None:
     pt, ki, k, tenor = (fields[x] for x in ("price_table", "ki_type", "first_callable_period", "tenor_months"))
     if not pt.ok:
         for key in ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct"):
-            fields[key] = _derived(key, pt)
+            fields[key] = derived(key, pt)
         return
     tickers = [r["ticker"] for r in pt.value["rows"]]
-    fields["underlyings"] = _derived("underlyings", pt, tickers)
+    fields["underlyings"] = derived("underlyings", pt, tickers)
     # 標的名稱取第 11 項標的表（代碼須依序相同才對得上列；投資人須知的標的名稱和它比）
     art11, names = fields["underlyings_art11"], fields["underlying_names_art11"]
     aligned = art11.ok and names.ok and art11.value == tickers and len(names.value) == len(tickers)
@@ -474,14 +454,10 @@ def _mentions(
 ) -> tuple[list[Mention], list[Mention]]:
     """月配息率的每個出處與獲利情境的年化報酬率（核對規則 §3.3）；讀不到的出處值為 None。"""
 
-    def one(where: str, pf: ParsedField) -> Mention:
-        return Mention(where, pf.value if pf.ok else None, tuple(pf.evidence))
+    one, missing = Mention.of_field, Mention.missing
 
-    def hit(where: str, h: ms_scenario.Hit) -> Mention:
-        return Mention(where, h.values[0], tuple(Evidence.of(ln) for ln in h.lines))
-
-    def missing(where: str, lines: Sequence[Line]) -> Mention:
-        return Mention(where, None, tuple(Evidence.of(ln) for ln in lines))
+    def hit(where: str, h: Hit[Decimal]) -> Mention:
+        return Mention.of_hit(where, h.value, h)
 
     coupons = [one("第 15 項(2) 固定配息率", fields["monthly_coupon_pct"])]
     table = fields["date_table"]

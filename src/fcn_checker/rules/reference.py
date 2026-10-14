@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from ..orders.reference import UNDERLYING_SLOTS, OrderRecord
@@ -391,7 +391,7 @@ def initial_pricing(ctx: Context) -> CheckResult:
 SPLIT_SUSPECTED = "split_suspected"  # 同一檔標的各價格與說明書差同一比例：疑似分割調整後的價格，轉人工覆核
 
 
-def _split_ratio(compared: list[tuple[Any, Any]]) -> Any | None:
+def _split_ratio(compared: list[tuple[Decimal, Decimal]]) -> Decimal | None:
     """同一檔標的可比對的價格欄（表上值, 說明書值）全部不同、且「表上 ÷ 說明書」（4 位）全部相同又不是 1 時回傳該比例。"""
     if len(compared) < 2 or any(doc_v == 0 for _, doc_v in compared):
         return None
@@ -515,10 +515,12 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
                 continue
             times = found
         expected = v * times
-        rule = "須等於參考條件表「單位面額」" + (f"× {times}（審查標準 min_amount_multiples）" if times != 1 else "")
+        requirement = "須等於參考條件表「單位面額」" + (
+            f"× {times}（審查標準 min_amount_multiples）" if times != 1 else ""
+        )
         item = Item.sheet(occ.name, [ov])  # 各出處分開寫（例：最低申購金額），不寫成「單位面額」
         check = Check(rid, occ.field, item, ctx.document, ov=(ov,), expected=expected).needs(pf)
-        out.append(check.compare(expected, pf.value, message=f"{occ.where}{rule}"))
+        out.append(check.compare(expected, pf.value, message=f"{occ.where}{requirement}"))
     return out
 
 

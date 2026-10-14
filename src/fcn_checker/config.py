@@ -5,12 +5,14 @@ from __future__ import annotations
 import datetime as dt
 import string
 import tomllib
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from .ingestion import IngestionError
+from .standard_fields import AGENT_PLACES, GUARANTOR_PLACES
 
 # 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）、
 # autocall（Non-Call < 天期，BNP），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）
@@ -306,38 +308,58 @@ def _issuer_name_ignore(d: dict[str, Any]) -> dict[str, frozenset[str]]:
     return {k: frozenset(v) for k, v in lists.items()}
 
 
-GUARANTOR_PLACES = ("cover", "ch1", "ch2")  # 保證機構名稱的出處鍵：封面、第一章、第二章
-AGENT_PLACES = ("cover", "ch2")  # 總代理人名稱的出處鍵：封面、第二章（SG）
+def _text(v: Any) -> bool:
+    return isinstance(v, str) and bool(v.strip())
 
 
-def _per_issuer_texts(d: Any, where: str, keys: tuple[str, ...] | None = None) -> dict[str, dict[str, str]]:
-    """`[<表>.<上手>]` 裡每個鍵一段不空白的文字；`keys` 給了就只允許這些鍵。"""
+def _per_issuer(d: Any, where: str, valid: Callable[[Any], bool], what: str) -> dict[str, Any]:
+    """`[<表>]` 裡每個上手一個值，都要 `valid`（`what` 為錯訊中值的說明）。"""
     if not isinstance(d, dict):
         raise IngestionError("config_invalid", f"審查標準 {where} 須是一個表（[{where}]）")
-    out: dict[str, dict[str, str]] = {}
-    for issuer, values in d.items():
-        if not isinstance(values, dict) or not values:
-            raise IngestionError("config_invalid", f"審查標準 {where}.{issuer} 須是一個表，每個鍵一段文字")
-        bad = [k for k, v in values.items() if not isinstance(v, str) or not v.strip()]
-        unknown = sorted(set(values) - set(keys)) if keys else []
-        if bad or unknown:
-            raise IngestionError(
-                "config_invalid",
-                f"審查標準 {where}.{issuer} 的鍵須為 {'、'.join(keys or values)}，值為不空白的文字"
-                + (f"（有問題：{'、'.join(bad + unknown)}）" if bad + unknown else ""),
-            )
-        out[issuer] = dict(values)
-    return out
+    bad = [k for k, v in d.items() if not valid(v)]
+    if bad:
+        raise IngestionError("config_invalid", f"審查標準 {where}.{bad[0]} 須是{what}")
+    return dict(d)
 
 
 def _per_issuer_text(d: Any, where: str) -> dict[str, str]:
     """`[<表>]` 裡每個上手一段不空白的文字。"""
-    if not isinstance(d, dict):
-        raise IngestionError("config_invalid", f"審查標準 {where} 須是一個表（[{where}]）")
-    bad = [k for k, v in d.items() if not isinstance(v, str) or not v.strip()]
-    if bad:
-        raise IngestionError("config_invalid", f"審查標準 {where}.{bad[0]} 須是一段不空白的文字")
-    return dict(d)
+    return _per_issuer(d, where, _text, "一段不空白的文字")
+
+
+def _per_issuer_tables(
+    d: Any,
+    where: str,
+    valid: Callable[[Any], bool],
+    table: str,
+    problem: Callable[[str, list[str], list[str]], str],
+    keys: Iterable[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """`[<表>.<上手>]`：每個上手一個不空的表（`table` 為錯訊中表的說明），表內每個值都要 `valid`；
+    `keys` 給了就只允許這些鍵。有不合法的值或未知的鍵時，`problem(上手, 不合法的鍵, 未知的鍵)` 為錯訊。"""
+    allowed = tuple(keys) if keys is not None else ()
+    tables = _per_issuer(d, where, lambda v: isinstance(v, dict) and bool(v), table)
+    for issuer, values in tables.items():
+        bad = [k for k, v in values.items() if not valid(v)]
+        unknown = sorted(set(values) - set(allowed)) if allowed else []
+        if bad or unknown:
+            raise IngestionError("config_invalid", problem(issuer, bad, unknown))
+    return {issuer: dict(values) for issuer, values in tables.items()}
+
+
+def _place_texts(d: Any, where: str, places: Iterable[str]) -> dict[str, dict[str, str]]:
+    """`[<表>.<上手>]`：機構名稱的出處（例：保證機構 cover／ch1／ch2、總代理人 cover／ch2）→ 不空白的文字。"""
+    keys = tuple(places)
+    return _per_issuer_tables(
+        d,
+        where,
+        _text,
+        "一個表，每個鍵一段文字",
+        lambda issuer, bad, unknown: (
+            f"審查標準 {where}.{issuer} 的鍵須為 {'、'.join(keys)}，值為不空白的文字（有問題：{'、'.join(bad + unknown)}）"
+        ),
+        keys,
+    )
 
 
 def _multiple_ok(v: Any) -> bool:
@@ -354,20 +376,15 @@ def _multiple_ok(v: Any) -> bool:
 def _min_amount_multiples(d: Any) -> dict[str, dict[str, int | dict[str, int]]]:
     """`[min_amount_multiples.<上手>]`：最低金額出處欄位 → 正整數倍數，或依承作幣別的 {ISO 代碼: 倍數}（SG 最低申購金額）。"""
     where = "min_amount_multiples"
-    if not isinstance(d, dict):
-        raise IngestionError("config_invalid", f"審查標準 {where} 須是一個表（[{where}]）")
-    out: dict[str, dict[str, int | dict[str, int]]] = {}
-    for issuer, values in d.items():
-        if not isinstance(values, dict) or not values:
-            raise IngestionError("config_invalid", f"審查標準 {where}.{issuer} 須是一個表，每個最低金額出處一個倍數")
-        bad = [k for k, v in values.items() if not _multiple_ok(v)]
-        if bad:
-            raise IngestionError(
-                "config_invalid",
-                f"審查標準 {where}.{issuer}.{bad[0]} 須是正整數（單位面額的倍數）或依幣別的表（例：{{ USD = 10, JPY = 1 }}）",
-            )
-        out[issuer] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in values.items()}
-    return out
+    return _per_issuer_tables(
+        d,
+        where,
+        _multiple_ok,
+        "一個表，每個最低金額出處一個倍數",
+        lambda issuer, bad, unknown: (
+            f"審查標準 {where}.{issuer}.{bad[0]} 須是正整數（單位面額的倍數）或依幣別的表（例：{{ USD = 10, JPY = 1 }}）"
+        ),
+    )
 
 
 def _approval_dates(value: Any) -> tuple[dt.date, ...]:
@@ -417,8 +434,8 @@ def load_review_standard(path: Path) -> ReviewStandard:
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
             iis_pages=int(d["iis"]["pages"]),
             iis_fixed_warning_occurrences={k: int(v) for k, v in d["iis"]["fixed_warning_occurrences"].items()},
-            guarantor_names=_per_issuer_texts(d.get("guarantor_name", {}), "guarantor_name", GUARANTOR_PLACES),
-            agent_names=_per_issuer_texts(d.get("agent_name", {}), "agent_name", AGENT_PLACES),
+            guarantor_names=_place_texts(d.get("guarantor_name", {}), "guarantor_name", GUARANTOR_PLACES),
+            agent_names=_place_texts(d.get("agent_name", {}), "agent_name", AGENT_PLACES),
             product_types=_per_issuer_text(d.get("product_type", {}), "product_type"),
             minimum_issue_sizes=_per_issuer_text(d.get("minimum_issue_size", {}), "minimum_issue_size"),
             min_amount_multiples=_min_amount_multiples(d.get("min_amount_multiples", {})),

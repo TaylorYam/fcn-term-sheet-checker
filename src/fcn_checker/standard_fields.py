@@ -147,6 +147,19 @@ STANDARD_FIELDS: dict[str, str] = {
     "agent_name_cover": "str：封面「總代理人」名稱（審查標準 agent_name.<上手> 有 cover 時核對；SG）",
     "agent_name_ch2": "str：第二章「總代理人」事業名稱（審查標準 agent_name.<上手> 有 ch2 時核對；SG）",
     "minimum_issue_size": "str：第四章發行不成立門檻的金額寫法（審查標準 minimum_issue_size.<上手> 有固定值時核對）",
+    "distributor_phone_ch4": "str：第四章受託機構聯絡電話（BNP 第四章第 16 項）；範本沒有這處時交出 absent",
+}
+
+# 保證機構名稱的出處（審查標準 guarantor_name.<上手> 的鍵）→ 標準欄位、說明的開頭、項目名稱；設定檔與審查標準規則共用這一份
+GUARANTOR_PLACES = {
+    "cover": ("guarantor_name_cover", "封面「保證機構」名稱", "封面保證機構名稱"),
+    "ch1": ("guarantor_name_ch1", "第一章保證機構名稱", "第一章保證機構名稱"),
+    "ch2": ("guarantor_name_ch2", "第二章「保證機構」事業名稱", "第二章保證機構名稱"),
+}
+# 總代理人名稱的出處（審查標準 agent_name.<上手> 的鍵，SG）→ 標準欄位、說明的開頭、項目名稱
+AGENT_PLACES = {
+    "cover": ("agent_name_cover", "封面「總代理人」名稱", "封面總代理人名稱"),
+    "ch2": ("agent_name_ch2", "第二章「總代理人」事業名稱", "第二章總代理人名稱"),
 }
 
 # 另有一組費用欄位：每個費用項目一個，名稱由 fee_field 產生

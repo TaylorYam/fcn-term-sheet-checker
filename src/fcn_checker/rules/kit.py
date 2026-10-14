@@ -402,3 +402,115 @@ def occurrences_of(
     if not container.ok:
         return (), doc_review(rid, name, container, item=item, document=ctx.document)
     return container.value, None
+
+
+# ---------------------------------------------------------------- 上手說明書內部規則共用（MS、BNP；Issue #196）
+
+
+def first_bad(deps: Sequence[ParsedField]) -> ParsedField | None:
+    """依賴欄位中第一個讀不到、歧義或不合法的；全部可用時為 None。"""
+    return next((p for p in deps if not p.ok), None)
+
+
+def doc_check(ctx: IssuerContext, rid: str, field: str, name: str, *deps: ParsedField) -> Check:
+    """文件內部比對的結果身分：項目名稱為 `name`（預期值來自同一份文件其他位置），依賴欄位有問題轉人工覆核。"""
+    return Check(rid, field, Item.expected(name), ctx.document).needs(*deps)
+
+
+def structure_check(
+    ctx: IssuerContext, rid: str, field: str, name: str, deps, issues: Sequence[str], tolerance: str | None = None
+) -> CheckResult:
+    """結構檢查（例：日期表）：`issues` 為不成立的說明，全部成立才通過。"""
+    return doc_check(ctx, rid, field, name, *deps).compare(
+        None, None, ok=not issues, reason="schedule_inconsistent", message="；".join(issues), tolerance=tolerance
+    )
+
+
+def evidence(lines) -> list[Evidence]:
+    """原文行 → 證據。"""
+    return [Evidence.of(ln) for ln in lines]
+
+
+def calc_result(
+    rid: str,
+    field: str,
+    item: Item | str,
+    issues: Sequence[str],
+    evidence: list[Evidence],
+    *,
+    review: bool = False,
+    expected: Any = None,
+    actual: Any = None,
+    ov: Sequence[OrderValue | None] = (),
+) -> CheckResult:
+    """算式驗算的結果：`item` 為項目（或預期值來自說明書時的項目名稱）；`issues` 為不成立的說明；
+    `review` 表示寫法未知（轉人工覆核）而不是算錯。"""
+    item = Item.expected(item) if isinstance(item, str) else item
+    return Check(rid, field, item, ov=tuple(ov)).compare(
+        expected,
+        actual,
+        ok=not issues,
+        fail=S.REVIEW_REQUIRED if review else S.MISMATCH,
+        reason="scenario_unknown_wording" if review else "value_mismatch",
+        message="；".join(issues),
+        evidence=evidence,
+    )
+
+
+def annual_rate(ctx: IssuerContext, rid: str, field: str) -> tuple[Any, OrderValue | None, CheckResult | None]:
+    """參考條件表年利率（上手以 reference_fields 宣告）；（值, 儲存格, 有問題時的人工覆核結果）。"""
+    return order_value(ctx, "coupon_pa_pct", rid, field, None, to_decimal, "數字", name="年利率 %")
+
+
+def rate_mentions(
+    ctx: IssuerContext,
+    rid: str,
+    field: str,
+    what: str,
+    mentions,
+    compare: Callable[[Decimal, Decimal], tuple[bool, Decimal]],
+    tolerance: str,
+    message: Callable[[Decimal], str],
+) -> list[CheckResult]:
+    """說明書每個出處（`parsers.common.Mention`）一筆，與參考條件表年利率推得的值比對；讀不到或出現多個轉人工覆核。
+
+    `compare(年利率, 說明書值)` 回傳（是否一致, 顯示的預期值）；`message(年利率)` 為推算說明。
+    """
+    annual, ov, problem = annual_rate(ctx, rid, field)
+    if problem:
+        return [problem]
+    out = []
+    for m in mentions:
+        check = Check(rid, field, Item.derived(f"{what} %（{m.where}）", [ov]), ctx.document, ov=(ov,))
+        if m.value is None:
+            out.append(
+                check.result(
+                    S.REVIEW_REQUIRED,
+                    evidence=list(m.evidence),
+                    reason="document_missing",
+                    message=f"說明書{m.where}找不到{what}或出現多個",
+                )
+            )
+            continue
+        ok, shown_value = compare(annual, m.value)
+        out.append(
+            check.compare(
+                shown_value, m.value, ok=ok, evidence=list(m.evidence), tolerance=tolerance, message=message(annual)
+            )
+        )
+    return out
+
+
+def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
+    """獲利情境每處年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）；出處由上手讀出結果的
+    `annualized_mentions` 交出（MS：標題不含「較差」的情境；BNP：自動提前贖回、最佳情況）。"""
+    return rate_mentions(
+        ctx,
+        "derive.annualized_return",
+        "annualized_return_pct",
+        "年化報酬率",
+        ctx.ts.annualized_mentions,
+        cmp_pct,
+        "依說明書顯示位數四捨五入後比對",
+        lambda annual: "獲利情境的年化報酬率應等於年利率",
+    )

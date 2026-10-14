@@ -21,7 +21,7 @@ import fitz
 
 from harness import CONFIG, STANDARD, check_all, iis_path
 from pdf_writer import Edit, PdfWriter, require_used
-from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row
+from reference_synth import UL, ProductSpec, build_reference_sheet, price, reference_row, weekday_on_or_after
 
 NAME = STANDARD["product_name"]["sg"]
 WARNING = STANDARD["risk"]["fixed_warning_by_issuer"]["sg"]
@@ -39,12 +39,6 @@ APPROVAL = dt.date(2026, 6, 11)
 ZH = "一二三四五六七八九十"
 NUMERIC = set("0123456789,.")
 Q2, Q4 = Decimal("0.01"), Decimal("0.0001")
-
-
-def _weekday(d: dt.date) -> dt.date:
-    while d.weekday() >= 5:
-        d += dt.timedelta(days=1)
-    return d
 
 
 def underlyings(count: int) -> tuple[UL, ...]:
@@ -98,12 +92,12 @@ class Spec(ProductSpec):
         out = []
         for j in range(1, self.tenor + 1):
             m = 1 + j
-            out.append(_weekday(dt.date(2030 + (m - 1) // 12, (m - 1) % 12 + 1, 9)))
+            out.append(weekday_on_or_after(dt.date(2030 + (m - 1) // 12, (m - 1) % 12 + 1, 9)))
         return out
 
     @property
     def payments(self) -> list[dt.date]:
-        return [_weekday(d + dt.timedelta(days=5)) for d in self.ends]
+        return [weekday_on_or_after(d + dt.timedelta(days=5)) for d in self.ends]
 
     @property
     def obs_start(self) -> dt.date:

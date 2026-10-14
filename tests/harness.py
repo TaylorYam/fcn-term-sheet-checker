@@ -96,6 +96,19 @@ def problems(report: CheckReport) -> set[tuple[str, CheckStatus]]:
     return {(r.rule_id, r.status) for r in report.results if r.status not in (PASS, NA)}
 
 
+PROBLEMS = (MISMATCH, REVIEW, ERROR)
+
+
+def field_problems(report: CheckReport) -> list[tuple[str, str, CheckStatus]]:
+    """不一致、待人工覆核與執行錯誤的結果：（rule_id, 欄位, 狀態），依結果順序。"""
+    return [(r.rule_id, r.field, r.status) for r in report.results if r.status in PROBLEMS]
+
+
+def flagged(report: CheckReport, rule_id: str, status: CheckStatus | None = None) -> bool:
+    """`rule_id` 有任何一筆結果是 `status`（沒給時為任一種問題）。"""
+    return any(r.rule_id == rule_id and r.status in ((status,) if status else PROBLEMS) for r in report.results)
+
+
 def results(report: CheckReport, rule_id: str, field: str | None = None):
     out = [r for r in report.results if r.rule_id == rule_id and (field is None or r.field == field)]
     assert out, f"沒有 {rule_id} {field or ''} 的結果"
