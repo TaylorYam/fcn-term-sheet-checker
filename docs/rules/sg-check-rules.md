@@ -3,7 +3,7 @@
 - 文件側：[SG 範本規格](../templates/sg-zh-product-description.md)
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [SG 下單資料格式](../order-formats/sg-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.8（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #192）；**尚未實作**（實作 Issue 另開，§7）
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #192）；已實作（Issue #194）。rule_id 對照：§3.3 `derive.monthly_coupon`／`derive.annualized_return`；§3.4 `derive.prices`（共用）、`doc.scenario_table`／`doc.scenario_header_pct`；§3.5 `doc.trustee_product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_observation`、`doc.ko_memory`、`doc.ki_consistency`、`doc.worst_of_count`、`doc.redemption_pct`、`schedule.coupon_dates`／`schedule.period_starts`／`schedule.autocall_dates`；§3.6 `standard.fixed_warning`（含 `risk.fixed_warning_variants.sg`）、`standard.risk_level`、`standard.product_name`、`standard.issuer_name`、`standard.guarantor_name`、`standard.agent_name`、`standard.product_type`、`standard.distributor`（`name_equivalents`、`address_equivalents`）；§3.1 最低申購倍數 `field.min_amounts`（`min_amount_multiples.sg` 依幣別，沒列的幣別 `multiple_not_configured` 轉人工覆核）；§3.7 `doc.scenario_parameters`、`doc.scenario_calculations`（欄位 `情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_strike`／`_shares`／`_cash`／`_assumed`）。無自動提前出場時 `ko_pct` 與各標的 KO 價交出不適用（結果為不適用，不比對表上的 100／進場價）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP 核對規則](bnp-check-rules.md)不同或 SG 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍

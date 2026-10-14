@@ -144,6 +144,8 @@ STANDARD_FIELDS: dict[str, str] = {
     "guarantor_name_cover": "str：封面「保證機構」名稱（審查標準 guarantor_name.<上手> 有 cover 時核對）",
     "guarantor_name_ch1": "str：第一章保證機構名稱（審查標準 guarantor_name.<上手> 有 ch1 時核對）",
     "guarantor_name_ch2": "str：第二章「保證機構」事業名稱（審查標準 guarantor_name.<上手> 有 ch2 時核對）",
+    "agent_name_cover": "str：封面「總代理人」名稱（審查標準 agent_name.<上手> 有 cover 時核對；SG）",
+    "agent_name_ch2": "str：第二章「總代理人」事業名稱（審查標準 agent_name.<上手> 有 ch2 時核對；SG）",
     "minimum_issue_size": "str：第四章發行不成立門檻的金額寫法（審查標準 minimum_issue_size.<上手> 有固定值時核對）",
 }
 

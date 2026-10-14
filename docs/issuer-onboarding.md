@@ -127,7 +127,7 @@
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
 | `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作；範本本身沒有的欄位（例：MS 沒有年利率、受理申購日）要明確交出 `standard_fields.absent(name, 說明)`（不適用），共用規則不核對、不報缺漏 |
 | `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構；價格推算已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
-| `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位（ADR 0005 的例外，需經審查才加；BARC 為年利率與天期、MS 與 BNP 為年利率）；讀未宣告的欄位是開發期錯誤 |
+| `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位（ADR 0005 的例外，需經審查才加；BARC 為年利率與天期、MS、BNP 與 SG 為年利率）；讀未宣告的欄位是開發期錯誤 |
 
 自動沿用（不必再寫）：
 

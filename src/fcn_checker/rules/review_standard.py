@@ -325,6 +325,7 @@ def _distributor_text(
     listed = {
         "phone": (std.distributor_phone_equivalents, "電話", "distributor.phone_equivalents"),
         "address": (std.distributor_address_equivalents, "地址", "distributor.address_equivalents"),
+        "name": (std.distributor_name_equivalents, "名稱", "distributor.name_equivalents"),
     }.get(kind)
     if listed is not None and pf.ok and squash(pf.value) in {squash(v) for v in listed[0]}:
         return (
@@ -446,10 +447,13 @@ def _product_name(ctx: Context) -> list[CheckResult]:
             out.append(check.review(bad))
             continue
         flags["memory"] = bool(mem.value)
-        values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": iso}
+        values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": tpl.ccy_text(iso)}
         for flag in NAME_FLAGS:
             for code in ("zh", "en"):
                 values[f"{flag}_{code}"] = tpl.flag_text(flag, code) if flags.get(flag) else ""
+        if flags.get("autocall"):  # 會提前出場且記憶式時改用 autocall_memory_*（SG「（記憶式自動提前出場）」）
+            for code in ("zh", "en"):
+                values[f"autocall_{code}"] = tpl.autocall_text(flags["memory"], code)
         if "maxi" in flags:
             for code in ("zh", "en"):
                 values[f"underlying_{code}"] = tpl.underlying_text(flags["maxi"], code)
@@ -495,6 +499,22 @@ def _guarantor_name(ctx: Context) -> list[CheckResult]:
         _fixed_text(rid, field, standard_field(ctx, field), expected, what, name, document=ctx.document)
         for place, expected in ctx.issuer_std.guarantor_names.items()
         for field, what, name in (GUARANTOR_PLACES[place],)
+    ]
+
+
+AGENT_PLACES = {  # 出處鍵 → 標準欄位、說明的開頭、項目名稱
+    "cover": ("agent_name_cover", "封面「總代理人」名稱", "封面總代理人名稱"),
+    "ch2": ("agent_name_ch2", "第二章「總代理人」事業名稱", "第二章總代理人名稱"),
+}
+
+
+def _agent_name(ctx: Context) -> list[CheckResult]:
+    """總代理人名稱：審查標準 agent_name.<上手> 列出的每個出處 = 固定值（SG；地址電話不核對）；沒有分節的上手不核對。"""
+    rid = "standard.agent_name"
+    return [
+        _fixed_text(rid, field, standard_field(ctx, field), expected, what, name, document=ctx.document)
+        for place, expected in ctx.issuer_std.agent_names.items()
+        for field, what, name in (AGENT_PLACES[place],)
     ]
 
 
@@ -629,6 +649,7 @@ def review_standard_rules(ctx: Context) -> list[CheckResult]:
         *_fees(ctx),
         *_issue_price(ctx),
         *_guarantor_name(ctx),
+        *_agent_name(ctx),
         *_product_type(ctx),
         *_minimum_issue_size(ctx),
     ]

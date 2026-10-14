@@ -151,6 +151,13 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
         ('ms = ["brackets", "trailing_period"]', 'ms = ["brackets", "commas"]', "issuer_name_ignore.ms"),
         ('ms = ["本商品風險程度為RR4。"]', 'ms = ["本商品風險程度為RR4"]', "risk.fixed_warning_openings.ms"),
         ('ms = ["本商品風險程度為RR4。"]', 'ms = ["本商品風險程度等級為RR4。"]', "risk.fixed_warning_openings.ms"),
+        # SG 分節（Issue #194）：依幣別的倍數、固定警語其他寫法、英文名稱幣別代碼對照
+        (
+            "minimum_subscription = { USD = 10, JPY = 1, CNH = 1 }",
+            "minimum_subscription = { USD = 10, JPY = 0, CNH = 1 }",
+            "min_amount_multiples.sg",
+        ),
+        ('ccy_aliases = { CNH = "CNY" }', "ccy_aliases = { CNH = 1 }", "product_name.sg.ccy_aliases"),
     ],
 )
 def test_invalid_ms_review_standard_is_a_batch_config_error(tmp_path, old, new, where):
@@ -181,7 +188,7 @@ def test_address_form_not_listed_in_standard_is_mismatch(tmp_path):
     assert r.status == PASS and "address_equivalents" in r.tolerance
     standard = standard_with(
         tmp_path,
-        'address_equivalents = ["台北市民生東路三段158號6樓", "臺北市105民生東路三段158號6樓"]',
+        'address_equivalents = ["台北市民生東路三段158號6樓", "臺北市105民生東路三段158號6樓", "台北市松山區民生東路3段158號6樓"]',
         "address_equivalents = []",
     )
     r = results(

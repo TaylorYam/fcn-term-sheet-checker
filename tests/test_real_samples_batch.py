@@ -50,12 +50,13 @@ def outcome(saved):
 
 def test_other_issuers_are_unsupported(saved):
     outcome, receipt = saved
-    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147", "082"))]
+    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037"))]
     assert others and all(i.unsupported and not receipt.filled(i) for i in others)
-    # BNP 說明書已有範本、投資人須知沒有：說明書照常核對，但 BNP 商品不回填（ADR 0007；test_real_bnp.py）
-    bnp = [i for i in outcome.items if i.term_sheet.name.startswith("082")]
-    assert bnp and not any(receipt.filled(i) for i in bnp)
-    assert all(i.unsupported == (i.kind == DocKind.IIS) for i in bnp)
+    # BNP、SG 說明書已有範本、投資人須知沒有：說明書照常核對，但 BNP、SG 商品不回填（ADR 0007；test_real_bnp.py、test_real_sg.py）
+    for prefix in ("082", "037"):
+        issuer = [i for i in outcome.items if i.term_sheet.name.startswith(prefix)]
+        assert issuer and not any(receipt.filled(i) for i in issuer)
+        assert all(i.unsupported == (i.kind == DocKind.IIS) for i in issuer)
     # MS 說明書與投資人須知都通過的 3 檔才回填（docs/templates/ms-zh-iis.md §7、test_real_ms.py）
     ms = [i for i in outcome.items if i.kind == DocKind.TERM_SHEET and i.term_sheet.name.startswith("147")]
     filled = [i for i in ms if receipt.filled(i)]

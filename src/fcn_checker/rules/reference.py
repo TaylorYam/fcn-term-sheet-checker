@@ -497,6 +497,23 @@ def min_amounts(ctx: Context) -> list[CheckResult]:
             out.append(problem)
             continue
         times = multiples.get(occ.field, 1)
+        if isinstance(times, dict):  # 依承作幣別的倍數（SG 最低申購金額）：表上幣別沒列倍數時轉人工覆核
+            cur = ctx.sheet_field("currency")
+            iso = cur.value if cur is not None and isinstance(cur.value, str) else None
+            found = times.get(iso) if iso else None
+            if found is None:
+                out.append(
+                    Check(rid, occ.field, Item.sheet(occ.name, [ov]), ctx.document, ov=(ov,))
+                    .needs(pf)
+                    .result(
+                        S.REVIEW_REQUIRED,
+                        actual=pf.value if pf.ok else None,
+                        reason="multiple_not_configured",
+                        message=f"審查標準 min_amount_multiples 沒有幣別 {iso or '（空白）'} 的{occ.name}倍數，請人工確認",
+                    )
+                )
+                continue
+            times = found
         expected = v * times
         rule = "須等於參考條件表「單位面額」" + (f"× {times}（審查標準 min_amount_multiples）" if times != 1 else "")
         item = Item.sheet(occ.name, [ov])  # 各出處分開寫（例：最低申購金額），不寫成「單位面額」
