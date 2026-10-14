@@ -131,7 +131,7 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
 
     standard = standard_with(
         tmp_path,
-        'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313", "+886 (2) 5556 1313"]',
+        'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313", "+886 (2) 5556 1313", "(+886)2-5556-1313"]',
         "phone_equivalents = []",
     )
     r = results(

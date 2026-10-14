@@ -3,7 +3,7 @@
 - 範本代號：`citi-zh-iis`
 - 對應說明書範本：[`citi-zh-pd`](citi-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-14 對 8 份真實樣本（CT1-IIS～CT8-IIS，與說明書 CT1–CT8 同商品）的探勘與核對範圍決定（Issue #220）
-- 狀態：探勘結論與核對範圍已確認（作業人員 2026-10-14 決定不畫螢光，依開發者凍結清單逐項決定）；待實作（Issue #220）
+- 狀態：探勘結論與核對範圍已確認（作業人員 2026-10-14 決定不畫螢光，依開發者凍結清單逐項決定）；已實作（Issue #220：`parsers/citi_iis.py`、範本專屬規則 `rules/citi_iis.py`；合成測試 `tests/test_iis_citi.py`、本機真實樣本測試 `tests/test_real_citi.py`）
 
 > 真實樣本與擷取文字只放在被 Git 忽略的 `data/`。本文件的數值範例都是虛構的；樣本代號與真實商品代號的對照只存在本機（`data/tmp/citi/sample_map.txt`）。產品條件以參考條件表（`data/核對表格式..xlsx` 有 8 列 Citi）與同商品說明書為基準。
 

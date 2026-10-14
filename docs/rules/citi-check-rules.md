@@ -3,7 +3,7 @@
 - 文件側：[Citi 範本規格](../templates/citi-zh-product-description.md)；投資人須知見 [Citi 投資人須知範本規格](../templates/citi-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 Citi 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [Citi 下單資料格式](../order-formats/citi-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.9（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-14，Issue #220）；待實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-14，Issue #220）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 Citi 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對；期初定價 `field.initial_pricing`）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.monthly_coupon`（第 13 項各處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d)）、`derive.coupon_pa_mentions`（第 14 項(2)、第 13 項末段舉例的年化配息率）；§3.4 `derive.prices`（共用）、`doc.table_header_pct`、`doc.scenario_table`；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`（含 ISO 代碼）、`doc.initial_valuation_date`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_memory`、`doc.memory_wording`、`doc.ki_consistency`（含 KI 每期觀察 t=1-n）、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`；§3.6 共用 `standard.*`（Citi 分節）。第 12 項(9)、第 13 項與日期表的 KO 觀察寫法不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG 核對規則](sg-check-rules.md)不同或 Citi 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -89,7 +89,7 @@
 | KO 觀察方式 | §12(7) 標籤與表頭、§12(9) 有無、§13 段名一致（範本規格 §4.1） |
 | Non-Call | D 型：§12(9) 中文數字 k = §13 `即第{k}個`（有寫時）= 日期表兩欄皆 `不適用` 的列數 + 1；P 型：§13 從 `於觀察日` 開始（= 1），其他寫法轉人工覆核 |
 | 記憶式 | §13 段名 `記憶式自動提前出場事件` ⇔ 逐檔記憶條款（`買回自動提前出場`）⇔ 名稱 `(記憶式自動提前出場)`（範本規格 §4.2） |
-| 記憶式用字 | 判定為非記憶式時，第一章不得出現「記憶式」（2026-10-14 確認；8 份說明書成立）。比對「記憶式」三個字，不是「記憶」（§10 標的說明有「記憶體」） |
+| 記憶式用字 | 判定為非記憶式時，第一章不得出現「記憶式」（2026-10-14 確認；8 份說明書成立）。比對「記憶式」三個字，不是「記憶」（§10 標的說明有「記憶體」）；rule_id `doc.memory_wording` |
 | 自動提前出場 | §13 有 `自動提前出場界限` ⇔ 名稱中文有 `自動提前出場`、英文有 `Autocall` ⇔ §9 表有自動提前出場界限欄 ⇔ 日期表為 D 型三欄或 P 型觀察日 ⇔ §8 有 (4) |
 | KI | §8(3) 有無 `下限價：` 與 `觸及下限事件：` 寫法、到期給付款一致（範本規格 §4.4）；§9 表有無下限價欄一致；P 型 `(t=1-n)` 的 n = 天期 |
 | 標的數 | 名稱 `單一連結標的`／`一籃子連結標的中表現最差`（英文 `Single Underlying`／`the Worst Performing Underlying in the basket`）與 §9 列數一致（1 檔／2 檔以上） |
@@ -164,7 +164,7 @@ PR #223 提出的 4 個問題（2026-10-14 作業人員回覆）：
 | 差異 | 樣本 | 解釋與處理 |
 |---|---|---|
 | 表上 `UL_n` 排序與說明書不同（代號與價格都對得上） | CT2–CT6 | Citi 依代號配對（2026-10-14 確認） |
-| 表上某檔日本 ETF 四個價格為說明書的 1/100 | CT2 | 表填錯，照常判不一致（2026-10-14 確認） |
+| 表上某檔日本 ETF 四個價格為說明書的 1/100 | CT2 | 表填錯（2026-10-14 確認）。四個價格與說明書差同一比例，依共用規則「疑似分割調整」轉人工覆核（[BNP 核對規則](bnp-check-rules.md) §3.4），不會通過；錯訊寫出比例 0.01 |
 | 表上 VWAP 商品進場價空白 | CT4 | 共用規則：不比對、通過後覆寫（依代號） |
 | 受託或銷售機構商品代號 `[ ]`、審查通過日期為舊日期 | CT1 | 2024 舊文件；判不通過屬預期（2026-10-14 確認） |
 | 固定警語與標準版本不同（沒有 OSU 段等） | 8 份 | Citi 版本（2026-10-14 確認） |

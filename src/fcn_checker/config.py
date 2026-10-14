@@ -206,6 +206,8 @@ class ReferenceFormat:
     ko_memory_values: dict[str, bool]
     ki_type_values: dict[str, str]
     initial_pricing_values: dict[str, str]  # 期初定價：開盤價／收盤價／VWAP → open／close／vwap
+    # 標的不看順序的上手代號：表上 UL_n 與說明書同一組代號就相符，價格與 VWAP 回填依代號配對（Citi，Issue #220）
+    underlyings_any_order: tuple[str, ...] = ()
 
 
 def load_toml(path: Path, what: str) -> dict[str, Any]:
@@ -481,6 +483,7 @@ def load_reference_format(path: Path) -> ReferenceFormat:
             ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
             ki_type_values=dict(d["values"]["ki_type"]),
             initial_pricing_values=dict(d["values"]["initial_pricing"]),
+            underlyings_any_order=tuple(str(c) for c in d.get("underlyings", {}).get("any_order_issuers", [])),
         )
     except (KeyError, TypeError, ValueError) as e:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔缺少或格式錯誤的項目：{e}") from e

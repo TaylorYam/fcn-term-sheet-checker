@@ -120,6 +120,8 @@ STANDARD_FIELDS: dict[str, str] = {
     "ki_type": "str：none 無 KI／AM 到期觀察／D 每日觀察／P 每期觀察（每個配息週期終止日）／M 每月觀察（BARC Monthly KI，"
     "尚無樣本）；none 可用 NOT_APPLICABLE 狀態交出",
     "autocall_schedule": "AutocallSchedule：提前出場排程（第一個可提前出場期、期數、各期比價日）",
+    "initial_pricing": "str：期初定價（參考條件表格式 [values.initial_pricing] 的對照值 open／close／vwap）；說明書寫明時才交出"
+    "（Citi 標的表表頭「期初評價日之收盤價格／VWAP」），範本沒有交 absent，共用規則只檢查表上是允許值",
     "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額 × 倍數的各最低金額出處（最低交易／申購／加購／贖回金額）；"
     "倍數依審查標準 min_amount_multiples.<上手>.<出處欄位>，沒設定為 1",
     "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",

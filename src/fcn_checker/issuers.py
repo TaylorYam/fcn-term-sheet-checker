@@ -13,13 +13,16 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, hsbc_iis, ms_iis, sg_iis
+from .parsers import barc_iis, bnp_iis, citi_iis, hsbc_iis, ms_iis, sg_iis
 from .parsers import bnp as bnp_parser
+from .parsers import citi as citi_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
 from .parsers import sg as sg_parser
 from .rules import barc as barc_rules
 from .rules import bnp as bnp_rules
+from .rules import citi as citi_rules
+from .rules import citi_iis as citi_iis_rules
 from .rules import hsbc as hsbc_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
@@ -176,7 +179,28 @@ SG = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG)
+CITI = Issuer(
+    code=citi_rules.ISSUER,
+    template_id=citi_parser.TEMPLATE_ID,
+    label="Citi 中文產品說明書",
+    parser_version=citi_parser.PARSER_VERSION,
+    not_covered=tuple(citi_rules.NOT_COVERED),
+    detect=citi_parser.detect,
+    read=citi_parser.read,
+    rules=citi_rules.run_all,
+    reference_fields=citi_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=citi_iis.TEMPLATE_ID,
+        label="Citi 中文投資人須知",
+        parser_version=citi_iis.PARSER_VERSION,
+        detect=citi_iis.detect,
+        read=citi_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=citi_iis_rules.run_all,
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:
