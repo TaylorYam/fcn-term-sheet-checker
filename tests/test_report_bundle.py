@@ -138,6 +138,52 @@ def test_known_unsupported_and_released_documents_are_left_out(tmp_path):
 KNOWN_HEADERS = [h for h in REFERENCE_HEADERS if h not in ("庫存狀態", "當日比價")]
 
 
+def variant_spec() -> tuple[Spec, dict]:
+    """BARC 不支援 KI 每期觀察（上手支援樣態表）：參考條件表填 P 的商品是不支援樣態（Issue #207）。"""
+    variant = Spec(product_code="029199990003", ki="D")
+    return variant, reference_row(variant, **{"KI(Freq)": "P"})
+
+
+def test_unsupported_variants_are_left_out_and_only_counted(tmp_path):
+    ok, bad, rows = failing_pair()
+    variant, variant_row = variant_spec()
+    other = Spec(product_code="999199990001")  # 未支援上手
+    outcome, _ = checked(tmp_path, [ok, bad, variant, other], [*rows, variant_row, reference_row(other)])
+    assert [i.term_sheet.name for i in report_bundle.reportable(outcome)] == [
+        f"{bad.product_code}_TS.pdf",
+        f"{bad.product_code}_IIS.pdf",
+    ]
+
+    out = export(outcome, tmp_path)
+
+    counts = summary(out / "回報總表.xlsx")
+    assert counts["不支援樣態（已知不支援，未列入回報包）"] == 2
+    assert counts["未支援上手（已知不支援，未列入回報包）"] == 2
+    assert (counts["通過"], counts["不一致"], counts["需人工覆核"]) == (2, 2, 0)
+    assert (counts["未通過"], counts["列入回報包"]) == (2, 2)
+    categories = ("通過", "人工放行", "不一致", "需人工覆核", "未支援上手（已知不支援，未列入回報包）", "執行錯誤")
+    assert (
+        sum(counts[k] for k in categories) + counts["不支援樣態（已知不支援，未列入回報包）"] == counts["PDF 總數"] == 8
+    )
+    assert {r["TDCC Code"] for r in sheet_dicts(out / "回報總表.xlsx", "回報")} == {bad.product_code}
+    assert not [p for p in (out / "PDF").rglob("*.pdf") if p.name.startswith(variant.product_code)]
+    assert variant.product_code not in (out / "核對紀錄_未通過.json").read_text(encoding="utf-8")
+    extract = openpyxl.load_workbook(out / "參考條件表_未通過.xlsx").active
+    codes = {str(v) for row in extract.iter_rows(values_only=True) for v in row if v is not None}
+    assert bad.product_code in codes and not {variant.product_code, other.product_code} & codes
+
+
+def test_panel_cannot_export_when_only_unsupported_variants_fail(tmp_path):
+    ok = Spec()
+    variant, variant_row = variant_spec()
+    session = session_for(tmp_path, [ok, variant], [reference_row(ok), variant_row])
+    session.load_preview()
+    session.start_check()
+    assert not session.can_export_bundle
+    with pytest.raises(IngestionError, match="沒有未通過"):
+        session.export_bundle(tmp_path / "out", now=NOW)
+
+
 def test_reference_extract_keeps_only_the_known_columns(tmp_path):
     """合成表最右側另有一個無表頭欄（不在匯入格式）：匯出時拿掉。"""
     ok, bad, rows = failing_pair()
