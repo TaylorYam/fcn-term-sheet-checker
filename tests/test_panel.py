@@ -76,23 +76,18 @@ def test_preview_and_result_show_pdfs_sharing_one_reference_row(tmp_path):
         assert str(other) in outcome.ordered_results(item)[0].message
 
 
-def test_preview_reports_reference_sheet_column_problems(tmp_path):
+def test_preview_stops_with_the_missing_required_columns(tmp_path):
     from reference_synth import REFERENCE_HEADERS
 
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
-    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)], [*REFERENCE_HEADERS, "新欄位"])
-    preview = session_for(tmp_path, sheet, [pdf]).load_preview()
-    assert any("新欄位" in w for w in preview.warnings)
-    text = PanelOutcome.preview_warnings(preview)
-    assert text.startswith("參考條件表欄名問題：") and "新欄位" in text
-
-
-def test_preview_without_column_problems_shows_no_warning(tmp_path):
-    sheet, pdfs = inputs(tmp_path)
-    preview = session_for(tmp_path, sheet, pdfs).load_preview()
-    assert not preview.warnings
-    assert PanelOutcome.preview_warnings(preview) == ""
+    headers = [*(h for h in REFERENCE_HEADERS if h != "KO(%)"), "新欄位"]
+    sheet = build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)], headers)
+    session = session_for(tmp_path, sheet, [pdf])
+    with pytest.raises(IngestionError, match=r"缺少必要欄：KO\(%\)") as e:
+        session.load_preview()
+    assert "新欄位" not in str(e.value), "多出的欄不提示"
+    assert session.preview is None
 
 
 def test_pdf_product_code_is_never_taken_from_the_sheet(tmp_path):
@@ -117,7 +112,7 @@ def test_selection_is_required_and_changing_it_clears_preview(tmp_path):
         session.load_preview()
 
 
-@pytest.mark.parametrize("kind", ["broken_excel", "missing_sheet"])
+@pytest.mark.parametrize("kind", ["broken_excel", "no_header"])
 def test_invalid_reference_sheet_never_leaves_valid_preview(tmp_path, kind):
     sheet, pdfs = inputs(tmp_path)
     session = session_for(tmp_path, sheet, pdfs)
@@ -126,7 +121,7 @@ def test_invalid_reference_sheet_never_leaves_valid_preview(tmp_path, kind):
         sheet.write_bytes(b"not an Excel")
     else:
         wb = openpyxl.load_workbook(sheet)
-        wb["樣本清單"].title = "其他"
+        wb["樣本清單"]["G3"] = "商品代號"  # 第一張工作表找不到 TDCC Code 表頭
         wb.save(sheet)
     with pytest.raises(IngestionError):
         session.load_preview()

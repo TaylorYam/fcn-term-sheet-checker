@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.saving import run_batch, save_batch
 from harness import CONFIG, check_all, load_record, with_iis
@@ -88,14 +89,13 @@ def test_blank_or_unknown_pricing_requires_review_naming_the_column(tmp_path, pr
     assert not receipt.filled(item)
 
 
-def test_sheet_without_the_pricing_column_requires_review_naming_it(tmp_path):
+def test_sheet_without_the_pricing_column_stops_the_whole_batch_naming_it(tmp_path):
     spec = Spec()
     pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
     headers = [h for h in REFERENCE_HEADERS if h != "期初定價"]
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(spec)], headers)
-    item, _ = check_all(sheet, [pdf]).items
-    assert item.report.status.value == "REVIEW_REQUIRED"
-    assert any("期初定價" in m for m in item.problem_messages), item.problem_messages
+    with pytest.raises(IngestionError, match="缺少必要欄：期初定價"):  # 必要欄（Issue #199）
+        check_all(sheet, [pdf])
 
 
 def test_vwap_with_ki_fills_the_ki_prices(tmp_path):

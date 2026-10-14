@@ -1,7 +1,7 @@
 """核對結果檔：一批說明書核對後唯一的 Excel 產出（Issue #72）。
 
-- 「回填後」：原參考條件表 `樣本清單` 刪掉不要的列，欄位再照參考條件表欄位順序重排（Issue #173）：各欄從第 1 列起的值、
-  儲存格與日期格式、欄寬跟著欄走；表上缺少的欄在該欄應在的位置補一個只有表頭的空白欄；沒有表頭（或不在參考條件表欄位順序、
+- 「回填後」：原參考條件表（第一張工作表）刪掉不要的列，欄位再照參考條件表欄位順序重排（Issue #173）：各欄從第 1 列起的值、
+  儲存格與日期格式、欄寬跟著欄走；表上缺少的欄在該欄應在的位置補一個只有表頭的空白欄（缺 TS、IIS 時補上並打勾，Issue #199）；沒有表頭（或不在參考條件表欄位順序、
   重複）的欄接在最右邊，保持原相對順序。資料列只留下整份通過且已回填的列，順序照原表；可以直接匯入資料庫。
   原檔其他工作表不帶入。
 - 「錯誤清單」：每份沒通過的說明書一列，依 PDF 輸入順序：TDCC Code、PDF 檔名、錯訊（多條以換行分隔）。
@@ -9,7 +9,7 @@
 檔名 `<參考條件表檔名>_核對結果_<YYYYMMDD-HHMMSS>.xlsx`，寫到指定資料夾，不覆蓋既有檔案。
 
 「回填後」是刪掉不要的列做出來的。合併儲存格、格式化條件、資料驗證的範圍與公式不會跟著位移，
-`樣本清單` 有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表；要重排欄位時，合併儲存格（含表頭以上）、
+參考條件表有這些設定時不產生核對結果檔並寫出原因，避免默默產出錯位的表；要重排欄位時，合併儲存格（含表頭以上）、
 篩選或排序條件也一樣。篩選範圍跟著資料列數縮小，補欄時跟著變寬。
 """
 
@@ -32,7 +32,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from .config import ReferenceFormat
 from .identification import Identification, name_code
 from .ingestion import IngestionError, write_new
-from .orders.reference import normalize_cell
+from .orders.reference import SheetLayout, locate, normalize_cell
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
@@ -65,9 +65,11 @@ def output_path(out_dir: Path, reference_sheet: Path, now: dt.datetime) -> Path:
 
 def check_layout(wb: Workbook, rfmt: ReferenceFormat) -> None:
     """版面無法安全刪列時丟出 IngestionError。要在回填前檢查：資料列的合併儲存格連回填都寫不進去。"""
-    ws = wb[rfmt.sheet]
-    unsupported = _unsupported_layout(ws, rfmt.first_data_row)
-    if not _is_identity(_arrangement(ws, rfmt)):  # 欄位要照參考條件表欄位順序重排：這些設定不會跟著欄移動
+    layout = locate(wb, rfmt)
+    ws = wb[layout.sheet]
+    unsupported = _unsupported_layout(ws, layout.first_data_row)
+    # 欄位要照參考條件表欄位順序重排：這些設定不會跟著欄移動
+    if not _is_identity(_arrangement(ws, rfmt, layout.header_row)):
         if ws.merged_cells.ranges:
             unsupported.append("合併儲存格（欄位要照參考條件表欄位順序重排）")
         if ws.auto_filter.filterColumn or ws.auto_filter.sortState:
@@ -75,7 +77,7 @@ def check_layout(wb: Workbook, rfmt: ReferenceFormat) -> None:
     if unsupported:
         raise IngestionError(
             "result_layout_unsupported",
-            f"參考條件表「{rfmt.sheet}」有{'、'.join(unsupported)}，刪列後無法保證版面正確，未產生核對結果檔",
+            f"參考條件表「{layout.sheet}」有{'、'.join(unsupported)}，刪列後無法保證版面正確，未產生核對結果檔",
         )
 
 
@@ -89,15 +91,18 @@ def save(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Seque
 
 
 def _build(wb: Workbook, rfmt: ReferenceFormat, keep: Iterable[int], errors: Sequence[ErrorRow]) -> bytes:
+    layout = locate(wb, rfmt)
     for name in wb.sheetnames:
-        if name != rfmt.sheet:
+        if name != layout.sheet:
             del wb[name]
-    ws = wb[rfmt.sheet]
+    ws = wb[layout.sheet]
     ws.title = FILLED_SHEET
+    ws.sheet_state = "visible"  # 第一張工作表隱藏時也讀它（Issue #199），「回填後」要看得到
     ws.sheet_view.tabSelected = True
     wb.active = ws
-    _keep_rows(ws, rfmt.first_data_row, sorted(set(keep)))
-    _arrange_columns(ws, rfmt)
+    kept = sorted(set(keep))
+    _keep_rows(ws, layout.first_data_row, kept)
+    _arrange_columns(ws, rfmt, layout, len(kept))
     _error_sheet(wb.create_sheet(ERROR_SHEET), errors)
     buf = io.BytesIO()
     wb.save(buf)
@@ -148,7 +153,7 @@ def _keep_rows(ws: Worksheet, first: int, keep: list[int]) -> None:
             ws.auto_filter.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{last}"
 
 
-def _arrangement(ws: Worksheet, rfmt: ReferenceFormat) -> list[int | str]:
+def _arrangement(ws: Worksheet, rfmt: ReferenceFormat, header_row: int) -> list[int | str]:
     """「回填後」由左到右每一欄的來源：原表欄號，或表上缺少、要補空白欄的欄名。
 
     參考條件表欄位順序的欄依序在前；沒有表頭、不在參考條件表欄位順序或重複出現的欄接在後面，保持原相對順序。
@@ -157,7 +162,7 @@ def _arrangement(ws: Worksheet, rfmt: ReferenceFormat) -> list[int | str]:
     named: dict[str, int] = {}
     rest: list[int] = []
     for col in range(1, ws.max_column + 1):
-        header = normalize_cell(ws.cell(row=rfmt.header_row, column=col).value)
+        header = normalize_cell(ws.cell(row=header_row, column=col).value)
         if header is not None and str(header) in standard and str(header) not in named:
             named[str(header)] = col
         else:
@@ -179,9 +184,12 @@ def _dim_columns(ws: Worksheet, last: int) -> dict[int, ColumnDimension]:
     return out
 
 
-def _arrange_columns(ws: Worksheet, rfmt: ReferenceFormat) -> None:
-    """欄位照參考條件表欄位順序重排；已照參考條件表欄位順序時不動。合併儲存格已由 `check_layout` 擋下。"""
-    order = _arrangement(ws, rfmt)
+def _arrange_columns(ws: Worksheet, rfmt: ReferenceFormat, layout: SheetLayout, kept: int) -> None:
+    """欄位照參考條件表欄位順序重排；已照參考條件表欄位順序時不動。合併儲存格已由 `check_layout` 擋下。
+
+    表上缺少的欄只補表頭；其中不是必要欄的 TS、IIS（`optional_columns`）在留下的 `kept` 列資料列都打勾：
+    留在「回填後」的都是說明書與投資人須知都通過或人工放行的商品（Issue #199）。"""
+    order = _arrangement(ws, rfmt, layout.header_row)
     if _is_identity(order):
         return
     dims = _dim_columns(ws, ws.max_column)
@@ -203,11 +211,14 @@ def _arrange_columns(ws: Worksheet, rfmt: ReferenceFormat) -> None:
     present = [col for col, src in enumerate(order, start=1) if isinstance(src, int)]
     for col, src in enumerate(order, start=1):
         if isinstance(src, str):  # 表頭格式比照最近的原有欄的表頭格
-            cell = ws.cell(rfmt.header_row, col)
+            cell = ws.cell(layout.header_row, col)
             cell.value = src
             if present:
                 near = min(present, key=lambda c: abs(c - col))
-                cell._style = copy(ws.cell(rfmt.header_row, near)._style)
+                cell._style = copy(ws.cell(layout.header_row, near)._style)
+            if src in rfmt.optional_columns:
+                for r in range(layout.first_data_row, layout.first_data_row + kept):
+                    ws.cell(r, col).value = rfmt.checked_value
     ws.column_dimensions.clear()
     for col, src in enumerate(order, start=1):
         if isinstance(src, int) and src in dims:

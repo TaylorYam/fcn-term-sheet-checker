@@ -178,15 +178,14 @@ class ReferenceFormat:
     """參考條件表（多列表格）的版面與欄位對照，所有上手共用。"""
 
     version: int
-    sheet: str
-    header_row: int
-    first_data_row: int
+    header_search_rows: int  # 表頭在第一張工作表的前幾列裡找（有配對欄 key_column 的那一列）
     key_column: str
-    issuer_column: str
+    issuer_column: str  # 不是必要欄：表上有才確認列屬於哪家上手
     empty_value: str
     checked_value: str  # TS、IIS 欄的打勾寫法（核對沒問題）
     issuer_values: dict[str, str]  # 上手代號 → 發行機構欄的寫法
-    columns: dict[str, str]  # Excel 欄名 → 標準欄位（要核對的欄）
+    columns: dict[str, str]  # Excel 欄名 → 標準欄位（要核對或回填的欄；同一標準欄位可有多個欄名）
+    optional_columns: tuple[str, ...]  # columns 裡不是必要欄的欄名（表上沒有也照常核對）
     column_order: tuple[str, ...]  # 參考條件表欄位順序；不在 columns 的是不核對的欄（Issue #173）
     ko_observation_values: dict[str, str]
     ko_memory_values: dict[str, bool]
@@ -451,15 +450,14 @@ def load_reference_format(path: Path) -> ReferenceFormat:
         layout = d["layout"]
         fmt = ReferenceFormat(
             version=int(d["version"]),
-            sheet=layout["sheet"],
-            header_row=int(layout["header_row"]),
-            first_data_row=int(layout["first_data_row"]),
+            header_search_rows=int(layout["header_search_rows"]),
             key_column=layout["key_column"],
             issuer_column=layout["issuer_column"],
             empty_value=layout["empty_value"],
             checked_value=layout["checked_value"],
             issuer_values=dict(d["issuer_values"]),
             columns=cols,
+            optional_columns=tuple(str(h) for h in layout["optional_columns"]),
             column_order=tuple(str(h) for h in layout["column_order"]),
             ko_observation_values=dict(d["values"]["ko_observation"]),
             ko_memory_values={k: bool(v) for k, v in d["values"]["ko_memory"].items()},
@@ -473,13 +471,21 @@ def load_reference_format(path: Path) -> ReferenceFormat:
 
 
 def _check_column_order(fmt: ReferenceFormat) -> None:
-    """參考條件表欄位順序要涵蓋每個核對欄與發行機構欄，且每個欄名只出現一次。"""
+    """參考條件表欄位順序要涵蓋每個標準欄位（同一標準欄位有多個欄名時至少一個）、配對欄與發行機構欄，
+    且每個欄名只出現一次；optional_columns 要是 [columns] 的欄名。"""
     order = fmt.column_order
-    absent = [h for h in (*fmt.columns, fmt.key_column, fmt.issuer_column) if h not in order]
+    named = {std for h, std in fmt.columns.items() if h in order}
+    absent = [h for h, std in fmt.columns.items() if std not in named]
+    absent += [h for h in (fmt.key_column, fmt.issuer_column) if h not in order]
     repeated = sorted({h for h in order if order.count(h) > 1}, key=order.index)
     problems = [f"缺少「{h}」" for h in dict.fromkeys(absent)] + [f"「{h}」重複" for h in repeated]
     if problems:
         raise IngestionError("config_invalid", f"參考條件表格式設定檔的參考條件表欄位順序{'、'.join(problems)}")
+    unknown = [h for h in fmt.optional_columns if h not in fmt.columns]
+    if unknown:
+        raise IngestionError(
+            "config_invalid", f"參考條件表格式設定檔 optional_columns 有 [columns] 沒有的欄名：{'、'.join(unknown)}"
+        )
 
 
 def load_issuer_prefixes(path: Path) -> dict[str, str]:

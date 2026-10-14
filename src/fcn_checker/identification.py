@@ -6,7 +6,7 @@
    其他 → 檔名無法辨識（人工覆核、不能放行）。
 1. 檔名前三碼（上手編號）查上手編號對照 → 上手；不在對照表或上手沒有該種文件的範本 → 未支援上手。
 2. 內容辨識出的上手必須與檔名一致；說明書封面商品代號也要等於檔名的商品代號，否則轉人工覆核。
-3. 以商品代號找參考條件表的列（TDCC Code），該列發行機構必須是此上手的寫法。
+3. 以商品代號找參考條件表的列（TDCC Code）；表上有發行機構欄時，該列發行機構必須是此上手的寫法。
 4. 同一商品代號（檔名）的說明書與投資人須知配成一組；同種文件有多份時，對到列的全部轉人工覆核，不核對也不回填。
 5. 這批只有說明書或只有投資人須知、且已對到列時，那一份轉人工覆核（這批缺另一份），不能人工放行。
    另一份在這批裡但本身配對失敗（例：未支援上手、範本不符）時不算缺，但那份沒通過，說明書就不回填。
@@ -257,7 +257,8 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
         return out.stop(problem, r)
     row = rows[0]
     expected_issuer = config.reference_format.issuer_values.get(issuer.code)
-    if expected_issuer is None or row.issuer.value != expected_issuer:
+    # 表上沒有發行機構欄時不確認：商品代號已等於檔名上手編號開頭，上手已確定（Issue #199）
+    if row.issuer is not None and (expected_issuer is None or row.issuer.value != expected_issuer):
         problem = PairingProblem.ISSUER_MISMATCH
         r = _review(
             "batch.pairing",

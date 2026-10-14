@@ -164,6 +164,29 @@ def test_reference_extract_drops_named_columns_the_tool_does_not_know(tmp_path):
     assert all(v != "台北" for row in ws.iter_rows(values_only=True) for v in row)
 
 
+def test_company_original_sheet_keeps_its_layout_and_reruns_the_same(tmp_path):
+    """公司原始待建檔表（Issue #199）：工作表名稱、表頭列照原表，「計價幣別」照樣帶出，其他欄拿掉；重跑結果相同。"""
+    ok, bad, rows = failing_pair()
+    dropped = {"TS", "IIS", "庫存狀態", "當日比價", "發行機構", "承作幣別"}
+    headers = ["交易日期", *(h for h in REFERENCE_HEADERS if h not in dropped), "計價幣別", "分公司_1"]
+    for r in rows:
+        r.update({"計價幣別": r["承作幣別"], "分公司_1": "城中"})
+    sheet = build_reference_sheet(tmp_path / "ELN待建檔.xlsx", rows, headers, title="ELN待建檔_測試", header_row=2)
+    outcome = check_all(sheet, [pdf_for(tmp_path, s) for s in (ok, bad)])
+    before = sorted((i.term_sheet.name, i.report.status, i.problem_messages) for i in report_bundle.reportable(outcome))
+    assert before
+
+    out = export(outcome, tmp_path)
+
+    extract = out / "參考條件表_未通過.xlsx"
+    ws = openpyxl.load_workbook(extract).worksheets[0]
+    assert ws.title == "ELN待建檔_測試"
+    assert [c.value for c in ws[2]] == [h for h in headers if h not in ("交易日期", "分公司_1")]
+    assert [r["TDCC Code"] for r in sheet_dicts(extract, "ELN待建檔_測試", header_row=2)] == [bad.product_code]
+    again = check_all(extract, sorted((out / "PDF").glob("*.pdf")), CONFIG)
+    assert sorted((i.term_sheet.name, i.report.status, i.problem_messages) for i in again.items) == before
+
+
 def test_same_named_pdfs_keep_their_names_and_rerun_the_same(tmp_path):
     """同名的不同 PDF（多份對到同一列）：檔名是辨識依據，不改名，另放 PDF/同名2/；兩個一起帶入重跑結果相同。"""
     spec = Spec()

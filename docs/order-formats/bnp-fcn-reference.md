@@ -5,7 +5,7 @@
 
 ## 1. 結構
 
-與其他上手相同（`樣本清單` 工作表、第 3 列表頭、每列一檔）。BNP 列的 `發行機構` 欄寫 `BNP`；商品代號前 3 碼為 `082`（`config/issuer_prefixes.toml` 已登記）。
+與其他上手相同（版面見[參考條件表格式](reference-sheet.md) §1，每列一檔）。BNP 列的 `發行機構` 欄寫 `BNP`；商品代號前 3 碼為 `082`（`config/issuer_prefixes.toml` 已登記）。
 
 已登記：`config/reference_sheet.toml` 的 `issuer_values.BNP = "BNP"`、`src/fcn_checker/issuers.py` 的 BNP 範本（`bnp-zh-pd`）。
 

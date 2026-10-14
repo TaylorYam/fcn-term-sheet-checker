@@ -60,7 +60,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 ## 目前進度（2026-10-01）
 
 - 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
-- 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`）。PANEL 與 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[核對規則](docs/rules/barc-check-rules.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表流程已刪除（Issue #46）。
+- 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`，或公司原始的待建檔表；只要必要欄都在）。PANEL 與 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[核對規則](docs/rules/barc-check-rules.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表流程已刪除（Issue #46）。
 - 第二家上手（已實作 Issue #34）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。H02 為唯一作業螢光樣本；其他樣本驗證不同型態，已支援參考條件表、價格／日期及情境簡單算式核對。
 - 第三家上手（已實作 Issue #135）：摩根士丹利（MS，`147`）中文產品說明書，只支援新版範本（以 2026 年後的文件為準；舊版範本辨識失敗轉人工覆核）：[MS 範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)。說明書沒有年利率，改核對月配息率（年利率 ÷ 12）與情境年化報酬率；另核對日期表結構、第 18 項情境金額與 MS 版本的固定警語、名稱樣板。投資人須知（已實作 Issue #137，[範本規格](docs/templates/ms-zh-iis.md)）同樣只支援新版範本，另核對交易日、期末定價日、KO／KI 條件、月配息率、開始受理贖回日期與商品種類；說明書與投資人須知都通過或放行才回填。
 - 第四家上手（說明書已實作，Issue #189、#191）：法國巴黎銀行（BNP，`082`）中文產品說明書，7 份文字型 PDF：[BNP 範本規格](docs/templates/bnp-zh-product-description.md)、[下單資料格式](docs/order-formats/bnp-fcn-reference.md)、[核對規則](docs/rules/bnp-check-rules.md)、[審查標準 §2.7](docs/rules/review-standard.md)。BNP 特有：保證機構、半形方括號的風險等級、最低申購／贖回 = 5 × 面額、Non-Call = 天期仍有 KO 價、發行不成立門檻；另新增所有上手共用的「參考條件表某檔標的各價格與說明書差同一比例（疑似分割調整）→ 轉人工覆核」。BNP 投資人須知尚無範本（另開 Issue），BNP 商品不打 `TS`／`IIS`、不回填。
@@ -87,7 +87,7 @@ fcn-batch data/orders/FCN參考條件.xlsx data/term-sheets/029*.pdf --out runti
 
 | 參數 | 說明 |
 |---|---|
-| 第 1 個 | 參考條件表 Excel（讀 `樣本清單` 工作表），格式見[參考條件表格式](docs/order-formats/reference-sheet.md) |
+| 第 1 個 | 參考條件表 Excel（讀第一張工作表），格式見[參考條件表格式](docs/order-formats/reference-sheet.md) |
 | 其後 | 一或多份說明書與投資人須知 PDF；檔名須為 `<商品代號>_TS.pdf`（說明書）或 `<商品代號>_IIS.pdf`（投資人須知），前三碼是上手編號（`config/issuer_prefixes.toml`），用來挑範本 |
 | `--review-standard` | 審查標準設定檔，預設 `config/review_standard.toml` |
 | `--reference-format` | 參考條件表格式設定檔，預設 `config/reference_sheet.toml` |
@@ -109,7 +109,7 @@ fcn-batch data/orders/FCN參考條件.xlsx data/term-sheets/029*.pdf --out runti
 | 1 | 有 `MISMATCH`（不一致）或 `REVIEW_REQUIRED`（需人工覆核，含未支援上手） |
 | 2 | `ERROR`：PDF 損毀／加密、檔案不存在、設定檔錯誤、寫檔失敗等 |
 
-整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非已支援範本、參考條件表未知欄名或欄位值一律轉人工覆核，不猜值。
+整體狀態優先順序 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`。抓不到的欄位、多個不同值、非已支援範本、參考條件表未知欄位值一律轉人工覆核，不猜值；參考條件表缺必要欄或必要欄重複時整批不核對。
 
 ## 本機 PANEL：預覽、核對與保存
 
@@ -118,7 +118,7 @@ Windows 第一次使用：安裝官方 Python 3.11 以上（包含 Tcl/Tk），�
 PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對與回填流程。`launch_panel.pyw` 與 `fcn-panel` 入口仍可使用。
 
 1. 選取一份參考條件表（`FCN參考條件` Excel），再選取一或多份說明書與投資人須知 PDF（可多選，同一檔商品的 `_TS` 與 `_IIS` 一起選）。上手由 PDF 檔名前三碼決定，不需要另外選擇。兩個「選取檔案…」各自記得上次選檔的資料夾，下次直接從那裡開始。
-2. 按「載入／重新載入預覽」：每份 PDF 一列，顯示對應的上手（或「未支援上手」）、PDF 第一頁的商品代號（直接讀取文字層，保留前導零）、對到參考條件表的第幾列，或找不到／多列／發行機構不符／同一批多份說明書對到同一列等原因。參考條件表的欄名問題另外列出。
+2. 按「載入／重新載入預覽」：每份 PDF 一列，顯示對應的上手（或「未支援上手」）、PDF 第一頁的商品代號（直接讀取文字層，保留前導零）、對到參考條件表的第幾列，或找不到／多列／發行機構不符／同一批多份說明書對到同一列等原因。參考條件表缺必要欄或欄名重複時不產生預覽，直接顯示缺了哪些欄。
 3. 確認預覽後按「開始核對」，畫面切到「核對結果」：左側列出每份說明書（有問題的排前面），狀態用中文顯示；跟參考條件表配對不起來時直接寫原因，例如「條件表找不到這筆」「條件表有重複列」「多份對到同一列」「條件表發行機構不符」「檔名上手編號不符」。右側是選取那份的逐欄結果。選取結果列可查看原因（與核對結果檔「錯誤清單」同一段中文錯訊）、雙方值、參考條件表儲存格、PDF 頁碼及完整原文；下方列出這份的回填欄位（TS、IIS、ISIN、發行日、比價日）及處理方式。
    - **人工放行**：作業人員看過錯訊，認定一份「不一致」或「需人工覆核」的說明書可以通過時，選取它後按下方「人工放行…」，確認視窗列出這份全部錯訊，確認後視同通過：儲存時回填、進「回填後」，不列入「錯誤清單」；狀態顯示「人工放行（原：不一致）」，摘要另計「X 份人工放行」；放行後清單改選最上面那份（下一份要處理的說明書）。同一個按鈕可「取消放行」，取消後仍選那份。回填值無法確定、參考條件表回填欄位已有不同的值、同一批多份對到同一列、找不到列、未支援上手或執行錯誤時不能放行，按鈕旁顯示原因。已儲存後再放行或取消放行，上一次的核對結果檔就不是目前的結果，要再按一次儲存。重新載入或重新核對會清除放行；CLI 沒有人工放行。
 4. 「待處理」分頁列出未涵蓋的項目（Monthly KI、標的名稱等），不算成通過。

@@ -36,7 +36,7 @@ from .config import ReferenceFormat
 from .identification import Identification, PairingProblem, identify, unexpected_result
 from .ingestion import IngestionError, SourceSnapshot, error_result
 from .messages import STATUS_ZH, problem_message
-from .orders.reference import ReferenceSheet, load_reference_sheet
+from .orders.reference import load_reference_sheet
 from .schema import CheckReport, CheckResult, CheckStatus, DocKind, Evidence, overall_status
 from .single_check import Paired, PairedIis, check_document, check_investor_sheet
 
@@ -287,18 +287,9 @@ class BatchPreview:
     """預覽：每份 PDF 的辨識結果（含讀出結果與對到的參考條件表列，核對直接沿用）；另帶核對要沿用的核對設定與來源快照。"""
 
     rows: tuple[PreviewRow, ...]
-    warnings: tuple[str, ...]  # 參考條件表欄名問題
     reference_sheet: Path
     snapshot: SourceSnapshot  # 讀取前取的來源快照（設定檔的 hash 取自核對設定）
     config: CheckConfig = field(compare=False, repr=False)
-
-
-def _sheet_warnings(sheet: ReferenceSheet) -> tuple[str, ...]:
-    return (
-        *(f"未找到欄名：{h}" for h in sheet.missing_columns),
-        *(f"未知欄名：{v.value}（{v.source}）" for v in sheet.unknown_columns),
-        *(f"重複欄名：{v.value}（{v.source}）" for v in sheet.duplicate_columns),
-    )
 
 
 def preview_batch(config: CheckConfig, reference_sheet: Path, term_sheets: Sequence[Path]) -> BatchPreview:
@@ -307,7 +298,7 @@ def preview_batch(config: CheckConfig, reference_sheet: Path, term_sheets: Seque
     snapshot = SourceSnapshot.take((reference_sheet, *term_sheets), taken=config.files)
     sheet = load_reference_sheet(reference_sheet, config.reference_format)
     rows = tuple(PreviewRow(ident) for ident in identify(term_sheets, sheet, config))
-    return BatchPreview(rows, _sheet_warnings(sheet), reference_sheet, snapshot, config)
+    return BatchPreview(rows, reference_sheet, snapshot, config)
 
 
 # ---------------------------------------------------------------- 核對

@@ -182,7 +182,7 @@
 | rule_id | 核對內容 |
 |---|---|
 | `template.detect`、`batch.issuer_prefix` | 已知章條錨點及上手代號前綴 |
-| `batch.pairing`、`order.unknown_column`、`order.missing_column`、`order.duplicate_column` | 整理表唯一列與欄名；無表頭欄忽略 |
+| `batch.pairing` | 整理表唯一列（表頭缺必要欄或重複時讀檔就整批錯誤，其他欄與無表頭欄略過；Issue #199） |
 | `field.product_code`、`backfill.isin`、`field.currency`、`field.denomination`、`field.*date`、`field.*pct`、`field.tenor_months` | 參考條件表核心條件（共用 `rules/reference.py`，§3.2） |
 | `field.ko_observation`、`field.ko_memory`、`field.ki_type`、`field.first_callable_period`、`backfill.compare_dates` | 型態、首可 KO 期與比價日（共用） |
 | `field.underlyings`、`field.underlying_prices` | 標的順序／尾碼與各標的四位價格（共用） |

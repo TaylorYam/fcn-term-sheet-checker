@@ -5,7 +5,7 @@
 
 ## 1. 結構
 
-與其他上手相同（`樣本清單` 工作表、第 3 列表頭、每列一檔）。SG 列的 `發行機構` 欄寫 `SG`；商品代號前 3 碼為 `037`（`config/issuer_prefixes.toml` 已登記）。
+與其他上手相同（版面見[參考條件表格式](reference-sheet.md) §1，每列一檔）。SG 列的 `發行機構` 欄寫 `SG`；商品代號前 3 碼為 `037`（`config/issuer_prefixes.toml` 已登記）。
 
 實作時要登記：
 

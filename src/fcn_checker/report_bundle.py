@@ -35,7 +35,7 @@ from . import reporting
 from .batch import BatchItem, BatchOutcome, Category
 from .config import ReferenceFormat
 from .ingestion import IngestionError
-from .orders.reference import normalize_cell
+from .orders.reference import locate, normalize_cell
 from .result_file import tdcc_code
 from .schema import overall_status
 
@@ -210,24 +210,26 @@ def _summary_sheet(
 
 
 def _reference_extract(reference_sheet: Path, rfmt: ReferenceFormat, members: Sequence[BatchItem]) -> bytes:
-    """參考條件表只留這些商品的列與認得的欄；表頭以上各列與資料列的位置照原表版面，值與數字格式照原表。"""
+    """參考條件表只留這些商品的列與認得的欄；只有第一張工作表，表頭以上各列與資料列的位置照原表版面，值與數字格式照原表。"""
     try:
-        src = openpyxl.load_workbook(reference_sheet, data_only=True)[rfmt.sheet]
+        wb = openpyxl.load_workbook(reference_sheet, data_only=True)
     except Exception as e:
         raise IngestionError("reference_unreadable", f"參考條件表無法開啟（可能已損毀或不是 Excel）：{e}") from e
+    layout = locate(wb, rfmt)
+    src = wb[layout.sheet]
     known = {*rfmt.column_order, *rfmt.columns}
     cols: list[int] = []
     seen: set[str] = set()
     for col in range(1, src.max_column + 1):
-        header = normalize_cell(src.cell(rfmt.header_row, col).value)
+        header = normalize_cell(src.cell(layout.header_row, col).value)
         if header is not None and str(header) in known and str(header) not in seen:
             seen.add(str(header))
             cols.append(col)
     rows = sorted({i.reference_row for i in members if i.reference_row is not None})
     wb = Workbook()
     ws = wb.active
-    ws.title = rfmt.sheet
-    for r_out, r_src in enumerate([*range(1, rfmt.first_data_row), *rows], start=1):
+    ws.title = layout.sheet
+    for r_out, r_src in enumerate([*range(1, layout.first_data_row), *rows], start=1):
         for c_out, c_src in enumerate(cols, start=1):
             cell = src.cell(r_src, c_src)
             ws.cell(r_out, c_out, cell.value).number_format = cell.number_format

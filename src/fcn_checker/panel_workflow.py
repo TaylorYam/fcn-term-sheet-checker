@@ -1,7 +1,7 @@
 """PANEL 公開工作流程：參考條件表＋多份說明書與投資人須知的唯讀預覽、核對、失效檢查、手動儲存與匯出回報包。
 
 核對、儲存與匯出回報包都呼叫批量入口與其輸出模組，PANEL 不另做規則；按「儲存」或「匯出回報包」之前不寫任何檔案。
-PANEL 操作員讀到的預覽列、欄名警告、結果清單列、結果明細、回填決策與放行說明文字都由 PanelOutcome 組好，Tk 視窗只負責顯示。
+PANEL 操作員讀到的預覽列、結果清單列、結果明細、回填決策與放行說明文字都由 PanelOutcome 組好，Tk 視窗只負責顯示。
 每次載入預覽時載入一次核對設定；核對沿用預覽的辨識與讀出，同一份說明書只讀一次。
 """
 
@@ -93,11 +93,6 @@ class PanelOutcome:
             f"第 {row.reference_row} 列" if row.reference_row else "—",
             row.problem or "可以核對",
         )
-
-    @staticmethod
-    def preview_warnings(preview: BatchPreview) -> str:
-        """預覽表下方的參考條件表欄名問題；沒有問題時不顯示。"""
-        return "參考條件表欄名問題：" + "；".join(preview.warnings) if preview.warnings else ""
 
     @staticmethod
     def item_row(item: BatchItem) -> tuple[str, ...]:
