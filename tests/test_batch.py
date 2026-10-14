@@ -252,9 +252,13 @@ def test_more_than_twelve_periods_requires_review(tmp_path):
 # ---------------------------------------------------------------- 上手編號與配對
 
 
-def prefixes_file(tmp_path: Path, extra: str) -> Path:
+def prefixes_file(tmp_path: Path, prefix: str, issuer: str) -> Path:
+    """repo 的上手編號對照再加一家上手（上手編號與支援樣態表都登記，沒有不支援樣態）。"""
+    text = ISSUER_PREFIXES.read_text(encoding="utf-8")
+    text = text.replace("[prefixes]\n", f'[prefixes]\n"{prefix}" = "{issuer}"\n')
+    text = text.replace("[unsupported_variants]\n", f"[unsupported_variants]\n{issuer} = []\n")
     p = tmp_path / "prefixes.toml"
-    p.write_text(ISSUER_PREFIXES.read_text(encoding="utf-8") + extra, encoding="utf-8")
+    p.write_text(text, encoding="utf-8")
     return p
 
 
@@ -303,7 +307,7 @@ def test_term_sheet_content_of_another_issuer_requires_review(tmp_path):
         tmp_path,
         [pdf_for(tmp_path, spec)],
         [reference_row(spec)],
-        config=load_config(issuer_prefixes=prefixes_file(tmp_path, '"777" = "FAKE"\n'), registry=(BARC, other)),
+        config=load_config(issuer_prefixes=prefixes_file(tmp_path, "777", "FAKE"), registry=(BARC, other)),
     )
     r = only(outcome.items[0], "batch.issuer_prefix")
     assert (r.status, r.reason_code, r.actual) == (REVIEW, "issuer_prefix_mismatch", "BARC")

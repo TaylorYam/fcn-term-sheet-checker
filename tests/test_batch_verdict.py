@@ -74,6 +74,8 @@ PROBLEM_CASES = [
     (TS, P.ROW_MISSING, REVIEW, None, False, Category.REVIEW, "條件表找不到這筆", NO_ROW),
     (IIS, P.ROW_DUPLICATE, REVIEW, None, False, Category.REVIEW, "條件表有重複列", NO_ROW),
     (TS, P.ISSUER_MISMATCH, REVIEW, None, False, Category.REVIEW, "條件表發行機構不符", NO_ROW),
+    (TS, P.UNSUPPORTED_VARIANT, REVIEW, ROW, False, Category.REVIEW, "不支援樣態", "上手不支援這個樣態"),
+    (IIS, P.UNSUPPORTED_VARIANT, REVIEW, ROW, False, Category.REVIEW, "不支援樣態", "上手不支援這個樣態"),
     (TS, P.SHARED_ROW, REVIEW, ROW, False, Category.REVIEW, "多份對到同一列", "同一批有多份文件對到同一列"),
     (IIS, P.SHARED_ROW, REVIEW, ROW, False, Category.REVIEW, "多份對到同一列", "同一批有多份文件對到同一列"),
     (TS, P.MISSING_IIS, REVIEW, ROW, True, Category.REVIEW, "這批缺投資人須知", "這批缺同商品的投資人須知"),

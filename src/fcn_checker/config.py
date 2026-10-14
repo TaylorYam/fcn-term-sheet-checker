@@ -193,7 +193,7 @@ class ReferenceFormat:
     initial_pricing_values: dict[str, str]  # 期初定價：開盤價／收盤價／VWAP → open／close／vwap
 
 
-def _load(path: Path, what: str) -> dict[str, Any]:
+def load_toml(path: Path, what: str) -> dict[str, Any]:
     if not path.is_file():
         raise IngestionError("config_not_found", f"找不到{what}設定檔：{path}")
     try:
@@ -401,7 +401,7 @@ def _approval_dates(value: Any) -> tuple[dt.date, ...]:
 
 
 def load_review_standard(path: Path) -> ReviewStandard:
-    d = _load(path, "審查標準")
+    d = load_toml(path, "審查標準")
     try:
         names = {issuer: _product_name(issuer, n) for issuer, n in d["product_name"].items()}
         warnings = dict(d["risk"].get("fixed_warning_by_issuer", {}))
@@ -444,7 +444,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
 
 
 def load_reference_format(path: Path) -> ReferenceFormat:
-    d = _load(path, "參考條件表格式")
+    d = load_toml(path, "參考條件表格式")
     try:
         cols = dict(d["columns"])
         layout = d["layout"]
@@ -490,7 +490,7 @@ def _check_column_order(fmt: ReferenceFormat) -> None:
 
 def load_issuer_prefixes(path: Path) -> dict[str, str]:
     """上手編號（三碼）→ 上手代號。"""
-    d = _load(path, "上手編號對照")
+    d = load_toml(path, "上手編號對照")
     try:
         prefixes = {str(k): str(v) for k, v in d["prefixes"].items()}
     except (KeyError, TypeError, AttributeError) as e:
