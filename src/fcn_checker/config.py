@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .ingestion import IngestionError
-from .standard_fields import GUARANTOR_PLACES
+from .standard_fields import AGENT_PLACES, GUARANTOR_PLACES
 
 # 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）、
 # autocall（Non-Call < 天期，BNP），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）
@@ -41,8 +41,13 @@ class ProductNameTemplate:
     single_en: str = ""
     basket_zh: str = ""  # 標的 2 檔以上時填入
     basket_en: str = ""
-    autocall_zh: str = ""  # {autocall_zh}／{autocall_en}：Non-Call < 天期（會提前出場）時填入（BNP）
+    autocall_zh: str = ""  # {autocall_zh}／{autocall_en}：Non-Call < 天期（會提前出場）時填入（BNP、SG）
     autocall_en: str = ""
+    autocall_memory_zh: str = ""  # 會提前出場且記憶式時改填這個（有設定時；SG 中文「（記憶式自動提前出場）」）
+    autocall_memory_en: str = ""
+    ccy_aliases: dict[str, str] = field(
+        default_factory=dict
+    )  # {ccy} 的其他寫法：ISO 代碼 → 名稱用的代碼（SG：CNH → CNY）
 
     def placeholders(self, lang: str) -> frozenset[str]:
         """樣板（zh／en）用到的佔位符名稱。"""
@@ -50,6 +55,14 @@ class ProductNameTemplate:
 
     def flag_text(self, flag: str, lang: str) -> str:
         return getattr(self, f"{flag}_{lang}")
+
+    def autocall_text(self, memory: bool, lang: str) -> str:
+        """{autocall_<lang>}：會提前出場時的字樣；記憶式且有 autocall_memory_* 時用它。"""
+        special = getattr(self, f"autocall_memory_{lang}")
+        return special if memory and special else getattr(self, f"autocall_{lang}")
+
+    def ccy_text(self, iso: str) -> str:
+        return self.ccy_aliases.get(iso, iso)
 
     def underlying_text(self, basket: bool, lang: str) -> str:
         """{underlying_<lang>} 的標的寫法：2 檔以上用 basket_*，1 檔用 single_*。"""
@@ -75,11 +88,14 @@ class IssuerStandard:
     distributor_address: str
     distributor_address_equivalents: tuple[str, ...]  # 地址可接受的其他寫法（所有上手適用）
     iis_fixed_warning_occurrences: int | None  # 投資人須知的固定警語次數；None → 審查標準沒有該上手的值
+    distributor_name_equivalents: tuple[str, ...] = ()  # 名稱可接受的其他寫法（所有上手適用；SG 第二章簡稱）
     # 下列只有審查標準有該上手分節時才核對（BNP）
     guarantor_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch1／ch2）→ 保證機構名稱
+    agent_names: dict[str, str] = field(default_factory=dict)  # 出處（cover／ch2）→ 總代理人名稱（SG）
     product_type: str | None = None  # 封面商品種類固定值
     minimum_issue_size: str | None = None  # 第四章發行不成立門檻的金額寫法
-    min_amount_multiples: dict[str, int] = field(default_factory=dict)  # 最低金額出處欄位 → 單位面額的倍數（沒列為 1）
+    # 最低金額出處欄位 → 單位面額的倍數（沒列為 1）；依幣別不同時為 {ISO 代碼: 倍數}（SG 最低申購金額）
+    min_amount_multiples: dict[str, int | dict[str, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -108,13 +124,18 @@ class ReviewStandard:
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
     distributor_phone_equivalents: tuple[str, ...] = ()
     distributor_address_equivalents: tuple[str, ...] = ()
+    distributor_name_equivalents: tuple[str, ...] = ()
     fixed_warning_openings: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 警語開頭句的其他寫法
     risk_level_formats: dict[str, tuple[str, ...]] = field(default_factory=dict)  # 上手 → 風險等級寫法
     issuer_name_ignore: dict[str, frozenset[str]] = field(default_factory=dict)  # 上手 → 全名比對另外忽略的差異
     guarantor_names: dict[str, dict[str, str]] = field(default_factory=dict)  # 上手 → 出處 → 保證機構名稱
+    agent_names: dict[str, dict[str, str]] = field(default_factory=dict)  # 上手 → 出處 → 總代理人名稱
     product_types: dict[str, str] = field(default_factory=dict)  # 上手 → 封面商品種類固定值
     minimum_issue_sizes: dict[str, str] = field(default_factory=dict)  # 上手 → 發行不成立門檻寫法
-    min_amount_multiples: dict[str, dict[str, int]] = field(default_factory=dict)  # 上手 → 最低金額出處 → 倍數
+    # 上手 → 最低金額出處 → 倍數（或 {ISO 代碼: 倍數}）
+    min_amount_multiples: dict[str, dict[str, int | dict[str, int]]] = field(default_factory=dict)
+    # 上手 → 固定警語的其他完整寫法（整段逐字；SG 第一章 §2 的風險等級寫 [RRn]），每一處都算一次
+    fixed_warning_variants: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def approval_date_on(self, trade_date: dt.date) -> dt.date | None:
         """交易日當天或之前最近一次的審查通過日期；交易日早於最早的日期時為 None。"""
@@ -127,7 +148,11 @@ class ReviewStandard:
         return IssuerStandard(
             issuer=issuer,
             fixed_warning=warning,
-            fixed_warnings=(warning, *(alt + rest for alt in self.fixed_warning_openings.get(key, ()))),
+            fixed_warnings=(
+                warning,
+                *(alt + rest for alt in self.fixed_warning_openings.get(key, ())),
+                *self.fixed_warning_variants.get(key, ()),
+            ),
             fixed_warning_occurrences=self.fixed_warning_occurrences,
             risk_level_formats=self.risk_level_formats.get(key, ("【" + RISK_LEVEL + "】",)),
             issuer_name=self.issuer_names.get(key),
@@ -138,8 +163,10 @@ class ReviewStandard:
             distributor_phone_equivalents=self.distributor_phone_equivalents,
             distributor_address=self.distributor_address,
             distributor_address_equivalents=self.distributor_address_equivalents,
+            distributor_name_equivalents=self.distributor_name_equivalents,
             iis_fixed_warning_occurrences=self.iis_fixed_warning_occurrences.get(key),
             guarantor_names=dict(self.guarantor_names.get(key, {})),
+            agent_names=dict(self.agent_names.get(key, {})),
             product_type=self.product_types.get(key),
             minimum_issue_size=self.minimum_issue_sizes.get(key),
             min_amount_multiples=dict(self.min_amount_multiples.get(key, {})),
@@ -195,7 +222,15 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
         basket_en=n.get("basket_en", ""),
         autocall_zh=n.get("autocall_zh", ""),
         autocall_en=n.get("autocall_en", ""),
+        autocall_memory_zh=n.get("autocall_memory_zh", ""),
+        autocall_memory_en=n.get("autocall_memory_en", ""),
+        ccy_aliases=dict(n.get("ccy_aliases", {})),
     )
+    if any(not (isinstance(k, str) and isinstance(v, str) and v) for k, v in tpl.ccy_aliases.items()):
+        raise IngestionError(
+            "config_invalid",
+            f"審查標準商品名稱樣板 product_name.{issuer}.ccy_aliases 須是 ISO 代碼 → 名稱用代碼的文字表",
+        )
     for lang in ("zh", "en"):
         unknown = sorted(tpl.placeholders(lang) - NAME_PLACEHOLDERS)
         if unknown:
@@ -250,7 +285,14 @@ def _risk_extras(risk: dict[str, Any], warnings: dict[str, str]) -> dict[str, An
             raise IngestionError(
                 "config_invalid", f"審查標準 risk.level_formats.{issuer} 的每個寫法都要剛好有一個 {RISK_LEVEL}"
             )
-    return {"fixed_warning_openings": openings, "risk_level_formats": formats}
+    variants = _per_issuer_lists(risk.get("fixed_warning_variants", {}), "risk.fixed_warning_variants")
+    for issuer, values in variants.items():
+        warning = warnings.get(issuer, risk["fixed_warning"])
+        if any(v.replace(" ", "") == warning.replace(" ", "") for v in values) or len(set(values)) != len(values):
+            raise IngestionError(
+                "config_invalid", f"審查標準 risk.fixed_warning_variants.{issuer} 的寫法重複或與該上手的固定警語相同"
+            )
+    return {"fixed_warning_openings": openings, "risk_level_formats": formats, "fixed_warning_variants": variants}
 
 
 def _issuer_name_ignore(d: dict[str, Any]) -> dict[str, frozenset[str]]:
@@ -268,10 +310,6 @@ def _issuer_name_ignore(d: dict[str, Any]) -> dict[str, frozenset[str]]:
 
 def _text(v: Any) -> bool:
     return isinstance(v, str) and bool(v.strip())
-
-
-def _positive_int(v: Any) -> bool:
-    return type(v) is int and v >= 1
 
 
 def _per_issuer(d: Any, where: str, valid: Callable[[Any], bool], what: str) -> dict[str, Any]:
@@ -309,31 +347,43 @@ def _per_issuer_tables(
     return {issuer: dict(values) for issuer, values in tables.items()}
 
 
-def _guarantor_names(d: Any) -> dict[str, dict[str, str]]:
-    """`[guarantor_name.<上手>]`：保證機構名稱的出處（cover／ch1／ch2）→ 不空白的文字。"""
-    where = "guarantor_name"
+def _place_texts(d: Any, where: str, places: Iterable[str]) -> dict[str, dict[str, str]]:
+    """`[<表>.<上手>]`：機構名稱的出處（例：保證機構 cover／ch1／ch2、總代理人 cover／ch2）→ 不空白的文字。"""
+    keys = tuple(places)
     return _per_issuer_tables(
         d,
         where,
         _text,
         "一個表，每個鍵一段文字",
         lambda issuer, bad, unknown: (
-            f"審查標準 {where}.{issuer} 的鍵須為 {'、'.join(GUARANTOR_PLACES)}，值為不空白的文字"
-            f"（有問題：{'、'.join(bad + unknown)}）"
+            f"審查標準 {where}.{issuer} 的鍵須為 {'、'.join(keys)}，值為不空白的文字（有問題：{'、'.join(bad + unknown)}）"
         ),
-        GUARANTOR_PLACES,
+        keys,
     )
 
 
-def _min_amount_multiples(d: Any) -> dict[str, dict[str, int]]:
-    """`[min_amount_multiples.<上手>]`：最低金額出處欄位 → 正整數倍數。"""
+def _multiple_ok(v: Any) -> bool:
+    """倍數：正整數，或依幣別的表 {ISO 代碼: 正整數}。"""
+    if type(v) is int:
+        return v >= 1
+    return (
+        isinstance(v, dict)
+        and bool(v)
+        and all(isinstance(k, str) and len(k) == 3 and k.isupper() and type(x) is int and x >= 1 for k, x in v.items())
+    )
+
+
+def _min_amount_multiples(d: Any) -> dict[str, dict[str, int | dict[str, int]]]:
+    """`[min_amount_multiples.<上手>]`：最低金額出處欄位 → 正整數倍數，或依承作幣別的 {ISO 代碼: 倍數}（SG 最低申購金額）。"""
     where = "min_amount_multiples"
     return _per_issuer_tables(
         d,
         where,
-        _positive_int,
+        _multiple_ok,
         "一個表，每個最低金額出處一個倍數",
-        lambda issuer, bad, unknown: f"審查標準 {where}.{issuer}.{bad[0]} 須是正整數（單位面額的倍數）",
+        lambda issuer, bad, unknown: (
+            f"審查標準 {where}.{issuer}.{bad[0]} 須是正整數（單位面額的倍數）或依幣別的表（例：{{ USD = 10, JPY = 1 }}）"
+        ),
     )
 
 
@@ -365,6 +415,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             distributor_phone=d["distributor"]["phone"],
             distributor_phone_equivalents=tuple(d["distributor"].get("phone_equivalents", ())),
             distributor_address_equivalents=tuple(d["distributor"].get("address_equivalents", ())),
+            distributor_name_equivalents=tuple(d["distributor"].get("name_equivalents", ())),
             distributor_address=d["distributor"]["address"],
             issuer_names=dict(d["issuer_name"]),
             fees=dict(d["fees"]),
@@ -383,7 +434,8 @@ def load_review_standard(path: Path) -> ReviewStandard:
             print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
             iis_pages=int(d["iis"]["pages"]),
             iis_fixed_warning_occurrences={k: int(v) for k, v in d["iis"]["fixed_warning_occurrences"].items()},
-            guarantor_names=_guarantor_names(d.get("guarantor_name", {})),
+            guarantor_names=_place_texts(d.get("guarantor_name", {}), "guarantor_name", GUARANTOR_PLACES),
+            agent_names=_place_texts(d.get("agent_name", {}), "agent_name", AGENT_PLACES),
             product_types=_per_issuer_text(d.get("product_type", {}), "product_type"),
             minimum_issue_sizes=_per_issuer_text(d.get("minimum_issue_size", {}), "minimum_issue_size"),
             min_amount_multiples=_min_amount_multiples(d.get("min_amount_multiples", {})),

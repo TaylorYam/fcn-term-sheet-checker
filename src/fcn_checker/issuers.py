@@ -17,11 +17,13 @@ from .parsers import barc_iis, hsbc_iis, ms_iis
 from .parsers import bnp as bnp_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
+from .parsers import sg as sg_parser
 from .rules import barc as barc_rules
 from .rules import bnp as bnp_rules
 from .rules import hsbc as hsbc_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
+from .rules import sg as sg_rules
 from .rules.iis import IisIssuerContext
 from .rules.kit import IssuerContext
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Item, Line
@@ -145,7 +147,20 @@ BNP = Issuer(
     iis=None,  # BNP 投資人須知尚無範本（另開 Issue）：未支援上手，BNP 商品不打 V、不回填（ADR 0007）
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP)
+SG = Issuer(
+    code=sg_rules.ISSUER,
+    template_id=sg_parser.TEMPLATE_ID,
+    label="SG 中文產品說明書",
+    parser_version=sg_parser.PARSER_VERSION,
+    not_covered=tuple(sg_rules.NOT_COVERED),
+    detect=sg_parser.detect,
+    read=sg_parser.read,
+    rules=sg_rules.run_all,
+    reference_fields=sg_rules.REFERENCE_FIELDS,
+    iis=None,  # SG 投資人須知尚無範本（另開 Issue）：未支援上手，SG 商品不打 V、不回填（ADR 0007）
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

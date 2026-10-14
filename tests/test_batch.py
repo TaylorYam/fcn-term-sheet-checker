@@ -287,13 +287,13 @@ def test_issuer_in_prefix_table_without_template_is_unsupported(tmp_path):
 
 
 def test_registered_issuer_without_a_template_names_the_issuer(tmp_path):
-    """上手編號對照登記了、但還沒有範本的上手（例：037 = SG，Issue #149）：未支援上手，錯訊寫出上手代號。"""
-    spec = Spec(product_code="037199990001")
-    outcome, _, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="SG")])
+    """上手編號對照登記了、但還沒有範本的上手（例：092 = UBS，Issue #149）：未支援上手，錯訊寫出上手代號。"""
+    spec = Spec(product_code="092199990001")
+    outcome, _, _ = batch(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, 發行機構="UBS")])
     for item in outcome.items:
         r = only(item, "batch.issuer_prefix")
-        assert item.unsupported and item.issuer == "SG"
-        assert r.message.startswith("上手編號 037 對應 SG，但 SG 還沒有"), r.message
+        assert item.unsupported and item.issuer == "UBS"
+        assert r.message.startswith("上手編號 092 對應 UBS，但 UBS 還沒有"), r.message
 
 
 def test_term_sheet_content_of_another_issuer_requires_review(tmp_path):
