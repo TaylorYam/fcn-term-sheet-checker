@@ -63,6 +63,8 @@ def with_markets(config: CheckConfig, change: Callable[[Market], Market]) -> Che
 
 
 CONFIG = load_config()  # 核對設定 fixture：repo config 只載入一次
+# 每家上手都支援所有樣態的核對設定：測範本本身的讀法（例：MS 每期觀察 KI，上手支援樣態表標為不支援，Issue #207）
+ALL_VARIANTS = replace(CONFIG, unsupported_variants={code: frozenset() for code in CONFIG.unsupported_variants})
 
 PASS, MISMATCH, REVIEW, NA, ERROR = (
     CheckStatus.PASS,

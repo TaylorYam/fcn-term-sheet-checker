@@ -13,7 +13,7 @@ from fcn_checker.backfill import BackfillAction
 from fcn_checker.issuers import MS
 from fcn_checker.messages import problem_message
 from fcn_checker.schema import CheckStatus as S
-from harness import check_all, flagged
+from harness import ALL_VARIANTS, check_all, flagged
 from harness import field_problems as problems
 from harness import results as rule
 from ms_synth import Spec, build_pdf, check
@@ -38,7 +38,8 @@ from reference_synth import build_reference_sheet, reference_row
     ids=lambda s: f"{s.ko_obs}-{'mem' if s.memory else 'plain'}-KI{s.ki}-{s.count}UL-{s.tenor}m-NC{s.first_callable}",
 )
 def test_supported_types_pass(tmp_path, spec):
-    r = check(tmp_path, spec)
+    # 範本推得的寫法都要讀得出；每期觀察 KI 是 MS 的不支援樣態（下一個測試），這裡以全部支援的設定測範本本身
+    r = check(tmp_path, spec, config=ALL_VARIANTS)
     assert r.template == MS.template_id
     assert r.status == S.PASS, problems(r)
     ms_rules = [x for x in r.results if x.rule_id.startswith(("doc.", "derive.", "schedule."))]
@@ -48,6 +49,14 @@ def test_supported_types_pass(tmp_path, spec):
     assert rule(r, "field.coupon_pa_pct")[0].status == S.NOT_APPLICABLE
     assert not [x for x in r.results if x.rule_id == "doc.subscription_start_date"]
     assert {x.status for x in rule(r, "derive.monthly_coupon")} == {S.PASS}
+
+
+def test_periodic_ki_is_an_unsupported_variant_for_ms(tmp_path):
+    r = check(tmp_path, Spec(ko_obs="D", memory=True, ki="P", count=3))
+    assert [(x.rule_id, x.reason_code) for x in r.results if x.status.is_problem] == [
+        ("batch.variant", "variant_unsupported")
+    ]
+    assert not [x for x in r.results if x.rule_id.startswith(("field.", "doc."))]
 
 
 def test_monthly_kept_annual_and_scenario_annualized_follow_the_sheet(tmp_path):
@@ -67,7 +76,6 @@ def test_monthly_kept_annual_and_scenario_annualized_follow_the_sheet(tmp_path):
         ("K(%)", 71, "field.strike_pct"),
         ("KI(%)", 61, "field.ki_pct"),
         ("KI(Freq)", "D", "field.ki_type"),
-        ("KI(Freq)", "P", "field.ki_type"),
         ("KO(Freq)", "P", "field.ko_observation"),
         ("KO(memo)", "N", "field.ko_memory"),
         ("天期(月)", 5, "field.tenor_months"),

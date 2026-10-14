@@ -1,4 +1,4 @@
-"""核對設定：審查標準、參考條件表格式、上手編號對照、交易所假日表與上手註冊表，一次載入、之後只傳這一個值（Issue #92）。
+"""核對設定：審查標準、參考條件表格式、上手編號對照（含上手支援樣態表）、交易所假日表與上手註冊表，一次載入、之後只傳這一個值（Issue #92）。
 
 設定檔的預設位置只在這裡定義；CLI 依參數、PANEL 依設定資料夾（缺檔時改用程式內建設定）建立 `ConfigPaths`，
 再以 `ConfigPaths.load` 載入。載入前先取設定檔的 hash（`CheckConfig.files`），來源快照與核對紀錄都取自它。
@@ -22,6 +22,7 @@ from .config import (
 from .ingestion import SourceSnapshot
 from .issuers import REGISTRY, Issuer
 from .trading_calendar import TradingCalendar
+from .variants import Variant, load_unsupported_variants
 
 CONFIG_DIR = Path("config")  # 預設設定資料夾（相對於執行目錄）
 REVIEW_STANDARD_FILE = "review_standard.toml"
@@ -78,10 +79,12 @@ class ConfigPaths:
             map(Path, (self.review_standard, self.reference_format, self.issuer_prefixes, self.exchange_holidays))
         )
         files = SourceSnapshot.take(paths)  # 讀取前先取 hash：之後設定檔被改過，來源快照就會失效
+        prefixes = load_issuer_prefixes(paths[2])
         return CheckConfig(
             review_standard=load_review_standard(paths[0]),
             reference_format=load_reference_format(paths[1]),
-            issuer_prefixes=load_issuer_prefixes(paths[2]),
+            issuer_prefixes=prefixes,
+            unsupported_variants=load_unsupported_variants(paths[2], prefixes.values()),
             exchange_calendar=load_exchange_holidays(paths[3]),
             registry=tuple(registry),
             paths=ConfigPaths(*paths),
@@ -99,6 +102,7 @@ class CheckConfig:
     review_standard: ReviewStandard
     reference_format: ReferenceFormat
     issuer_prefixes: dict[str, str]  # 上手編號（三碼）→ 上手代號
+    unsupported_variants: dict[str, frozenset[Variant]]  # 上手支援樣態表：上手代號 → 不支援的樣態（Issue #207）
     exchange_calendar: TradingCalendar  # 交易所假日表：一籃子預定交易日（Issue #208）
     registry: tuple[Issuer, ...]
     paths: ConfigPaths

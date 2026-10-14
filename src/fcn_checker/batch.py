@@ -71,6 +71,7 @@ _PAIRING_LABELS = {
     PairingProblem.ROW_DUPLICATE: "條件表有重複列",
     PairingProblem.SHARED_ROW: "多份對到同一列",
     PairingProblem.ISSUER_MISMATCH: "條件表發行機構不符",
+    PairingProblem.UNSUPPORTED_VARIANT: "不支援樣態",
     PairingProblem.PREFIX_MISMATCH: "檔名上手編號不符",
     PairingProblem.NAME_UNRECOGNIZED: "檔名無法辨識",
     PairingProblem.CODE_MISMATCH: "檔名商品代號不符",
@@ -82,6 +83,7 @@ _UNRELEASABLE = {
     PairingProblem.NAME_UNRECOGNIZED: "檔名無法辨識，請修正檔名後重新載入",
     PairingProblem.CODE_MISMATCH: "檔名的商品代號與說明書封面不同，可能放錯檔案，請修正後重新載入",
     PairingProblem.SHARED_ROW: "同一批有多份文件對到同一列（說明書與投資人須知各只能一份），不能人工放行",
+    PairingProblem.UNSUPPORTED_VARIANT: "上手不支援這個樣態，沒有範本可以核對，不能人工放行",
     PairingProblem.MISSING_IIS: "這批缺同商品的投資人須知，請一起選取說明書與投資人須知後重新載入",
     PairingProblem.MISSING_TS: "這批缺同商品的說明書，請一起選取說明書與投資人須知後重新載入",
 }
