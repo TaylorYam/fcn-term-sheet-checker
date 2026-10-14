@@ -33,7 +33,7 @@ from .extraction import extract_lines
 from .ingestion import IngestionError, error_result, open_pdf
 from .investor_sheet import IisSheet
 from .issuers import Issuer, by_code, detect, detect_iis
-from .orders.reference import OrderRecord, ReferenceSheet
+from .orders.reference import SOURCE, OrderRecord, ReferenceSheet
 from .rules.kit import doc_review, read_standard
 from .schema import CheckResult, CheckStatus, DocKind, Evidence, Item, ParsedField
 from .standard_fields import TermSheet
@@ -123,8 +123,6 @@ class Identification:
 # 辨識與配對結果的項目：只寫說明，不附雙方值
 _ISSUER_ITEM, _PRODUCT_CODE_ITEM, _FILE_NAME_ITEM = Item.note("上手"), Item.note("商品代號"), Item.note("檔名")
 _VARIANT_ITEM = Item.note("樣態")
-_REFERENCE = "參考條件表"  # 樣態出處的稱呼
-_TS = DocKind.TERM_SHEET
 
 
 def unexpected_result(e: Exception, kind: DocKind | None) -> CheckResult:
@@ -174,7 +172,7 @@ class _Draft:
     template: CheckResult | None = None  # 範本辨識命中的結果
     terms: tuple[str, Terms] | None = None  # 這份讀出的樣態條件（出處稱呼, 條件）：讀出成功才有
     row_terms: Terms | None = None  # 對到的參考條件表列的樣態條件
-    banned: frozenset[Variant] = frozenset()  # 這家上手的不支援樣態
+    unsupported_variants: frozenset[Variant] = frozenset()  # 這家上手的不支援樣態（上手支援樣態表）
     problem: PairingProblem | None = None  # 遇到就停的配對問題
     stopped: CheckResult | None = None  # 該問題對應的結果
     shared: tuple[str, str] | None = None  # 多份對到同一列：（哪種文件有多份, 其他文件的檔名）
@@ -238,7 +236,7 @@ def _draft(pdf: Path, sheet: ReferenceSheet, config: CheckConfig) -> _Draft:
     terms = (
         investor_sheet_terms(out.investor_sheet) if out.investor_sheet is not None else term_sheet_terms(out.term_sheet)
     )
-    out.terms, out.banned = (what, terms), config.unsupported_variants.get(issuer.code, frozenset())
+    out.terms, out.unsupported_variants = (what, terms), config.unsupported_variants.get(issuer.code, frozenset())
 
     if out.kind == DocKind.IIS:  # 投資人須知以檔名前 12 碼配對（HSBC 範本沒有商品代號；封面有的另由規則核對）
         pc = out.product_code = ParsedField.present("product_code", file_code(pdf), [])
@@ -364,9 +362,13 @@ def _counterpart(d: _Draft) -> tuple[PairingProblem, CheckResult]:
 
 
 def _variant(d: _Draft) -> CheckResult | None:
-    """對到列後的樣態：參考條件表該列、這份與同商品另一份讀出的條件，任一邊是不支援樣態就人工覆核（不能放行）。"""
-    docs = sorted((x for x in (d, d.partner) if x is not None and x.terms is not None), key=lambda x: x.kind != _TS)
-    found = unsupported([(_REFERENCE, d.row_terms), *(x.terms for x in docs)], d.banned)  # 出處依表、說明書、須知
+    """對到列後的樣態：參考條件表該列、這份與同商品另一份讀出的條件，任一邊是不支援樣態就人工覆核（不能放行）。
+
+    同商品另一份本身有配對問題（例：檔名商品代號不符，可能放錯檔）時，它讀出的條件不算，避免蓋掉真正的原因。
+    """
+    docs = [x for x in (d, d.partner) if x is not None and x.terms is not None and x.problem is None]
+    docs.sort(key=lambda x: x.kind != DocKind.TERM_SHEET)  # 出處依參考條件表、說明書、投資人須知
+    found = unsupported([(SOURCE, d.row_terms), *(x.terms for x in docs)], d.unsupported_variants)
     if not found:
         return None
     parts = "、".join(f"「{v.label}」（{'、'.join(names)}）" for v, names in found.items())

@@ -7,6 +7,8 @@ from pathlib import Path
 import openpyxl
 import pytest
 
+import hsbc_synth
+from fcn_checker.identification import PairingProblem
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
@@ -103,8 +105,8 @@ def test_table_problems_fail_config_load_naming_the_issuer(tmp_path, old, new, m
 # ---------------------------------------------------------------- 批量核對
 
 
-def run(tmp_path: Path, spec: Spec, row: dict, config=CONFIG):
-    pdf = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+def run(tmp_path: Path, spec, row: dict, config=CONFIG, *, build=build_pdf, name: str | None = None):
+    pdf = build(tmp_path / (name or f"{spec.product_code}_TS.pdf"), spec)
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [row])
     return run_batch(config, sheet, with_iis([pdf]), tmp_path / "reports", root=tmp_path, now=None)
 
@@ -114,17 +116,26 @@ def variant_result(item):
     return r
 
 
-def test_reference_sheet_variant_stops_both_documents_without_rules_or_release(tmp_path):
-    spec = Spec(ki="D")
-    outcome, receipt = run(tmp_path, spec, reference_row(spec, **{"KI(Freq)": "P"}))
+def filled_codes(output: Path) -> set[str]:
+    """核對結果檔「回填後」出現的所有商品代號（不依賴版面列號）。"""
+    ws = openpyxl.load_workbook(output)["回填後"]
+    return {str(v) for row in ws.iter_rows(values_only=True) for v in row if isinstance(v, str) and v.isdigit()}
+
+
+@pytest.mark.parametrize(
+    ("spec", "build", "issuer"),
+    [(Spec(ki="D"), build_pdf, "BARC"), (hsbc_synth.Spec(ki="D"), hsbc_synth.build_pdf, "HSBC")],
+    ids=["BARC", "HSBC"],
+)
+def test_reference_sheet_variant_stops_both_documents_without_rules_or_release(tmp_path, spec, build, issuer):
+    outcome, receipt = run(tmp_path, spec, reference_row(spec, **{"KI(Freq)": "P"}), build=build)
+    message = f"樣態：{issuer} 不支援「KI 每期觀察」（參考條件表）；這個樣態沒有範本可以核對，不能人工放行"
 
     assert [i.kind.value for i in outcome.items] == ["說明書", "投資人須知"]
     for item in outcome.items:
         r = variant_result(item)
         assert (r.status, r.reason_code) == (REVIEW, "variant_unsupported")
-        assert item.problem_messages == (
-            "樣態：BARC 不支援「KI 每期觀察」（參考條件表）；這個樣態沒有範本可以核對，不能人工放行",
-        )
+        assert item.problem_messages == (message,)
         assert not item.identification.checked
         assert not any(r.rule_id.startswith(("field.", "doc.", "iis.")) for r in item.report.results)
         assert item.status_label == "不支援樣態"
@@ -133,9 +144,8 @@ def test_reference_sheet_variant_stops_both_documents_without_rules_or_release(t
             outcome.release(item)
         assert not receipt.filled(item)
     ws = openpyxl.load_workbook(receipt.output)["錯誤清單"]
-    assert [r[2] for r in ws.iter_rows(min_row=2, values_only=True)] == [
-        "樣態：BARC 不支援「KI 每期觀察」（參考條件表）；這個樣態沒有範本可以核對，不能人工放行"
-    ] * 2
+    assert [r[2] for r in ws.iter_rows(min_row=2, values_only=True)] == [message] * 2
+    assert spec.product_code not in filled_codes(receipt.output)
 
 
 def test_term_sheet_variant_stops_the_product_even_when_the_sheet_is_supported(tmp_path):
@@ -170,3 +180,20 @@ def test_supported_variants_are_checked_as_usual(tmp_path):
     assert all(i.status == CheckStatus.PASS for i in outcome.items), [i.problem_messages for i in outcome.items]
     assert not any(r.rule_id == "batch.variant" for i in outcome.items for r in i.report.results)
     assert receipt.filled(outcome.items[0])
+    assert spec.product_code in filled_codes(receipt.output)
+
+
+def test_counterpart_with_its_own_pairing_problem_does_not_decide_the_variant(tmp_path):
+    """說明書檔名的商品代號和封面不同（可能放錯檔）：它讀出的條件不拿來判斷投資人須知的樣態。"""
+    spec = Spec(ki="D")  # 說明書讀出 KI 每日觀察；這份設定把它當成 BARC 的不支援樣態
+    code = "029199990002"
+    config = load_config(
+        issuer_prefixes=prefixes_with(tmp_path, '\nBARC = ["ki_periodic"]\n', '\nBARC = ["ki_daily"]\n')
+    )
+    row = reference_row(spec, **{"TDCC Code": code, "KI(Freq)": "AM"})
+    outcome, _ = run(tmp_path, spec, row, config, name=f"{code}_TS.pdf")
+
+    ts, iis = outcome.items
+    assert ts.identification.problem == PairingProblem.CODE_MISMATCH
+    assert iis.identification.problem != PairingProblem.UNSUPPORTED_VARIANT
+    assert not any(r.rule_id == "batch.variant" for r in iis.report.results)

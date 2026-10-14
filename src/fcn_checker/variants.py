@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -21,9 +21,9 @@ from .ingestion import IngestionError
 from .investor_sheet import IisSheet, read_iis
 from .orders.reference import OrderRecord
 from .rules.kit import read_standard, to_int
+from .rules.reference import VWAP
+from .schema import ParsedField
 from .standard_fields import AutocallSchedule, TermSheet
-
-VWAP = "vwap"  # 期初定價允許值對照後的 VWAP（config/reference_sheet.toml [values.initial_pricing]）
 
 
 class Variant(StrEnum):
@@ -102,39 +102,39 @@ def row_terms(row: OrderRecord, fmt: ReferenceFormat) -> Terms:
     )
 
 
-def term_sheet_terms(ts: TermSheet) -> Terms:
-    """說明書明確讀出的條件（期初定價說明書不寫）；Non-Call 取提前出場排程的第一個可提前出場期。"""
+def _explicit(pf: ParsedField) -> Any:
+    """讀出結果明確的值；沒交出、讀不到或不適用（例：無 KI）時為 None。"""
+    return pf.value if pf.ok else None
 
-    def value(name: str) -> Any:
-        pf = read_standard(ts, name)
-        return pf.value if pf.ok else None
 
-    schedule = value("autocall_schedule")
+def _document_terms(value: Callable[[str], Any], first_callable: int | None) -> Terms:
+    """說明書或投資人須知的條件（期初定價文件不寫）：`value` 依欄位名稱取明確的值。"""
     return Terms(
         ko_observation=value("ko_observation"),
         ko_memory=value("ko_memory"),
         ki_type=value("ki_type"),
-        first_callable=schedule.first_callable if isinstance(schedule, AutocallSchedule) else None,
+        first_callable=first_callable,
         tenor=value("tenor_months"),
     )
+
+
+def term_sheet_terms(ts: TermSheet) -> Terms:
+    """說明書明確讀出的條件；Non-Call 取提前出場排程的第一個可提前出場期。"""
+
+    def value(name: str) -> Any:
+        return _explicit(read_standard(ts, name))
+
+    schedule = value("autocall_schedule")
+    return _document_terms(value, schedule.first_callable if isinstance(schedule, AutocallSchedule) else None)
 
 
 def investor_sheet_terms(sheet: IisSheet) -> Terms:
     """投資人須知明確讀出的條件：只看這份範本有的欄位。"""
 
     def value(name: str) -> Any:
-        if not sheet.provides(name):
-            return None
-        pf = read_iis(sheet, name)
-        return pf.value if pf.ok else None
+        return _explicit(read_iis(sheet, name)) if sheet.provides(name) else None
 
-    return Terms(
-        ko_observation=value("ko_observation"),
-        ko_memory=value("ko_memory"),
-        ki_type=value("ki_type"),
-        first_callable=value("first_callable_period"),
-        tenor=value("tenor_months"),
-    )
+    return _document_terms(value, value("first_callable_period"))
 
 
 def unsupported(sources: Sequence[tuple[str, Terms]], banned: frozenset[Variant]) -> dict[Variant, tuple[str, ...]]:
