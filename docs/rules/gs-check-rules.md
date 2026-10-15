@@ -3,7 +3,7 @@
 - 文件側：[GS 範本規格](../templates/gs-zh-product-description.md)；投資人須知見 [GS 投資人須知範本規格](../templates/gs-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 GS 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [GS 下單資料格式](../order-formats/gs-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.13（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #248）；待實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #248）；已實作（`parsers/gs.py`、`rules/gs.py`，投資人須知見[投資人須知核對規則](iis-check-rules.md)）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura 核對規則](nomura-check-rules.md)不同或 GS 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -185,11 +185,29 @@
 | 內容 | 說明 |
 |---|---|
 | 說明書 | 上手登記（`issuers.py`）；GS `LayoutSpec`（`第一章:` 章名六章、頁底 `第- N -頁，共M頁` 與右上角重複章名排除、第 1 頁 1–13 項與第一章 1–36(37) 項分開）；範本辨識；`read` 交出全部標準欄位（`distributor_phone_ch4`、`issue_price_others` 交 `absent`；`subscription_dates` 2 筆；`min_amounts` 由單位數換算；`initial_pricing` 依範本規格 §4.7）；§3.3–§3.8 |
-| 投資人須知 | `parsers/gs_iis.py`（先轉 CJK 相容字 U+F900–U+FAFF）、`IisTemplate`（頁底 `第- N -頁，共4頁` 的 `page_totals`；刊印日期在第 1 行）、範本專屬規則：每月配息率 = 年利率 ÷ 12（4 位）；[投資人須知核對規則](iis-check-rules.md) GS 欄 |
+| 投資人須知 | `parsers/gs_iis.py`（先轉 CJK 相容字 U+F900–U+FAFF）、`IisTemplate`（頁底 `第- N -頁，共4頁` 的 `page_totals`；刊印日期在第 1 行）；沒有範本專屬規則（每月配息率用共用 `iis.monthly_coupon`）；[投資人須知核對規則](iis-check-rules.md) GS 欄 |
 | 共用設定 | 審查標準 GS 分節（`fixed_warning_by_issuer.gs`、名稱樣板、`issuer_name.gs`、`product_type.gs`、`min_amount_multiples.gs`、`iis.fixed_warning_occurrences.gs`）；`config/reference_sheet.toml` 的 `[issuer_values] GS`、`[underlyings] any_order_issuers` 加 `GS` |
 | 禁用語特例 | 依 Issue #247（PR #250，已合併）的共用設定 `wording.exempt_until`，GS 不另寫 |
 
 要有合成 PDF 測試（D 型記憶式／單一標的非記憶式、KI 無／AM／D、Non-Call 1／3、JPY、CNH（CNY 寫法）、VWAP 與開盤價、收盤價間接寫法、非整數 K %、頁底 `第- N -頁`、價格數字拆行、投資人須知相容字「利」）、本機 5 份真實樣本測試（`tests/test_real_gs.py`，結果與 §5 一致：GS2 說明書與投資人須知因一檔價格疑似分割轉人工覆核，其餘 4 組通過並回填；投資人須知「受託投資」依 #247 特例通過），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM、Nomura 樣本的負面測試；既有上手的合成與本機真實樣本測試結果須不變。
+
+### 7.1 實作對照（Issue #248）
+
+說明書有年利率，`REFERENCE_FIELDS` 為空（說明書內部規則不讀參考條件表）。
+
+| 規則 | rule_id |
+|---|---|
+| 第 14 項「約為Y%」= 年利率 ÷ 12（4 位） | `derive.monthly_coupon` |
+| 第 15 項(2) 最低保證收益率、第 17 項情境假設的年利率 = 第 14 項 | `doc.coupon_mentions` |
+| 第 15 項(2) 首 k 個、情境 1 第 k 個觀察期間 = 第 16 項 k | `doc.autocall_terms` |
+| 商品代號四處；ISIN 三處；第一章第 1 項中文名稱；第一章第 3 項發行機構全名 = 第 1 頁第 7 項；第一章第 5 項幣別與 ISO 代碼（CNY 視為 CNH） | `doc.product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.issuer_name`、`doc.currency_consistency` |
+| 期數（觀察時程表列數、中英文名稱月數） | `doc.coupon_periods` |
+| 記憶式句型 ⇔ 名稱；單一／多標的句型 ⇔ 價格表檔數；第 10 項代碼 = 價格表 | `doc.ko_memory`、`doc.underlying_count`、`doc.underlying_tickers` |
+| KI 寫法 ⇔ 價格表下限觸發價格欄 ⇔「下限觸發價格」定義 | `doc.ki_consistency` |
+| 價格表表頭 K／KI % = 定義；情境 4 第 1 檔價格與 K % | `doc.table_header_pct`、`doc.scenario_table` |
+| 觀察時程表末列、連續、結束日早於付息日 | `schedule.coupon_dates` |
+
+第一章第 3 項寫發行機構全名：共用 `standard.issuer_name` 的 `issuer_name_ch1` 是「只寫中文的出處」，parser 交中文部分給共用規則，全名另由 `doc.issuer_name` 和第 1 頁比（實作時決定）。價格表依座標分欄讀（表頭與數字欄由左到右、每欄由上到下接起來；列以左欄列號切），費用表費率欄取「費率（百分比）」到「收取時點」之間、一列剛好一個 X%~Y%。投資人須知的 CJK 相容字在 `parsers/gs_iis.py` 讀之前轉換；合成文件畫不出相容字，這一點只由本機真實樣本測試（`tests/test_real_gs.py`）涵蓋。
 
 ## 8. 決策紀錄
 

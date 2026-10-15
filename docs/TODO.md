@@ -60,7 +60,7 @@
   - [x] Citi 說明書與投資人須知（Issue #220）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；Citi 版本固定警語、兩個「受託投資」允許片語、標的依代號配對、期初定價欄核對、非記憶式不得寫「記憶式」；[說明書範本規格](templates/citi-zh-product-description.md)、[投資人須知範本規格](templates/citi-zh-iis.md)、[核對規則](rules/citi-check-rules.md)）；本機 8 組樣本中說明書與投資人須知都通過的 5 組回填。
   - [x] JPM 說明書與投資人須知（Issue #233）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；JPM 版本固定警語、「受託投資/受託買賣」允許片語、標的依代號配對、期初定價欄不核對；[說明書範本規格](templates/jpm-zh-product-description.md)、[投資人須知範本規格](templates/jpm-zh-iis.md)、[核對規則](rules/jpm-check-rules.md)）；本機 5 組樣本說明書與投資人須知全部通過並回填。
   - [x] Nomura 說明書與投資人須知（Issue #239）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；每月配息率 × 12 = 年利率、固定警語 SG 版本說明書 2 次（新增上手別次數設定）、投資人須知沒有刊印日期、審查日期清單加 2025-06-24；[說明書範本規格](templates/nomura-zh-product-description.md)、[投資人須知範本規格](templates/nomura-zh-iis.md)、[核對規則](rules/nomura-check-rules.md)）；本機 8 組樣本中 7 組通過並回填，1 組因參考條件表到期日填錯判不一致。
-  - [ ] GS 說明書與投資人須知（Issue #248）：探勘與規格完成（作業人員決定不畫螢光、逐項決定；GS 版本固定警語、標的依代號配對、期初定價欄核對、只核對發行機構名稱、最低申購依幣別倍數、投資人須知「受託投資」依 #247 交易日特例；[說明書範本規格](templates/gs-zh-product-description.md)、[投資人須知範本規格](templates/gs-zh-iis.md)、[核對規則](rules/gs-check-rules.md)）；待實作。
+  - [x] GS 說明書與投資人須知（Issue #248）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；GS 版本固定警語、標的依代號配對、期初定價欄核對、只核對發行機構名稱、最低申購依幣別倍數、投資人須知「受託投資」依 #247 交易日特例；[說明書範本規格](templates/gs-zh-product-description.md)、[投資人須知範本規格](templates/gs-zh-iis.md)、[核對規則](rules/gs-check-rules.md)）；本機 5 組樣本中 4 組通過並回填，1 組一檔標的價格是表上 2 倍（表上錯）依疑似分割轉人工覆核。
   - [ ] UBS：樣本與參考條件表列已就位（2026-10-13），尚未探勘。
   - [x] 上手編號對照補齊尚無範本的 11 家（Issue #149）：未支援上手的錯訊寫出上手代號。
   - [x] 其他幣別：可承作的八種幣別（USD、JPY、CNH、HKD、AUD、EUR、GBP、ZAR）審查標準 `[currency]`、`[denomination]` 都有了；澳幣、歐元、英鎊、南非幣在有樣本確認中文寫法後於 2026-10-13 加入（Issue #185）。表裡沒有的寫法（例：澳元、南非蘭特）仍轉人工覆核。
