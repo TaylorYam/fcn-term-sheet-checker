@@ -2,7 +2,7 @@
 
 - 適用：BARC（[`barc-zh-iis`](../templates/barc-zh-iis.md)）、HSBC（[`hsbc-zh-iis`](../templates/hsbc-zh-iis.md)）、MS（[`ms-zh-iis`](../templates/ms-zh-iis.md)）、BNP（[`bnp-zh-iis`](../templates/bnp-zh-iis.md)）、SG（[`sg-zh-iis`](../templates/sg-zh-iis.md)）、Citi（[`citi-zh-iis`](../templates/citi-zh-iis.md)）、JPM（[`jpm-zh-iis`](../templates/jpm-zh-iis.md)）、Nomura（[`nomura-zh-iis`](../templates/nomura-zh-iis.md)）中文投資人須知
 - 決策：[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)；名詞見 [CONTEXT.md](../../CONTEXT.md)
-- 狀態：2026-10-08 與使用者確認（grill-with-docs）；已實作（Issue #124：`rules/iis.py`、`rules/review_standard.py` 的 `iis_review_standard_rules`）。MS 欄與 D 類為 2026-10-09 確認並實作（Issue #137：`parsers/ms_iis.py`、範本專屬規則 `rules/ms_iis.py`）；BNP 欄為 2026-10-14 確認並實作（Issue #197：`parsers/bnp_iis.py`，沒有範本專屬規則）。SG 欄為 2026-10-14 確認並實作（Issue #213：`parsers/sg_iis.py`、範本專屬規則 `rules/sg_iis.py`）；Citi 欄為 2026-10-14 確認並實作（Issue #220：`parsers/citi_iis.py`、範本專屬規則 `rules/citi_iis.py`：開始受理贖回日期 `iis.redemption_start`、有無自動提前出場 `iis.has_autocall`、非記憶式不得寫「記憶式」`iis.memory_wording`）；JPM 欄為 2026-10-15 確認（Issue #233，待實作）；Nomura 欄為 2026-10-15 確認（Issue #239，待實作）
+- 狀態：2026-10-08 與使用者確認（grill-with-docs）；已實作（Issue #124：`rules/iis.py`、`rules/review_standard.py` 的 `iis_review_standard_rules`）。MS 欄與 D 類為 2026-10-09 確認並實作（Issue #137：`parsers/ms_iis.py`、範本專屬規則 `rules/ms_iis.py`）；BNP 欄為 2026-10-14 確認並實作（Issue #197：`parsers/bnp_iis.py`，沒有範本專屬規則）。SG 欄為 2026-10-14 確認並實作（Issue #213：`parsers/sg_iis.py`、範本專屬規則 `rules/sg_iis.py`）；Citi 欄為 2026-10-14 確認並實作（Issue #220：`parsers/citi_iis.py`、範本專屬規則 `rules/citi_iis.py`：開始受理贖回日期 `iis.redemption_start`、有無自動提前出場 `iis.has_autocall`、非記憶式不得寫「記憶式」`iis.memory_wording`）；JPM 欄為 2026-10-15 確認並實作（Issue #233：`parsers/jpm_iis.py`，沒有範本專屬規則；標的表價格依代號對到表上那一格）；Nomura 欄為 2026-10-15 確認（Issue #239，待實作）
 - 依據：SOP「結構債TS、IIS 核對SOP」（IIS 共 4 頁；產品條件、風險等級、警語、受託機構等與說明書相同）＋ BARC、HSBC、MS 各 8 份、BNP 與 SG 各 6 份、Citi 8 份、JPM 5 份、Nomura 8 份樣本探勘（MS 只支援新版 6 份的範本）
 
 ## 1. 檔名、配對與結果
@@ -34,7 +34,7 @@
 | # | 檢查點 | BARC | HSBC | MS | BNP | SG | Citi | JPM | Nomura | 預期值 | 不符時 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | A1 | 頁數剛好 4 頁 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 4（使用者 2026-10-08：比外規「不超過 5 頁」嚴格） | 不一致 |
-| A2 | 頁首「共 M 頁」的 M | — | ✓ | ✓（頁底 `第 N 頁，共 M頁`） | ✓（頁首 `第N頁，共M頁`） | —（頁底只有頁碼數字） | ✓（頁首 `第N頁，共4頁`） | ✓（頁首 `N/4`） | ✓（頁首 `N/4`） | 實際頁數 | 不一致 |
+| A2 | 頁首「共 M 頁」的 M | — | ✓ | ✓（頁底 `第 N 頁，共 M頁`） | ✓（頁首 `第N頁，共M頁`） | —（頁底只有頁碼數字） | ✓（頁首 `第N頁，共4頁`） | ✓（頁面底部 `N/4`） | ✓（頁首 `N/4`） | 實際頁數 | 不一致 |
 | A3 | 範本辨識 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 範本規格的辨識條件 | 需人工覆核 |
 | A4 | 商品代號（`商品代號`、`受託或銷售機構商品代號` 兩處） | ✓ | — | — | ✓（`TDCC 商品代號`、`受託機構商品代號`） | ✓（`TDCC商品代號`、`受託機構商品代號`；SG6 寫 `受託或銷售機構商品代號`，兩種都收） | ✓（`受託或銷售機構商品代號`、`集保商品代號`；`[ ]` 判不一致） | ✓（`TDCC商品代號`、`受託機構商品代號`） | ✓（`TDCC商品代號為` 1 處） | 檔名前 12 碼 | 不一致 |
 | A5 | ISIN | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 說明書 | 不一致 |
