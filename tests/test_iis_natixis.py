@@ -35,23 +35,24 @@ def test_supported_types_pass(tmp_path, spec):
 NO_PCT = "自動提前到期贖回價格為中文產品說明書第一章第14項所列之期初進場價格。"
 
 
-def test_ko_definition_without_a_percentage_reads_as_100_percent(tmp_path):
-    """KO 定義寫成「…所列之期初進場價格」（沒有 %）＝ KO 100%（2026-10-15 確認，Issue #270）：KO 100% 的商品通過。"""
-    spec = Spec(ko=Decimal("100.00"))
-    edit = Edit("自動提前到期贖回價格為期初進場價格之100.00%。", NO_PCT, "iis.coupon")
-    r = check_iis(tmp_path, spec, edits=[edit]).report
+@pytest.mark.parametrize("ko", ["100.00", "105.00"])
+def test_ko_definition_without_a_percentage_refers_to_the_term_sheet(tmp_path, ko):
+    """KO 定義寫成「…所列之期初進場價格」（沒有 %）是參照說明書第一章第 14 項（2026-10-15 確認，Issue #272）：
+    不論 KO 多少都通過，投資人須知不核對 KO %。"""
+    edit = Edit(f"自動提前到期贖回價格為期初進場價格之{ko}%。", NO_PCT, "iis.coupon")
+    r = check_iis(tmp_path, Spec(ko=Decimal(ko)), edits=[edit]).report
     assert r.status == S.PASS, problems(r)
     assert rule(r, "iis.ko_definition")[0].status == S.PASS
-    assert rule(r, "field.ko_pct")[0].actual == Decimal(100)
+    assert not [x for x in r.results if x.rule_id == "field.ko_pct"]
 
 
-def test_ko_definition_without_a_percentage_is_a_mismatch_when_ko_is_not_100(tmp_path):
-    """同上寫法、但 KO 是 105%（NX7 的情況）：KO % 判不一致（100 ≠ 105），KO 定義也寫出為什麼等於 100%。"""
-    edit = Edit("自動提前到期贖回價格為期初進場價格之105.00%。", NO_PCT, "iis.coupon")
+def test_other_ko_definition_wording_is_a_mismatch(tmp_path):
+    """KO 定義不是「之Y%」也不是參照說明書第 14 項的寫法：判不一致（Issue #272）。"""
+    edit = Edit(
+        "自動提前到期贖回價格為期初進場價格之105.00%。", "自動提前到期贖回價格為某處所列之期初進場價格。", "iis.coupon"
+    )
     r = check_iis(tmp_path, edits=[edit]).report
-    assert rule(r, "field.ko_pct")[0].status == S.MISMATCH
-    definition = rule(r, "iis.ko_definition")[0]
-    assert definition.status == S.MISMATCH and "105" in definition.message
+    assert rule(r, "iis.ko_definition")[0].status == S.MISMATCH
 
 
 def test_currency_bullet_may_be_a_black_circle_with_a_space(tmp_path):

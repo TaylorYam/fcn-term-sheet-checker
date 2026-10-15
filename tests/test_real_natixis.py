@@ -47,8 +47,6 @@ def test_samples_only_differ_where_the_exploration_said(items):
         {
             ("doc.distributor_product_code", "blank_field"): 1,
             ("iis.pages", "value_mismatch"): 1,
-            ("iis.ko_definition", "value_mismatch"): 1,  # NX7 KO 定義沒寫 %（＝100%），說明書 KO 105%（Issue #270）
-            ("field.ko_pct", "value_mismatch"): 1,  # 同上，投資人須知 KO % 讀成 100%
             ("batch.pairing", "reference_row_missing"): 1,
         }
     )
@@ -56,7 +54,7 @@ def test_samples_only_differ_where_the_exploration_said(items):
 
 def test_products_whose_two_documents_pass_are_filled(items):
     term_sheets, _ = items
-    assert sum(i.fills_sheet for i in term_sheets) == 4
+    assert sum(i.fills_sheet for i in term_sheets) == 5  # NX7 KO 定義是參照說明書、不核對 KO %（Issue #272）
 
 
 def test_template_variants_match_the_sample_table(items):
