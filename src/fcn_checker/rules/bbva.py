@@ -230,7 +230,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
     out = [
         kit.doc_check(ctx, "doc.ki_consistency", "price_table", "價格表下限值欄", ki, table).compare(
             label[has],
-            label["ki" in table.value["columns"]] if table.ok else None,
+            label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="價格表有無下限值欄須與到期條件的下限值寫法一致",
@@ -263,18 +263,18 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         ("strike", "strike_def_pct", "價格表轉換比例欄頭 %"),
         ("ki", "ki_def_pct", "價格表下限值欄頭 %"),
     ):
-        if table.ok and col not in table.value["pcts"]:
+        if table.ok and col not in table.value.pcts:
             continue  # 沒有這欄（無 KI）：一致性由 ki_terms 檢查
         pf = f(key)
         out.append(
             kit.doc_check(ctx, "doc.table_header_pct", f"header_{col}", name, pf, table).compare(
-                pf.value, table.value["pcts"].get(col) if table.ok else None
+                pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
     listed = f("underlying_list")
     out.append(
         kit.doc_check(ctx, "doc.underlying_list", "underlying_list", "第 9 項連結標的表的標的", table, listed).compare(
-            table.value["tickers"] if table.ok else None,
+            table.value.tickers if table.ok else None,
             listed.value,
             fail_message="第 9 項連結標的表的彭博代碼與順序須等於第 14 項價格表",
         )
@@ -285,11 +285,11 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     )
     if table.ok and scen.ok and denom.ok and units.ok and amount.ok:
         issues = []
-        if scen.value["pcts"] != table.value["pcts"]:
+        if scen.value.pcts != table.value.pcts:
             issues.append("情境價格表表頭 % 和第 14 項價格表不同")
-        if scen.value["tickers"] != table.value["tickers"]:
+        if scen.value.tickers != table.value.tickers:
             issues.append("情境價格表的標的和第 14 項價格表不同")
-        rows, own = scen.value["rows"], table.value["rows"]
+        rows, own = scen.value.prices, table.value.prices
         if len(rows) != len(own):
             issues.append(f"情境價格表 {len(rows)} 列，第 14 項價格表 {len(own)} 列")
         else:

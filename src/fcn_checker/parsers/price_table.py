@@ -265,7 +265,7 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
     codes = [
         ln
         for ln in ordered
-        if TICKER_START.match(ln.text.strip())
+        if TICKER_START.match(ROW_NUMBER.sub("", ln.text.strip()))  # 列號和代碼可能擠在同一行（`3 ASML UW Equity`）
         or (  # 代號與交易所碼換成兩行（`AVGO` / `UW`）：代號那一行是列錨點
             SYMBOL.fullmatch(ln.text.strip())
             and any(EXCHANGE.fullmatch(b.text.strip()) and _adjacent(ln, b) for b in lines)
@@ -279,11 +279,15 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
 
 def _split(lines: list[Line], first: Line, spec: TableSpec) -> tuple[list[Line], list[Line]]:
     """第 1 列錨點的上緣以上是表頭，以下是列。表頭從有關鍵字的那幾格的上緣起，更上面的文字（範圍裡表前的說明、
-    上一頁頁底的註腳）不算。格內垂直置中、比列錨點高的行（沒有表頭關鍵字、從表頭最後一行之下才開始、緊接著下面
-    的列）仍屬於列。"""
+    上一頁頁底的註腳）不算；第 1 列那一頁的表頭已經有全部必要的關鍵字時，不往上一頁找。格內垂直置中、比列錨點高的
+    行（沒有表頭關鍵字、從表頭最後一行之下才開始、緊接著下面的列）仍屬於列。"""
     top = (first.page, first.y0)
     above = [ln for ln in lines if (ln.page, _yc(ln)) < top]
     below = [ln for ln in lines if (ln.page, _yc(ln)) >= top]
+    same_page = [ln for ln in above if ln.page == first.page]
+    if same_page and _complete_header(_cells(same_page), spec):
+        above = same_page
+    above = _from_first_row(above)
     cells = _cells(above)
     keyed = [c for c in cells if _has_keyword(c, spec)]
     if not keyed:
@@ -353,6 +357,31 @@ def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]]) -> bool:
 
 def _text(cell: Sequence[Line]) -> str:
     return "".join(squash(ln.text) for ln in cell)
+
+
+def _from_first_row(lines: list[Line]) -> list[Line]:
+    """表頭從第一個「至少兩格並排」的列開始（上下重疊的行算同一列）；更上面單獨成行的文字（表前的說明、上一頁的
+    註腳）不算表頭。"""
+    ordered = sorted(lines, key=_page_key)
+    rows: list[list[Line]] = []
+    for ln in ordered:
+        row = rows[-1] if rows else None
+        if row and row[0].page == ln.page and ln.y0 < max(x.y1 for x in row) - 1:
+            row.append(ln)
+        else:
+            rows.append([ln])
+    first = next((r for r in rows if len(r) >= 2), None)
+    if first is None:
+        return lines
+    top = min((x.page, x.y0) for x in first)
+    return [ln for ln in lines if (ln.page, ln.y1) > top]
+
+
+def _complete_header(cells: list[list[Line]], spec: TableSpec) -> bool:
+    """表頭的格裡有期初價格、各必要價格欄（與代碼欄）的關鍵字。"""
+    texts = [_text(c) for c in cells]
+    required = [spec.initial, *(c.word for c in spec.columns if c.required), *([spec.code] if spec.code else [])]
+    return all(any(w in t for t in texts) for w in required)
 
 
 def _words(spec: TableSpec) -> list[str]:
