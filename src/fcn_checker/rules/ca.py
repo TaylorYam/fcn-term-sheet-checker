@@ -73,11 +73,10 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             fail_message="第 9 項配息表的配息率須等於第 16 項年化配息率 ÷ 12 四捨五入到 4 位",
         )
     ]
-    guaranteed = f("guaranteed_coupon")
-    rate = _part(guaranteed, 1)
+    rate = f("guaranteed_coupon_pct")
     out.append(
         kit.doc_check(
-            ctx, "doc.coupon_mentions", "guaranteed_coupon", "第 15 項 (4) 最低保證配息率", monthly, rate
+            ctx, "doc.coupon_mentions", "guaranteed_coupon_pct", "第 15 項 (4) 最低保證配息率", monthly, rate
         ).compare(monthly.value, rate.value, fail_message="最低保證配息率須等於配息表的配息率")
     )
     scen = f("scenario_monthly_pct")
@@ -87,11 +86,6 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
         ).compare(monthly.value, scen.value, fail_message="情境基本假設的配息率須等於配息表的配息率")
     )
     return out
-
-
-def _part(pf: ParsedField, i: int) -> ParsedField:
-    """(月數, 配息率) 這類值的第 i 個（證據沿用）。"""
-    return ParsedField(pf.name, pf.status, pf.value[i] if pf.ok else None, list(pf.evidence), note=pf.note)
 
 
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.5）
@@ -166,7 +160,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
     """第 15 項 (4) 最低保證配息率的月數、情境一配息月數（第 1／第 1~k 個月）= Non-Call。"""
     f = ctx.ts.f
     k = f("first_callable_period")
-    months = _part(f("guaranteed_coupon"), 0)
+    months = f("guaranteed_coupon_months")
     first = f("scenario_first_months")
     return [
         kit.doc_check(

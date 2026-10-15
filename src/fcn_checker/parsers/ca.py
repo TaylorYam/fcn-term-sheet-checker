@@ -10,9 +10,8 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal
 
 from .. import standard_fields
@@ -20,7 +19,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import RawText, capture_group, dec, derived, fee_rates, number
+from .common import RawText, capture_group, compat_normalized, dec, derived, fee_rates, header_columns, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-pd"
@@ -75,19 +74,9 @@ PRICE_HEADS = (("strike", "執行價"), ("ki", "下限價"), ("ko", "自動提�
 PRICE = re.compile(r"^([\d,]+\.\d+)(?!\d|\s*%)")  # 價格（後接幣別字）；表頭的「60.00% )」不算
 
 
-def nfkc(text: str) -> str:
-    """CJK 相容字（U+F900–U+FAFF，例：「年」U+F98E）轉回一般字；其他字元不動（同 gs_iis）。"""
-    return "".join(unicodedata.normalize("NFKC", c) if 0xF900 <= ord(c) <= 0xFAFF else c for c in text)
-
-
-def clean(lines: Sequence[Line]) -> list[Line]:
-    """CJK 相容字正規化（字數不變，字座標照舊）。"""
-    return [replace(ln, text=nfkc(ln.text)) if any(0xF900 <= ord(c) <= 0xFAFF for c in ln.text) else ln for ln in lines]
-
-
 def document(lines: Sequence[Line]) -> Document:
     """版面結構；頁底頁碼不算內文。"""
-    body = [ln for ln in clean(lines) if not (ln.y0 >= PAGE_Y and PAGE.match(ln.text.strip()))]
+    body = [ln for ln in compat_normalized(lines) if not (ln.y0 >= PAGE_Y and PAGE.match(ln.text.strip()))]
     return Document(body, LAYOUT)
 
 
@@ -191,7 +180,7 @@ def read(lines: Sequence[Line]) -> CaTermSheet:
     put("issue_date", art13, r"\(3\)發行日：" + D, parse_date)
     put("final_valuation_date", art13, r"\(4\)期末訂價日：" + D, parse_date)
     put("maturity_date", art13, r"\(5\)到期日：" + D, parse_date)
-    fields["guaranteed_coupon"] = guaranteed_coupon(article(15))
+    fields.update(guaranteed_coupon(article(15)))
     _table_fields(fields)
     _schedule(fields)
     _article16(fields, article(16))
@@ -372,20 +361,6 @@ def ki_type(ti: TextIndex, c: int, e: int, table: ParsedField) -> ParsedField:
     return ParsedField.present("ki_type", "AM" if am else "D", ti.lines_for(p, p + len(anchor)))
 
 
-def _header_columns(header: list[Line]) -> list[tuple[float, str]]:
-    """表頭各行依 x 中心分欄（相差 15pt 內同一欄），回傳（欄中心, 欄文字）由左到右。"""
-    cols: list[list[Line]] = []
-    for ln in sorted(header, key=lambda x: x.xc):
-        if cols and ln.xc - cols[-1][-1].xc <= 15:
-            cols[-1].append(ln)
-        else:
-            cols.append([ln])
-    return [
-        (sum(x.xc for x in col) / len(col), "".join(squash(x.text) for x in sorted(col, key=lambda x: (x.page, x.y0))))
-        for col in cols
-    ]
-
-
 def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) -> ParsedField:
     """價格表（第 9 項 (2)、第 16 項情境）：`start_marker` 那一行之後、`end_marker` 之前；表頭決定欄序與 %
     （K → KI → KO），每檔一列（以價格那一行的 y 切列）。表頭各格的擷取順序不一定由上而下，所以不用表頭文字找起點。
@@ -402,7 +377,7 @@ def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) 
         return ParsedField.invalid(name, lines, "價格表讀不到任何價格")
     top = min(prices, key=lambda x: (x.page, x.y0))
     header = [ln for ln in lines if (ln.page, ln.y1) <= (top.page, top.y0 + 1)]
-    head = _header_columns(header)
+    head = header_columns(header)
     found, pcts = [], {}
     for col, word in PRICE_HEADS:
         hit = [(x, t) for x, t in head if word in t]
@@ -504,18 +479,24 @@ def _table_fields(fields: dict[str, ParsedField]) -> None:
         fields["ki_pct"] = derived("ki_pct", bad or table, None if bad else table.value["pcts"]["ki"])
 
 
-def guaranteed_coupon(art15: list[Line]) -> ParsedField:
-    """第 15 項 (4)「最低保證配息率：第一個月／前k個月配息 x%」→ (月數, x)。"""
+def guaranteed_coupon(art15: list[Line]) -> dict[str, ParsedField]:
+    """第 15 項 (4)「最低保證配息率：第一個月／前k個月配息 x%」→ 月數（`guaranteed_coupon_months`）與 x（`guaranteed_coupon_pct`）。"""
+    names = ("guaranteed_coupon_months", "guaranteed_coupon_pct")
     ti = TextIndex(art15)
     found = list(ti.finditer(r"\(4\)最低保證配息率：(?:第一個月|前([一二三四五六七八九十]{1,3})個月)配息" + PCT))
     if len(found) != 1:
-        return ParsedField.missing("guaranteed_coupon", "第 15 項找不到或有多處「(4) 最低保證配息率：…配息 x%」")
+        note = "第 15 項找不到或有多處「(4) 最低保證配息率：…配息 x%」"
+        return {n: ParsedField.missing(n, note) for n in names}
     m = found[0]
     months = CN_NUM.get(m[1]) if m[1] else 1
     lns = ti.lines_for(m.start(), m.end())
+    pct = ParsedField.present(names[1], Decimal(m[2]), lns)
     if months is None:
-        return ParsedField.invalid("guaranteed_coupon", lns, f"最低保證配息率的月數「前{m[1]}個月」無法辨識")
-    return ParsedField.present("guaranteed_coupon", (months, Decimal(m[2])), lns)
+        return {
+            names[0]: ParsedField.invalid(names[0], lns, f"最低保證配息率的月數「前{m[1]}個月」無法辨識"),
+            names[1]: pct,
+        }
+    return {names[0]: ParsedField.present(names[0], months, lns), names[1]: pct}
 
 
 # ---------------------------------------------------------------- KO 排程
@@ -584,6 +565,11 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     fields["scenario_monthly_pct"] = capture_group(art16, coupon, 1, "scenario_monthly_pct", Decimal)
     fields["coupon_pa_pct"] = capture_group(art16, coupon, 2, "coupon_pa_pct", Decimal)
     fields["scenario_table"] = price_table("scenario_table", art16, "(年化配息率為", "情境分析一")
+    a = ti.text.find("情境分析一")
+    one = art16[ti.line_at(a) : ti.line_at(ti.text.find("情境分析二", a))] if a >= 0 else []
+    fields["scenario_coupon_currency"] = capture(  # 情境一的累積配息金額（配息金額 = 承作幣別，2026-10-15 確認）
+        "scenario_coupon_currency", TextIndex(one), rf"累積配息金額＝[\d,]+(?:\.\d+)?({CCY})", whole_match=True
+    )
     found = list(
         ti.finditer(
             r"情境分析一：較佳情況假設於第1個自動提前出場觀察日發生自動提前出場事件。[•‧]第1(?:~(\d+))?個月配息金額"
@@ -670,6 +656,7 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         ("minimum_redemption_currency", "最低贖回金額幣別", "第四章第 8 項最低贖回金額"),
         ("scenario_denomination_currency", "情境假設每單位面額幣別", "第一章第 16 項基本假設每單位面額"),
         ("scenario_investment_currency", "情境假設初始投資金額幣別", "第一章第 16 項基本假設初始投資金額"),
+        ("scenario_coupon_currency", "情境一累積配息金額幣別", "第一章第 16 項情境分析一累積配息金額"),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]

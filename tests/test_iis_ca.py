@@ -46,6 +46,17 @@ def test_ki_presence_must_match_the_term_sheet(tmp_path):
     assert rule(r, "iis.has_ki")[0].status == S.MISMATCH
 
 
+def test_ki_on_the_term_sheet_must_appear_on_the_investor_sheet(tmp_path):
+    """說明書有界限事件、投資人須知到期贖回卻直接比執行價：判不一致。"""
+    edit = Edit(
+        "(i) 若未發生界限事件，則到期贖回金額為",
+        "(i) 若最差表現之連結標的期末訂價低於執行價：到期贖回金額為",
+        "iis.coupon",
+    )
+    r = check_iis(tmp_path, Spec(ki="AM", count=1, memory=False), edits=[edit]).report
+    assert rule(r, "iis.has_ki")[0].status == S.MISMATCH
+
+
 @pytest.mark.parametrize(
     ("edit", "broken"),
     [

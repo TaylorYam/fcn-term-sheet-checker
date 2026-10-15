@@ -58,6 +58,7 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     skipped = ("standard.guarantor_name", "standard.agent_name", "standard.minimum_issue_size")  # 決定不核對
     assert not [x for x in r.results if x.rule_id in skipped]
     assert len(rule(r, "field.min_amounts")) == 3
+    assert len(rule(r, "field.currency")) == 9  # 封面計價幣別＋金額旁的幣別字 8 處
     assert rule(r, "field.initial_pricing")[0].status == S.PASS  # 說明書沒寫：只檢查表上是允許值
     assert rule(r, "field.ki_type")[0].status == S.PASS
 
@@ -124,6 +125,19 @@ def test_coupon_rate_must_be_annual_over_twelve(tmp_path):
     r = check(tmp_path, edits=[Edit("0.7500%", "0.7600%", "ts.art9.coupon")])
     assert rule(r, "derive.monthly_coupon")[0].status == S.MISMATCH
     assert {x.status for x in rule(r, "doc.coupon_mentions")} == {S.MISMATCH}
+
+
+def test_annual_coupon_must_match_the_coupon_table(tmp_path):
+    """第 16 項年化配息率（說明書唯一的年利率）錯：配息率推算與參考條件表年利率都不一致。"""
+    r = check(tmp_path, edits=[Edit("(年化配息率為9.00%)", "(年化配息率為9.12%)", "ts.art16")])
+    assert rule(r, "derive.monthly_coupon")[0].status == S.MISMATCH
+    assert rule(r, "field.coupon_pa_pct")[0].status == S.MISMATCH
+
+
+def test_scenario_coupon_amount_is_in_the_product_currency(tmp_path):
+    """情境一累積配息金額的幣別 = 承作幣別（2026-10-15 確認：配息金額仍 = 承作幣別）。"""
+    r = check(tmp_path, edits=[Edit("累積配息金額 ＝75.00 美元", "累積配息金額 ＝75.00 日圓", "ts.art16")])
+    assert rule(r, "field.currency", "scenario_coupon_currency")[0].status == S.MISMATCH
 
 
 def test_last_payment_date_must_be_the_maturity_date(tmp_path):

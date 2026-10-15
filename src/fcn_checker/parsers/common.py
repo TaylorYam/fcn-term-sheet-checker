@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import bisect
 import re
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
@@ -185,6 +186,30 @@ def split_at_columns(lines: list[Line], tol: float = 0.6) -> list[Line]:
                 i, j = keep[0], keep[-1] + 1
                 out.append(replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=ln.text[i:j], char_spans=spans[i:j]))
     return out
+
+
+def header_columns(header: list[Line], gap: float = 15) -> list[tuple[float, str]]:
+    """表頭各行依 x 中心分欄（相鄰兩行相差 `gap` 內同一欄），回傳（欄中心, 欄文字去空白、欄內由上到下）由左到右（Natixis、CA）。"""
+    cols: list[list[Line]] = []
+    for ln in sorted(header, key=lambda x: x.xc):
+        if cols and ln.xc - cols[-1][-1].xc <= gap:
+            cols[-1].append(ln)
+        else:
+            cols.append([ln])
+    return [
+        (sum(x.xc for x in col) / len(col), "".join(squash(x.text) for x in sorted(col, key=lambda x: (x.page, x.y0))))
+        for col in cols
+    ]
+
+
+def compat_standard(text: str) -> str:
+    """CJK 相容字（U+F900–U+FAFF）轉成標準字（例：U+F9DD → 利、U+F98E → 年）；其他字元不動，字數不變。"""
+    return "".join(unicodedata.normalize("NFKC", c) if 0xF900 <= ord(c) <= 0xFAFF else c for c in text)
+
+
+def compat_normalized(lines: Sequence[Line]) -> list[Line]:
+    """每行的 CJK 相容字轉成標準字（GS 投資人須知、CA 兩種文件）；字數不變，字座標照舊。"""
+    return [replace(ln, text=t) if (t := compat_standard(ln.text)) != ln.text else ln for ln in lines]
 
 
 def column_text(lines: list[Line]) -> str:

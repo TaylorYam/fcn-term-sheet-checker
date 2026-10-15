@@ -16,7 +16,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, Line, ParsedField
 from ..text import squash
 from . import ca, iis
-from .common import RawText, fee_rates
+from .common import RawText, compat_normalized, fee_rates
 from .layout import TextIndex, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-iis"
@@ -69,7 +69,7 @@ PROVIDED = frozenset(
 
 def body(lines: Sequence[Line]) -> list[Line]:
     """CJK 相容字正規化；頁碼以外的行（頁碼另由 `iis.page_totals` 讀）。"""
-    return [ln for ln in ca.clean(lines) if not NOISE.fullmatch(ln.text.strip())]
+    return [ln for ln in compat_normalized(lines) if not NOISE.fullmatch(ln.text.strip())]
 
 
 def detect(lines: Sequence[Line]) -> DetectionResult:
@@ -160,7 +160,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     text_lines = body(lines)
     ti = TextIndex(text_lines)
     raw = RawText(text_lines)
-    fields: dict[str, ParsedField] = {"page_totals": iis.page_totals(ca.clean(lines))}
+    fields: dict[str, ParsedField] = {"page_totals": iis.page_totals(compat_normalized(lines))}
     provided = set(PROVIDED)
 
     def put(name, pattern, convert=lambda x: x):

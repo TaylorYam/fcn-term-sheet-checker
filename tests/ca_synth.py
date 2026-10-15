@@ -373,6 +373,8 @@ def _article16(d: _Doc, s: Spec) -> None:
     d.text(36, "情境分析一：較佳情況")
     d.text(36, "假設於第1 個自動提前出場觀察日發生自動提前出場事件。")
     d.text(36, f"• 第 {months} 個月配息金額 ＝每單位面額 × {s.monthly}%")
+    cumulative = (Decimal(s.denom) * s.monthly / 100 * s.first_callable).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    d.text(36, f"• 累積配息金額 ＝{cumulative:,} {s.currency_zh}")
     d.text(36, "情境分析二：一般情況")
 
 
