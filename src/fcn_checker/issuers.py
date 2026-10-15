@@ -13,8 +13,21 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, citi_iis, gs_iis, hsbc_iis, jpm_iis, ms_iis, natixis_iis, nomura_iis, sg_iis
+from .parsers import (
+    barc_iis,
+    bnp_iis,
+    ca_iis,
+    citi_iis,
+    gs_iis,
+    hsbc_iis,
+    jpm_iis,
+    ms_iis,
+    natixis_iis,
+    nomura_iis,
+    sg_iis,
+)
 from .parsers import bnp as bnp_parser
+from .parsers import ca as ca_parser
 from .parsers import citi as citi_parser
 from .parsers import gs as gs_parser
 from .parsers import hsbc as hsbc_parser
@@ -25,6 +38,8 @@ from .parsers import nomura as nomura_parser
 from .parsers import sg as sg_parser
 from .rules import barc as barc_rules
 from .rules import bnp as bnp_rules
+from .rules import ca as ca_rules
+from .rules import ca_iis as ca_iis_rules
 from .rules import citi as citi_rules
 from .rules import citi_iis as citi_iis_rules
 from .rules import gs as gs_rules
@@ -294,7 +309,28 @@ NATIXIS = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS)
+CA = Issuer(
+    code=ca_rules.ISSUER,
+    template_id=ca_parser.TEMPLATE_ID,
+    label="CA 中文產品說明書",
+    parser_version=ca_parser.PARSER_VERSION,
+    not_covered=tuple(ca_rules.NOT_COVERED),
+    detect=ca_parser.detect,
+    read=ca_parser.read,
+    rules=ca_rules.run_all,
+    reference_fields=ca_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=ca_iis.TEMPLATE_ID,
+        label="CA 中文投資人須知",
+        parser_version=ca_iis.PARSER_VERSION,
+        detect=ca_iis.detect,
+        read=ca_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=ca_iis_rules.run_all,
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS, CA)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

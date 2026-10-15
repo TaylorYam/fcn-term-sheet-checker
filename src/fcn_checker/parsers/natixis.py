@@ -19,7 +19,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import RawText, by_column, capture_group, dec, derived, fee_rates, number
+from .common import RawText, by_column, capture_group, dec, derived, fee_rates, header_columns, number
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
@@ -370,21 +370,6 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line]) -> None:
 # ---------------------------------------------------------------- 第 9 項連結標的表、第 16 項情境價格表
 
 
-def _header_columns(header: list[Line]) -> list[tuple[float, str]]:
-    """表頭各行依 x 中心分欄（相差 15pt 內同一欄），回傳（欄中心, 欄文字）由左到右。"""
-    cols: list[list[Line]] = []
-    for ln in sorted(header, key=lambda x: x.xc):
-        if cols and ln.xc - cols[-1][-1].xc <= 15:
-            cols[-1].append(ln)
-        else:
-            cols.append([ln])
-    out = []
-    for col in cols:
-        lns = sorted(col, key=lambda x: (x.page, x.y0))
-        out.append((sum(x.xc for x in lns) / len(lns), "".join(squash(x.text) for x in lns)))
-    return out
-
-
 def _price_columns(head: list[tuple[float, str]]) -> tuple[list[str], dict[str, Decimal], float | None] | str:
     """表頭 → 價格欄序（依出現順序）、各欄 %、期初進場價格欄的 x 中心；讀不到時回傳原因。"""
     found = []
@@ -452,11 +437,11 @@ def underlying_table(name: str, art9: list[Line]) -> ParsedField:
     if not marks:
         return ParsedField.invalid(name, lines, "連結標的表找不到第 1 列")
     header = [ln for ln in lines[: marks[0]] if squash(ln.text) != "i"]  # 列號欄的表頭「i」不是價格欄
-    parsed = _price_columns(_header_columns(header))
+    parsed = _price_columns(header_columns(header))
     if isinstance(parsed, str):
         return ParsedField.invalid(name, header, parsed)
     columns, pcts, initial_x = parsed
-    code_x = next((x for x, t in _header_columns(header) if "彭博" in t), None)
+    code_x = next((x for x, t in header_columns(header) if "彭博" in t), None)
     if initial_x is None or code_x is None:
         return ParsedField.invalid(name, header, "連結標的表表頭讀不到「彭博代碼」或「期初進場價格」欄")
     anchors = [lines[i] for i in marks]
@@ -511,7 +496,7 @@ def scenario_table(name: str, lns: list[Line]) -> ParsedField:
     top = anchors[0]
     header = [ln for ln in lines if ln.page == top.page and ln.y1 < top.y0 - 2 or ln.page < top.page]
     body = [ln for ln in lines if ln not in header]
-    parsed = _price_columns(_header_columns(header))
+    parsed = _price_columns(header_columns(header))
     if isinstance(parsed, str):
         return ParsedField.invalid(name, header, parsed)
     columns, pcts, _ = parsed

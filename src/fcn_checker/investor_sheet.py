@@ -48,6 +48,7 @@ IIS_FIELDS: dict[str, str] = {
     "redemption_start_text": "str：開始受理贖回日期的文字（Nomura；= 說明書第四章 1.(3)）",
     "redemption_later_text": "str：後續受理贖回日期的文字（Nomura；= 說明書第四章 1.(4)）",
     "distributor_code": "str：「受託機構商品代號為」的值（Natixis 舊版有標籤但空白；沒有標籤的範本交 absent）",
+    "has_ki": "bool：有沒有 KI（CA：只寫到期贖回「若未發生界限事件」、沒有界限事件定義；須等於同商品說明書）",
     "ko_definition": "str：KO 價格定義原文（Natixis「自動提前到期贖回價格為…期初進場價格之Y%」；沒寫 % 判不一致）",
 }
 
