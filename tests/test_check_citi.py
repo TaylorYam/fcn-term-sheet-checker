@@ -121,6 +121,32 @@ def test_unknown_initial_pricing_header_requires_review(tmp_path):
     assert rule(r, "field.initial_pricing")[0].status == S.REVIEW_REQUIRED
 
 
+def test_blank_sheet_pricing_follows_a_vwap_header_and_fills_the_prices(tmp_path):
+    """表上期初定價空白、表頭寫 VWAP：當 VWAP 商品，價格欄不比對、通過後依代號以說明書覆寫（Issue #246）。"""
+    spec = Spec(vwap=True)
+    stale = {f"UL_{i}_進場價": 1.0 for i in range(1, 4)}
+    r = check(tmp_path, spec, order=(3, 1, 2), 期初定價=None, **stale)
+    assert r.status == S.PASS, problems(r)
+    [pricing] = rule(r, "field.initial_pricing")
+    assert pricing.status == S.PASS and "VWAP" in pricing.message, pricing.message
+    assert not [x for x in r.results if x.rule_id == "field.underlying_prices"]  # 價格欄不比對
+    cells = {d.column: d for d in r.backfill}
+    assert cells["UL_2_進場價"].expected == spec.underlyings[0].initial  # 表上第 2 檔是說明書第 1 檔
+    assert cells["UL_2_進場價"].action == BackfillAction.OVERWRITE
+
+
+@pytest.mark.parametrize("header", ["收盤價格", "開盤價格"])
+def test_blank_sheet_pricing_with_a_closing_or_opening_price_header_compares_the_prices(tmp_path, header):
+    r = check(tmp_path, Spec(pricing_text=header), 期初定價=None, UL_1_進場價=1.0)
+    assert problems(r) == [("field.underlying_prices", "ZCA UW 進場價", S.MISMATCH)]
+    assert rule(r, "field.initial_pricing")[0].status == S.PASS
+
+
+def test_blank_sheet_pricing_with_an_unknown_header_requires_review(tmp_path):
+    r = check(tmp_path, Spec(), pdf_spec=Spec(pricing_text="平均價格"), 期初定價=None)
+    assert rule(r, "field.initial_pricing")[0].status == S.REVIEW_REQUIRED
+
+
 # ---------------------------------------------------------------- 說明書內部規則
 
 
