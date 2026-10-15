@@ -209,7 +209,7 @@ def test_page_count_and_footer_total(tmp_path, spec, rule, message):
             None,
         ),
         (
-            ("cover", f"刊印日期:{zh_date(TRADE)}", "刊印日期:2030 年1 月9 日"),
+            ("cover", f"刊印日期:{zh_date(TRADE)}", "刊印日期:2030 年1 月14 日"),
             ("doc.print_date", "print_date_iis"),
             None,
         ),

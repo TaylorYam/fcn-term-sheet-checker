@@ -228,7 +228,7 @@ def test_page_count_and_header_total(tmp_path, spec, rule, message):
             ("standard.minimum_issue_size", "minimum_issue_size"),
             None,
         ),
-        (("cover", f"刊印日期：{TRADE}", "刊印日期：2030 年1 月9 日"), ("doc.print_date", "print_date_iis"), None),
+        (("cover", f"刊印日期：{TRADE}", "刊印日期：2030 年1 月14 日"), ("doc.print_date", "print_date_iis"), None),
         (
             ("warn", "最低收益率。", "最低收益率。受託投資之標的。"),
             ("standard.forbidden_wording", "forbidden_wording"),

@@ -300,14 +300,14 @@ def test_hsbc_iis_forbidden_wording_and_print_date(tmp_path):
     ts = hsbc_synth.build_pdf(tmp_path / f"{s.product_code}_TS.pdf", s, iis=False)
     edits = [
         Edit("四、本商品雖經", "四、受託或銷售機構將為投資人受託投資本商品。本商品雖經"),
-        Edit("2030 年1 月7 日", "2030 年1 月9 日"),
+        Edit("2030 年1 月7 日", "2030 年1 月14 日"),  # 刊印日期 = 發行日（不含）
     ]
     iis = hsbc_synth.build_iis_pdf(iis_path(ts), s, edits=edits)
     sheet = build_reference_sheet(tmp_path / "order.xlsx", [reference_row(s)])
     _, item = check_all(sheet, [ts, iis]).items
     messages = problems(item)
     assert any(m.startswith("禁用語「受託投資」：允許片語以外出現「受託投資」1 處") for m in messages), messages
-    assert any(m.startswith("刊印日期為交易日 +2 天") for m in messages), messages
+    assert any("刊印日期須在交易日（含）至發行日（不含）之間" in m for m in messages), messages
 
 
 # ---------------------------------------------------------------- 人工放行
