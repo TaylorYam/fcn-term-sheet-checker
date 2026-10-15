@@ -82,6 +82,8 @@
 | `{daily_zh}`／`{daily_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`，否則空白 |
 | `{underlying_zh}`／`{underlying_en}` | 標的寫法：標的 1 檔填 `single_zh`／`single_en`、2 檔以上填 `basket_zh`／`basket_en`（兩組不同字串，不是「多檔才加前綴」；Issue #135） |
 | `{autocall_zh}`／`{autocall_en}` | 第一個可提前出場期早於到期（Non-Call < 天期）時填入 `autocall_zh`／`autocall_en`，否則空白（BNP，Issue #191）；會提前出場且記憶式、樣板另有 `autocall_memory_zh`／`autocall_memory_en` 時改填它（SG 中文「（記憶式自動提前出場）」，Issue #194） |
+| `{ko_observation_zh}`／`{ko_observation_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`、每期觀察（P 型）時填入 `periodic_zh`／`periodic_en`（UBS 名稱兩種都有字樣，`{daily_*}` 在每期時是空白不夠用；Issue #279，待實作） |
+| `{ki_zh}`／`{ki_en}` | 有 KI（KI 型態不是「無」）時填入 `ki_zh`／`ki_en`，否則空白（UBS 中文「（含觸及下限價事件）」、英文「Kick-In Event and 」；Issue #279，待實作） |
 | `{ccy}` 的別名 | 樣板的 `ccy_aliases`（ISO 代碼 → 名稱用的代碼）：SG 英文名稱把 CNH 寫成 CNY（Issue #194） |
 
 樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
@@ -302,6 +304,24 @@ OOS 多家上手的舊範本寫「受託投資」（SG 投資人須知警語七�
 - **受理申購日期**：只有開始受理申購日期 1 處（= 交易日）。
 - **配息率**：KO 每日型第一章第 13 項直接寫年利率；KO 每期型第 13 項每期 `配息率` = 年利率 ÷ 12 四捨五入 4 位，第 16 項 `年利率相當於約y%` 的 y = 年利率。
 - 發行機構地址電話、日圓商品的轉換匯率、情境分析算式（只核對情境假設年期面額利率、情境價格表、情境第 1 期配息率）不核對。
+
+### 2.17 UBS 的差異（2026-10-15 確認，Issue #279；尚未實作）
+
+細節見 [UBS 核對規則](ubs-check-rules.md) §3.2、§3.6。審查通過日期、負責人、風險等級（預設【RRn】寫法）、受託機構名稱、電話（`+886-2-5556-1313` 已在 `phone_equivalents`）與地址（= `distributor.address`，`(營業活動所在地)` 不屬於地址）、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
+
+- **固定警語**（`risk.fixed_warning_by_issuer.ubs`，2026-10-15 確認視為正確）：= 共用版本（`risk.fixed_warning`）只差 3 處：開頭 `本商品風險程度為【RR4】`（少「等級」）、`連結標的為證券交易所交易證券`（沒有【】）、`再綜合評量`（共用版「在綜合」）；有「*」、有 OSU 客戶段、5 處都寫 `受託機構`。說明書 3 次（第 1 頁警語 1.、商品基本資料二、投資風險警語段第一點；沿用 `fixed_warning_occurrences = 3`）；投資人須知 1 次（警語 1.；`iis.fixed_warning_occurrences.ubs = 1`）。新版文件每頁有私用區字元 U+F020，可能夾在警語中間，比對前刪除。
+- **商品名稱樣板**（`product_name.ubs`）：中文 `瑞銀{ko_observation_zh}{memory_zh}提前出場固定配息連結股票（不保本）{ki_zh}（無擔保）（無保證機構）結構型商品`；英文 `UBS {ko_observation_en} {memory_en}Callable Variable Maturity Equity Linked Notes with {ki_en}Fixed Coupon`。觀察方式 `每日觀察`／`定期觀察`（`Daily`／`Periodic`）**要和 KO 型態一致**、記憶式 `記憶式`（`Memory `）、KI `（含觸及下限價事件）`（`Kick-In Event and `）；不分幣別、天期、標的數。需要新佔位符 `{ko_observation_*}`、`{ki_*}`（§2.3）。中英文都忽略空白、括號統一、句尾 `。` 忽略；**`瑞銀（定期觀察）`／`瑞銀（每日觀察）`（觀察方式加括號）視為等價寫法**（2026-10-15 確認）。名稱後的 `（下稱“本商品”）` 不屬於名稱。
+- **發行機構全名**（`issuer_name.ubs`）：`瑞士銀行`；第 1 頁四、（後接 `（下稱…）`）、商品基本資料三、相關機構事業概況一、(一)（後接 `（UBS AG）`）、投資人須知相關機構都相同。**發行分行**（`倫敦分行`）由 UBS 專屬規則另外核對：`經由瑞士境外之倫敦分行`、`經由倫敦分行`、`透過其倫敦分行` 等價，其他分行轉人工覆核（2026-10-15 確認 UBS 只有倫敦分行）。
+- **發行人（瑞士商瑞士銀行台北分行）**：**不核對**（2026-10-15 確認）。範本**沒有保證機構與總代理人**，不設 `guarantor_name.ubs`、`agent_name.ubs`；固定警語、費用表、特別記載事項的「總代理人」字樣照原文放行。
+- **商品種類**（`product_type.ubs`）：`股權結構型商品`（舊版 `股權結構型債券` 不支援，範本辨識失敗）。
+- **最低金額倍數**（`min_amount_multiples.ubs`）：`minimum_trade = 5`（商品基本資料八 `最低交易金額`）、`minimum_subscription = 5`、`minimum_additional = 1`、`minimum_redemption = 1`、`redemption_increment = 1`（一般交易事項四、八）；不分幣別（USD、JPY、AUD 樣本都相同）。
+- **發行不成立門檻**：範本沒有（`發行機構可根據其絕對裁量權，取消任何發行`），不設 `minimum_issue_size.ubs`。
+- **發行價格**：商品基本資料八 `發行價格：100%，即X幣別` 或 `每單位面額之100%`；沒有其他出處。
+- **受託機構電話**：第 1 頁七、與一般交易事項十六 `受託機構聯絡方式`（`distributor_phone_ch4`）；投資人須知末頁 `受託機構聯絡方式` 也核對。
+- **受理申購日期**：只有 `商品申購開始受理日` 1 處（= 交易日）；結束受理日只有文字，不核對。
+- **配息率**：商品基本資料八 `固定配息率：x%（年化配息率為y%）`：x = y ÷ 12 四捨五入 4 位。
+- **刊印日期**：標籤寫異體字 `刋印`（也有 `刊印`），兩種都收。
+- 發行人與受託機構以外的機構資訊、發行機構註冊地與評等、情境分析算式（只核對設定參數與情境價格表）不核對。
 
 ### 2.18 DBS 的差異（2026-10-15 確認，Issue #280；尚未實作）
 
