@@ -1,0 +1,642 @@
+"""DBS（星展銀行）中文產品說明書（docs/templates/dbs-zh-product-description.md）：段落標題＋標籤定位，保留原文證據。
+
+沒有章號：段落標題（`商品基本資料`、`商品投資收益計算方法及其他資料`、`相關機構事業概況`、`商品主要風險揭露`、
+`一般交易事項`、`特別記載事項`）整行比對；商品基本資料是「標籤：值」兩欄表（標籤 x≈56、值 x≈170）。第 1–2 頁是
+「• 標籤：值」清單（`•` 單獨一行）、警語 1.～11. 與刊印日期。每頁頁底「N / M頁」（擷取時排在該頁第一行）不算內文。
+K／KO／KI % 只在表1 表頭（欄序 K → KO → KI），表1 有彭博代碼。最終比價日叫「定價日」；KI 叫「下限觸發事件」。
+支援樣態只有 KO 每日觀察＋記憶式、KI 到期觀察或無 KI（config/issuer_prefixes.toml），其他寫法一律讀不到、轉人工覆核。
+數字、日期與句型在去空白的全文索引上讀；名稱、地址等要保留空白的值在原文合併文字（`common.RawText`）上讀。
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
+from decimal import Decimal
+
+from .. import standard_fields
+from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import Occurrence
+from ..text import full_brackets, squash
+from . import money
+from .common import RawText, capture_group, compat_normalized, dec, derived, fee_rates, header_columns, number
+from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
+
+TEMPLATE_ID = "dbs-zh-pd"
+PARSER_VERSION = "1"
+TITLE = "中文產品說明書(最終版本)"
+SECTIONS = (
+    "商品基本資料",
+    "商品投資收益計算方法及其他資料",
+    "相關機構事業概況",
+    "商品主要風險揭露",
+    "一般交易事項",
+    "特別記載事項",
+)
+ISSUER_ZH = "星展銀行"
+ISSUER_EN = "DBS Bank Ltd"
+NAME_ZH_MARK = "股權連結結構型商品(無擔保及無保證機構)(不保本)"
+NAME_EN_MARK = "Equity Linked Notes"
+PAGE = re.compile(r"^\d+ / \d+頁$")
+PAGE_Y = 760  # 頁碼在頁底（y≈774）
+D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
+PCT = r"(\d+(?:\.\d+)?)%"
+CCY = money.CURRENCY
+ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"
+TICKER = re.compile(r"^([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})$")
+# 強制贖回、配息資料（範本規格 §4.1、§4.2、§4.6）
+OBSERVATION_DAY = "觀察日：就一觀察期間而言，指該觀察期間內所有連結標的的所有交易所的每一個規劃交易日"
+KO_START = r"自動提前出場決定日[:：]從第(\d{1,2})個觀察期間結束日（包含）開始至預定規劃定價日（包含）為止的期間內的每一個觀察日"
+MEMORY_EVENT = (
+    "記憶事件：就每一連結標的而言，如果該連結標的在任一自動提前出場決定日的參考價格大於或等於其自動提前出場價格"
+)
+MEMORY_ALL = r"自動提前出場事件：若所有連結標的皆被視[為爲]記憶標的"
+# 說明書「為a%（即y%/12）」、投資人須知「為a% (y%/12)」
+MAX_RATE = r"最大利率值：就每個觀察期間而言，為" + PCT + r"[（(]即?" + PCT + r"/12[）)]，無條件進位至小數點後第四位"
+FULL_RATE = r"利率：1?\)?對於第1(?:~(\d{1,2}))?個觀察期間而言，利率為最大利率值"
+# 到期贖回（範本規格 §4.4）
+KI_EVENT = "下限觸發事件：若任一連結標的於定價日的參考價格小於其下限觸發價格，則視為發生下限觸發事件"
+KI_MATURITY = r"\(a\)如果未發生下限觸發事件，將適用現金結算"
+NO_KI_MATURITY = r"\(a\)若表現最差連結標的之最終價格等於或高於其執行價格，將適用現金結算"
+# 價格表欄（依表頭關鍵字的出現順序決定欄序；DBS 是 K → KO → KI）
+PRICE_HEADS = (("strike", "執行價格"), ("ko", "自動提前出場價格"), ("ki", "下限觸發價格"))
+CELL = re.compile(rf"^({ZH_CCY})?\s*([\d,]+\.\d+)?$")  # 價格格：「美元 123.4567」或分兩行「美元」／「123.4567」
+
+
+def body(lines: Sequence[Line]) -> list[Line]:
+    """CJK 相容字正規化（4 份樣本都沒有，照共用做法）；列項符號「‧」（U+2027，部分字型擷取成這個字）統一成「•」；
+    頁底頁碼不算內文。"""
+    out = []
+    for ln in compat_normalized(lines):
+        if ln.y0 >= PAGE_Y and PAGE.match(ln.text.strip()):
+            continue
+        out.append(replace(ln, text=ln.text.replace("‧", "•")) if "‧" in ln.text else ln)
+    return out
+
+
+def sections(lines: list[Line]) -> dict[str, list[Line]]:
+    """段落標題（整行相等、各出現一次）→ 該段的行（到下一個段落標題為止）；第 1–2 頁封面以 `cover` 為鍵。"""
+    starts = {}
+    for name in SECTIONS:
+        idx = [i for i, ln in enumerate(lines) if squash(ln.text) == name]
+        if len(idx) == 1:
+            starts[name] = idx[0]
+    out: dict[str, list[Line]] = {}
+    ordered = sorted((i, n) for n, i in starts.items())
+    out["cover"] = lines[: ordered[0][0]] if ordered else list(lines)
+    for k, (i, n) in enumerate(ordered):
+        end = ordered[k + 1][0] if k + 1 < len(ordered) else len(lines)
+        out[n] = lines[i:end]
+    return out
+
+
+# ---------------------------------------------------------------- 辨識
+
+
+def detect(lines: Sequence[Line]) -> DetectionResult:
+    """範本辨識（範本規格 §8）：全部條件成立才是 DBS 說明書。"""
+    text_lines = body(lines)
+    secs = sections(text_lines)
+    ti = TextIndex(secs["cover"])
+    head = squash(text_lines[0].text) if text_lines else ""
+    zh = re.search(r"•商品中文名稱：(.+?)\(下稱「本商品」\)", ti.text)
+    en = re.search(r"•商品英文名稱：(.+?)•", ti.text)
+    order = [i for n in SECTIONS for i, ln in enumerate(text_lines) if squash(ln.text) == n]
+    failed = []
+    for ok, message in (
+        (head == TITLE, f"第一行不是「{TITLE}」"),
+        (
+            all(
+                f"•{x}：" in ti.text
+                for x in ("商品代號", "受託或銷售機構商品代號", "國際證券編碼ISIN", "商品中文名稱", "商品英文名稱")
+            ),
+            "封面沒有「• 商品代號、受託或銷售機構商品代號、國際證券編碼ISIN、商品中文名稱、商品英文名稱」",
+        ),
+        (
+            zh is not None
+            and zh[1].startswith(ISSUER_ZH)
+            and full_brackets(squash(NAME_ZH_MARK)) in full_brackets(zh[1]),
+            f"封面商品中文名稱不是以「{ISSUER_ZH}」開頭或沒有「{NAME_ZH_MARK}」",
+        ),
+        (
+            en is not None and en[1].startswith(squash(ISSUER_EN)) and squash(NAME_EN_MARK) in en[1],
+            f"封面商品英文名稱不是以「{ISSUER_EN}」開頭或沒有「{NAME_EN_MARK}」",
+        ),
+        (
+            "•發行人之名稱、電話及地址：" in ti.text and "•保證機構之名稱及地址：" in ti.text,
+            "封面沒有「發行人之名稱、電話及地址」「保證機構之名稱及地址」",
+        ),
+        (
+            len(order) == len(SECTIONS) and order == sorted(order),
+            "段落標題不是依序各一次：" + "、".join(SECTIONS),
+        ),
+    ):
+        if not ok:
+            failed.append(message)
+    return DetectionResult(not failed, failed, [Evidence.of(x) for x in text_lines[:2]])
+
+
+# ---------------------------------------------------------------- 讀出
+
+
+@dataclass
+class DbsTermSheet:
+    fields: dict[str, ParsedField]
+    full_text: TextIndex
+
+    def f(self, name: str) -> ParsedField:
+        return standard_fields.lookup(self.fields, name)
+
+
+def read(lines: Sequence[Line]) -> DbsTermSheet:
+    """讀出標準欄位與 DBS 規則需要的專屬資料（範本辨識另由 `detect` 負責，不在這裡重做）。"""
+    text_lines = body(lines)
+    secs = sections(text_lines)
+    fields: dict[str, ParsedField] = {}
+
+    def section(name: str) -> list[Line]:
+        return secs.get(name, [])
+
+    def put(name: str, lns: list[Line], pattern: str, convert: Callable = lambda x: x) -> None:
+        fields[name] = capture(name, TextIndex(lns), pattern, convert, whole_match=True)
+
+    _cover(fields, section("cover"), put)
+    basic = section("商品基本資料")
+    _basic(fields, basic, put)
+    _schedule(fields)
+    _scenario(fields, section("商品投資收益計算方法及其他資料"), put)
+    _organisations(fields, section("相關機構事業概況"))
+    _trading(fields, section("一般交易事項"), put)
+    _occurrences(fields)
+    fields["initial_pricing"] = standard_fields.absent(
+        "initial_pricing", "期初定價方式（說明書沒有寫開盤價／收盤價／VWAP）"
+    )
+    fields["issuer_name_ch1"] = standard_fields.absent("issuer_name_ch1", "只寫中文的發行機構名稱出處")
+    return DbsTermSheet(fields, TextIndex(text_lines))
+
+
+def _cover(fields: dict[str, ParsedField], cover: list[Line], put: Callable) -> None:
+    """第 1–2 頁「• 標籤：值」清單與刊印日期。"""
+    raw = RawText(cover)
+    put("product_code", cover, r"•商品代號：(\d{12})")
+    put("distributor_code", cover, r"•受託或銷售機構商品代號：(\d{12})")
+    put("isin", cover, r"•國際證券編碼ISIN：([A-Z]{2}[A-Z0-9]{10})")
+    fields["name_zh"] = raw.capture("name_zh", r"•\s*商品中文名稱\s*：\s*(.+?)\s*\(下稱「本商品」\)")
+    fields["name_en"] = raw.capture("name_en", r"•\s*商品英文名稱\s*：\s*(.+?)\s*•")
+    put("product_type", cover, r"•商品種類：(.+?)•")
+    put("currency_zh", cover, rf"•計價幣別：({ZH_CCY})\([A-Z]{{3}}\)•")
+    put("currency_cover_iso", cover, rf"•計價幣別：{ZH_CCY}\(([A-Z]{{3}})\)•")
+    fields["issuer_name_cover"] = raw.capture("issuer_name_cover", r"•\s*發行機構之名稱\s*：\s*(.+?)\s*•")
+    dist = (
+        r"•\s*受託或銷售機構之名稱、電話及地址\s*：\s*(.+?)\s*、\s*電話\s*：\s*(.+?)\s*、\s*地址\s*：\s*(.+?)\s*。?\s*•"
+    )
+    fields["distributor_name_cover"] = raw.capture("distributor_name_cover", dist)
+    fields["distributor_phone_cover"] = raw.capture("distributor_phone_cover", dist, group=2)
+    fields["distributor_address_cover"] = raw.capture("distributor_address_cover", dist, group=3)
+    put("approval_date", cover, r"•受託或銷售機構審查通過之日期及文號：" + D, parse_date)
+    put("print_date", cover, r"中文產品說明書刊印日期：" + D, parse_date)
+
+
+# ---------------------------------------------------------------- 商品基本資料
+
+
+def _basic(fields: dict[str, ParsedField], basic: list[Line], put: Callable) -> None:
+    ti = TextIndex(basic, separate_digits=True)
+    fields["name_basic"] = RawText(basic).capture("name_basic", r"商品名稱\s*：\s*(.+?)\s*商品風險程度\s*：")
+    put("currency_basic", basic, rf"計價幣別：({ZH_CCY})\([A-Z]{{3}}\)商品面額：")
+    put("currency_basic_iso", basic, rf"計價幣別：{ZH_CCY}\(([A-Z]{{3}})\)商品面額：")
+    denom = rf"商品面額：每單位({CCY})([\d,]+)發行價格："
+    fields["denomination"] = capture_group(basic, denom, 2, "denomination", number)
+    fields["denomination_currency"] = capture_group(basic, denom, 1, "denomination_currency")
+    put("issue_price_pct", basic, r"發行價格：商品面額的" + PCT, Decimal)
+    fields["basic_tickers"] = basic_tickers(basic)
+    put("tenor_months", basic, r"商品年期：(\d+)個月。", int)
+    put("issue_date", basic, r"發行日：" + D, parse_date)
+    put("trade_date", basic, r"(?<!劃)(?<!定)交易日：" + D, parse_date)
+    put("maturity_date", basic, r"到期日：如未依下載之強制贖回條款發生自動提前出場事件之情形，為" + D, parse_date)
+    put("final_valuation_date", basic, r"(?<!規劃)定價日：" + D + r"，如該日並非", parse_date)
+    fields["coupon_table"] = table_a(ti)
+    fields["coupon_pa_pct"] = capture_group(basic, MAX_RATE, 2, "coupon_pa_pct", Decimal)
+    fields["monthly_coupon_pct"] = capture_group(basic, MAX_RATE, 1, "monthly_coupon_pct", Decimal)
+    fields["full_rate_periods"] = full_rate_periods("full_rate_periods", ti, FULL_RATE)
+    fields["ko_wording"] = ko_wording(ti)
+    fields["ko_memory"] = memory(ti, "ko_memory")
+    table = price_table("underlying_table", basic, "表1", "到期贖回計算公式，含")
+    fields["underlying_table"] = table
+    fields["ki_type"] = ki_type(ti, table)
+    _table_fields(fields)
+
+
+def basic_tickers(basic: list[Line]) -> ParsedField:
+    """連結標的資產表的彭博代碼（`ABC UW`），依表上順序（`連結標的／彭博代碼／交易所` 到 `相關交易所：`）。"""
+    ti = TextIndex(basic)
+    a, b = ti.text.find("連結標的彭博代碼交易所"), ti.text.find("相關交易所：")
+    if a < 0 or b < a:
+        return ParsedField.missing("basic_tickers", "商品基本資料找不到連結標的資產表")
+    lines = join_wrapped_tickers(basic[ti.line_at(a) + 1 : ti.line_at(b)])
+    tickers = [(f"{m[1]} {m[2]}", ln) for ln in lines if (m := TICKER.match(ln.text.strip()))]
+    if not tickers:
+        return ParsedField.invalid("basic_tickers", lines, "連結標的資產表讀不到彭博代碼")
+    return ParsedField.present("basic_tickers", [t for t, _ in tickers], [ln for _, ln in tickers])
+
+
+def table_a(ti: TextIndex) -> ParsedField:
+    """表A（範本規格 §5.2）：觀察期間／觀察期間結束日／利息支付日；期別須從 1 起連續。"""
+    head = "表A：觀察期間觀察期間結束日#利息支付日##"
+    a = ti.text.find(head)
+    b = ti.text.find("#為避免疑問", a + len(head))
+    if a < 0 or b < 0:
+        return ParsedField.missing("coupon_table", "商品年期格找不到「表A：」觀察期間表")
+    text = ti.text[a + len(head) : b]
+    rows = [
+        {"period": int(m[1]), "end": parse_date(m[2]), "payment": parse_date(m[3])}
+        for m in re.finditer(r"(\d{1,2})\|?" + D + D, text)
+    ]
+    ev = ti.lines_for(a, b)
+    if not rows or any(None in r.values() for r in rows):
+        return ParsedField.invalid("coupon_table", ev, "表A 的列讀不到")
+    if [r["period"] for r in rows] != list(range(1, len(rows) + 1)):
+        return ParsedField.invalid("coupon_table", ev, "表A 的觀察期間不是從 1 起連續")
+    return ParsedField.present("coupon_table", {"kind": "D", "rows": rows}, ev)
+
+
+def full_rate_periods(name: str, ti: TextIndex, pattern: str) -> ParsedField:
+    """「對於第1~k個觀察期間而言，利率為最大利率值」的 k（k = 1 時寫「第1個」）。"""
+    found = list(ti.finditer(pattern))
+    if len(found) != 1:
+        return ParsedField.missing(name, "找不到或有多處「對於第1~k個觀察期間而言，利率為最大利率值」")
+    m = found[0]
+    return ParsedField.present(name, int(m[1]) if m[1] else 1, ti.lines_for(m.start(), m.end()))
+
+
+def ko_wording(ti: TextIndex) -> ParsedField:
+    """KO 每日觀察（範本規格 §4.1）：觀察日 = 每一個規劃交易日，且強制贖回的自動提前出場決定日從第 k 個觀察期間結束日起。"""
+    starts = list(ti.finditer(KO_START))
+    if OBSERVATION_DAY not in ti.text or len(starts) != 1:
+        return ParsedField.invalid(
+            "ko_wording", [], "觀察日或自動提前出場決定日的寫法缺漏、重複或不在範本規格內（只支援每日觀察）"
+        )
+    m = starts[0]
+    return ParsedField.present("ko_wording", int(m[1]), ti.lines_for(m.start(), m.end()))
+
+
+def memory(ti: TextIndex, name: str) -> ParsedField:
+    """記憶式（範本規格 §4.2）：「記憶事件」定義＋「所有連結標的皆被視為記憶標的」兩句都有才是記憶式；其他寫法讀不到。"""
+    events = list(ti.finditer(MEMORY_ALL))
+    if MEMORY_EVENT not in ti.text or len(events) != 1:
+        return ParsedField.invalid(name, [], "記憶事件與自動提前出場事件的寫法缺漏或不在範本規格內（只支援記憶式）")
+    m = events[0]
+    return ParsedField.present(name, True, ti.lines_for(m.start(), m.end()))
+
+
+def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:
+    """下限觸發事件（範本規格 §4.4）：到期 (a)、下限觸發事件定義、價格表下限觸發價格欄三者須一致（說明書、投資人須知共用）。"""
+    am, none = list(ti.finditer(KI_MATURITY)), list(ti.finditer(NO_KI_MATURITY))
+    event = ti.text.count(KI_EVENT)
+    has_col = table.ok and "ki" in table.value["columns"]
+    if len(am) == 1 and not none and event == 1:
+        if table.ok and not has_col:
+            return ParsedField.invalid(
+                "ki_type", ti.lines_for(am[0].start(), am[0].end()), "有下限觸發事件，但價格表沒有下限觸發價格欄"
+            )
+        p = ti.text.find(KI_EVENT)
+        return ParsedField.present("ki_type", "AM", ti.lines_for(p, p + len(KI_EVENT)))
+    if len(none) == 1 and not am and event == 0:
+        if has_col:
+            return ParsedField.invalid(
+                "ki_type", ti.lines_for(none[0].start(), none[0].end()), "價格表有下限觸發價格欄，但沒有下限觸發事件"
+            )
+        return ParsedField.present("ki_type", "none", ti.lines_for(none[0].start(), none[0].end()))
+    return ParsedField.invalid("ki_type", [], "到期贖回 (a) 與下限觸發事件的寫法不一致或不在範本規格內")
+
+
+def price_rows(table: ParsedField) -> ParsedField:
+    """價格表 → 標準欄位 `underlying_prices`（代碼、各價格、證據、價格旁的幣別字）；價格表有問題時沿用它的狀態。"""
+    if not table.ok:
+        return derived("underlying_prices", table)
+    v = table.value
+    rows = tuple(
+        standard_fields.PriceRow(t, dict(p), tuple(Evidence.of(ln) for ln in lns), currency=c)
+        for t, p, lns, c in zip(v["tickers"], v["rows"], v["row_lines"], v["currencies"], strict=True)
+    )
+    return ParsedField("underlying_prices", FieldStatus.PRESENT, rows, list(table.evidence))
+
+
+def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) -> ParsedField:
+    """價格表（表1、情境、投資人須知）：`start_marker` 那一行之後、`end_marker` 那一行之前。
+
+    每檔一列，列首是彭博代碼（`ABC UW`）；代碼以上是表頭（可能跨頁：欄名在前一頁、「(期初價格的X%)」在下一頁），
+    表頭各行依 x 中心分欄，欄序依關鍵字（K → KO → KI）。每格「美元 123.4567」，或分兩行「美元」／「123.4567」，依 x 中心
+    歸到最近的欄、依 y 歸到所在的列（下一列代碼之前）。
+
+    值：{"columns", "pcts", "rows": [{欄: Decimal}], "row_lines", "tickers", "currencies"}。"""
+    ti = TextIndex(lns)
+    a = next((i for i, ln in enumerate(lns) if squash(ln.text).startswith(start_marker)), None)
+    if a is None:
+        return ParsedField.missing(name, f"找不到價格表（「{start_marker}」）")
+    b = next((i for i in range(a + 1, len(lns)) if squash(lns[i].text).startswith(end_marker)), None)
+    if b is None:
+        return ParsedField.missing(name, f"找不到價格表的結尾（「{end_marker}」）")
+    lines = lns[a + 1 : b]
+    codes = [ln for ln in lines if TICKER.match(ln.text.strip())]
+    if not codes:
+        return ParsedField.invalid(name, lines or ti.lines, "價格表讀不到任何彭博代碼")
+    first = min(codes, key=lambda x: (x.page, x.y0))
+    top = next((ln for ln in lines if squash(ln.text) == "彭博代碼"), None)
+    if top is None:
+        return ParsedField.invalid(name, lines, "價格表找不到表頭「彭博代碼」")
+    header = [
+        ln for ln in lines if (top.page, top.y0) <= (ln.page, ln.y0) and (ln.page, ln.y1) <= (first.page, first.y0 + 1)
+    ]
+    head = header_columns(header)
+    cols: dict[str, float] = {}
+    pcts: dict[str, Decimal] = {}
+    for col, word in PRICE_HEADS:
+        hit = [(x, t) for x, t in head if word in t]
+        if len(hit) > 1:
+            return ParsedField.invalid(name, header, f"價格表表頭「{word}」出現多欄")
+        if hit:
+            m = re.search(r"期初價格的?" + PCT, hit[0][1])
+            if m is None:
+                return ParsedField.invalid(name, header, f"價格表表頭「{word}」讀不到「(期初價格的X%)」")
+            cols[col], pcts[col] = hit[0][0], Decimal(m[1])
+    initial = [x for x, t in head if t == "期初價格"]
+    if "strike" not in cols or "ko" not in cols or len(initial) != 1:
+        return ParsedField.invalid(
+            name, header, "價格表表頭不是「彭博代碼、期初價格、執行價格、自動提前出場價格(、下限觸發價格)」"
+        )
+    centers = {"initial": initial[0], **cols}
+    columns = [c for c, _ in sorted(cols.items(), key=lambda kv: kv[1])]
+    codes.sort(key=lambda x: (x.page, x.y0))
+    cells = [ln for ln in lines if ln not in header and ln not in codes and (ln.page, ln.y0) > (top.page, top.y0)]
+    rows, row_lines, tickers, currencies = [], [], [], []
+    for k, code in enumerate(codes):
+        nxt = codes[k + 1] if k + 1 < len(codes) else None
+        height = code.y1 - code.y0
+        mine = [  # 以每行的 y 中心歸列：代碼那一行（略高一點）起、到下一列代碼之前；最後一列只到代碼下方一行半
+            ln
+            for ln in cells
+            if (ln.page, (ln.y0 + ln.y1) / 2) >= (code.page, code.y0 - 3)
+            and (nxt is None or (ln.page, (ln.y0 + ln.y1) / 2) < (nxt.page, nxt.y0 - 3))
+            and (nxt is not None or (ln.page == code.page and ln.y0 < code.y1 + 1.5 * height))
+        ]
+        found: dict[str, list[Line]] = {}
+        for ln in mine:
+            col = min(centers, key=lambda c: abs(centers[c] - ln.xc))
+            found.setdefault(col, []).append(ln)
+        values, ccys = {}, set()
+        for col in centers:
+            text = "".join(squash(x.text) for x in sorted(found.get(col, []), key=lambda x: (x.page, x.y0)))
+            m = re.fullmatch(rf"({ZH_CCY})([\d,]+\.\d+)", text)
+            if m is None:
+                return ParsedField.invalid(
+                    name, [code, *mine], f"價格表 {code.text.strip()} 那一列「{col}」欄讀不到「幣別 價格」"
+                )
+            values[col], ccy = dec(m[2]), m[1]
+            ccys.add(ccy)
+        if len(ccys) != 1:
+            return ParsedField.invalid(name, [code, *mine], f"價格表 {code.text.strip()} 那一列各格幣別字不同")
+        t = TICKER.match(code.text.strip())
+        rows.append(values)
+        row_lines.append([code, *sorted(mine, key=lambda x: (x.page, x.y0, x.x0))])
+        tickers.append(f"{t[1]} {t[2]}")
+        currencies.append(ccys.pop())
+    value = {
+        "columns": columns,
+        "pcts": pcts,
+        "rows": rows,
+        "row_lines": row_lines,
+        "tickers": tickers,
+        "currencies": currencies,
+    }
+    return ParsedField.present(name, value, lines)
+
+
+def _table_fields(fields: dict[str, ParsedField]) -> None:
+    """表1＋標的表代碼 → 標準欄位：標的、各標的價格、K／KO／KI %（表頭是唯一來源）。"""
+    table, tickers = fields["underlying_table"], fields["basic_tickers"]
+    if table.ok and tickers.ok and table.value["tickers"] == tickers.value:
+        fields["underlyings"] = ParsedField(
+            "underlyings", FieldStatus.PRESENT, list(tickers.value), list(tickers.evidence)
+        )
+        fields["underlying_prices"] = price_rows(table)
+    elif table.ok and tickers.ok:
+        note = f"表1 的彭博代碼 {table.value['tickers']} 和連結標的資產表 {tickers.value} 不同（代碼、順序或檔數）"
+        ev = list(table.evidence) + list(tickers.evidence)
+        for key in ("underlyings", "underlying_prices"):
+            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
+    else:
+        bad = table if not table.ok else tickers
+        fields["underlyings"] = derived("underlyings", bad)
+        fields["underlying_prices"] = derived("underlying_prices", bad)
+    for key, col in (("strike_pct", "strike"), ("ko_pct", "ko")):
+        fields[key] = derived(key, table, table.value["pcts"][col] if table.ok else None)
+    ki = fields["ki_type"]
+    if ki.ok and ki.value == "none":
+        fields["ki_pct"] = ParsedField(
+            "ki_pct", FieldStatus.NOT_APPLICABLE, evidence=list(ki.evidence), note="說明書無 KI（沒有下限觸發事件）"
+        )
+    else:
+        bad = next((p for p in (ki, table) if not p.ok), None)
+        fields["ki_pct"] = derived("ki_pct", bad or table, None if bad else table.value["pcts"]["ki"])
+
+
+def _schedule(fields: dict[str, ParsedField]) -> None:
+    """KO 觀察方式（D）、第一個可提前出場期與提前出場排程：比價日為表A 第 k 期與末期的觀察期間結束日。"""
+    wording, table = fields["ko_wording"], fields["coupon_table"]
+    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    bad = next((p for p in (wording, table) if not p.ok), None)
+    if bad is not None:
+        for key in keys:
+            fields[key] = derived(key, bad)
+        return
+    k, rows = wording.value, table.value["rows"]
+    n = len(rows)
+    ev = list(wording.evidence) + list(table.evidence)
+    if not 1 <= k < n:
+        for key in keys:
+            note = f"自動提前出場決定日的起始期（第 {k} 個觀察期間）不在表A（{n} 期）內或等於最後一期"
+            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
+        return
+    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, "D", list(wording.evidence))
+    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
+    fields["autocall_schedule"] = ParsedField(
+        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule("D", k, n, dates), ev
+    )
+
+
+# ---------------------------------------------------------------- 情境分析
+
+
+def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) -> None:
+    """基本假設（年期、面額、發行價格、利率、KO 決定日）、情境價格表、情境一出場期、情境二年化報酬率（範本規格 §4.9）。"""
+    ti = TextIndex(sec)
+    put("scenario_tenor", sec, r"假設：商品年期：(\d+)個月", int)
+    denom = rf"商品面額=({CCY})([\d,]+)發行價格=" + PCT
+    fields["scenario_denomination"] = capture_group(sec, denom, 2, "scenario_denomination", number)
+    fields["scenario_denomination_currency"] = capture_group(sec, denom, 1, "scenario_denomination_currency")
+    fields["scenario_issue_price_pct"] = capture_group(sec, denom, 3, "scenario_issue_price_pct", Decimal)
+    invest = rf"投資金額=[^=]+=({CCY})[\d,]+利率："
+    fields["scenario_investment_currency"] = capture_group(sec, invest, 1, "scenario_investment_currency")
+    fields["scenario_full_rate_periods"] = full_rate_periods(
+        "scenario_full_rate_periods", ti, r"利率：第1(?:~(\d{1,2}))?個觀察期間之利率為最大利率值"
+    )
+    put("scenario_monthly_pct", sec, r"最大利率值：" + PCT + r"自動提前出場決定日", Decimal)
+    put("scenario_ko_start", sec, r"自動提前出場決定日：從第(\d{1,2})個觀察期間結束日", int)
+    fields["scenario_table"] = price_table("scenario_table", sec, "各連結標的之相關價格", "1.")
+    put(
+        "scenario_first_period",
+        sec,
+        r"有利情況：假設本商品於第(\d{1,2})個觀察期間的第\d+個觀察日發生自動提前出場事件",
+        int,
+    )
+    a = ti.text.find("於到期最佳情況")
+    b = ti.text.find("較差情況", a)
+    best = ti.lines_for(a, b) if a >= 0 and b > a else []
+    put("scenario_best_annual_pct", best, r"年化平均報酬率約為" + PCT, Decimal)
+
+
+# ---------------------------------------------------------------- 相關機構事業概況、一般交易事項
+
+
+def _organisations(fields: dict[str, ParsedField], sec: list[Line]) -> None:
+    raw = RawText(sec)
+    fields["issuer_name_ch2"] = raw.capture(
+        "issuer_name_ch2", r"1\.\s*發行機構\s*：\s*\(1\)\s*事業名稱\s*：\s*(.+?)\s*\(2\)\s*設立日期"
+    )
+    trustee = (
+        r"4\.\s*受託或銷售機構\s*：\s*\(1\)\s*事業名稱\s*：\s*(.+?)\s*\(2\)\s*營業所在地\s*：\s*(.+?)\s*\(3\)\s*設立日期"
+        r".*?\(4\)\s*負責人姓名\s*：\s*(.+?)\s*5\."
+    )
+    fields["distributor_name_ch2"] = raw.capture("distributor_name_ch2", trustee)
+    fields["distributor_address_ch2"] = raw.capture("distributor_address_ch2", trustee, group=2)
+    fields["chairman"] = raw.capture("chairman", trustee, group=3)
+
+
+def _trading(fields: dict[str, ParsedField], sec: list[Line], put: Callable) -> None:
+    put("subscription_start", sec, r"\(1\)商品開始受理申購日期：" + D, parse_date)
+    ti = TextIndex(sec)
+    a, b = ti.text.find("投資人應負擔的各項費用"), ti.text.find("商品交易架構")
+    fees = sec[ti.line_at(a) : ti.line_at(b)] if a >= 0 and b > a else []
+    fields.update(fee_rates(fees))
+    fields[standard_fields.fee_field("分銷費用")] = distribution_fee(
+        fees, fields[standard_fields.fee_field("分銷費用")]
+    )
+    sub = rf"最低申購金額為(\d+)單位商品面額，即({CCY})([\d,]+)，並以(\d+)單位商品面額為最低加購金額"
+    red = (
+        rf"\(3\)投資人申請提前贖回：最低贖回金額為(\d+)單位商品面額，即({CCY})([\d,]+)，並以(\d+)單位商品面額為累加單位"
+    )
+    for name, pattern in (("subscription", sub), ("redemption", red)):
+        fields[f"minimum_{name}_units"] = capture_group(sec, pattern, 1, f"minimum_{name}_units", int)
+        fields[f"minimum_{name}_currency"] = capture_group(sec, pattern, 2, f"minimum_{name}_currency")
+        fields[f"minimum_{name}_amount"] = capture_group(sec, pattern, 3, f"minimum_{name}_amount", number)
+        fields[f"minimum_{name}_step"] = capture_group(sec, pattern, 4, f"minimum_{name}_step", int)
+
+
+def distribution_fee(lines: list[Line], shared: ParsedField) -> ParsedField:
+    """說明書分銷費用的子列標籤（報酬／費用／折讓）佔了「費率」欄，費率在右邊一欄：取「費用」子列、子列標籤右邊到
+    「收取方式」欄之前的文字（範本規格 §5.3）。共用 `fee_rates` 讀得到（投資人須知的版面）時用它。"""
+    if shared.ok:
+        return shared
+    name = shared.name
+    head = next((ln for ln in lines if squash(ln.text).startswith("費率")), None)
+    way = next((ln for ln in lines if squash(ln.text) == "收取方式"), None)
+    if head is None or way is None:
+        return shared
+    subs = [ln for ln in lines if abs(ln.x0 - head.x0) < 5 and squash(ln.text) in ("報酬", "費用", "折讓")]
+    fee = [ln for ln in subs if squash(ln.text) == "費用"]
+    if len(fee) != 1:
+        return shared
+    top = fee[0]
+    below = [ln for ln in subs if (ln.page, ln.y0) > (top.page, top.y0)]
+    bottom = min(below, key=lambda x: (x.page, x.y0)) if below else None
+    cells = sorted(
+        (
+            ln
+            for ln in lines
+            if ln.page == top.page
+            and top.x1 < ln.x0 < way.x0 - 5
+            and ln.y0 + 3 >= top.y0
+            and (bottom is None or ln.y0 + 3 < bottom.y0)
+        ),
+        key=lambda x: (x.y0, x.x0),
+    )
+    rates = re.findall(r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)", "".join(squash(ln.text) for ln in cells))
+    if len(rates) != 1:
+        return ParsedField.invalid(name, [top, *cells], "費用表「分銷費用」的「費用」子列沒有剛好一個「X%~Y%」")
+    return ParsedField.present(name, rates[0], [top, *cells])
+
+
+# ---------------------------------------------------------------- 出處清單
+
+
+def _min_amount(fields: dict[str, ParsedField], name: str, units: str, amount: str | None) -> ParsedField:
+    """最低金額：`amount`（「即」後的金額）須 = 單位數 × 面額；`amount` 為 None 時用單位數 × 面額（加購、累加單位）。"""
+    denom, n = fields["denomination"], fields[units]
+    bad = next((p for p in (denom, n) if not p.ok), None)
+    if bad is not None:
+        return derived(name, bad)
+    value = n.value * denom.value
+    if amount is None:
+        return derived(name, n, value)
+    shown = fields[amount]
+    if not shown.ok:
+        return derived(name, shown)
+    if shown.value != value:
+        note = f"「{n.value}單位商品面額」= {value}，和「即」後的金額 {shown.value} 不同"
+        return ParsedField(name, FieldStatus.INVALID, evidence=list(shown.evidence), note=note)
+    return derived(name, shown, value)
+
+
+def _occurrences(fields: dict[str, ParsedField]) -> None:
+    occ = Occurrence
+    minimums = (
+        (
+            "minimum_subscription",
+            "最低申購金額",
+            "一般交易事項 4. 最低申購金額",
+            "minimum_subscription_units",
+            "minimum_subscription_amount",
+        ),
+        ("minimum_additional", "最低加購金額", "一般交易事項 4. 最低加購金額", "minimum_subscription_step", None),
+        (
+            "minimum_redemption",
+            "最低贖回金額",
+            "一般交易事項 8.(3) 最低贖回金額",
+            "minimum_redemption_units",
+            "minimum_redemption_amount",
+        ),
+        ("redemption_increment", "增加贖回單位", "一般交易事項 8.(3) 累加單位", "minimum_redemption_step", None),
+    )
+    fields["min_amounts"] = standard_fields.occurrences(
+        "min_amounts",
+        [occ(f, label, where, _min_amount(fields, f, units, amount)) for f, label, where, units, amount in minimums],
+    )
+    fields["subscription_dates"] = standard_fields.occurrences(
+        "subscription_dates",
+        [
+            occ(
+                "subscription_start",
+                "開始受理申購日",
+                "一般交易事項 1.(1) 商品開始受理申購日期",
+                fields["subscription_start"],
+            )
+        ],
+    )
+    fields["print_dates"] = standard_fields.occurrences(
+        "print_dates", [occ("print_date", "刊印日期", "第 2 頁中文產品說明書刊印日期", fields["print_date"])]
+    )
+    fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
+    fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "一般交易事項受託機構電話")
+    currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、情境股價與算式不列入
+        ("denomination_currency", "每單位商品面額幣別", "商品基本資料商品面額"),
+        ("minimum_subscription_currency", "最低申購金額幣別", "一般交易事項 4. 最低申購金額"),
+        ("minimum_redemption_currency", "最低贖回金額幣別", "一般交易事項 8.(3) 最低贖回金額"),
+        ("scenario_denomination_currency", "情境假設商品面額幣別", "情境分析假設商品面額"),
+        ("scenario_investment_currency", "情境假設投資金額幣別", "情境分析假設投資金額"),
+    )
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]
+    )

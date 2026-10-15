@@ -16,9 +16,9 @@ from .standard_fields import AGENT_PLACES, GUARANTOR_PLACES
 from .trading_calendar import Market, TradingCalendar
 
 # 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）、
-# autocall（Non-Call < 天期，BNP）、ki（有 KI，UBS），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）、
-# ko_observation（KO 觀察方式：每日填 daily_*、每期填 periodic_*，UBS）
-NAME_FLAGS = ("memory", "maxi", "daily", "autocall", "ki")
+# autocall（Non-Call < 天期，BNP）、quanto（承作幣別 ≠ 標的報價幣別，DBS）、ki（有 KI，DBS、UBS），與 underlying（標的寫法：
+# 1 檔填 single_*、2 檔以上填 basket_*）、ko_observation（KO 觀察方式：每日填 daily_*、每期填 periodic_*，UBS）
+NAME_FLAGS = ("memory", "maxi", "daily", "autocall", "quanto", "ki")
 NAME_PLACEHOLDERS = frozenset(
     {"tenor", "ccy_zh", "ccy"}
     | {f"{f}_{lang}" for f in (*NAME_FLAGS, "underlying", "ko_observation") for lang in ("zh", "en")}
@@ -51,10 +51,14 @@ class ProductNameTemplate:
     ccy_aliases: dict[str, str] = field(
         default_factory=dict
     )  # {ccy} 的其他寫法：ISO 代碼 → 名稱用的代碼（SG：CNH → CNY）
+    quanto_zh: str = ""  # {quanto_zh}／{quanto_en}：承作幣別和標的報價幣別不同時填入（DBS「Quanto」）
+    quanto_en: str = ""
+    ki_zh: str = ""  # {ki_zh}／{ki_en}：有 KI 時填入（DBS「及定價日觸發(歐式)」、UBS「（含觸及下限價事件）」）
+    ki_en: str = ""
+    # 標的 1 檔沒有樣本、名稱寫法未知：用了 {underlying_*} 而標的只有 1 檔時名稱轉人工覆核，single_* 可不設（DBS）
+    single_unsupported: bool = False
     periodic_zh: str = ""  # {ko_observation_*}：KO 每期觀察時填入（每日時填 daily_*；UBS）
     periodic_en: str = ""
-    ki_zh: str = ""  # {ki_zh}／{ki_en}：有 KI（KI 型態不是「無」）時填入（UBS）
-    ki_en: str = ""
 
     def placeholders(self, lang: str) -> frozenset[str]:
         """樣板（zh／en）用到的佔位符名稱。"""
@@ -254,10 +258,13 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
         autocall_memory_zh=n.get("autocall_memory_zh", ""),
         autocall_memory_en=n.get("autocall_memory_en", ""),
         ccy_aliases=dict(n.get("ccy_aliases", {})),
-        periodic_zh=n.get("periodic_zh", ""),
-        periodic_en=n.get("periodic_en", ""),
+        quanto_zh=n.get("quanto_zh", ""),
+        quanto_en=n.get("quanto_en", ""),
         ki_zh=n.get("ki_zh", ""),
         ki_en=n.get("ki_en", ""),
+        single_unsupported=bool(n.get("single_unsupported", False)),
+        periodic_zh=n.get("periodic_zh", ""),
+        periodic_en=n.get("periodic_en", ""),
     )
     if any(not (isinstance(k, str) and isinstance(v, str) and v) for k, v in tpl.ccy_aliases.items()):
         raise IngestionError(
@@ -282,7 +289,8 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
                 f"審查標準商品名稱樣板 product_name.{issuer}.{lang} 用了 {{ko_observation_{lang}}}，"
                 f"但沒有設定 {'、'.join(need)}（KO 每日與每期觀察的寫法）",
             )
-        missing = [k for k in (f"single_{lang}", f"basket_{lang}") if not getattr(tpl, k)]
+        needed = (f"basket_{lang}",) if tpl.single_unsupported else (f"single_{lang}", f"basket_{lang}")
+        missing = [k for k in needed if not getattr(tpl, k)]
         if f"underlying_{lang}" in tpl.placeholders(lang) and missing:
             raise IngestionError(
                 "config_invalid",

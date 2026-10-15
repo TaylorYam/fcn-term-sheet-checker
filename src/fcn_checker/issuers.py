@@ -19,6 +19,7 @@ from .parsers import (
     bnp_iis,
     ca_iis,
     citi_iis,
+    dbs_iis,
     gs_iis,
     hsbc_iis,
     jpm_iis,
@@ -32,6 +33,7 @@ from .parsers import bbva as bbva_parser
 from .parsers import bnp as bnp_parser
 from .parsers import ca as ca_parser
 from .parsers import citi as citi_parser
+from .parsers import dbs as dbs_parser
 from .parsers import gs as gs_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import jpm as jpm_parser
@@ -48,6 +50,8 @@ from .rules import ca as ca_rules
 from .rules import ca_iis as ca_iis_rules
 from .rules import citi as citi_rules
 from .rules import citi_iis as citi_iis_rules
+from .rules import dbs as dbs_rules
+from .rules import dbs_iis as dbs_iis_rules
 from .rules import gs as gs_rules
 from .rules import hsbc as hsbc_rules
 from .rules import jpm as jpm_rules
@@ -359,6 +363,27 @@ BBVA = Issuer(
     ),
 )
 
+DBS = Issuer(
+    code=dbs_rules.ISSUER,
+    template_id=dbs_parser.TEMPLATE_ID,
+    label="DBS 中文產品說明書",
+    parser_version=dbs_parser.PARSER_VERSION,
+    not_covered=tuple(dbs_rules.NOT_COVERED),
+    detect=dbs_parser.detect,
+    read=dbs_parser.read,
+    rules=dbs_rules.run_all,
+    reference_fields=dbs_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=dbs_iis.TEMPLATE_ID,
+        label="DBS 中文投資人須知",
+        parser_version=dbs_iis.PARSER_VERSION,
+        detect=dbs_iis.detect,
+        read=dbs_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=dbs_iis_rules.run_all,
+    ),
+)
+
 UBS = Issuer(
     code=ubs_rules.ISSUER,
     template_id=ubs_parser.TEMPLATE_ID,
@@ -380,7 +405,7 @@ UBS = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS, CA, BBVA, UBS)
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS, CA, BBVA, DBS, UBS)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

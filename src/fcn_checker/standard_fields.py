@@ -56,6 +56,8 @@ class PriceRow:
     evidence: tuple[Evidence, ...]
     # 標的名稱（BARC 價格列、MS 第 11 項標的表）：投資人須知的標的名稱和它比；讀不到代號時也用來指出是哪一檔
     name: str | None = None
+    # 價格旁的幣別字（標的報價幣別，例：美元）；名稱樣板的 {quanto_*} 依它和承作幣別是否不同（DBS）。沒讀時為 None
+    currency: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +106,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "情境試算每個情境一處（值為 tuple[Money, ...]：該情境各金額旁的幣別）；商品幣別不必等於標的幣別，承作幣別只影響"
     "面額、配息、本金，股價（執行價等）與實物交割算式不列入；範本沒有時交出 absent",
     "underlyings": "list[str]：標的彭博代號，依說明書順序",
-    "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據、標的名稱）",
+    "underlying_prices": "tuple[PriceRow, ...]：各標的價格列（代號、進場／執行／KO／下限價、證據、標的名稱、價格旁的幣別字）",
     "strike_pct": "Decimal：執行價為最初價格的 N%，保留說明書顯示位數",
     "ko_pct": "Decimal：KO 價為最初價格的 N%，保留說明書顯示位數；說明書沒有 KO 價（Non-Call = 天期）時為 100",
     "ki_pct": "Decimal：下限價為最初價格的 N%，保留說明書顯示位數；無 KI 時不讀",

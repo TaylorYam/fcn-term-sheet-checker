@@ -79,13 +79,13 @@ def test_unknown_product_name_placeholder_is_a_batch_config_error(tmp_path):
     standard = standard_with(
         tmp_path,
         'en = "{maxi_en}{daily_en}{memory_en}Autocallable',
-        'en = "{maxi_en}{daily_en}{memory_en}{quanto_en}Autocallable',
+        'en = "{maxi_en}{daily_en}{memory_en}{fancy_en}Autocallable',
     )
     with pytest.raises(IngestionError) as raised:
         load_config(review_standard=standard)
     err = raised.value
     assert err.reason_code == "config_invalid"
-    assert "quanto_en" in str(err) and "product_name.hsbc" in str(err)
+    assert "fancy_en" in str(err) and "product_name.hsbc" in str(err)
 
 
 def test_product_name_placeholders_are_filled_from_the_document_for_any_issuer(tmp_path):
@@ -125,13 +125,13 @@ def test_international_phone_listed_as_equivalent_passes_for_every_issuer(tmp_pa
 
 
 def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
-    edits = [Edit(PHONE, "(02)5556-1313", "ts.cover.distributor")]
+    edits = [Edit(PHONE, "02.5556.1313", "ts.cover.distributor")]
     r = results(check(sub(tmp_path, "barc"), edits=edits), "standard.distributor", "distributor_phone_cover")[0]
     assert r.status == MISMATCH
 
     standard = standard_with(
         tmp_path,
-        'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313", "+886 (2) 5556 1313", "(+886)2-5556-1313"]',
+        'phone_equivalents = ["+886-2-5556-1313", "+886 2 5556 1313", "+886 (2) 5556 1313", "(+886)2-5556-1313", "(02)5556-1313"]',
         "phone_equivalents = []",
     )
     r = results(
