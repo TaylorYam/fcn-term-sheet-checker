@@ -106,6 +106,13 @@ def test_underlyings_in_a_different_order_on_the_sheet_pass(tmp_path):
     assert ts.fills_sheet
 
 
+def test_bloomberg_code_wrapped_onto_two_lines_is_still_read(tmp_path):
+    """投資人須知彭博代碼欄窄，4 碼代號換成「代號」「交易所碼」兩行（Issue #257）：標的與價格仍讀到，兩份都通過。"""
+    ts, iis = pair(tmp_path, Spec(iis_ticker_wrap=True))
+    assert bad(iis) == set(), bad(iis)
+    assert iis.report.status == PASS and ts.report.status == PASS and ts.fills_sheet
+
+
 def test_a_wrong_price_on_the_sheet_is_found_after_matching_by_ticker(tmp_path):
     ts, iis = pair(tmp_path, order=(3, 1, 2), **{"UL_2_KO價": 1.0})  # 表上第 2 檔是投資人須知第 1 檔
     assert ("iis.underlying_prices", "UL_2 KO 價", MISMATCH) in bad(iis)

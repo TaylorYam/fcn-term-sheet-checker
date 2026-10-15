@@ -75,6 +75,7 @@ class Spec(ProductSpec):
     vwap: bool = False  # 參考條件表期初定價為 VWAP（說明書不寫期初定價方式）
     trustee_code: str | None = None  # 受託機構商品代號；None 同商品代號
     iis_pages: int = 4  # 投資人須知頁數（不足補空白頁、多的刪掉最後幾頁）
+    iis_ticker_wrap: bool = False  # 投資人須知標的表彭博代碼換成兩行（代號／交易所碼，4 碼代號的真實樣本）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -189,7 +190,8 @@ def _price_table(d: _Doc, s: Spec, *, iis: bool = False) -> None:
     for i, u in enumerate(s.underlyings, 1):
         d.cell(48, str(i))
         d.cell(60, u.name)
-        d.cell(150, u.ticker)
+        for part in u.ticker.split(" ") if iis and s.iis_ticker_wrap else (u.ticker,):
+            d.cell(150, part)
         d.cell(200, u.exchange)
         for _, pct in cols:
             value = u.initial if pct is None else price(u.initial, pct)
