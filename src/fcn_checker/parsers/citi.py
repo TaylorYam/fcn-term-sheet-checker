@@ -15,12 +15,12 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money
-from .common import NO_AUTOCALL_KO_PCT, NUM, Mention, dec, derived, ko_at_initial, number, zh_number
+from . import money, price_table
+from .common import NO_AUTOCALL_KO_PCT, NUM, Mention, derived, ko_at_initial, number, zh_number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "citi-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -69,11 +69,22 @@ VALUE_X = 230.0  # 封面兩欄表：標籤在左（x < 230）、值與 ‧ 在�
 WARNING_HEAD = "警語："
 BULLETS = "‧•·"
 # 標的表與假設價格表的欄（表頭文字 → 欄）；欄位順序以表頭出現位置為準
-HEADERS = (("initial", "期初股價"), ("strike", "執行價"), ("ki", "下限價"), ("ko", "自動提前出場界限"))
-ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"  # 表格價格只寫中文幣別
-PRICE_CELL = rf"({money.NUMBER})({ZH_CCY})"
-TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})\s+(?:Equity|EQUITY)\b")
-# §9 表頭「期初股價(期初評價日之X)」→ 參考條件表期初定價對照值（開盤價格：OOS 樣本，Issue #229）
+# 價格表：§9 標的表與 §15 假設價格表（同一張表重印，執行價、下限價欄標「(假設)」），以左欄列號切列；
+# 表頭 % 寫「(期初股價的X%)」，期初股價欄寫期初定價「(期初評價日之X)」；沒有自動提前出場時沒有 KO 欄
+PRICE_TABLE = price_table.TableSpec(
+    where="第 9 項價格表",
+    initial="期初股價",
+    columns=(
+        price_table.Column("strike", "執行價"),
+        price_table.Column("ki", "下限價", required=False),
+        price_table.Column("ko", "自動提前出場界限", required=False),
+    ),
+    anchor="number",
+    pct=r"期初股價的(\d+(?:\.\d+)?)%",
+    pct_label="(期初股價的X%)",
+    code="彭博代碼",
+)
+SCENARIO_TABLE = replace(PRICE_TABLE, where="第 15 項假設價格表")
 INITIAL_PRICING = {"收盤價格": "close", "開盤價格": "open", "VWAP": "vwap"}
 AUTOCALL_LIMIT = r"自動提前出場界限：係指相關連結標的之期初股價的" + PCT
 NO_AUTOCALL_KO_NOTE = "說明書沒有自動提前出場界限（Non-Call = 天期，不會提前出場）：KO 視為期初股價的 100%"
@@ -330,25 +341,12 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
 
     # §9 標的表
     art9 = article(9)
-    table = price_table("underlying_table", _table_region(art9, "連結標的資產：", "（每一連結標的下稱"))
+    table = price_table.read(
+        "underlying_table", _table_region(art9, "連結標的資產：", "（每一連結標的下稱"), PRICE_TABLE
+    )
     fields["underlying_table"] = table
-    fields["underlyings"] = (
-        ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-        if table.ok
-        else derived("underlyings", table)
-    )
-    fields["initial_pricing"] = (
-        ParsedField("initial_pricing", FieldStatus.PRESENT, table.value["initial_pricing"], list(table.evidence))
-        if table.ok and table.value["initial_pricing"] is not None
-        else ParsedField(
-            "initial_pricing",
-            FieldStatus.INVALID,
-            evidence=list(table.evidence),
-            note="標的表表頭「期初股價(期初評價日之…)」寫法未知",
-        )
-        if table.ok
-        else derived("initial_pricing", table)
-    )
+    fields["underlyings"] = price_table.underlyings(table)
+    fields["initial_pricing"] = initial_pricing(table)
     _prices(fields, table, has_autocall)
 
     # §12 日期
@@ -376,8 +374,8 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     put("scenario_coupon", assumptions, rf"d\)固定配息金額為每單位商品面額{X}" + PCT, Decimal)
     put("scenario_denomination_currency", assumptions, rf"a\)每單位商品面額：{money.NUMBER}({CCY})")
     put("scenario_total_currency", assumptions, rf"c\)初始投資金額[=：].*?={money.NUMBER}({CCY})")
-    fields["scenario_table"] = price_table(
-        "scenario_table", _table_region(assumptions, "連結標的相關股價資訊", None), reprint=True
+    fields["scenario_table"] = price_table.read(
+        "scenario_table", _table_region(assumptions, "連結標的相關股價資訊", None), SCENARIO_TABLE
     )
     fields["dividend_example"] = capture(
         "dividend_example",
@@ -595,81 +593,24 @@ def _table_region(lines: list[Line], start: str, end: str | None) -> list[Line]:
     return lines[a + 1 : b]
 
 
-def price_table(name: str, lines: list[Line], *, reprint: bool = False) -> ParsedField:
-    """§9 標的表（`reprint` 為 §15 假設價格表）：表頭決定欄位與順序、表頭 %、期初定價寫法；每檔一列（列號、名稱、代碼、價格）。
-
-    值：{"columns", "tickers", "rows": [{欄: Decimal}], "row_lines", "pcts": {欄: Decimal}, "initial_pricing",
-    "currencies"}。代碼以「代號 交易所碼 Equity」切列，價格以「數字＋幣別字」切格。
-    """
-    if not lines:
-        return ParsedField.missing(name, "找不到標的表" if not reprint else "第 15 項找不到假設價格表")
-    first_row = next((i for i, ln in enumerate(lines) if re.fullmatch(r"\s*1\s*", ln.text)), None)
-    if first_row is None:
-        return ParsedField.invalid(name, lines, "標的表找不到第 1 列")
-    head = "".join(squash(ln.text) for ln in lines[:first_row])
-    positions = sorted((head.find(label), col) for col, label in HEADERS if label in head)
-    columns = [col for _, col in positions]
-    if columns[:2] != ["initial", "strike"]:
-        return ParsedField.invalid(name, lines[:first_row], "標的表表頭不是「期初股價、執行價…」的順序")
-    found = [Decimal(x) for x in re.findall(r"期初股價的" + PCT, head)]
-    pct_cols = [c for c in columns if c != "initial"]
-    if len(found) != len(pct_cols):
-        return ParsedField.invalid(name, lines[:first_row], "標的表表頭的百分比數與欄位數不符")
-    pcts = dict(zip(pct_cols, found, strict=True))
-    pricing = re.search(r"期初評價日之(" + "|".join(INITIAL_PRICING) + ")", head)
-    body = lines[first_row:]
-    joined = " ".join(ln.text.strip() for ln in body)
-    tickers = [f"{m[1]} {m[2]}" for m in TICKER.finditer(joined)]
-    bti = TextIndex(body)
-    cells = list(bti.finditer(PRICE_CELL))
-    ncol = len(columns)
-    if not tickers or len(cells) != len(tickers) * ncol:
-        return ParsedField.invalid(
-            name, lines, f"標的表有 {len(cells)} 個價格格、{len(tickers)} 個代碼，與 {ncol} 欄不符"
-        )
-    rows, row_lines = [], []
-    for i in range(len(tickers)):
-        prices: dict[str, Decimal] = {}
-        lns: list[Line] = []
-        for j, col in enumerate(columns):
-            m = cells[i * ncol + j]
-            prices[col] = dec(m[1])
-            lns += [x for x in bti.lines_for(m.start(), m.end()) if x not in lns]
-        rows.append(prices)
-        row_lines.append(lns)
-    value = {
-        "columns": columns,
-        "tickers": tickers,
-        "rows": rows,
-        "row_lines": row_lines,
-        "pcts": pcts,
-        "initial_pricing": INITIAL_PRICING.get(pricing[1]) if pricing else None,
-        "currencies": {m[2] for m in cells},
-    }
-    return ParsedField.present(name, value, lines)
-
-
 def _prices(fields: dict[str, ParsedField], table: ParsedField, has_autocall: bool) -> None:
-    """§9 標的表 → 標準欄位 `underlying_prices`；無自動提前出場時 KO 價 = 期初股價（KO 100%）。"""
+    """§9 標的表 → 標準欄位 `underlying_prices`（列名「第 n 檔」）；無自動提前出場時 KO 價 = 期初股價（KO 100%）。"""
+    names = [f"第 {i} 檔" for i in range(1, len(table.value.rows) + 1)] if table.ok else None
+    rows = price_table.price_rows(table, names=names)
+    if rows.ok and not has_autocall:
+        rows.value = tuple(replace(r, prices=ko_at_initial(r.prices)) for r in rows.value)
+    fields["underlying_prices"] = rows
+
+
+def initial_pricing(table: ParsedField) -> ParsedField:
+    """標的表表頭「期初股價(期初評價日之X)」的 X → 期初定價（收盤價格／開盤價格／VWAP）。"""
     if not table.ok:
-        fields["underlying_prices"] = derived("underlying_prices", table)
-        return
-    fields["underlying_prices"] = ParsedField(
-        "underlying_prices",
-        FieldStatus.PRESENT,
-        tuple(
-            standard_fields.PriceRow(
-                ticker,
-                dict(prices) if has_autocall else ko_at_initial(prices),
-                tuple(Evidence.of(ln) for ln in lns),
-                name=f"第 {i} 檔",
-            )
-            for i, (ticker, prices, lns) in enumerate(
-                zip(table.value["tickers"], table.value["rows"], table.value["row_lines"], strict=True), start=1
-            )
-        ),
-        list(table.evidence),
-    )
+        return derived("initial_pricing", table)
+    m = re.search(r"期初評價日之(" + "|".join(INITIAL_PRICING) + ")", table.value.heads["initial"])
+    if m is None:
+        note = "標的表表頭「期初股價(期初評價日之…)」寫法未知"
+        return ParsedField("initial_pricing", FieldStatus.INVALID, evidence=list(table.evidence), note=note)
+    return ParsedField("initial_pricing", FieldStatus.PRESENT, INITIAL_PRICING[m[1]], list(table.evidence))
 
 
 # ---------------------------------------------------------------- 第 12 項日期表

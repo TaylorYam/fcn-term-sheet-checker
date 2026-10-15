@@ -26,7 +26,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.underlying_names",
-        "description": "連結標的中文名稱、分類與交易所不核對；以第 9 項標的表彭博代碼為準",
+        "description": "連結標的中文名稱、分類與交易所不核對；以第 9 項價格表彭博代碼為準",
     },
     {
         "rule_id": "doc.initial_prices",
@@ -34,7 +34,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項標的表；情境算式、投資單位數、假設收盤價、總報酬率與年化報酬率"
+        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表；情境算式、投資單位數、假設收盤價、總報酬率與年化報酬率"
         "不核對（2026-10-14 確認）",
     },
     {
@@ -179,7 +179,7 @@ def _has(pf: ParsedField, word: str) -> bool | None:
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """有無自動提前出場：第 13 項自動提前出場界限 ⇔ 名稱字樣 ⇔ 標的表自動提前出場界限欄 ⇔ 第 8 項 (4)（與日期表型態、第 12 項(9)
+    """有無自動提前出場：第 13 項自動提前出場界限 ⇔ 名稱字樣 ⇔ 價格表自動提前出場界限欄 ⇔ 第 8 項 (4)（與日期表型態、第 12 項(9)
     的一致由 parser 判定，不一致時 KO 觀察方式與 Non-Call 轉人工覆核）；
     記憶式：第 13 項段名與記憶條款 ⇔ 名稱「記憶式」；非記憶式的第一章不得出現「記憶式」。"""
     f = ctx.ts.f
@@ -210,12 +210,12 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
         )
     )
     out.append(
-        kit.doc_check(ctx, "doc.autocall_wording", "underlying_table", "標的表自動提前出場界限欄", has, table).compare(
+        kit.doc_check(ctx, "doc.autocall_wording", "underlying_table", "價格表自動提前出場界限欄", has, table).compare(
             label.get(has.value) if has.ok else None,
-            label.get("ko" in table.value["columns"]) if table.ok else None,
+            label.get("ko" in table.value.columns) if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="標的表有無自動提前出場界限欄須與第 13 項一致",
+            fail_message="價格表有無自動提前出場界限欄須與第 13 項一致",
         )
     )
     mem, words = f("ko_memory"), f("memory_wording_ch1")
@@ -245,7 +245,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KI：第 8 項觸及下限事件 ⇔ 有無「下限價：」 ⇔ 標的表下限價欄；KI 每期觀察的 t=1-n 的 n = 天期。"""
+    """KI：第 8 項觸及下限事件 ⇔ 有無「下限價：」 ⇔ 價格表下限價欄；KI 每期觀察的 t=1-n 的 n = 天期。"""
     f = ctx.ts.f
     ki, pct, table, tenor = f("ki_type"), f("ki_pct"), f("underlying_table"), f("tenor_months")
     doc_ki = kit.doc_ki(ki)
@@ -267,12 +267,12 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
         )
     )
     out.append(
-        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "標的表下限價欄", ki, table).compare(
+        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "價格表下限價欄", ki, table).compare(
             label[doc_ki != "none"],
-            label["ki" in table.value["columns"]] if table.ok else None,
+            label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="標的表有無下限價欄須與 KI 型態一致",
+            fail_message="價格表有無下限價欄須與 KI 型態一致",
         )
     )
     if doc_ki == "P":
@@ -294,39 +294,39 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """§9 標的表表頭 % = 第 8、13 項的 K／KI／KO %；§15 假設價格表逐格 = §9 標的表（代碼、各價格、表頭 %）。"""
+    """§9 價格表表頭 % = 第 8、13 項的 K／KI／KO %；§15 假設價格表逐格 = §9 價格表（代碼、各價格、表頭 %）。"""
     f = ctx.ts.f
     table, scen = f("underlying_table"), f("scenario_table")
     out = []
     for col, key, name in (
-        ("strike", "strike_pct", "標的表執行價欄頭 %"),
-        ("ki", "ki_pct", "標的表下限價欄頭 %"),
-        ("ko", "ko_pct", "標的表自動提前出場界限欄頭 %"),
+        ("strike", "strike_pct", "價格表執行價欄頭 %"),
+        ("ki", "ki_pct", "價格表下限價欄頭 %"),
+        ("ko", "ko_pct", "價格表自動提前出場界限欄頭 %"),
     ):
         pf = f(key)
-        if table.ok and col not in table.value["pcts"]:
+        if table.ok and col not in table.value.pcts:
             continue  # 沒有這欄（無 KI／無自動提前出場）：一致性由 ki_terms、autocall_terms 檢查
         out.append(
             kit.doc_check(ctx, "doc.table_header_pct", f"header_{col}", name, pf, table).compare(
-                pf.value, table.value["pcts"].get(col) if table.ok else None
+                pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 15 項假設價格表", table, scen)
     if table.ok and scen.ok:
         issues = []
-        if scen.value["tickers"] != table.value["tickers"]:
-            issues.append(f"代碼 {scen.value['tickers']} 不等於標的表 {table.value['tickers']}")
-        if scen.value["columns"] != table.value["columns"]:
-            issues.append("欄位與標的表不同")
-        if scen.value["pcts"] != table.value["pcts"]:
-            issues.append("表頭百分比與標的表不同")
-        for i, (a, b) in enumerate(zip(scen.value["rows"], table.value["rows"], strict=False), start=1):
+        if scen.value.tickers != table.value.tickers:
+            issues.append(f"代碼 {scen.value.tickers} 不等於第 9 項價格表 {table.value.tickers}")
+        if scen.value.columns != table.value.columns:
+            issues.append("欄位與第 9 項價格表不同")
+        if scen.value.pcts != table.value.pcts:
+            issues.append("表頭百分比與第 9 項價格表不同")
+        for i, (a, b) in enumerate(zip(scen.value.prices, table.value.prices, strict=False), start=1):
             diff = [c for c in b if a.get(c) != b[c]]
             if diff:
-                issues.append(f"第 {i} 檔 {'、'.join(diff)} 與標的表不同")
+                issues.append(f"第 {i} 檔 {'、'.join(diff)} 與價格表不同")
         out.append(
             check.compare(
-                None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項標的表"
+                None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項價格表"
             )
         )
     else:

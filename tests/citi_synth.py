@@ -202,8 +202,14 @@ class _Doc:
             self.text(273, v)
 
 
+# 標的表各欄的左緣（真實樣本的欄序：列號、名稱、彭博代碼、分類、交易所、期初股價、執行價、下限價、自動提前出場界限）
+TABLE_X = {"n": 48, "name": 62, "code": 150, "class": 196, "exchange": 222, "prices": (264, 344, 424, 504)}
+
+
 def _price_table(d: _Doc, s: Spec, *, reprint: bool) -> None:
-    """第 9 項標的表（`reprint` 為第 15 項假設價格表：沒有分類與交易所欄，執行價、下限價欄標「(假設)」）。"""
+    """第 9 項標的表（8 號字；`reprint` 為第 15 項假設價格表：沒有分類與交易所欄，執行價、下限價欄標「(假設)」）。
+    表頭每格拆成多行（每行 6 字）；每檔一列，代碼「代號 交易所碼」下一行是「Equity」（真實樣本）。"""
+    x = TABLE_X
     hypo = "(假設)" if reprint else ""
     pricing = s.pricing_text or ("VWAP" if s.vwap else "收盤價格")
     cols: list[tuple[str, Decimal | None]] = [
@@ -214,24 +220,24 @@ def _price_table(d: _Doc, s: Spec, *, reprint: bool) -> None:
         cols.append((f"下限價 (期初股價的{s.ki_pct:.2f}%){hypo}", s.ki_pct))
     if s.autocall:
         cols.append((f"自動提前出場界限 (期初股價的{s.ko:.2f}%)", s.ko))
-    heads = ["連結標的", "彭博代碼"] + ([] if reprint else ["連結標的分類", "交易所"])
-    for t in heads:
-        d.cell(60, t)
-    for label, _ in cols:
-        for k in range(0, len(label), 6):  # 表頭每格拆成多行
-            d.cell(300, label[k : k + 6])
+    heads = [(x["name"], "連結標的"), (x["code"], "彭博代碼")]
+    if not reprint:
+        heads += [(x["class"], "分類"), (x["exchange"], "交易所")]
+    parts = [[label[k : k + 6] for k in range(0, len(label), 6)] for label, _ in cols]
+    d.w.need(30 + 12 * max(len(p) for p in parts) + 26 * s.count)
+    for k in range(max(len(p) for p in parts)):
+        cells = [(px, p[k]) for px, p in zip(x["prices"], parts, strict=False) if k < len(p)]
+        d.w.row([*(heads if k == 0 else []), *cells], gap=11, size=8)
+    d.w.space(4)
     for i, u in enumerate(s.underlyings, 1):
-        d.cell(48, str(i))
-        d.cell(60, u.name)
         code, exch = u.ticker.split(" ")
-        d.cell(150, f"{code} {exch}")
-        d.cell(150, "Equity")
+        cells = [(x["n"], str(i)), (x["name"], u.name), (x["code"], f"{code} {exch}")]
         if not reprint:
-            d.cell(200, "股份")
-            d.cell(240, u.exchange)
-        for _, pct in cols:
-            value = u.initial if pct is None else price(u.initial, pct)
-            d.cell(300, s.price_text(value))
+            cells += [(x["class"], "股份"), (x["exchange"], u.exchange[:4])]
+        for px, (_, pct) in zip(x["prices"], cols, strict=False):
+            cells.append((px, s.price_text(u.initial if pct is None else price(u.initial, pct))))
+        d.w.row(cells, gap=11, size=8)
+        d.w.row([(x["code"], "Equity")], gap=15, size=8)
 
 
 def _article8(d: _Doc, s: Spec) -> None:

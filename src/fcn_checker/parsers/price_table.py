@@ -480,7 +480,7 @@ def _row(
     spec: TableSpec,
 ) -> TableRow:
     by_col: dict[str | None, list[Line]] = {}
-    for ln in lns:
+    for ln in (w for x in lns for w in _words_of(x)):
         by_col.setdefault(_column_of(ln, cols, others), []).append(ln)
     ordered = sorted(lns, key=_reading)
     keys = [c for c in order if c != "code"]
@@ -509,6 +509,19 @@ def _row(
         currency=currencies.pop(),
         lines=tuple(ordered),
     )
+
+
+def _words_of(ln: Line) -> list[Line]:
+    """一行依空白切成詞（有字座標時）：擠成一行、切欄時找不到對齊左緣的幾格（`340.74 美元 234.5995 美`），
+    每個詞仍各自歸到所在的欄。"""
+    spans = ln.aligned_char_spans
+    if not spans:
+        return [ln]
+    out = []
+    for m in re.finditer(r"\S+", ln.text):
+        i, j = m.span()
+        out.append(replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=m[0], char_spans=spans[i:j]))
+    return out
 
 
 def _values(cell: list[Line]) -> list[tuple[Decimal, str | None]]:
