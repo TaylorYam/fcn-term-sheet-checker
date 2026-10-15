@@ -1,4 +1,4 @@
-"""單份核對：一份說明書從配對結果到整體狀態的完整順序，所有上手共用（ADR 0005）。
+"""單份核對：一份說明書從配對結果到整體狀態的完整順序，所有上手共用（ADR 0009）。
 
 1. 接收批量入口的配對結果（上手、讀出的說明書、對到的參考條件表列；配對失敗時只有辨識結果）
 2. 參考條件表欄位規則（rules/reference.py；表頭缺必要欄或重複時讀檔就整批錯誤，Issue #199）
@@ -50,7 +50,7 @@ class Paired:
 
 
 def _issuer_context(paired: Paired, config: CheckConfig) -> IssuerContext:
-    """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0005）與交易所假日表。"""
+    """上手說明書內部規則的輸入：只帶該上手宣告的參考條件表欄位（ADR 0009）與交易所假日表。"""
     row = paired.row
     declared = {key: row.get(key) for key in paired.issuer.reference_fields}
     return IssuerContext(

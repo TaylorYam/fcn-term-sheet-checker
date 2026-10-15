@@ -1,7 +1,8 @@
 # 核對規則：BARC 中文產品說明書
 
 - 文件側：[BARC 範本規格](../templates/barc-zh-product-description.md)
-- 下單側：2026-10-02 起為[參考條件表](../order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`，[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)），對照見 §9。§1～§8 中與 BARC 詢價表欄位對照的部分（Guaranteed Periods、Observation Frequency、Effective Date offset、KO Type／Barrier Type 值）已隨詢價表流程刪除（Issue #46），只保留為歷史紀錄；說明書內部規則與審查標準仍然有效
+- 下單側：2026-10-02 起為[參考條件表](../order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`，[ADR 0008](../adr/0008-reference-sheet-and-import-format.md)），對照見 §9。§1～§8 中與 BARC 詢價表欄位對照的部分（Guaranteed Periods、Observation Frequency、Effective Date offset、KO Type／Barrier Type 值）已隨詢價表流程刪除（Issue #46），只保留為歷史紀錄；說明書內部規則與審查標準仍然有效
+- 各上手共用的規則（判定原則、數值處理、參考條件表欄位、價格推算、標的、共用日期規則、回填）的定義已搬到[共用核對規則](shared-check-rules.md)（[ADR 0009](../adr/0009-shared-rules-defined-per-rule.md)）；本文件保留 BARC 專屬規則與當初的決策紀錄
 - 會隨時間改變的基準（審查通過日期、固定警語、負責人、名稱格式、面額預設值等）見 [審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
 - 狀態：規則已與使用者確認（2026-10-01）；第一階段已實作（Issue #7，`src/fcn_checker/rules/barc.py`，實作對照見 §8），第二階段（配息表、提前出場表、保證配息期等）待另開 Issue；§6.2 擱置、§6.4 需更多詢價表樣本驗證
 - 依 Issue #38 的範圍決定（使用者螢光標記與程式規則取交集，差異逐項決定），Issue #41 補齊文件內重複出現處、情境試算與審查標準固定值的核對（§3.7、§3.9、§7）
@@ -300,7 +301,7 @@ C4 依說明書定義：自動提前出場觀察期是期始日到期末日之�
 
 ## 9. 參考條件表流程（2026-10-02，Issue #43）
 
-表上事先填好的欄位與說明書比對；說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：表上欄位的比對與 Non-Call 在各上手共用的 `rules/reference.py`（讀說明書標準欄位，見 `standard_fields.py`），回填規則在共用的 `backfill.py`；審查標準規則在共用的 `rules/review_standard.py`；提前出場排程在擷取端（`parsers/barc_schedule.py` 的 `autocall_schedule`）；`rules/barc.py` 只剩月配息率推算與說明書內部規則。
+表上事先填好的欄位與說明書比對，規則定義見[共用核對規則](shared-check-rules.md) §3；下表只列 BARC 說明書的出處與 BARC 特有的推法（例：Non-Call 由保證配息期 G 推得）。說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：表上欄位的比對與 Non-Call 在各上手共用的 `rules/reference.py`（讀說明書標準欄位，見 `standard_fields.py`），回填規則在共用的 `backfill.py`；審查標準規則在共用的 `rules/review_standard.py`；提前出場排程在擷取端（`parsers/barc_schedule.py` 的 `autocall_schedule`）；`rules/barc.py` 只剩月配息率推算與說明書內部規則。
 
 | 參考條件表欄 | 說明書來源 | 規則 |
 |---|---|---|

@@ -1,7 +1,7 @@
 # 參考條件表格式（所有上手共用）
 
 - 設定檔：[`config/reference_sheet.toml`](../../config/reference_sheet.toml)（版面、欄位對照、允許值）、[`config/issuer_prefixes.toml`](../../config/issuer_prefixes.toml)（上手編號對照）
-- 決策：[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)。2026-10-02 起，所有上手的核對條件都來自參考條件表。BARC 詢價表已停用，PANEL 改版前暫時保留。
+- 決策：[ADR 0008](../adr/0008-reference-sheet-and-import-format.md)（取代 ADR 0004）。2026-10-02 起，所有上手的核對條件都來自參考條件表。BARC 詢價表已停用，PANEL 改版前暫時保留。
 - 入口：`fcn-batch`（`fcn_checker.saving.run_batch`），見 README。
 - 名詞：見 [CONTEXT.md](../../CONTEXT.md)
 

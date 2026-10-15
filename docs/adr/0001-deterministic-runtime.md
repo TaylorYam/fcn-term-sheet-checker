@@ -9,7 +9,7 @@
 
 ## Decision
 
-採 PDF text extraction → template/parser → normalized schema → rule engine → exception report。文字型 PDF 優先評估 PyMuPDF/pdfplumber，掃描頁於後續階段加入本地 OCR。下單資料獨立標準化，作為預期值來源。缺值、歧義、未知範本或不支援語意必須進例外報告與人工覆核。
+採 PDF text extraction → template/parser → normalized schema → rule engine → 錯誤清單（核對結果檔）。文字型 PDF 採用 PyMuPDF（[ADR 0002](0002-python-cli-pymupdf.md)），掃描頁於後續階段加入本地 OCR（尚未實作）。參考條件表獨立標準化，作為預期值來源（[ADR 0008](0008-reference-sheet-and-import-format.md)）。缺值、歧義、未知範本或不支援語意必須轉人工覆核並列入錯誤清單。
 
 第一版 production runtime 不包含模型 SDK、金鑰、模型呼叫或可啟用的 LLM fallback。保留 extraction adapter 邊界供未來重新評估，但不建立未使用的抽象框架。
 
@@ -21,4 +21,4 @@
 
 ## Consequences
 
-可將欄位、規則與來源證據版本化，也需維護範本及回歸案例。確定性不保證正確性，必須以人工標註樣本與拒絕不確定輸入驗證。OCR 引擎、下單來源與細部業務規則仍待確認；後續變更 LLM 政策需另立 ADR。
+可將欄位、規則與來源證據版本化，也需維護範本及回歸案例。確定性不保證正確性，必須以人工標註樣本與拒絕不確定輸入驗證。OCR 引擎仍待確認（尚未實作）；預期值來源已定為參考條件表（ADR 0008），細部業務規則見 `docs/rules/`。後續變更 LLM 政策需另立 ADR。

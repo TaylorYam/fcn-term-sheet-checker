@@ -1,7 +1,7 @@
 """JPM 專屬規則（docs/rules/jpm-check-rules.md）：年利率其他出處、說明書內部交叉驗證、日期表結構、假設價格表。
 
 參考條件表欄位（含標的依代號配對）、價格推算、審查標準（含 JPM 分節：保證機構與總代理人名稱、商品種類）與回填是
-各上手共用的規則。只有年利率其他出處要讀參考條件表（ADR 0005 的例外，見 REFERENCE_FIELDS）。
+各上手共用的規則。只有年利率其他出處要讀參考條件表（ADR 0009，見 REFERENCE_FIELDS）。
 KO 觀察方式、第一個可提前出場期與日期表排法的一致由 parser 判定（不一致時那三個欄位轉人工覆核）。
 抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
 """
@@ -17,7 +17,7 @@ from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "JPM"
-# 本上手規則可讀的參考條件表欄位（ADR 0005 的例外：年利率其他出處依表上年利率核對，同 Citi）
+# 本上手規則可讀的參考條件表欄位（ADR 0009，須在 reference_fields 宣告：年利率其他出處依表上年利率核對，同 Citi）
 REFERENCE_FIELDS = ("coupon_pa_pct",)
 NOT_COVERED = [
     {

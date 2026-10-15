@@ -4,7 +4,7 @@
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [HSBC 下單資料格式](../order-formats/hsbc-fcn-reference.md)（設定檔 `config/reference_sheet.toml`）
 - 會隨時間改變的基準見[審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
 - 狀態：已實作（Issue #34）；採 §3.7 的 H02 單份作業標記及後續確認範圍。
-- 本文件只寫與 [BARC 核對規則](barc-check-rules.md) 不同或 HSBC 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號等）沿用 BARC
+- 本文件只寫與 [BARC 核對規則](barc-check-rules.md) 不同或 HSBC 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 下單資料來源
 
@@ -27,7 +27,7 @@
 
 ### 3.2 標準欄位對照
 
-參考條件表欄位與標準欄位的比對由各上手共用的 `rules/reference.py` 執行，語意與 rule_id 同 [BARC 核對規則](barc-check-rules.md) §9（使用者 2026-10-02 確認：兩家不同時以 BARC 為準，Issue #54）。HSBC parser 只負責交出標準欄位（`src/fcn_checker/standard_fields.py`）。
+參考條件表欄位與標準欄位的比對由各上手共用的 `rules/reference.py` 執行，語意見[共用核對規則](shared-check-rules.md) §3（原本以 BARC 為準，Issue #54；2026-10-15 起共用規則逐條定義，[ADR 0009](../adr/0009-shared-rules-defined-per-rule.md)）。HSBC parser 只負責交出標準欄位（`src/fcn_checker/standard_fields.py`）。
 
 | 標準欄位 | 參考條件表欄位 | 說明書來源（範本規格） | 規則（rule_id） |
 |---|---|---|---|

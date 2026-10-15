@@ -21,4 +21,4 @@
 
 ## Consequences
 
-程式與安裝流程變簡單，日常核對不需要連網。維護者每次更新都要記得重跑 `setup_panel.cmd`。舊版自動更新留下的 `.local/releases/`、`.local/current.json`、`.local/update.lock` 不再使用，由維護者手動刪除；`.local/installed.json` 保留。若日後同事也要使用 PANEL，需重新設計發佈與更新方式。
+程式與安裝流程變簡單，日常核對不需要連網。維護者每次更新都要記得重跑 `setup_panel.cmd`。舊版自動更新留下的 `.local/releases/`、`.local/current.json`、`.local/update.lock` 不再使用，由維護者手動刪除；`.local/installed.json` 保留。若日後同事也要使用 PANEL，需重新設計發佈與更新方式。其他文件寫的「作業人員」在 PANEL 的操作（人工放行、填回報包的「我的判斷」），都是維護者本人以作業身分操作，與本決定不衝突（2026-10-15 確認）。
