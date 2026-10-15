@@ -370,9 +370,11 @@ def _article7(d: _Doc, s: Spec) -> None:
 
 def _price_table(d: _Doc, s: Spec) -> None:
     """第 7 項標的表（7 號字）：表頭一格拆成多行（K／KO／KI % 寫在表頭）；每檔一列，名稱與彭博代碼拆兩行（單數檔
-    「代號 交易所碼」／「Equity」，雙數檔「代號」／「交易所碼 Equity 交易所」）。"""
+    「代號 交易所碼」／「Equity」，雙數檔「代號」／「交易所碼 Equity 交易所」）。表頭「期初價格 執行價」擠在同一行，
+    執行價欄的續行對齊「執」字（真實樣本）。"""
     ki = s.ki != "none"
     d.w.need(60 + 26 * s.count)  # 表格不跨頁
+    k_x = 290 + 7 * 4 + fitz.get_text_length(" ", fontname="helv", fontsize=7)  # 「執行價」接在「期初價格 」之後
 
     def row(cells: list[tuple[float, str]], gap: float) -> None:
         d.row(cells, gap=gap, size=7)
@@ -391,10 +393,10 @@ def _price_table(d: _Doc, s: Spec) -> None:
         9,
     )
     row(
-        [(239, "所"), (262, "幣別"), (345, "(期初價格"), (397, "場價 (期初"), *([(445, "(期初價格之")] if ki else [])],
+        [(239, "所"), (262, "幣別"), (k_x, "(期初價格"), (397, "場價 (期初"), *([(445, "(期初價格之")] if ki else [])],
         9,
     )
-    row([(345, f"之{s.strike}% )"), (402, "價格之"), *([(452, f"{s.ki_pct}% )")] if ki else [])], 9)
+    row([(k_x, f"之{s.strike}% )"), (402, "價格之"), *([(452, f"{s.ki_pct}% )")] if ki else [])], 9)
     row([(398, f"{s.ko}% )")], 12)
     unit = "日圓" if s.market == "JT" else "美元"
     for i, u in enumerate(s.underlyings, 1):
