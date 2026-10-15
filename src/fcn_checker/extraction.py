@@ -27,17 +27,22 @@ def extract_lines(doc: fitz.Document) -> list[Line]:
     out: list[Line] = []
     try:
         for pno, page in enumerate(doc, start=1):
-            for block in page.get_text("dict")["blocks"]:
+            for block in page.get_text("rawdict")["blocks"]:
                 if block.get("type") != 0:
                     continue
                 for ln in block["lines"]:
-                    text = "".join(s["text"] for s in ln["spans"]).strip()
+                    chars = [(c["c"], c["bbox"][0], c["bbox"][2]) for s in ln["spans"] for c in s["chars"]]
+                    while chars and chars[0][0].isspace():
+                        chars.pop(0)
+                    while chars and chars[-1][0].isspace():
+                        chars.pop()
+                    text = "".join(c for c, _, _ in chars)
                     if not text:
                         continue
                     x0, y0, x1, y1 = ln["bbox"]
                     if _is_page_noise(text, x0, x1, y0, page):
                         continue
-                    out.append(Line(pno, x0, y0, x1, y1, text))
+                    out.append(Line(pno, x0, y0, x1, y1, text, tuple((a, b) for _, a, b in chars)))
     except Exception as e:
         raise IngestionError("pdf_unreadable", f"說明書文字擷取失敗：{e}") from e
     return out

@@ -66,7 +66,12 @@ def overall_status(statuses: list[CheckStatus]) -> CheckStatus:
 
 @dataclass(frozen=True)
 class Line:
-    """擷取出的一行文字。頁碼從 1 起；bbox 為 PyMuPDF 座標（左上原點，pt）。"""
+    """擷取出的一行文字。頁碼從 1 起；bbox 為 PyMuPDF 座標（左上原點，pt）。
+
+    `char_spans` 為 `text` 每個字的 (x0, x1)（擷取時填入；不參與相等比較）。改過文字的行（`dataclasses.replace`）
+    可能帶著過期的值，一律經 `aligned_char_spans` 取用：個數與 `text` 字數不符時視為沒有。只換字不改字數的改寫
+    （例：GS 投資人須知把相容字轉成標準字）位置仍然正確。
+    """
 
     page: int
     x0: float
@@ -74,10 +79,15 @@ class Line:
     x1: float
     y1: float
     text: str
+    char_spans: tuple[tuple[float, float], ...] = field(default=(), compare=False, repr=False)
 
     @property
     def xc(self) -> float:
         return (self.x0 + self.x1) / 2
+
+    @property
+    def aligned_char_spans(self) -> tuple[tuple[float, float], ...]:
+        return self.char_spans if len(self.char_spans) == len(self.text) else ()
 
 
 @dataclass(frozen=True)
