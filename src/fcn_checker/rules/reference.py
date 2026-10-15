@@ -270,16 +270,31 @@ def sheet_slots(ctx: Context, rows: int) -> list[int]:
     docs = list(uls.value)
     if len(sheet) != rows or len(set(sheet.values())) != rows or len(set(docs)) != rows:
         return identity
-    slots: dict[int, int] = {}
-    for key in (lambda t: t, lambda t: t.split()[0]):
-        free = {n: key(t) for n, t in sheet.items() if n not in slots.values()}
-        for i, t in enumerate(docs):
-            if i in slots:
-                continue
-            hits = [n for n, k in free.items() if k == key(t)]
-            if len(hits) == 1 and sum(key(d) == key(t) for j, d in enumerate(docs) if j not in slots) == 1:
-                slots[i] = hits[0]
+    slots: dict[int, int] = {}  # 說明書第 i 檔（從 0 起）→ 表上第 n 檔
+    for match_key in (_full_ticker, _symbol):
+        _pair_unique(docs, sheet, match_key, slots)
     return [slots[i] for i in range(rows)] if len(slots) == rows else identity
+
+
+def _full_ticker(ticker: str) -> str:
+    return ticker
+
+
+def _symbol(ticker: str) -> str:
+    """不含交易所碼的代號（`ABC UN` → `ABC`）。"""
+    return ticker.split()[0]
+
+
+def _pair_unique(
+    docs: list[str], sheet: dict[int, str], match_key: Callable[[str], str], slots: dict[int, int]
+) -> None:
+    """還沒配到的說明書標的與表上標的，`match_key` 相同且兩邊都只有一檔時配成一對，寫進 `slots`。"""
+    unpaired_docs = {i: match_key(t) for i, t in enumerate(docs) if i not in slots}
+    unpaired_slots = {n: match_key(t) for n, t in sheet.items() if n not in slots.values()}
+    for i, key in unpaired_docs.items():
+        candidates = [n for n, k in unpaired_slots.items() if k == key]
+        if len(candidates) == 1 and list(unpaired_docs.values()).count(key) == 1:
+            slots[i] = candidates[0]
 
 
 def underlyings(ctx: Context) -> CheckResult:
