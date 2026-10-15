@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import bisect
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -18,7 +17,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import iis, money
-from .common import Hit, Mention, dec, derived, hits, number, one
+from .common import Hit, Mention, RawText, by_column, capture_group, column_text, dec, derived, hits, number, one
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "nomura-zh-pd"
@@ -93,45 +92,6 @@ MATURITY_CASE = r"\((\d)\)如於最終評價日，"  # 第 7 項到期贖回各�
 
 
 # ---------------------------------------------------------------- 原文合併文字
-
-
-class RawText:
-    """多行原文合併（同 `layout.join_text`：英數字跨行補一個空白），並可由字元位置找回原始行（作為證據）。
-
-    名稱、地址、電話等要保留空白的值在這裡讀；數字、日期與句型在去空白的 `TextIndex` 上讀。
-    """
-
-    def __init__(self, lines: Sequence[Line]):
-        self.lines = list(lines)
-        out, self._starts = "", []
-        for ln in self.lines:
-            t = ln.text.strip()
-            if out and t and re.search(r"[A-Za-z0-9.,)]$", out) and re.match(r"[A-Za-z0-9(]", t):
-                out += " "
-            self._starts.append(len(out))
-            out += t
-        self.text = out
-
-    def lines_for(self, start: int, end: int) -> list[Line]:
-        if not self.lines:
-            return []
-        i = max(0, bisect.bisect_right(self._starts, start) - 1)
-        j = max(i, bisect.bisect_right(self._starts, max(start, end - 1)) - 1)
-        return self.lines[i : j + 1]
-
-    def capture(self, name: str, pattern: str, convert: Callable = lambda x: x.strip(), group: int = 1) -> ParsedField:
-        """`pattern` 第 `group` 組的每一處（證據為整個比對所在的行）；不同值 → 歧義，沒有 → 缺漏，轉不成值 → 不合法。"""
-        found = []
-        for m in re.finditer(pattern, self.text, re.S):
-            lns = self.lines_for(m.start(), m.end())
-            try:
-                value = convert(m[group])
-            except (ValueError, TypeError, InvalidOperation):
-                value = None
-            if value is None:
-                return ParsedField.invalid(name, lns, f"「{m[group]}」無法辨識")
-            found.append((value, lns))
-        return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
 
 
 def rest_of_line(name: str, lines: Sequence[Line], label: str) -> ParsedField:
@@ -314,9 +274,11 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     art16 = article(16)
     early = rf"最低金額為{AMOUNT}，並以{AMOUNT}為增加贖回之單位"
     put("early_redemption_minimum", art16, early, number)
-    fields["early_redemption_increment"] = _group(art16, early, 3, "early_redemption_increment", number)
-    fields["early_redemption_minimum_currency"] = _group(art16, early, 2, "early_redemption_minimum_currency")
-    fields["early_redemption_increment_currency"] = _group(art16, early, 4, "early_redemption_increment_currency")
+    fields["early_redemption_increment"] = capture_group(art16, early, 3, "early_redemption_increment", number)
+    fields["early_redemption_minimum_currency"] = capture_group(art16, early, 2, "early_redemption_minimum_currency")
+    fields["early_redemption_increment_currency"] = capture_group(
+        art16, early, 4, "early_redemption_increment_currency"
+    )
 
     # 第二章
     _chapter2(fields, doc)
@@ -341,17 +303,17 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     art4 = ch4_article(4)
     subscribe = rf"最低申購金額：{AMOUNT}（相當1單位商品面額）最低加價申購金額：{AMOUNT}"
     put("minimum_subscription", art4, subscribe, number)
-    fields["minimum_additional"] = _group(art4, subscribe, 3, "minimum_additional", number)
-    fields["minimum_subscription_currency"] = _group(art4, subscribe, 2, "minimum_subscription_currency")
-    fields["minimum_additional_currency"] = _group(art4, subscribe, 4, "minimum_additional_currency")
+    fields["minimum_additional"] = capture_group(art4, subscribe, 3, "minimum_additional", number)
+    fields["minimum_subscription_currency"] = capture_group(art4, subscribe, 2, "minimum_subscription_currency")
+    fields["minimum_additional_currency"] = capture_group(art4, subscribe, 4, "minimum_additional_currency")
     put("issue_price_ch4", ch4_article(5), rf"申購價金之計算：每單位商品面額{X}申購單位數{X}" + PCT, Decimal)
     put("minimum_issue_size", ch4_article(7), r"有效申購金額總計至少達(.+?)；")
     art8_ch4 = ch4_article(8)
     redeem = rf"最低贖回金額：{AMOUNT}（相當1單位商品面額），並以{AMOUNT}為增加贖回之單位"
     put("minimum_redemption", art8_ch4, redeem, number)
-    fields["redemption_increment"] = _group(art8_ch4, redeem, 3, "redemption_increment", number)
-    fields["minimum_redemption_currency"] = _group(art8_ch4, redeem, 2, "minimum_redemption_currency")
-    fields["redemption_increment_currency"] = _group(art8_ch4, redeem, 4, "redemption_increment_currency")
+    fields["redemption_increment"] = capture_group(art8_ch4, redeem, 3, "redemption_increment", number)
+    fields["minimum_redemption_currency"] = capture_group(art8_ch4, redeem, 2, "minimum_redemption_currency")
+    fields["redemption_increment_currency"] = capture_group(art8_ch4, redeem, 4, "redemption_increment_currency")
     fields["distributor_phone_ch4"] = rest_of_line("distributor_phone_ch4", doc.chapter_lines(4), "受託機構聯絡方式：")
 
     _occurrences(fields)
@@ -360,18 +322,6 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
         Mention.of_field("第 15 項(1) 固定配息率", fields["coupon_art15"]),
     ]
     return NomuraTermSheet(fields, TextIndex(doc.lines), doc, coupons, annualized)
-
-
-def _group(lns: list[Line], pattern: str, group: int, name: str, convert: Callable = lambda x: x) -> ParsedField:
-    """同一句的另一組（例：最低加價申購金額接在最低申購金額後面）。"""
-    ti = TextIndex(lns)
-    found = []
-    for m in ti.finditer(pattern):
-        try:
-            found.append((convert(m[group]), ti.lines_for(m.start(), m.end())))
-        except (ValueError, TypeError, InvalidOperation):
-            return ParsedField.invalid(name, ti.lines_for(m.start(), m.end()), f"「{m[group]}」無法辨識")
-    return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
 
 
 def _cover(fields: dict[str, ParsedField], items: dict[str, CoverItem], cover: list[Line]) -> None:
@@ -410,9 +360,9 @@ def _article7(fields: dict[str, ParsedField], art7: list[Line], put: Callable) -
     t7 = TextIndex(art7)
     minimum, denomination = rf"最低投資金額{AMOUNT}", rf"每單位商品面額{AMOUNT}"
     put("minimum_investment", art7, minimum, number)
-    fields["minimum_investment_currency"] = _group(art7, minimum, 2, "minimum_investment_currency")
+    fields["minimum_investment_currency"] = capture_group(art7, minimum, 2, "minimum_investment_currency")
     put("denomination", art7, denomination, number)
-    fields["denomination_currency"] = _group(art7, denomination, 2, "denomination_currency")
+    fields["denomination_currency"] = capture_group(art7, denomination, 2, "denomination_currency")
     put("issue_price_pct", art7, r"發行價格每單位商品面額的(\d+(?:\.\d+)?)[％%]", Decimal)
     put("coupon_period_pct", art7, r"固定配息率：就每配息日而言，" + PCT, Decimal)
     fields["coupon_pa_pct"] = standard_fields.absent(
@@ -613,24 +563,6 @@ def price_table(lines: list[Line]) -> ParsedField:
         "header_lines": header,
     }
     return ParsedField.present(name, value, lines)
-
-
-def by_column(lines: list[Line], gap: float = 20) -> list[Line]:
-    """表格的行依 x 座標分欄（相鄰兩行 x 相差超過 `gap` 為不同欄），由左到右、每欄由上到下。
-
-    一格拆成多行時，擷取順序可能逐欄也可能逐列；分欄後的順序固定（`執行價 (期初價格之X% )`、`ABC` / `UW Equity` 會接在一起）。"""
-    columns: list[list[Line]] = []
-    for ln in sorted(lines, key=lambda x: x.x0):
-        if columns and ln.x0 - columns[-1][-1].x0 <= gap:
-            columns[-1].append(ln)
-        else:
-            columns.append([ln])
-    return [ln for col in columns for ln in sorted(col, key=lambda x: (x.page, x.y0))]
-
-
-def column_text(lines: list[Line]) -> str:
-    """`by_column` 順序接起來、去空白（表頭）。"""
-    return "".join(squash(ln.text) for ln in by_column(lines))
 
 
 def _row_name(lns: list[Line], price_x: float) -> str:
@@ -884,7 +816,7 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
     params = t14.lines_for(a.end(), b) if a and b > a.end() else []
     put("scenario_tenor", params, r"年期(\d+)個月", int)
     put("scenario_denomination", params, rf"每單位商品面額{AMOUNT}", number)
-    fields["scenario_denomination_currency"] = _group(
+    fields["scenario_denomination_currency"] = capture_group(
         params, rf"每單位商品面額{AMOUNT}", 2, "scenario_denomination_currency"
     )
     put("scenario_issue_price", params, r"發行價格(\d+(?:\.\d+)?)%", Decimal)

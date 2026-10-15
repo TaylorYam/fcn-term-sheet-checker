@@ -13,9 +13,10 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, citi_iis, hsbc_iis, jpm_iis, ms_iis, nomura_iis, sg_iis
+from .parsers import barc_iis, bnp_iis, citi_iis, gs_iis, hsbc_iis, jpm_iis, ms_iis, nomura_iis, sg_iis
 from .parsers import bnp as bnp_parser
 from .parsers import citi as citi_parser
+from .parsers import gs as gs_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import jpm as jpm_parser
 from .parsers import ms as ms_parser
@@ -25,6 +26,7 @@ from .rules import barc as barc_rules
 from .rules import bnp as bnp_rules
 from .rules import citi as citi_rules
 from .rules import citi_iis as citi_iis_rules
+from .rules import gs as gs_rules
 from .rules import hsbc as hsbc_rules
 from .rules import jpm as jpm_rules
 from .rules import jpm_iis as jpm_iis_rules
@@ -248,7 +250,27 @@ NOMURA = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA)
+GS = Issuer(
+    code=gs_rules.ISSUER,
+    template_id=gs_parser.TEMPLATE_ID,
+    label="GS 中文產品說明書",
+    parser_version=gs_parser.PARSER_VERSION,
+    not_covered=tuple(gs_rules.NOT_COVERED),
+    detect=gs_parser.detect,
+    read=gs_parser.read,
+    rules=gs_rules.run_all,
+    reference_fields=gs_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=gs_iis.TEMPLATE_ID,
+        label="GS 中文投資人須知",
+        parser_version=gs_iis.PARSER_VERSION,
+        detect=gs_iis.detect,
+        read=gs_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:
