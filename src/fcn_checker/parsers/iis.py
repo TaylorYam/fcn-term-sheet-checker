@@ -25,6 +25,7 @@ __all__ = [
     "integer",
     "number",
     "occurrences",
+    "PAGE_SLASH",
     "page_totals",
     "raw",
     "section",
@@ -83,9 +84,13 @@ def section(ti: TextIndex, anchors: tuple[str, str]) -> list[Line] | None:
     return None if b < 0 else ti.lines_for(a, b + len(end))
 
 
-def page_totals(lines: Sequence[Line]) -> ParsedField:
-    """頁首「第 N 頁，共 M 頁」的 M（每頁一個）。"""
-    hits = [(int(m[2]), ln) for ln in lines if (m := re.fullmatch(r"-?\s*第\s*(\d+)\s*頁，共\s*(\d+)\s*頁", ln.text))]
+PAGE_OF = r"-?\s*第\s*(\d+)\s*頁，共\s*(\d+)\s*頁"  # 「第 N 頁，共 M 頁」
+PAGE_SLASH = r"(\d+)\s*/\s*(\d+)"  # 「N/M」（Nomura）
+
+
+def page_totals(lines: Sequence[Line], pattern: str = PAGE_OF, shown: str = "第 N 頁，共 M 頁") -> ParsedField:
+    """每頁頁碼（整行等於 `pattern`，第 2 組為總頁數；預設「第 N 頁，共 M 頁」）的 M（每頁一個）。"""
+    hits = [(int(m[2]), ln) for ln in lines if (m := re.fullmatch(pattern, ln.text.strip()))]
     if not hits:
-        return ParsedField.missing("page_totals", "找不到頁首「第 N 頁，共 M 頁」")
+        return ParsedField.missing("page_totals", f"找不到頁碼「{shown}」")
     return ParsedField.present("page_totals", tuple(m for m, _ in hits), [ln for _, ln in hits])

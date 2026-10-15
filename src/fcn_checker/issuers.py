@@ -13,11 +13,12 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, citi_iis, hsbc_iis, ms_iis, sg_iis
+from .parsers import barc_iis, bnp_iis, citi_iis, hsbc_iis, ms_iis, nomura_iis, sg_iis
 from .parsers import bnp as bnp_parser
 from .parsers import citi as citi_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import ms as ms_parser
+from .parsers import nomura as nomura_parser
 from .parsers import sg as sg_parser
 from .rules import barc as barc_rules
 from .rules import bnp as bnp_rules
@@ -26,6 +27,8 @@ from .rules import citi_iis as citi_iis_rules
 from .rules import hsbc as hsbc_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
+from .rules import nomura as nomura_rules
+from .rules import nomura_iis as nomura_iis_rules
 from .rules import sg as sg_rules
 from .rules import sg_iis as sg_iis_rules
 from .rules.iis import IisIssuerContext
@@ -66,7 +69,7 @@ class Issuer:
     # 說明書內部規則：只用讀出結果與審查標準，拿不到參考條件表的列與格式設定
     rules: Callable[[IssuerContext], list[CheckResult]]
     # 說明書內部規則可讀的參考條件表欄位（ADR 0005 的例外，須逐一宣告：BARC 月配息率推算的年利率與天期（Issue #54）、
-    # MS 月配息率與年化報酬率的年利率（說明書沒有年利率，Issue #135））
+    # MS 月配息率與年化報酬率的年利率（說明書沒有年利率，Issue #135）；Nomura 同 MS（每期配息率 × 12，Issue #239））
     reference_fields: tuple[str, ...] = ()
     # 投資人須知範本；None → 這家上手的投資人須知是未支援上手
     iis: IisTemplate | None = None
@@ -200,7 +203,28 @@ CITI = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI)
+NOMURA = Issuer(
+    code=nomura_rules.ISSUER,
+    template_id=nomura_parser.TEMPLATE_ID,
+    label="Nomura 中文產品說明書",
+    parser_version=nomura_parser.PARSER_VERSION,
+    not_covered=tuple(nomura_rules.NOT_COVERED),
+    detect=nomura_parser.detect,
+    read=nomura_parser.read,
+    rules=nomura_rules.run_all,
+    reference_fields=nomura_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=nomura_iis.TEMPLATE_ID,
+        label="Nomura 中文投資人須知",
+        parser_version=nomura_iis.PARSER_VERSION,
+        detect=nomura_iis.detect,
+        read=nomura_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=nomura_iis_rules.run_all,
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, NOMURA)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

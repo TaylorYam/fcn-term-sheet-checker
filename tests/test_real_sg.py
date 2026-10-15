@@ -68,14 +68,16 @@ def test_samples_only_differ_where_the_exploration_said(items):
                 "field.underlying_prices",
                 "split_suspected",
             ): 4,  # 舊範本一檔標的的四個價格欄都是說明書的同一比例（除權息調整）
-            ("standard.approval_date", "approval_date_not_configured"): 2,  # 2023、2025 年交易，早於審查標準最早的日期
+            # 2023 年交易，早於審查標準最早的日期（2025 年那份寫 2025-06-24，Issue #239 加入審查日期後依交易日通過）
+            ("standard.approval_date", "approval_date_not_configured"): 1,
             ("standard.chairman", "value_mismatch"): 1,  # 舊範本的前任負責人
             ("standard.fixed_warning", "occurrence_count"): 1,  # 舊範本的警語用「受託投資」
             ("standard.forbidden_wording", "forbidden_wording"): 2,  # 舊範本 4 處；沿用舊字的 2026 年舊版面文件 1 處
         }
     )
     passed = [i for i in term_sheets if i.report.status == S.PASS]
-    assert len(passed) == 3  # 新版面 2026 年的 3 份（含單一標的、VWAP）全部通過
+    # 新版面 2026 年的 3 份（含單一標的、VWAP）與寫 2025-06-24 的 2025 年那份（Issue #239）通過
+    assert len(passed) == 4
     # 封面受託機構地址「3段」與第二章簡稱「玉山證券」都是審查標準的等價寫法
     for field in ("distributor_address_cover", "distributor_name_ch2"):
         found = [r for i in term_sheets for r in i.report.results if r.field == field]
@@ -119,7 +121,7 @@ def test_sg_investor_sheets_are_recognised(items):
 
 
 def test_term_sheets_that_pass_are_filled_once_their_investor_sheets_are_released(tmp_path, items):
-    """說明書通過的 3 份：投資人須知人工放行後兩份都視同通過，回填並打 V；其他 3 份進錯誤清單。"""
+    """說明書通過的 4 份：投資人須知人工放行後兩份都視同通過，回填並打 V；其他 2 份進錯誤清單。"""
     if _no_reference_rows(items):
         pytest.skip("本機參考條件表沒有 SG 的列，無法回填")
     session = PanelSession(REVIEW_STANDARD, ROOT / "config", install_root=tmp_path)
@@ -128,7 +130,7 @@ def test_term_sheets_that_pass_are_filled_once_their_investor_sheets_are_release
     batch = session.start_check().batch.items
     pairs = {i.term_sheet.name[:12]: i for i in batch if i.term_sheet.name.endswith("_IIS.pdf")}
     passed = [i for i in batch if i.term_sheet.name.endswith("_TS.pdf") and i.report.status == S.PASS]
-    assert len(passed) == 3
+    assert len(passed) == 4  # 2025 年那份寫 2025-06-24（Issue #239 加入審查日期）
     for ts in passed:
         session.release(pairs[ts.term_sheet.name[:12]])
     assert all(ts.fills_sheet for ts in passed)
@@ -146,7 +148,7 @@ def test_term_sheets_that_pass_are_filled_once_their_investor_sheets_are_release
     errors = [
         r for r in wb["錯誤清單"].iter_rows(values_only=True) if r and any(str(c).startswith("037") for c in r if c)
     ]
-    assert len(errors) == 6  # 另外 3 檔的說明書與投資人須知
+    assert len(errors) == 4  # 另外 2 檔的說明書與投資人須知
 
 
 def _lines(path):
