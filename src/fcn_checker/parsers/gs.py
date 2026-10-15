@@ -18,7 +18,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import Mention, RawText, by_column, capture_group, dec, derived, number, split_at_columns
+from .common import Mention, RawText, by_column, capture_group, dec, derived, fee_rates, number, split_at_columns
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "gs-zh-pd"
@@ -56,18 +56,6 @@ ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) +
 OPT_I = r"(?:\(i\))?"  # 多標的寫「(i)」，單一標的沒有
 PRICE = r"\d[\d,]*\.\d{4}"  # 價格表價格（4 位小數）
 TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})\s+(?:Equity|EQUITY)(?![A-Za-z])")
-RATE = r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)"
-# 費用表：左欄項目名稱的開頭 → 審查標準 [fees] 的鍵（投資人須知寫「贖回費用」）
-FEE_ITEMS = {
-    "申購費用": "申購費用",
-    "提前贖回費用": "提前贖回費用",
-    "贖回費用": "提前贖回費用",
-    "管理費用": None,
-    "分銷費": "分銷費用",
-    "保費費用": None,
-    "解約費用": None,
-    "其他費用": None,
-}
 # 第 16 項 KO 觀察（範本規格 §4.1）：只有每日觀察；k = 第一個可提前出場期
 KO_DAILY = r"「提前出場觀察日」指自第(\d+)個觀察期間結束日開始（含）至評價日結束（不含）之期間內"
 # 第 16 項記憶式（範本規格 §4.2）
@@ -624,55 +612,6 @@ def _chapter4(fields: dict[str, ParsedField], doc: Document, put: Callable) -> N
     fields["issue_price_pct"] = capture_group(art(5), price, 3, "issue_price_pct", Decimal)
     fields["subscription_price_currency"] = capture_group(art(5), price, 2, "subscription_price_currency")
     put("minimum_redemption_units", art(8), r"每筆交易之最低贖回單位數為(\d+)單位，後續為一單位之倍數", int)
-
-
-def fee_rates(lines: list[Line]) -> dict[str, ParsedField]:
-    """費用表（說明書第四章 2.、投資人須知四.）各費用項目的費率區間（標準欄位 `fee_<費用項目>`）。
-
-    依座標讀：費率欄從表頭「費率（百分比）」的 x 起、到下一欄「收取時點」之前（分銷費用的子列標籤「報酬／費用／折讓」也在
-    這個範圍）；每個費用項目一列，從左欄項目名稱那一行到下一個項目名稱之前。一列的費率欄文字接起來須剛好有一個
-    「X%~Y%」（分銷費用只有「費用」子列有費率；擷取時欄位文字可能交錯，不要求前綴寫法）。"""
-    out = {standard_fields.fee_field(k): k for k in dict.fromkeys(v for v in FEE_ITEMS.values() if v)}
-    head = next((ln for ln in lines if squash(ln.text).startswith("費率")), None)
-    if head is None:
-        return {name: ParsedField.missing(name, "找不到費用表表頭「費率（百分比）」") for name in out}
-    right = min(
-        (ln.x0 for ln in lines if ln.page == head.page and abs(ln.y0 - head.y0) < 4 and ln.x0 > head.x0 + 10),
-        default=None,
-    )
-    lo = head.x0 - 40
-    starts = []
-    for ln in lines:
-        if ln.x0 < lo and (ln.page, ln.y0) > (head.page, head.y0):
-            label = next((k for k in FEE_ITEMS if squash(ln.text).startswith(k)), None)
-            if label is not None:
-                starts.append((ln, FEE_ITEMS[label]))
-    fields: dict[str, ParsedField] = {}
-    for name, label in out.items():
-        rows = [k for k, (_, key) in enumerate(starts) if key == label]
-        if len(rows) != 1 or right is None:
-            fields[name] = ParsedField.missing(name, f"費用表找不到「{label}」這一列或出現多次")
-            continue
-        k = rows[0]
-        top = starts[k][0]
-        bottom = starts[k + 1][0] if k + 1 < len(starts) else None
-        cells = sorted(
-            (
-                ln
-                for ln in lines
-                if lo <= ln.x0 < right - 5
-                and (ln.page, ln.y0 + 3) >= (top.page, top.y0)
-                and (bottom is None or (ln.page, ln.y0 + 3) < (bottom.page, bottom.y0))
-            ),
-            key=lambda x: (x.page, x.y0, x.x0),
-        )
-        rates = re.findall(RATE, "".join(squash(ln.text) for ln in cells))
-        fields[name] = (
-            ParsedField.present(name, rates[0], [top, *cells])
-            if len(rates) == 1
-            else ParsedField.invalid(name, [top, *cells], f"費用表「{label}」的費率欄沒有剛好一個「X%~Y%」")
-        )
-    return fields
 
 
 # ---------------------------------------------------------------- 出處清單

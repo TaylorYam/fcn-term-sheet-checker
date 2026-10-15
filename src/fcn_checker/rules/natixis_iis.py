@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from ..investor_sheet import read_iis
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, Item
 from .iis import IisIssuerContext
 from .kit import Check
 from .natixis import distributor_code
@@ -32,12 +32,4 @@ def ko_definition(ctx: IisIssuerContext) -> CheckResult:
 
 
 def run_all(ctx: IisIssuerContext) -> list[CheckResult]:
-    return [ko_definition(ctx), *distributor_code(ctx, read_iis(ctx.sheet, "distributor_code"), _first_code(ctx))]
-
-
-def _first_code(ctx: IisIssuerContext):
-    """封面 TDCC 商品代號（出處清單的第 1 處）。"""
-    codes = read_iis(ctx.sheet, "product_codes")
-    if not codes.ok or not codes.value:
-        return ParsedField.missing("product_code", "讀不到封面 TDCC 商品代號")
-    return codes.value[0].value
+    return [ko_definition(ctx), *distributor_code(ctx, read_iis(ctx.sheet, "distributor_code"))]

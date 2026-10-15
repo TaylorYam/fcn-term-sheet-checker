@@ -16,8 +16,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import iis, natixis
-from .common import RawText, number
-from .gs import fee_rates
+from .common import RawText, fee_rates, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "natixis-zh-iis"
@@ -194,7 +193,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         lambda x: natixis.non_principal(x.strip()),
     )
     put("product_type", r"商品種類：(.+?)，TDCC")
-    code = r"TDCC商品代號為(\d{12})，(?:受託機構商品代號為(.*?)，)?ISIN為([A-Z]{2}[A-Z0-9]{10})"
+    code = natixis.PRODUCT_CODES
     fields["product_codes"] = iis.occurrences(
         "product_codes", ti, (("product_code_tdcc", "封面商品代號", "第 1 頁「TDCC商品代號為」", code),)
     )

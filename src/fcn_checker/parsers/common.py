@@ -1,5 +1,6 @@
 """各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%，
-以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS）。
+以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS），
+費用表依座標讀費率的 `fee_rates`（GS、Natixis）。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
 """
@@ -13,6 +14,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Generic, NamedTuple, TypeVar
 
+from .. import standard_fields
 from ..schema import Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from .layout import TextIndex
@@ -200,3 +202,68 @@ def capture_group(lns: list[Line], pattern: str, group: int, name: str, convert:
         except (ValueError, TypeError, InvalidOperation):
             return ParsedField.invalid(name, ti.lines_for(m.start(), m.end()), f"「{m[group]}」無法辨識")
     return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
+
+
+# ---------------------------------------------------------------- 費用表（GS、Natixis）
+
+FEE_RATE = r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)"
+# 費用表：左欄項目名稱的開頭 → 審查標準 [fees] 的鍵（投資人須知寫「贖回費用」）
+FEE_ITEMS = {
+    "申購費用": "申購費用",
+    "提前贖回費用": "提前贖回費用",
+    "贖回費用": "提前贖回費用",
+    "管理費用": None,
+    "分銷費": "分銷費用",
+    "保費費用": None,
+    "解約費用": None,
+    "其他費用": None,
+}
+
+
+def fee_rates(lines: list[Line]) -> dict[str, ParsedField]:
+    """費用表（說明書第四章 2.、投資人須知四.）各費用項目的費率區間（標準欄位 `fee_<費用項目>`）。
+
+    依座標讀：費率欄從表頭「費率（百分比）」的 x 起、到下一欄「收取時點」之前（分銷費用的子列標籤「報酬／費用／折讓」也在
+    這個範圍）；每個費用項目一列，從左欄項目名稱那一行到下一個項目名稱之前。一列的費率欄文字接起來須剛好有一個
+    「X%~Y%」（分銷費用只有「費用」子列有費率；擷取時欄位文字可能交錯，不要求前綴寫法）。"""
+    out = {standard_fields.fee_field(k): k for k in dict.fromkeys(v for v in FEE_ITEMS.values() if v)}
+    head = next((ln for ln in lines if squash(ln.text).startswith("費率")), None)
+    if head is None:
+        return {name: ParsedField.missing(name, "找不到費用表表頭「費率（百分比）」") for name in out}
+    right = min(
+        (ln.x0 for ln in lines if ln.page == head.page and abs(ln.y0 - head.y0) < 4 and ln.x0 > head.x0 + 10),
+        default=None,
+    )
+    lo = head.x0 - 40
+    starts = []
+    for ln in lines:
+        if ln.x0 < lo and (ln.page, ln.y0) > (head.page, head.y0):
+            label = next((k for k in FEE_ITEMS if squash(ln.text).startswith(k)), None)
+            if label is not None:
+                starts.append((ln, FEE_ITEMS[label]))
+    fields: dict[str, ParsedField] = {}
+    for name, label in out.items():
+        rows = [k for k, (_, key) in enumerate(starts) if key == label]
+        if len(rows) != 1 or right is None:
+            fields[name] = ParsedField.missing(name, f"費用表找不到「{label}」這一列或出現多次")
+            continue
+        k = rows[0]
+        top = starts[k][0]
+        bottom = starts[k + 1][0] if k + 1 < len(starts) else None
+        cells = sorted(
+            (
+                ln
+                for ln in lines
+                if lo <= ln.x0 < right - 5
+                and (ln.page, ln.y0 + 3) >= (top.page, top.y0)
+                and (bottom is None or (ln.page, ln.y0 + 3) < (bottom.page, bottom.y0))
+            ),
+            key=lambda x: (x.page, x.y0, x.x0),
+        )
+        rates = re.findall(FEE_RATE, "".join(squash(ln.text) for ln in cells))
+        fields[name] = (
+            ParsedField.present(name, rates[0], [top, *cells])
+            if len(rates) == 1
+            else ParsedField.invalid(name, [top, *cells], f"費用表「{label}」的費率欄沒有剛好一個「X%~Y%」")
+        )
+    return fields

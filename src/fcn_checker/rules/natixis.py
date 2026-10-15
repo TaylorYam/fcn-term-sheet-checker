@@ -9,12 +9,12 @@
 from __future__ import annotations
 
 import re
-from decimal import ROUND_HALF_UP, Decimal
 
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
 from . import kit
+from .iis import IisIssuerContext
 from .kit import Check, IssuerContext
 
 ISSUER = "NATIXIS"
@@ -35,7 +35,8 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.initial_pricing",
-        "description": "說明書沒有寫期初定價方式（開盤價／收盤價／VWAP），參考條件表「期初定價」欄不核對（2026-10-15 確認）",
+        "description": "說明書沒有寫期初定價方式（開盤價／收盤價／VWAP），參考條件表「期初定價」欄不和說明書比，只檢查是允許值"
+        "（2026-10-15 確認）",
     },
     {
         "rule_id": "doc.scenario_calculations",
@@ -54,11 +55,6 @@ NOT_COVERED = [
 ]
 
 
-def monthly_of(annual: Decimal) -> Decimal:
-    """月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（範本規格 §4.6）。"""
-    return (annual / 12).quantize(kit.Q4, ROUND_HALF_UP)
-
-
 # ---------------------------------------------------------------- 配息率（核對規則 §3.3）
 
 
@@ -70,7 +66,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(
             ctx, "derive.monthly_coupon", "monthly_coupon_pct", "月配息率 %（年利率 ÷ 12）", annual, monthly
         ).compare(
-            monthly_of(annual.value) if annual.ok else None,
+            kit.monthly_of_annual(annual.value) if annual.ok else None,
             monthly.value,
             tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位後比數值",
             fail_message="第 13 項月配息率須等於年利率 ÷ 12 四捨五入到 4 位",
@@ -137,35 +133,27 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
                 mapped, pf.value, fail_message="括號內的幣別代碼須對應封面中文計價幣別（審查標準幣別對照）"
             )
         )
-    out.extend(distributor_code(ctx, f("distributor_code"), f("product_code")))
+    out.extend(distributor_code(ctx, f("distributor_code")))
     return out
 
 
-def distributor_code(ctx, code: ParsedField, product: ParsedField) -> list[CheckResult]:
-    """「受託機構商品代號為」有標籤時須有值（NX2、NX8 空白 → 轉人工覆核，2026-10-15 確認）；沒有標籤的文件不檢查。"""
+def distributor_code(ctx: IssuerContext | IisIssuerContext, code: ParsedField) -> list[CheckResult]:
+    """「受託機構商品代號為」有標籤卻空白 → 轉人工覆核（NX2、NX8，2026-10-15 確認）；有值或沒有標籤的文件不檢查
+    （有值時要不要和 TDCC 商品代號比，作業人員沒有決定，樣本也沒有）。"""
     if code.status == FieldStatus.NOT_APPLICABLE:
         return []
     check = Check("doc.distributor_product_code", "distributor_code", Item.expected("受託機構商品代號"), ctx.document)
     check = check.needs(code)
     if (problem := check.blocked) is not None:
         return [problem]
-    value = squash(code.value)
-    if not value:
-        return [
-            check.result(
-                S.REVIEW_REQUIRED,
-                actual="（空白）",
-                reason="blank_field",
-                message="「受託機構商品代號為」後面是空白，請人工確認（2026-10-15 確認轉人工覆核）",
-            )
-        ]
+    if squash(code.value):
+        return []
     return [
-        check.compare(
-            product.value if product.ok else None,
-            value,
-            fail=S.REVIEW_REQUIRED,
-            reason="document_inconsistent",
-            fail_message="受託機構商品代號和 TDCC 商品代號不同，請人工確認",
+        check.result(
+            S.REVIEW_REQUIRED,
+            actual="（空白）",
+            reason="blank_field",
+            message="「受託機構商品代號為」後面是空白，請人工確認（2026-10-15 確認轉人工覆核）",
         )
     ]
 

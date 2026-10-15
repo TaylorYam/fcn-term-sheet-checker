@@ -19,8 +19,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import RawText, by_column, capture_group, dec, derived, number
-from .gs import fee_rates
+from .common import RawText, by_column, capture_group, dec, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
@@ -60,7 +59,11 @@ TICKER = re.compile(r"^([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})$")
 CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 CN_NUM.update({f"十{k}": 10 + v for k, v in list(CN_NUM.items())[:9]})
 # 第 12 項 KO 觀察（範本規格 §4.1）
-KO_DAILY = r"自動提前到期觀察日：從第([一二三四五六七八九十]{1,3})個配息觀察期間結束日\(含\)到最終評價日\(不含\)之每一預定交易日每日觀察"
+CN_PERIOD = r"([一二三四五六七八九十]{1,3})"  # 中文數字的期別（第一～第十二）
+KO_DAILY_BODY = r"從第" + CN_PERIOD + r"個配息觀察期間結束日\(含\)到最終評價日\(不含\)之每一預定交易日每日觀察"
+KO_DAILY = r"自動提前到期觀察日：" + KO_DAILY_BODY
+# 封面「TDCC 商品代號為…，ISIN 為…」：第 1 組商品代號、第 2 組受託機構商品代號（舊版有標籤、可能空白；沒有時為 None）、第 3 組 ISIN
+PRODUCT_CODES = r"TDCC商品代號為(\d{12})，(?:受託機構商品代號為(.*?)，)?ISIN為([A-Z]{2}[A-Z0-9]{10})"
 KO_PERIODIC = "自動提前到期觀察日：如下表所列"
 # 第 14 項記憶式（範本規格 §4.2）
 MEMORY = "收盤價皆曾經高於或等於其自動提前到期贖回價格"
@@ -300,7 +303,7 @@ def read(lines: Sequence[Line]) -> NatixisTermSheet:
 def _cover(fields: dict[str, ParsedField], cover: list[Line]) -> None:
     """封面：標題名稱、商品代號與 ISIN、「標籤：值」各欄、第 2 頁末刊印日期。"""
     ti = TextIndex(cover)
-    code = r"TDCC商品代號為(\d{12})，(?:受託機構商品代號為(.*?)，)?ISIN為([A-Z]{2}[A-Z0-9]{10})"
+    code = PRODUCT_CODES
     fields["product_code"] = capture("product_code", ti, code, whole_match=True)
     fields["isin"] = capture_group(cover, code, 3, "isin")
     fields["distributor_code"] = distributor_code(ti, code)
@@ -388,10 +391,22 @@ def _numbers(lines: list[Line]) -> list[str]:
     return join_numeric([t for t in tokens if NUMBER.match(t)])
 
 
+def _rows_by_anchor(lines: list[Line], anchors: list[Line]) -> list[list[Line]] | Line:
+    """每行分給同一頁 y 中心最近的列錨（列號或貨幣格）；有一行所在頁沒有列錨時回傳那一行（表格跨頁，讀不出）。"""
+    rows: list[list[Line]] = [[] for _ in anchors]
+    for ln in lines:
+        same = [k for k, x in enumerate(anchors) if x.page == ln.page]
+        if not same:
+            return ln
+        k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
+        rows[k].append(ln)
+    return rows
+
+
 def underlying_table(name: str, art9: list[Line]) -> ParsedField:
     """第 9 項連結標的表：表頭決定欄序與 %（KO → KI → K），每檔一列（以左欄列號切列）。
 
-    值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines", "header_lines", "raw_initials"}。"""
+    值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines"}。"""
     ti = TextIndex(art9)
     a = ti.text.find("「投資組合」於本商品發行日")
     b = ti.text.find("相對權重：", a)
@@ -405,7 +420,7 @@ def underlying_table(name: str, art9: list[Line]) -> ParsedField:
             marks.append(i)
     if not marks:
         return ParsedField.invalid(name, lines, "連結標的表找不到第 1 列")
-    header = [ln for ln in lines[: marks[0]] if squash(ln.text) not in ("i",)]
+    header = [ln for ln in lines[: marks[0]] if squash(ln.text) != "i"]  # 列號欄的表頭「i」不是價格欄
     parsed = _price_columns(_header_columns(header))
     if isinstance(parsed, str):
         return ParsedField.invalid(name, header, parsed)
@@ -414,15 +429,11 @@ def underlying_table(name: str, art9: list[Line]) -> ParsedField:
     if initial_x is None or code_x is None:
         return ParsedField.invalid(name, header, "連結標的表表頭讀不到「彭博代碼」或「期初進場價格」欄")
     anchors = [lines[i] for i in marks]
-    rows_lines: list[list[Line]] = [[] for _ in marks]
-    for ln in lines[marks[0] :]:
-        same = [k for k, x in enumerate(anchors) if x.page == ln.page]
-        if not same:
-            return ParsedField.invalid(name, [ln], "連結標的表跨頁時讀不到該頁的列號")
-        k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
-        rows_lines[k].append(ln)
+    rows_lines = _rows_by_anchor(lines[marks[0] :], anchors)
+    if isinstance(rows_lines, Line):
+        return ParsedField.invalid(name, [rows_lines], "連結標的表跨頁時讀不到該頁的列號")
     left = initial_x - 25
-    tickers, names, rows, raw_initials = [], [], [], []
+    tickers, names, rows = [], [], []
     for k, lns in enumerate(rows_lines, start=1):
         code = " ".join(ln.text.strip() for ln in sorted(lns, key=lambda x: x.y0) if abs(ln.xc - code_x) < 15)
         t = TICKER.match(code)
@@ -439,7 +450,6 @@ def underlying_table(name: str, art9: list[Line]) -> ParsedField:
             "".join(squash(ln.text) for ln in by_column(lns) if ln.xc < code_x - 15 and ln is not anchors[k - 1])
         )
         rows.append(dict(zip(["initial", *columns], values, strict=True)))
-        raw_initials.append(nums[0])
     value = {
         "columns": columns,
         "pcts": pcts,
@@ -447,8 +457,6 @@ def underlying_table(name: str, art9: list[Line]) -> ParsedField:
         "names": names,
         "rows": rows,
         "row_lines": rows_lines,
-        "header_lines": header,
-        "raw_initials": raw_initials,
     }
     return ParsedField.present(name, value, lines)
 
@@ -476,13 +484,9 @@ def scenario_table(name: str, lns: list[Line]) -> ParsedField:
     if isinstance(parsed, str):
         return ParsedField.invalid(name, header, parsed)
     columns, pcts, _ = parsed
-    rows_lines: list[list[Line]] = [[] for _ in anchors]
-    for ln in body:
-        same = [k for k, x in enumerate(anchors) if x.page == ln.page]
-        if not same:
-            continue
-        k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
-        rows_lines[k].append(ln)
+    rows_lines = _rows_by_anchor(body, anchors)
+    if isinstance(rows_lines, Line):
+        return ParsedField.invalid(name, [rows_lines], "情境價格表跨頁時讀不到該頁的貨幣欄")
     rows = []
     for k, rl in enumerate(rows_lines, start=1):
         nums = _numbers([ln for ln in rl if ln is not anchors[k - 1]])
@@ -718,9 +722,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 
 def scenario_ko_kind(text: str) -> tuple[str, int | None] | None:
     """情境假設 e. 的 KO 觀察寫法 → (D, k)／(P, None)；不在範本規格內為 None（不合法）。"""
-    m = re.match(
-        r"從第([一二三四五六七八九十]{1,3})個配息觀察期間結束日\(含\)到最終評價日\(不含\)之每一預定交易日每日觀察", text
-    )
+    m = re.match(KO_DAILY_BODY, text)
     if m:
         return "D", CN_NUM.get(m[1])
     return ("P", None) if text.startswith("依第一章第12(7)項所列") else None
@@ -753,7 +755,7 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     first = (
         list(
             re.finditer(
-                BULLET + r"在較佳情況下，自動提前到期事件於第([一二三四五六七八九十]{1,3})個配息觀察期間結束日發生",
+                BULLET + r"在較佳情況下，自動提前到期事件於第" + CN_PERIOD + r"個配息觀察期間結束日發生",
                 section1[1],
             )
         )
