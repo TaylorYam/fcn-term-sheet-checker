@@ -19,7 +19,7 @@ from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
 from .common import NUM, Mention, dec, derived, number
-from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
+from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "jpm-zh-pd"
 PARSER_VERSION = "1"
@@ -561,10 +561,11 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
     """第 9 項標的表：表頭決定欄位與順序；每檔一列（列號、名稱、彭博代碼一行、交易所、價格＋下一行幣別字）。
 
     值：{"columns", "tickers", "rows": [{欄: Decimal}], "row_lines"}。表頭結束在最後一個價格欄名；
-    代碼以自成一行的「代號 交易所碼」切列，價格以「數字＋幣別字」切格。
+    代碼以自成一行的「代號 交易所碼」切列（換成兩行的先接回，Issue #257），價格以「數字＋幣別字」切格。
     """
     if not lines:
         return ParsedField.missing(name, "找不到標的表")
+    lines = join_wrapped_tickers(lines)
     first = next((i for i, ln in enumerate(lines) if TICKER_LINE.fullmatch(ln.text.strip())), None)
     if first is None:
         return ParsedField.invalid(name, lines, "標的表找不到彭博代碼")

@@ -6,13 +6,15 @@ import bisect
 import datetime as dt
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import InvalidOperation
 
 from ..schema import Line, ParsedField
 from ..text import full_brackets, squash
 
 DATE_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
+TICKER_SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9./-]*")  # 換行後只剩代號的一行（交易所碼在下一行）
+TICKER_EXCHANGE = re.compile(r"[A-Z]{2}")
 
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
@@ -57,6 +59,25 @@ def join_text(lines: Sequence[Line]) -> str:
         if out and re.search(r"[A-Za-z0-9.,)]$", out) and re.match(r"[A-Za-z0-9(]", t):
             out += " "
         out += t
+    return out
+
+
+def join_wrapped_tickers(lines: Sequence[Line]) -> list[Line]:
+    """標的表彭博代碼欄窄，4 碼以上的代號會換成兩行（`AVGO` / `UW`）；接回一行 `AVGO UW` 才認得出標的列。"""
+    out: list[Line] = []
+    for ln in lines:
+        prev = out[-1] if out else None
+        if prev and TICKER_EXCHANGE.fullmatch(ln.text.strip()) and TICKER_SYMBOL.fullmatch(prev.text.strip()):
+            out[-1] = replace(
+                prev,
+                x0=min(prev.x0, ln.x0),
+                y0=min(prev.y0, ln.y0),
+                x1=max(prev.x1, ln.x1),
+                y1=max(prev.y1, ln.y1),
+                text=f"{prev.text.strip()} {ln.text.strip()}",
+            )
+        else:
+            out.append(ln)
     return out
 
 
