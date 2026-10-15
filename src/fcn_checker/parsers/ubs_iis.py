@@ -24,7 +24,7 @@ PARSER_VERSION = "1"
 SECTIONS = ("警語", "相關機構", "商品事項", "商品風險揭露", "相關機構之權利、義務及責任")
 NOISE = re.compile(iis.PAGE_OF)
 D = ubs.D
-TICKER = r"彭博代碼[:：]([A-Z0-9][A-Z0-9./-]*?)(UW|UN|UQ|UA|UP|US|JT|HK|LN|FP|GY|KS|TT|AU|SP|NA|SW|IM)）"
+TICKER = r"彭博代碼[:：]([A-Z0-9][A-Z0-9./-]*?)([A-Z]{2})）"  # 去空白後「ABCUW）」：最後兩個大寫字母是交易所碼
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -56,12 +56,16 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
     lines = body(lines)
     text = TextIndex(lines).text
     head = squash(lines[0].text) if lines else ""
+    second = squash(lines[1].text) if len(lines) > 1 else ""
     zh = re.search(r"商品中文名稱[:：](.+?)[（(]下稱", text)
     en = re.search(r"商品英文名稱[:：](.+?)；商品種類", text)
     kind = re.search(r"商品種類[:：](.+?)。", text)
     failed = []
     for ok, message in (
-        (head == "中文投資人須知", "第一行不是「中文投資人須知」"),
+        (
+            head == "中文投資人須知" and second.startswith("商品中文名稱：瑞銀"),
+            "前兩行不是「中文投資人須知」「商品中文名稱：瑞銀…」",
+        ),
         (
             zh is not None and zh[1].startswith("瑞銀") and ubs.NAME_ZH_MARK in zh[1],
             f"中文名稱不是以「瑞銀」開頭或沒有「{ubs.NAME_ZH_MARK}」",
@@ -76,6 +80,10 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
             + ("（舊版範本「股權結構型債券」不支援）" if kind is not None and kind[1] == ubs.OLD_PRODUCT_TYPE else ""),
         ),
         (iis.in_order(text, SECTIONS), "段落標題不完整或順序不符：" + "、".join(SECTIONS)),
+        (
+            re.search(r"警語.+本投資人須知[刋刊]印日期[:：].+相關機構", text) is not None,
+            "警語與相關機構之間沒有刊印日期",
+        ),
         (re.search(r"[•‧]發行機構[:：]瑞士銀行", text) is not None, "相關機構沒有「發行機構：瑞士銀行」"),
     ):
         if not ok:
@@ -129,13 +137,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         ]
         fields["maturity_date"] = ParsedField.from_hits("maturity_date", found, missing_note="商品簡介 12. 讀不到日期")
     # 相關機構（審查標準）
-    issuer = raw.capture("issuing_branch", r"[•‧]\s*發行機構\s*[:：]\s*(.+?)\s*。")
-    fields["issuing_branch"] = issuer
+    branch = raw.capture("issuing_branch", r"[•‧]\s*發行機構\s*[:：]\s*(.+?)\s*。")
+    fields["issuing_branch"] = branch
     fields["issuer_names"] = standard_fields.occurrences(
         "issuer_names",
         [
             Occurrence(
-                "issuer_name_org", "發行機構名稱（相關機構）", "相關機構", ubs.derived_name(issuer, "issuer_name_org")
+                "issuer_name_org", "發行機構名稱（相關機構）", "相關機構", ubs.derived_name(branch, "issuer_name_org")
             )
         ],
     )

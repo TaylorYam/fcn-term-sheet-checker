@@ -9,7 +9,8 @@
 （相關機構事業概況）、`ts.risk`、`ts.warnings`（投資風險警語段）、`ts.general`（一般交易事項）、`ts.special`。
 投資人須知（docs/templates/ubs-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
 段落代號 `iis.cover`、`iis.warn`、`iis.org`（相關機構）、`iis.summary`（商品簡介）、`iis.fees`、`iis.rest`。
-真實文件每頁的私用區字元 U+F020 合成字型畫不出來，改由 tests/test_check_ubs.py 直接以擷取後的行測刪除。
+真實文件每頁的私用區字元 U+F020 合成字型畫不出來，改由 tests/test_iis_ubs.py 直接以擷取後的行測刪除（說明書與投資人須知
+共用 `parsers.ubs.clean_lines`）。
 """
 
 from __future__ import annotations
@@ -54,13 +55,15 @@ ZH_NUM = (
 ).split()
 
 
-def underlyings(count: int, market: str) -> tuple[UL, ...]:
-    """UBS 合成文件的標的：美股期初價 100n + 0.45，日股 1000n + 500（說明書一律 4 位小數）。"""
+def underlyings(count: int, market: str, long_name: bool = False) -> tuple[UL, ...]:
+    """UBS 合成文件的標的：美股期初價 100n + 0.45，日股 1000n + 500（說明書一律 4 位小數）；`long_name` 時第 1 檔名稱
+    長到價格表裡要拆兩行（真實樣本：`甲乙丙半導體公` ／ `司`）。"""
     out = []
     for i in range(1, count + 1):
         ticker = TICKERS[market][i - 1]
         initial = Decimal(1000 * i + 500) if market == "JT" else Decimal(100 * i) + Decimal("0.45")
-        out.append(UL(f"虛構控股{CN[i - 1]}公司", EXCHANGE[ticker.split()[1]], ticker, initial))
+        name = f"虛構控股{CN[i - 1]}半導體股份有限公司" if long_name and i == 1 else f"虛構控股{CN[i - 1]}公司"
+        out.append(UL(name, EXCHANGE[ticker.split()[1]], ticker, initial))
     return tuple(out)
 
 
@@ -93,9 +96,10 @@ class Spec(ProductSpec):
     trustee_label: str = "受託機構"  # 第 1 頁商品代號與受託機構名稱的標籤（新版另有「受託機構/銷售機構」）
     issue_price_amount: bool = True  # 發行價格「100%，即X幣別」；False 寫「每單位面額之100%」（沒有金額）
     ko_pct_in_clause: bool = False  # 非記憶式多標的的 KO 條款寫出「提前出場價（即期初價格的Y%）」
+    long_name: bool = False  # 第 1 檔標的名稱在價格表拆兩行
 
     def __post_init__(self) -> None:
-        self.underlyings = underlyings(self.count, self.market)
+        self.underlyings = underlyings(self.count, self.market, self.long_name)
         self.final_date = self.ends[-1]
         self.maturity_date = self.payments[-1]
 
@@ -306,13 +310,18 @@ def _price_table(d: _Doc, s: Spec) -> None:
     for u in s.underlyings:
         prices = [u.initial] + [price(u.initial, p) for _, _, p in cols]
         cells = [
-            (x["name"], u.name),
-            *[
-                (cx, f"{v:,.4f} {s.quote}")
-                for cx, v in zip([x["initial"], *[x[c] for c, _, _ in cols]], prices, strict=True)
-            ],
+            (cx, f"{v:,.4f} {s.quote}")
+            for cx, v in zip([x["initial"], *[x[c] for c, _, _ in cols]], prices, strict=True)
         ]
-        d.centered_row(cells, gap=16)
+        if len(u.name) > 8:  # 名稱拆兩行，價格垂直置中在兩行之間
+            d.w.need(28)
+            top, cut = d.w.y, 8
+            for dy, part in ((0, u.name[:cut]), (11, u.name[cut:])):
+                d.w.put(x["name"] - _width(part, 8) / 2, top + dy, part, 8)
+            d.w.y = top + 5.5
+            d.centered_row(cells, gap=22.5)
+            continue
+        d.centered_row([(x["name"], u.name), *cells], gap=16)
 
 
 def _coupon_table(d: _Doc, s: Spec) -> None:

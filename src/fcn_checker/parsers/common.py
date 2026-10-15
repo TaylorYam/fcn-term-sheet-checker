@@ -202,6 +202,21 @@ def header_columns(header: list[Line], gap: float = 15) -> list[tuple[float, str
     ]
 
 
+ZH_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def zh_number(s: str) -> int | None:
+    """中文數字（一～九十九）或阿拉伯數字 → int（Citi 自動提前出場起始期、UBS 項號「二十六、」）。"""
+    if s.isdigit():
+        return int(s)
+    if s in ZH_DIGITS:
+        return ZH_DIGITS[s]
+    m = re.fullmatch(r"([一二三四五六七八九]?)十([一二三四五六七八九]?)", s)
+    if not m:
+        return None
+    return (ZH_DIGITS.get(m[1], 1) if m[1] else 1) * 10 + (ZH_DIGITS[m[2]] if m[2] else 0)
+
+
 def compat_standard(text: str) -> str:
     """CJK 相容字（U+F900–U+FAFF）轉成標準字（例：U+F9DD → 利、U+F98E → 年）；其他字元不動，字數不變。"""
     return "".join(unicodedata.normalize("NFKC", c) if 0xF900 <= ord(c) <= 0xFAFF else c for c in text)

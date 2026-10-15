@@ -16,7 +16,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import NO_AUTOCALL_KO_PCT, NUM, Mention, dec, derived, ko_at_initial, number
+from .common import NO_AUTOCALL_KO_PCT, NUM, Mention, dec, derived, ko_at_initial, number, zh_number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "citi-zh-pd"
@@ -68,7 +68,6 @@ COVER_LABELS = (
 VALUE_X = 230.0  # 封面兩欄表：標籤在左（x < 230）、值與 ‧ 在右
 WARNING_HEAD = "警語："
 BULLETS = "‧•·"
-ZH_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 # 標的表與假設價格表的欄（表頭文字 → 欄）；欄位順序以表頭出現位置為準
 HEADERS = (("initial", "期初股價"), ("strike", "執行價"), ("ki", "下限價"), ("ko", "自動提前出場界限"))
 ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"  # 表格價格只寫中文幣別
@@ -80,18 +79,6 @@ AUTOCALL_LIMIT = r"自動提前出場界限：係指相關連結標的之期初�
 NO_AUTOCALL_KO_NOTE = "說明書沒有自動提前出場界限（Non-Call = 天期，不會提前出場）：KO 視為期初股價的 100%"
 ABSENT_KO = "說明書沒有自動提前出場（第 13 項沒有自動提前出場界限）"
 MEMORY_CLAUSE = "其將被視為已在"  # 逐檔記憶條款「…其將被視為已在該…及其後的…發生「買回自動提前出場」」
-
-
-def zh_number(s: str) -> int | None:
-    """中文數字（一～九十九）或阿拉伯數字 → int。"""
-    if s.isdigit():
-        return int(s)
-    if s in ZH_DIGITS:
-        return ZH_DIGITS[s]
-    m = re.fullmatch(r"([一二三四五六七八九]?)十([一二三四五六七八九]?)", s)
-    if not m:
-        return None
-    return (ZH_DIGITS.get(m[1], 1) if m[1] else 1) * 10 + (ZH_DIGITS[m[2]] if m[2] else 0)
 
 
 def document(lines: Sequence[Line]) -> Document:

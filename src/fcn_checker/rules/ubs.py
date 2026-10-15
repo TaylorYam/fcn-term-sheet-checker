@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, FieldStatus, Item, ParsedField
+from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from . import kit
 from .kit import Check, IssuerContext
@@ -82,7 +83,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
         ]
     for field, name, base in mentions:
         pf = f(field)
-        if pf.status.name == "NOT_APPLICABLE":
+        if pf.status == FieldStatus.NOT_APPLICABLE:
             continue
         out.append(
             kit.doc_check(ctx, "doc.coupon_mentions", field, name, base, pf).compare(
@@ -122,23 +123,21 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
         ("issuer_full_ch2", "相關機構事業概況發行機構的發行分行"),
     ):
         pf = f(field)
-        check = Check("doc.issuing_branch", field, Item.expected(name), ctx.document).needs(pf)
-        if (problem := check.blocked) is not None:
-            out.append(problem)
-            continue
-        ok = any(p in squash(pf.value) for p in BRANCH_PHRASES)
-        out.append(
-            check.compare(
-                "倫敦分行",
-                pf.value,
-                ok=ok,
-                fail=kit.S.REVIEW_REQUIRED,
-                reason="variant_not_covered",
-                tolerance="「經由瑞士境外之倫敦分行」「經由倫敦分行」「透過其倫敦分行」視為相同",
-                fail_message="發行分行不是倫敦分行（目前只支援瑞士銀行經由倫敦分行發行），請人工確認",
-            )
-        )
+        out.append(issuing_branch(Check("doc.issuing_branch", field, Item.expected(name), ctx.document), pf))
     return out
+
+
+def issuing_branch(check: Check, pf: ParsedField) -> CheckResult:
+    """發行機構寫法裡的發行分行是倫敦分行（三種寫法等價）；其他分行轉人工覆核（說明書與投資人須知共用）。"""
+    return check.needs(pf).compare(
+        "倫敦分行",
+        pf.value,
+        ok=pf.ok and any(p in squash(pf.value) for p in BRANCH_PHRASES),
+        fail=S.REVIEW_REQUIRED,
+        reason="variant_not_covered",
+        tolerance="「經由瑞士境外之倫敦分行」「經由倫敦分行」「透過其倫敦分行」視為相同",
+        fail_message="發行分行不是倫敦分行（目前只支援瑞士銀行經由倫敦分行發行），請人工確認",
+    )
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:

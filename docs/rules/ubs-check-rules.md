@@ -221,7 +221,8 @@
 |---|---|
 | 固定配息率 = 年利率 ÷ 12（4 位） | `derive.monthly_coupon` |
 | D 型變動配息率的 x 與年化 y、十五情境固定配息率與年化 = 八 | `doc.coupon_mentions` |
-| D 型固定配息期數 = Non-Call、`t 係為a 至b`；八與十二 `提前出場觀察日` 寫法相同 | `doc.autocall_terms` |
+| D 型固定配息期數 = Non-Call、`t 係為a 至b` | `doc.autocall_terms` |
+| 八與十二 `提前出場觀察日` 寫法不同：parser 交出不合法（`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核，同範本規格 §4.1） | （parser） |
 | 受託機構商品代號 = TDCC 商品代號 | `doc.trustee_product_code` |
 | 商品基本資料一中文名稱 = 第 1 頁 | `doc.name_consistency` |
 | 商品基本資料五幣別 = 第 1 頁 | `doc.currency_consistency` |
@@ -257,4 +258,4 @@ KO 型態與配息表種類不一致時，parser 交出不合法，`field.ko_obs
 | 2026-10-15 | 投資人須知核對範圍如[投資人須知核對規則](iis-check-rules.md) §3 UBS 欄（沒有商品代號、ISIN 等欄位不核對、不報缺漏） |
 | 2026-10-15 | UB4 表上計價幣別是表上填錯 |
 | 2026-10-15 | 發行主體只有瑞士銀行經由倫敦分行；參考條件表 `發行機構` 欄 UBS 寫 `UBS` |
-| 2026-10-15 | 實作時決定：名稱的括號版與句尾「。」由 parser 正規化（說明書第 1 頁、商品基本資料一、投資人須知都適用）；名稱新佔位符 `{ko_observation_*}`（`daily_*`／`periodic_*`）、`{ki_*}`；投資人須知的發行分行用範本專屬規則 `iis.issuing_branch`；發行價格寫「每單位面額之100%」（沒有金額）時不列入金額旁的幣別出處；最低交易金額的倍數鍵為 `minimum_trade`；本機 6 份結果與 §5 一致（新版 3 份通過並回填） |
+| 2026-10-15 | 實作時決定：名稱的括號版與句尾「。」由 parser 正規化（說明書第 1 頁、商品基本資料一、投資人須知都適用）；名稱新佔位符 `{ko_observation_*}`（`daily_*`／`periodic_*`）、`{ki_*}`；投資人須知的發行分行用範本專屬規則 `iis.issuing_branch`；發行價格寫「每單位面額之100%」（沒有金額）時不列入金額旁的幣別出處；最低交易金額的倍數鍵為 `minimum_trade`；版面不用共用 `LayoutSpec`（沒有章號，改用 `UbsDocument`：段名單獨一行、段內項號依序）；八與十二提前出場觀察日寫法一致由 parser 檢查（不一致轉人工覆核，不另設 `doc.autocall_terms` 結果）；無 KI 須價格表讀得到且到期日給付直接比轉換價（code review 後補上）；投資人須知彭博代碼的交易所碼不限清單（code review 後放寬）；本機 6 份結果與 §5 一致（新版 3 份通過並回填） |

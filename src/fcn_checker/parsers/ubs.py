@@ -20,7 +20,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import RawText, capture_group, dec, derived, fee_rates, header_columns, number
+from .common import RawText, capture_group, dec, derived, fee_rates, header_columns, number, zh_number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
@@ -35,7 +35,7 @@ REP_LABEL = "六、發行人（即依「境外結構型商品管理規則」所�
 ARTICLES = 26  # 商品基本資料項數
 PAGE = re.compile(r"^第\d+\s?頁，共\d+頁$")
 PAGE_Y = 770  # 頁碼在頁底（y≈781）
-PUA = re.compile("[-]")  # Symbol 字型的私用區字元（U+F020）
+PUA = re.compile("[\uf000-\uf0ff]")  # Symbol 字型的私用區字元（U+F020）
 ITEM = re.compile(r"^([一二三四五六七八九十]{1,3})、")
 ITEM_X = 45  # 項號左緣 x≈36
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
@@ -60,17 +60,6 @@ KI_KINDS = (
 # 價格表欄（依表頭關鍵字的出現順序決定欄序；UBS 是 K → KI → KO）
 PRICE_HEADS = (("strike", "轉換價"), ("ki", "下限價"), ("ko", "提前出場價"))
 PRICE = re.compile(r"^([\d,]+\.\d{4})(?!\d|\s*%)")
-_ZH_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
-
-
-def zh_number(text: str) -> int | None:
-    """一～九十九的中文數字（十、十一、二十、二十六）。"""
-    if text in _ZH_DIGITS:
-        return _ZH_DIGITS[text]
-    m = re.fullmatch(r"([二三四五六七八九]?)十([一二三四五六七八九]?)", text)
-    if not m:
-        return None
-    return (_ZH_DIGITS[m[1]] if m[1] else 1) * 10 + (_ZH_DIGITS[m[2]] if m[2] else 0)
 
 
 def clean_lines(lines: Sequence[Line]) -> list[Line]:
@@ -296,7 +285,7 @@ def _article8(fields: dict[str, ParsedField], art8: list[Line], put: Callable) -
     fields["issue_price_currency"] = capture_group(
         art8, r"發行價格[:：]\d+(?:\.\d+)?%，即[\d,]+\.\d{2}(" + CCY + ")", 1, "issue_price_currency"
     )
-    if not fields["issue_price_currency"].ok and fields["issue_price_currency"].status == FieldStatus.MISSING:
+    if fields["issue_price_currency"].status == FieldStatus.MISSING:
         fields["issue_price_currency"] = standard_fields.absent("issue_price_currency", "發行價格的金額")
     denom = rf"每單位面額[:：]{AMOUNT}。"
     put("denomination", art8, denom, number)
@@ -403,8 +392,9 @@ def _memory(fields: dict[str, ParsedField], ti: TextIndex) -> None:
             "ko_memory", ti.lines, "記憶式句型「即使各股票在不同提前出場觀察日成為鎖定股票」與「鎖定股票」定義只有其一"
         )
         return
-    p = ti.text.find(MEMORY) if sentence else ti.text.find("提前出場事件視同")
-    ev = ti.lines_for(p, p + len(MEMORY)) if p >= 0 else ti.lines
+    anchor = MEMORY if sentence else "提前出場事件視同"
+    p = ti.text.find(anchor)
+    ev = ti.lines_for(p, p + len(anchor)) if p >= 0 else ti.lines
     fields["ko_memory"] = ParsedField.present("ko_memory", sentence, ev)
 
 
@@ -415,10 +405,15 @@ def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:
     maturity = "若觸及下限事件" in text
     has_col = table.ok and "ki" in table.value["columns"]
     if not defs and not maturity:
+        # 無 KI 要由說明書明確判定：沒有定義句、到期日給付直接比轉換價、價格表讀得到且沒有下限價欄（核對規則 §4）
+        if not table.ok:
+            return derived("ki_type", table)
         if has_col:
             return ParsedField.invalid("ki_type", ti.lines, "價格表有下限價欄，但沒有觸及下限事件")
-        p = text.find("到期日給付")
-        return ParsedField.present("ki_type", "none", ti.lines_for(p, p + 5) if p >= 0 else [])
+        p = text.find("收盤價低於轉換價")
+        if p < 0:
+            return ParsedField.invalid("ki_type", ti.lines, "沒有觸及下限事件，到期日給付也不是直接比轉換價")
+        return ParsedField.present("ki_type", "none", ti.lines_for(p, p + 8))
     if len(defs) != 1 or not maturity:
         return ParsedField.invalid("ki_type", ti.lines, "觸及下限事件的定義與到期日給付寫法不一致或不在範本規格內")
     m = defs[0]

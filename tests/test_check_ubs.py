@@ -73,6 +73,13 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert bool([x for x in r.results if x.rule_id == "doc.ko_pct_mentions"]) == spec.ko_pct_in_clause
 
 
+def test_wrapped_underlying_name_stays_in_its_row(tmp_path):
+    """價格表的長標的名稱拆兩行（價格置中在兩行之間）：名稱接回一列，照常對到第九項的代碼並通過。"""
+    item = check_item(tmp_path, Spec(long_name=True))
+    assert item.report.status == S.PASS, problems(item.report)
+    assert item.fills_sheet
+
+
 def test_daily_autocall_dates_are_the_non_call_and_last_period_ends(tmp_path):
     spec = Spec(first_callable=2)
     r = check(tmp_path, spec)
