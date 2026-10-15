@@ -114,7 +114,7 @@ class ReviewStandard:
     issue_price_pct: Decimal
     risk_level: str
     fixed_warning: str
-    fixed_warning_occurrences: int
+    fixed_warning_occurrences: int  # 說明書的固定警語次數（沒有上手別設定的上手）
     forbidden: tuple[str, ...]
     allowed_phrases: tuple[str, ...]
     product_names: dict[str, ProductNameTemplate]  # 上手代號（小寫）→ 名稱樣板
@@ -124,6 +124,8 @@ class ReviewStandard:
     iis_pages: int  # 投資人須知必須剛好的頁數
     iis_fixed_warning_occurrences: dict[str, int]  # 上手代號（小寫）→ 固定警語在投資人須知出現的次數
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
+    # 上手代號（小寫）→ 固定警語在說明書出現的次數（risk.fixed_warning_occurrences_by_issuer；沒列出的上手用 fixed_warning_occurrences）
+    fixed_warning_occurrences_by_issuer: dict[str, int] = field(default_factory=dict)
     distributor_phone_equivalents: tuple[str, ...] = ()
     distributor_address_equivalents: tuple[str, ...] = ()
     distributor_name_equivalents: tuple[str, ...] = ()
@@ -158,7 +160,7 @@ class ReviewStandard:
                 *(alt + rest for alt in self.fixed_warning_openings.get(key, ())),
                 *self.fixed_warning_variants.get(key, ()),
             ),
-            fixed_warning_occurrences=self.fixed_warning_occurrences,
+            fixed_warning_occurrences=self.fixed_warning_occurrences_by_issuer.get(key, self.fixed_warning_occurrences),
             risk_level_formats=self.risk_level_formats.get(key, ("【" + RISK_LEVEL + "】",)),
             issuer_name=self.issuer_names.get(key),
             issuer_name_ignore=self.issuer_name_ignore.get(key, frozenset()),
@@ -405,6 +407,11 @@ def _min_amount_multiples(d: Any) -> dict[str, dict[str, int | dict[str, int]]]:
     )
 
 
+def _occurrence_counts(d: Any, where: str) -> dict[str, int]:
+    """上手代號（小寫）→ 固定警語次數：須是正整數。"""
+    return _per_issuer(d, where, lambda v: type(v) is int and v > 0, "正整數")
+
+
 def _approval_dates(value: Any) -> tuple[dt.date, ...]:
     """distributor.approval_dates：至少一筆、都是日期、不重複；回傳由舊到新。"""
     where = "審查標準 distributor.approval_dates"
@@ -444,6 +451,9 @@ def load_review_standard(path: Path) -> ReviewStandard:
             **_risk_extras(d["risk"], warnings),
             issuer_name_ignore=_issuer_name_ignore(d.get("issuer_name_ignore", {})),
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),
+            fixed_warning_occurrences_by_issuer=_occurrence_counts(
+                d["risk"].get("fixed_warning_occurrences_by_issuer", {}), "risk.fixed_warning_occurrences_by_issuer"
+            ),
             forbidden=tuple(d["wording"]["forbidden"]),
             allowed_phrases=tuple(d["wording"]["allowed_phrases"]),
             forbidden_exempt_until=d["wording"].get("exempt_until"),

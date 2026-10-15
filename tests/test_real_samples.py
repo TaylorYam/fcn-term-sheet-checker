@@ -39,10 +39,18 @@ def test_other_issuers_are_unsupported(reports):
     others = [
         i
         for i in reports.values()
-        if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037", "159", "076"))
-    ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py、SG 見 test_real_sg.py、Citi 見 test_real_citi.py、JPM 見 test_real_jpm.py
+        if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037", "159", "076", "156"))
+    ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py、SG 見 test_real_sg.py、Citi 見 test_real_citi.py、JPM 見 test_real_jpm.py、
+    # Nomura 見 test_real_nomura.py
     assert others, "本機應有其他上手的負面樣本"
     assert all(i.unsupported and i.report.status == CheckStatus.REVIEW_REQUIRED for i in others)
+
+
+def test_no_other_issuer_is_recognised_as_nomura(reports):
+    """其他上手的說明書與投資人須知都不會被判成 Nomura 範本（Issue #239）。"""
+    nomura = {"nomura-zh-pd", "nomura-zh-iis"}
+    others = [i for i in reports.values() if not i.term_sheet.name.startswith("156")]
+    assert others and all(i.report.template not in nomura for i in others)
 
 
 def test_document_rules_only_flag_old_format_documents(reports):

@@ -73,8 +73,9 @@ def test_missing_trade_date_needs_review(tmp_path):
 # ---------------------------------------------------------------- 設定檔載入
 
 
-def test_repo_standard_keeps_both_known_approval_dates():
-    assert load_review_standard(REVIEW_STANDARD).approval_dates == (D(2025, 12, 18), D(2026, 6, 11))
+def test_repo_standard_keeps_every_known_approval_date():
+    """2025-06-24：Nomura 2025 年文件寫的日期，作業人員確認是受託機構真實的歷次審查日期（Issue #239）。"""
+    assert load_review_standard(REVIEW_STANDARD).approval_dates == (D(2025, 6, 24), D(2025, 12, 18), D(2026, 6, 11))
 
 
 def test_dates_are_sorted_when_loaded(tmp_path):

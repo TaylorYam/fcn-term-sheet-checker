@@ -25,7 +25,7 @@ FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料�
 
 | 類別 | 內容 |
 |---|---|
-| 跟參考條件表比 | 幣別（封面與每一處金額旁的幣別字；商品幣別不必等於標的幣別）、面額、標的與各標的進場價／執行價／下限價／KO 價（`期初定價` 為 `VWAP` 時不比，改以說明書回填）、執行 %、KO %、KI %、提前出場觀察方式、記憶式、KI 型態、年利率、天期、交易日／發行日／最終比價日／到期日、Non-Call |
+| 跟參考條件表比 | 幣別（封面與每一處金額旁的幣別字；商品幣別不必等於標的幣別）、面額、標的與各標的進場價／執行價／下限價／KO 價（`期初定價` 為 `VWAP` 時不比，改以說明書回填；空白時照常比對，Citi 依說明書表頭判斷是否 VWAP）、執行 %、KO %、KI %、提前出場觀察方式、記憶式、KI 型態、年利率、天期、交易日／發行日／最終比價日／到期日、Non-Call |
 | 說明書自己前後一致 | 同一數字出現在多處要相同；價格 = 最初價格 × 百分比；配息表、提前出場表日期與情境試算算得通 |
 | 投資人須知（Issue #124） | 剛好 4 頁；產品條件和參考條件表一致，參考條件表沒有的（ISIN、名稱、最低申購金額、標的中文名稱、發行日）和說明書一致；風險等級、固定警語、受託機構、發行機構、禁用詞、費率、刊印日期。只核對該上手投資人須知範本有的項目（[核對規則](docs/rules/iis-check-rules.md)） |
 | 公司規定（審查標準） | 受託機構名稱／電話／地址、負責人姓名字碼、固定警語全文與出現次數、風險等級、禁用詞、費率、商品名稱格式、面額。規定改變時只改設定檔，不改程式 |
@@ -67,7 +67,7 @@ PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化
 - 第五家上手（已實作 Issue #194）：法國興業（SG，`037`）中文產品說明書，6 份文字型 PDF（兩種版面都支援），規格見 [SG 範本規格](docs/templates/sg-zh-product-description.md)、[下單資料格式](docs/order-formats/sg-fcn-reference.md)、[核對規則](docs/rules/sg-check-rules.md)、[審查標準 §2.8](docs/rules/review-standard.md)（作業人員決定跳過雙方螢光取交集，Issue #192）。SG 特有：章名「一、商品基本資料」、§8 集中所有條件、保證機構與總代理人名稱、商品種類「債券」、無自動提前出場型態（表上 KO(Freq)=P、Non-Call=天期）、最低申購依幣別倍數、配息率固定 4 位、第一章警語的半形方括號 `[RR4]`。投資人須知尚無範本（另開 Issue），SG 商品不回填。
 - 第六家上手（說明書與投資人須知已實作，Issue #220）：花旗（Citi，`159`）中文產品說明書與投資人須知各 8 份文字型 PDF：[說明書範本規格](docs/templates/citi-zh-product-description.md)、[投資人須知範本規格](docs/templates/citi-zh-iis.md)、[下單資料格式](docs/order-formats/citi-fcn-reference.md)、[核對規則](docs/rules/citi-check-rules.md)、[審查標準 §2.9](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。Citi 特有：Citi 版本固定警語（沒有 OSU 段：Citi 商品 OSU 客戶不能承作）、標的依代號配對不看順序、參考條件表「期初定價」欄可核對、保證機構與總代理人名稱、發行不成立門檻；新增兩個「受託投資」允許片語（所有上手）。
 - 第七家上手（說明書與投資人須知已實作，Issue #233）：摩根大通（JPM，`076`）中文產品說明書與投資人須知各 5 份文字型 PDF：[說明書範本規格](docs/templates/jpm-zh-product-description.md)、[投資人須知範本規格](docs/templates/jpm-zh-iis.md)、[下單資料格式](docs/order-formats/jpm-fcn-reference.md)、[核對規則](docs/rules/jpm-check-rules.md)、[審查標準 §2.10](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。JPM 特有：羅馬數字章名「I. 商品基本資料」、KI 叫「觸碰價」、JPM 版本固定警語（無【】、OSU 段改寫）、標的依英文公司名稱排序（依代號配對不看順序，比照 Citi）、名稱樣板不分型態、沒有發行不成立門檻與月配息率；新增「受託投資/受託買賣」允許片語（所有上手）。
-- 第八家上手（規格完成、待實作，Issue #239）：野村（Nomura，`156`）中文產品說明書與投資人須知各 8 份文字型 PDF：[說明書範本規格](docs/templates/nomura-zh-product-description.md)、[投資人須知範本規格](docs/templates/nomura-zh-iis.md)、[下單資料格式](docs/order-formats/nomura-fcn-reference.md)、[核對規則](docs/rules/nomura-check-rules.md)、[審查標準 §2.11](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。Nomura 特有：說明書只寫每月配息率（× 12 = 年利率，情境年化報酬率另核）、K／KO／KI % 只在標的表表頭、KI 叫「下限觸發價」（含每期觀察）、固定警語 SG 版本但說明書只 2 次（需新增上手別次數設定）、投資人須知沒有刊印日期與價格表、名稱依記憶式與標的數變化；受託機構審查日期清單加 2025-06-24（所有上手）。
+- 第八家上手（說明書與投資人須知已實作，Issue #239）：野村（Nomura，`156`）中文產品說明書與投資人須知各 8 份文字型 PDF：[說明書範本規格](docs/templates/nomura-zh-product-description.md)、[投資人須知範本規格](docs/templates/nomura-zh-iis.md)、[下單資料格式](docs/order-formats/nomura-fcn-reference.md)、[核對規則](docs/rules/nomura-check-rules.md)、[審查標準 §2.11](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。Nomura 特有：說明書只寫每月配息率（× 12 = 年利率，情境年化報酬率另核）、K／KO／KI % 只在標的表表頭、KI 叫「下限觸發價」（含每期觀察）、固定警語 SG 版本但說明書只 2 次（審查標準新增上手別說明書次數設定 `risk.fixed_warning_occurrences_by_issuer`）、投資人須知沒有刊印日期與價格表、頁碼「N/4」、名稱依記憶式與標的數變化；受託機構審查日期清單加 2025-06-24（所有上手）。
 - 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
 
 ## 安裝
@@ -178,7 +178,7 @@ ruff check src tests
 - SG（已實作說明書與投資人須知）：[範本規格](docs/templates/sg-zh-product-description.md)、[下單資料格式](docs/order-formats/sg-fcn-reference.md)、[核對規則](docs/rules/sg-check-rules.md)
 - Citi（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/citi-zh-product-description.md)、[投資人須知範本規格](docs/templates/citi-zh-iis.md)、[下單資料格式](docs/order-formats/citi-fcn-reference.md)、[核對規則](docs/rules/citi-check-rules.md)
 - JPM（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/jpm-zh-product-description.md)、[投資人須知範本規格](docs/templates/jpm-zh-iis.md)、[下單資料格式](docs/order-formats/jpm-fcn-reference.md)、[核對規則](docs/rules/jpm-check-rules.md)
-- Nomura（規格完成、待實作）：[說明書範本規格](docs/templates/nomura-zh-product-description.md)、[投資人須知範本規格](docs/templates/nomura-zh-iis.md)、[下單資料格式](docs/order-formats/nomura-fcn-reference.md)、[核對規則](docs/rules/nomura-check-rules.md)
+- Nomura（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/nomura-zh-product-description.md)、[投資人須知範本規格](docs/templates/nomura-zh-iis.md)、[下單資料格式](docs/order-formats/nomura-fcn-reference.md)、[核對規則](docs/rules/nomura-check-rules.md)
 - 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)、[MS 範本規格](docs/templates/ms-zh-iis.md)、[BNP 範本規格](docs/templates/bnp-zh-iis.md)、[SG 範本規格](docs/templates/sg-zh-iis.md)、[Citi 範本規格](docs/templates/citi-zh-iis.md)、[JPM 範本規格](docs/templates/jpm-zh-iis.md)、[Nomura 範本規格](docs/templates/nomura-zh-iis.md)
 - ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表](docs/adr/0004-reference-sheet-as-check-source.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)、[0007 投資人須知與說明書成對核對](docs/adr/0007-iis-paired-with-term-sheet.md)
 - [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。

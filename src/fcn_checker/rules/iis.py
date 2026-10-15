@@ -28,6 +28,7 @@ from .kit import (
     Q4,
     Check,
     Context,
+    annual_of_period,
     cmp_pct,
     order_review,
     order_value,
@@ -211,6 +212,27 @@ def _monthly_coupons(ctx: Context) -> list[CheckResult]:
     ]
 
 
+def _coupon_per_period(ctx: Context) -> CheckResult:
+    """每期配息率（Nomura）× 12，四捨五入（half-up）到 2 位 = 參考條件表年利率（同 Nomura 說明書 §3.3）。"""
+    rid, key = "iis.coupon_pa", "coupon_per_period_pct"
+    pf = read_iis(ctx.iis, key)
+    annual, ov, problem = order_value(ctx, "coupon_pa_pct", rid, key, pf, to_decimal, "數字", name="年利率 %")
+    if problem:
+        return problem
+    item = Item.derived("年利率 %（每期配息率 × 12）", [ov])
+    check = Check(rid, key, item, ctx.document, ov=(ov,)).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
+    derived = annual_of_period(pf.value)
+    return check.compare(
+        annual,
+        derived,
+        ok=derived == annual,
+        tolerance="每期配息率 × 12 四捨五入（half-up）到 2 位後比數值",
+        message=f"推算：每期配息率 {pf.value}% × 12 = {derived}%",
+    )
+
+
 def _first_callable(ctx: Context) -> CheckResult:
     """「自第 k 個…開始」的 k = 參考條件表 Non-Call(月)（第一個可以提前出場的期別）。"""
     rid, key, name = "field.first_callable_period", "first_callable_period", "第一個可提前出場期"
@@ -270,6 +292,7 @@ def reference_fields(ctx: Context) -> list[CheckResult]:
         ("coupon_pa_pct", lambda: table["coupon_pa_pct"].check(ctx)),
         ("monthly_coupon_pct", lambda: _monthly_coupon(ctx)),
         ("monthly_coupon_shown_pct", lambda: _monthly_coupon_shown(ctx)),
+        ("coupon_per_period_pct", lambda: _coupon_per_period(ctx)),
         ("strike_pct", lambda: table["strike_pct"].check(ctx)),
         ("ko_pct", lambda: table["ko_pct"].check(ctx)),
         ("ki_pct", lambda: _KI_PCT.check(ctx)),

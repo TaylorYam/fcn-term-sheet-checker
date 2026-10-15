@@ -1,4 +1,5 @@
-"""期初定價（Issue #122）：參考條件表「期初定價」欄，VWAP 商品的四個價格欄不比對、改以說明書覆寫。
+"""期初定價（Issue #122、#246）：參考條件表「期初定價」欄，VWAP 商品的四個價格欄不比對、改以說明書覆寫；
+空白時當成不是 VWAP，價格照常比對。
 
 測試切點是批量入口（run_batch／check_all、save_batch）與 PANEL 回填決策文字（PanelOutcome.backfill_text）；回填結果讀核對結果檔「回填後」。
 只用合成資料（tests/synth.py）；預期價格是依合成說明書的期初價格與百分比手算的字面值。
@@ -80,12 +81,34 @@ def test_open_or_close_pricing_still_compares_the_sheet_prices(tmp_path, pricing
     assert not [d for d in item.report.backfill if d.column.startswith("UL_")], "價格欄不是回填欄位"
 
 
-@pytest.mark.parametrize(("pricing", "shown"), [(None, "空白"), ("均價", "均價")])
-def test_blank_or_unknown_pricing_requires_review_naming_the_column(tmp_path, pricing, shown):
-    item, receipt, spec = run(tmp_path, 期初定價=pricing)
+def test_blank_pricing_passes_compares_the_sheet_prices_and_fills_the_sheet(tmp_path):
+    """表上期初定價空白不報錯，當成不是 VWAP：價格照常比對（Issue #246）。"""
+    item, receipt, spec = run(tmp_path, 期初定價=None)
+    assert item.report.status.value == "PASS", [r for r in item.report.results if r.status.is_problem]
+    [pricing] = [r for r in item.report.results if r.rule_id == "field.initial_pricing"]
+    assert pricing.message == "表上未填期初定價，各標的價格與說明書比對", pricing.message
+    assert receipt.filled(item)
+    assert not [d for d in item.report.backfill if d.column.startswith("UL_")], "價格欄不是回填欄位"
+
+
+def test_blank_pricing_with_a_wrong_sheet_price_is_a_mismatch(tmp_path):
+    item, receipt, spec = run(tmp_path, 期初定價=None, UL_1_進場價=1.0)
+    assert item.report.status.value == "MISMATCH"
+    assert [m for m in item.problem_messages if m.startswith("UL_1 進場價對不起來")], item.problem_messages
+
+
+def test_blank_pricing_with_blank_sheet_prices_is_not_filled_from_the_term_sheet(tmp_path):
+    """說明書沒寫期初定價時，空白不會被當成 VWAP：表上價格空白照常轉人工覆核，不回填。"""
+    item, receipt, spec = run(tmp_path, 期初定價=None, **BLANK)
+    assert item.report.status.value == "REVIEW_REQUIRED"
+    assert not receipt.filled(item)
+
+
+def test_unknown_pricing_requires_review_naming_the_column(tmp_path):
+    item, receipt, spec = run(tmp_path, 期初定價="均價")
     assert item.report.status.value == "REVIEW_REQUIRED"
     [message] = item.problem_messages
-    assert message.startswith("期初定價") and shown in message, message
+    assert message.startswith("期初定價") and "均價" in message, message
     assert not receipt.filled(item)
 
 
