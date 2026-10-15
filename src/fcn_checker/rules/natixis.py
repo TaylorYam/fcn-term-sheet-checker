@@ -1,5 +1,5 @@
 """Natixis 專屬規則（docs/rules/natixis-check-rules.md）：月配息率與年利率其他出處、說明書內部交叉驗證、日期表（KO 每日／
-每期兩種）、連結標的表表頭、情境假設與情境價格表、空白的受託機構商品代號。
+每期兩種）、第 9 項價格表表頭、情境假設與情境價格表、空白的受託機構商品代號。
 
 參考條件表欄位、價格推算、審查標準（含 Natixis 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
 規則。說明書有年利率，不讀參考條件表（REFERENCE_FIELDS 為空）。發行人、保證機構名稱、發行不成立門檻與期初定價依作業人員
@@ -26,7 +26,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.underlying_names",
-        "description": "連結標的發行公司名稱、本交易所、貨幣欄不核對；以連結標的表彭博代碼為準",
+        "description": "連結標的發行公司名稱、本交易所、貨幣欄不核對；以第 9 項價格表彭博代碼為準",
     },
     {"rule_id": "doc.initial_prices", "description": "期初進場價格本身的外部正確性（沒有權威來源）"},
     {
@@ -222,7 +222,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KI：觸及事件判定寫法 ⇔ 連結標的表有無界限價格欄 ⇔ 有無「界限價格」定義（不一致轉人工覆核）。"""
+    """KI：觸及事件判定寫法 ⇔ 第 9 項價格表有無界限價格欄 ⇔ 有無「界限價格」定義（不一致轉人工覆核）。"""
     f = ctx.ts.f
     ki, table, definition = f("ki_type"), f("underlying_table"), f("ki_def_pct")
     doc_ki = kit.doc_ki(ki)
@@ -231,12 +231,12 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
     label = {True: "有 KI", False: "無 KI"}
     has = doc_ki != "none"
     return [
-        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "連結標的表界限價格欄", ki, table).compare(
+        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "第 9 項價格表界限價格欄", ki, table).compare(
             label[has],
-            label["ki" in table.value["columns"]] if table.ok else None,
+            label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="連結標的表有無界限價格欄須與觸及事件寫法一致",
+            fail_message="第 9 項價格表有無界限價格欄須與觸及事件寫法一致",
         ),
         kit.doc_check(ctx, "doc.ki_consistency", "ki_def_pct", "第 15 項「界限價格」定義", ki).compare(
             label[has],
@@ -249,21 +249,21 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """連結標的表表頭 % = 第 14、15 項定義；情境價格表逐格 = 連結標的表、表頭 % 相同；情境假設 a. 面額 = 第一章第 5 項。"""
+    """第 9 項價格表表頭 % = 第 14、15 項定義；情境價格表逐格 = 第 9 項價格表、表頭 % 相同；情境假設 a. 面額 = 第一章第 5 項。"""
     f = ctx.ts.f
     table = f("underlying_table")
     out = []
     for col, key, name in (
-        ("ko", "ko_def_pct", "連結標的表自動提前到期贖回價格欄頭 %"),
-        ("ki", "ki_def_pct", "連結標的表界限價格欄頭 %"),
-        ("strike", "strike_def_pct", "連結標的表執行價格欄頭 %"),
+        ("ko", "ko_def_pct", "第 9 項價格表自動提前到期贖回價格欄頭 %"),
+        ("ki", "ki_def_pct", "第 9 項價格表界限價格欄頭 %"),
+        ("strike", "strike_def_pct", "第 9 項價格表執行價格欄頭 %"),
     ):
-        if table.ok and col not in table.value["pcts"]:
+        if table.ok and col not in table.value.pcts:
             continue  # 沒有這欄（無 KI）：一致性由 ki_terms 檢查
         pf = f(key)
         out.append(
             kit.doc_check(ctx, "doc.table_header_pct", f"header_{col}", name, pf, table).compare(
-                pf.value, table.value["pcts"].get(col) if table.ok else None
+                pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
     scen, denom, scen_denom = f("scenario_table"), f("denomination"), f("scenario_denomination")
@@ -272,16 +272,16 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     )
     if table.ok and scen.ok and denom.ok and scen_denom.ok:
         issues = []
-        if scen.value["pcts"] != table.value["pcts"]:
-            issues.append("情境價格表表頭 % 和連結標的表不同")
-        rows, own = scen.value["rows"], table.value["rows"]
+        if scen.value.pcts != table.value.pcts:
+            issues.append("情境價格表表頭 % 和第 9 項價格表不同")
+        rows, own = scen.value.prices, table.value.prices
         if len(rows) != len(own):
-            issues.append(f"情境價格表 {len(rows)} 列，連結標的表 {len(own)} 列")
+            issues.append(f"情境價格表 {len(rows)} 列，第 9 項價格表 {len(own)} 列")
         else:
             for n, (a, b) in enumerate(zip(rows, own, strict=True), start=1):
                 diff = [c for c in b if a.get(c) != b[c]]
                 if diff:
-                    issues.append(f"第 {n} 列{'、'.join(diff)}和連結標的表不同")
+                    issues.append(f"第 {n} 列{'、'.join(diff)}和第 9 項價格表不同")
         if scen_denom.value != denom.value:
             issues.append(f"情境假設面額 {scen_denom.value} 不等於每單位商品面額 {denom.value}")
         out.append(
@@ -290,7 +290,7 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
                 None,
                 ok=not issues,
                 reason="value_mismatch",
-                message="；".join(issues) or "等於連結標的表與每單位商品面額",
+                message="；".join(issues) or "等於第 9 項價格表與每單位商品面額",
             )
         )
     else:

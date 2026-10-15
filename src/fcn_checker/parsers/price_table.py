@@ -296,7 +296,7 @@ def _split(lines: list[Line], first: Line, spec: TableSpec) -> tuple[list[Line],
             continue
         if any(_adjacent(c[-1], b) for b in below):
             attached += c
-    header = [ln for ln in above if ln not in attached and (ln.page, ln.y1) > start]
+    header = [ln for ln in above if ln not in attached and (ln.page, _yc(ln)) >= start]
     return header, below + attached
 
 
@@ -444,8 +444,8 @@ def _rows(
         ln = body[i]
         uppers = [j for j in head if column[j] == column[i] and _adjacent(body[j], ln)]
         for j in sorted(uppers, key=lambda j: body[j].y1, reverse=True):
-            joined = text[head[j]] + squash(ln.text)
-            if not COMPLETE.fullmatch(text[head[j]]) and VALUE.fullmatch(joined):
+            if _continues(text[head[j]], squash(ln.text)):
+                joined = text[head[j]] + squash(ln.text)
                 head[i] = head[j]
                 text[head[j]] = joined
                 row_of[i] = row_of[head[j]]
@@ -457,6 +457,19 @@ def _rows(
     for i, ln in enumerate(body):
         rows[row_of[i]].append(ln)
     return rows
+
+
+def _continues(upper: str, lower: str) -> bool:
+    """`lower` 是 `upper` 那一格換下來的部分：接起來剛好一個值，而且是幣別字（`日圓`）、數字前的幣別字那一格的
+    數字（`美元` / `123.4567`）或小數的後幾位（`19,740.000` / `0日圓`、`123.456` / `7`）。兩個完整的整數不接。"""
+    if COMPLETE.fullmatch(upper) or not VALUE.fullmatch(upper + lower):
+        return False
+    digits = re.compile(r"\d")
+    return (
+        not digits.search(lower)
+        or not digits.search(upper)
+        or ("." in upper and upper[-1].isdigit() and not re.search(r"[.,]", lower))
+    )
 
 
 def _column_of(ln: Line, cols: dict[str, _Col], others: list[list[Line]]) -> str | None:
