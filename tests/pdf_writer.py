@@ -71,7 +71,8 @@ class PdfWriter:
     寫入的每個文字單位（`put`／`line`／`row` 一格／`para` 整段／`numbered` 標題）先套用 `edits` 中涵蓋
     目前段落（`kind`.`section`）的改字；合成器自行分行的文字先以 `edit` 整段改過，再在 `verbatim()` 內寫入。
 
-    同一頁的文字共用一個 `Shape`，換頁或取用 `doc` 時才 commit（每段各自 `page.insert_text` 太慢）。
+    同一頁的文字共用一個 `Shape`，換頁或取用 `doc` 時才 commit（每段各自 `page.insert_text` 太慢）；
+    合成器另外加字請經由 `doc`（例：`w.doc[0].insert_text`），不要直接寫 `page`，否則會排在尚未 commit 的內文之前。
     """
 
     TOP, BOTTOM = 80.0, 770.0
