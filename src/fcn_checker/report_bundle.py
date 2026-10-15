@@ -3,8 +3,9 @@
 PANEL「匯出回報包…」呼叫 `export_bundle`，不需要先儲存核對結果，也不寫核對紀錄。資料夾結構是平的，
 維護者拿到後可以直接用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 原樣重跑：
 
-- `回報總表.xlsx`：「回報」一條錯訊一列（上手、TDCC、TS or IIS、錯訊、我的判斷、備註；不列檔名，Issue #234），「我的判斷」是
-  誤報／真錯／不確定的下拉選單，由作業人員填；「摘要」是這批各類別的份數。
+- `回報總表.xlsx`：「回報」同一個 TDCC 一列（上手、TDCC、TS or IIS、錯訊、我的判斷、備註；不列檔名，Issue #234、#237），
+  錯訊合併在一格並編號，說明書與投資人須知都有問題時每條標 (TS)／(IIS)／(TS & IIS)；「我的判斷」是誤報／真錯／不確定的
+  下拉選單，由作業人員整列填一個；「摘要」是這批各類別的份數。
 - `參考條件表_未通過.xlsx`：只有這些商品的列，只留匯入格式的欄、核對欄與發行機構（其他欄拿掉），版面位置照原表。
 - `核對紀錄_未通過.json`：核對紀錄中這些商品的部分，格式相同。
 - `PDF/`：這些商品的說明書與投資人須知（同商品兩份都附，就算只有一份未通過）。檔名是辨識的依據，不改名；同名的不同檔案
@@ -47,6 +48,7 @@ REPORT_SHEET = "回報"
 SUMMARY_SHEET = "摘要"
 REPORT_COLUMNS = (("上手", 10), ("TDCC", 16), ("TS or IIS", 10), ("錯訊", 90), ("我的判斷", 12), ("備註", 40))
 DOC_KIND_LABELS = {DocKind.TERM_SHEET: "TS", DocKind.IIS: "IIS"}  # 檔名無法判斷種類時留空
+DOC_KIND_ORDER = tuple(DOC_KIND_LABELS.values())  # 同一列裡說明書的錯訊在前
 JUDGEMENT_COLUMN = "我的判斷"
 JUDGEMENTS = ("誤報", "真錯", "不確定")
 UNSUPPORTED_LABEL = "未支援上手（已知不支援，未列入回報包）"
@@ -177,10 +179,8 @@ def _report_book(
     ws = wb.active
     ws.title = REPORT_SHEET
     ws.append([header for header, _ in REPORT_COLUMNS])
-    for item in failing:
-        code = tdcc_code(item.identification)
-        for message in item.problem_messages or (item.status_label,):
-            ws.append((item.issuer, code, DOC_KIND_LABELS.get(item.kind), message, None, None))
+    for row in report_rows(failing):
+        ws.append((*row, None, None))
     judgement = get_column_letter([h for h, _ in REPORT_COLUMNS].index(JUDGEMENT_COLUMN) + 1)
     dv = DataValidation(type="list", formula1='"' + ",".join(JUDGEMENTS) + '"', allow_blank=True)
     dv.error, dv.errorTitle, dv.showErrorMessage = "請從清單選擇：" + "、".join(JUDGEMENTS), JUDGEMENT_COLUMN, True
@@ -196,6 +196,39 @@ def _report_book(
     ws.freeze_panes = "A2"
     _summary_sheet(wb.create_sheet(SUMMARY_SHEET), outcome, failing, pdfs, now)
     return _xlsx(wb)
+
+
+def report_rows(failing: Sequence[BatchItem]) -> list[tuple[str | None, str | None, str | None, str]]:
+    """「回報」的資料列（上手、TDCC、TS or IIS、錯訊），同一個 TDCC 一列，依第一次出現的順序；TDCC 空白的每份各自一列。
+
+    錯訊每條一行並編號，說明書的在前；說明書與投資人須知都有問題時每條標出處，文字完全相同的只列一次、標 (TS & IIS)。
+    """
+    groups: dict[object, list[BatchItem]] = {}
+    for item in failing:
+        groups.setdefault(tdcc_code(item.identification) or id(item), []).append(item)
+    rows = []
+    for items in groups.values():
+        items = sorted(items, key=_kind_order)
+        sources: dict[str, list[str]] = {}  # 錯訊 → 出處（TS、IIS），依第一次出現的順序
+        for item in items:
+            label = DOC_KIND_LABELS.get(item.kind)
+            for message in item.problem_messages or (item.status_label,):
+                labels = sources.setdefault(message, [])
+                if label and label not in labels:
+                    labels.append(label)
+        kinds = [k for k in DOC_KIND_ORDER if any(DOC_KIND_LABELS.get(i.kind) == k for i in items)]
+        tagged = len(kinds) > 1
+        lines = [
+            f"{n}. " + (f"({' & '.join(labels)}) " if tagged and labels else "") + message
+            for n, (message, labels) in enumerate(sources.items(), start=1)
+        ]
+        rows.append((items[0].issuer, tdcc_code(items[0].identification), " & ".join(kinds) or None, "\n".join(lines)))
+    return rows
+
+
+def _kind_order(item: BatchItem) -> int:
+    label = DOC_KIND_LABELS.get(item.kind)
+    return DOC_KIND_ORDER.index(label) if label else len(DOC_KIND_ORDER)
 
 
 def _summary_sheet(
