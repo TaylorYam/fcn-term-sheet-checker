@@ -1,7 +1,7 @@
 """JPM 中文投資人須知（docs/templates/jpm-zh-iis.md）：段落標題＋標籤定位，一律在去空白的全文上讀。
 
 依 5 份真實樣本建立（同說明書 JP1–JP5）。每頁頁碼「N/4」。KO／KI 寫法只在「二、境外結構型商品事項」到「三、投資風險」之間
-判斷，句型同說明書第 8 項（parsers/jpm.py 的 `ko_wording`、`ko_memory`、`ki_type`）；標的表同說明書第 9 項（`price_table`）。
+判斷，句型同說明書第 8 項（parsers/jpm.py 的 `ko_wording`、`ko_memory`、`ki_type`）；價格表同說明書第 9 項（`jpm.PRICE_TABLE`）。
 開始受理贖回日期只有文字，不核對（2026-10-15 確認，同 BNP、SG）。
 """
 
@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
-from . import iis, jpm, money
+from . import iis, jpm, money, price_table
 from .common import derived
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "jpm-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 TITLE = "中文投資人須知"
 SECTIONS = (
     "本商品之投資風險警語",
@@ -39,6 +40,7 @@ PRODUCT = ("二、境外結構型商品事項", "三、投資風險")  # 產品�
 CCY = money.CURRENCY
 PCT = r"(\d+(?:\.\d+)?)%"
 ISSUER_ORG = "一、相關機構1.發行機構：" + squash(jpm.ISSUER)
+PRICE_TABLE = replace(jpm.PRICE_TABLE, where="商品簡介價格表")
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -170,8 +172,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     )
     # 商品簡介
     put("currency_zh", rf"計價幣別：({CCY})●?原計價幣別本金保本率")
-    table = jpm.price_table("underlying_table", jpm.table_region(text_lines, "連結標的資產：", "商品年期："))
-    fields["underlyings"] = jpm.underlyings_field(table)
+    table = price_table.read(
+        "underlying_table", jpm.table_region(text_lines, "連結標的資產：", "商品年期："), PRICE_TABLE
+    )
+    fields["underlyings"] = price_table.underlyings(table)
     fields["underlying_prices"] = jpm.price_rows(table)
     put("tenor_months", r"商品年期：(\d+)個月", int)
     put("trade_date", r"交易日/期初評價日：" + iis.DATE, parse_date)

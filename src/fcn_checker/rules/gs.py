@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from ..parsers import gs
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
@@ -222,7 +223,7 @@ def underlying_terms(ctx: IssuerContext) -> list[CheckResult]:
         ),
         kit.doc_check(ctx, "doc.underlying_count", "price_table_header", "價格表表頭「(i)」", uls, table).compare(
             shape.get(len(uls.value) > 1) if uls.ok else None,
-            shape.get(table.value["indexed"]) if table.ok else None,
+            shape.get(gs.indexed(table.value)) if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="價格表表頭有無「(i)」（多標的寫法）須與價格表檔數一致",
@@ -249,7 +250,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
     return [
         kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "價格表下限觸發價格欄", ki, table).compare(
             label[has],
-            label["ki" in table.value["columns"]] if table.ok else None,
+            label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="價格表有無下限觸發價格欄須與第 15 項到期買回的下限觸發寫法一致",
@@ -273,12 +274,12 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         ("strike", "strike_def_pct", "價格表執行價格欄頭 %"),
         ("ki", "ki_def_pct", "價格表下限觸發價格欄頭 %"),
     ):
-        if table.ok and col not in table.value["pcts"]:
+        if table.ok and col not in table.value.pcts:
             continue  # 沒有這欄（無 KI）：一致性由 ki_terms 檢查
         pf = f(key)
         out.append(
             kit.doc_check(ctx, "doc.table_header_pct", f"header_{col}", name, pf, table).compare(
-                pf.value, table.value["pcts"].get(col) if table.ok else None
+                pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
     scen, strike = f("scenario_first_underlying"), f("strike_pct")
@@ -286,7 +287,7 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         ctx, "doc.scenario_table", "scenario_first_underlying", "第 17 項情境 4 第 1 檔", table, scen, strike
     )
     if table.ok and scen.ok and strike.ok:
-        row = table.value["rows"][0]
+        row = table.value.prices[0]
         issues = [
             f"{what} {scen.value[key]} 不等於價格表第 1 檔 {row[col]}"
             for key, col, what in (("initial", "initial", "初始參考價格"), ("strike", "strike", "執行價格"))

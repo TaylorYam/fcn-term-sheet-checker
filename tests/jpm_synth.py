@@ -173,30 +173,38 @@ class _Doc:
             self.text(190, v)
 
 
+# 標的表各欄的左緣（真實樣本的欄序：列號、名稱、彭博代碼、交易所、期初價格、執行價、自動提前出場價、觸碰價）
+TABLE_X = {"i": 40, "name": 60, "code": 150, "exchange": 200, "initial": 290, "strike": 365, "ko": 440, "ki": 515}
+
+
 def _price_table(d: _Doc, s: Spec, *, iis: bool = False) -> None:
-    """第 9 項標的表（投資人須知商品簡介同一張表，「自動提前出場價(i)」欄名拆成兩行）。"""
-    cols: list[tuple[str, Decimal | None]] = [("期初價格(i)", None), ("執行價(i)", s.strike)]
-    cols.append(("自動提前出場價(i)", s.ko))
+    """第 9 項標的表（8 號字，投資人須知商品簡介同一張表）：表頭一列（名稱欄拆兩行；投資人須知「自動提前出場價(i)」
+    拆成「自動提前」／「出場價(i)」）；每檔一列，價格下一行是幣別字（真實樣本）。`iis_ticker_wrap` 時投資人須知的
+    彭博代碼拆成代號／交易所碼兩行。"""
+    x = TABLE_X
+    cols = [("initial", "期初價格(i)", None), ("strike", "執行價(i)", s.strike), ("ko", "自動提前出場價(i)", s.ko)]
     if s.ki != "none":
-        cols.append(("觸碰價(i)", s.ki_pct))
-    for t in ("i", "連結標的(i)(以下各稱「股票」)", "彭博代碼", "交易所"):
-        d.cell(60, t)
-    for label, _ in cols:
-        if iis and label == "自動提前出場價(i)":
-            d.cell(300, "自動提前")
-            d.cell(300, "出場價(i)")
+        cols.append(("ki", "觸碰價(i)", s.ki_pct))
+    d.w.need(40 + 30 * s.count)
+    first = [(x["i"], "i"), (x["name"], "連結標的(i)(以"), (x["code"], "彭博代碼"), (x["exchange"], "交易所")]
+    second = [(x["name"], "下各稱「股票」)")]
+    for key, label, _ in cols:
+        if iis and key == "ko":
+            first.append((x[key], "自動提前"))
+            second.append((x[key], "出場價(i)"))
         else:
-            d.cell(300, label)
+            first.append((x[key], label))
+    d.w.row(first, gap=11, size=8)
+    d.w.row(second, gap=16, size=8)
     for i, u in enumerate(s.underlyings, 1):
-        d.cell(48, str(i))
-        d.cell(60, u.name)
-        for part in u.ticker.split(" ") if iis and s.iis_ticker_wrap else (u.ticker,):
-            d.cell(150, part)
-        d.cell(200, u.exchange)
-        for _, pct in cols:
-            value = u.initial if pct is None else price(u.initial, pct)
-            d.cell(300, f"{value:,.4f}")
-            d.cell(300, s.currency_zh)
+        wrap = iis and s.iis_ticker_wrap
+        code, exchange = u.ticker.split(" ")
+        cells = [(x["i"], str(i)), (x["name"], u.name), (x["code"], code if wrap else u.ticker)]
+        cells.append((x["exchange"], u.exchange[:6]))
+        cells += [(x[key], f"{u.initial if pct is None else price(u.initial, pct):,.4f}") for key, _, pct in cols]
+        d.w.row(cells, gap=11, size=8)
+        tail = [(x[key] + 8, s.currency_zh) for key, _, _ in cols] + ([(x["code"], exchange)] if wrap else [])
+        d.w.row(tail, gap=16, size=8)
 
 
 def _payoff(d: _Doc, s: Spec, x: float, *, iis: bool = False) -> None:
@@ -289,15 +297,18 @@ def _scenario(d: _Doc, s: Spec) -> None:
     d.text(25, "(3) 以情境分析解說最大可能獲利、損失及其他狀況之平均年化報酬率：")
     d.text(35, f"假設原計價幣別本金為{s.money(s.denom)}，若未發生第I部分第17項所定情形為前提：")
     d.section = "art15.table"
-    heads = ["期初價格", "執行價", "自動提前出場價"] + (["觸碰價"] if s.ki != "none" else [])
-    pcts = [None, s.strike, s.ko] + ([s.ki_pct] if s.ki != "none" else [])
-    for h in heads:
-        d.cell(150, h)
+    x = {"label": 60, "initial": 160, "strike": 260, "ko": 360, "ki": 460}
+    cols = [("initial", "期初價格", None), ("strike", "執行價", s.strike), ("ko", "自動提前出場價", s.ko)]
+    if s.ki != "none":
+        cols.append(("ki", "觸碰價", s.ki_pct))
+    d.w.need(20 + 15 * s.count)
+    d.w.row([(x[key], label) for key, label, _ in cols], gap=15, size=9)
     for i, u in enumerate(s.underlyings, 1):
-        d.cell(60, f"連結標的{i}")
-        for pct in pcts:
-            value = u.initial if pct is None else price(u.initial, pct)
-            d.cell(150, f"{value:,.4f}{s.currency_zh}")
+        values = [
+            (x[key], f"{u.initial if pct is None else price(u.initial, pct):,.4f}{s.currency_zh}")
+            for key, _, pct in cols
+        ]
+        d.w.row([(x["label"], f"連結標的{i}"), *values], gap=15, size=9)
     d.section = "art15"
     d.text(35, "(i) 最佳情境：發生自動提前出場事件（情境內容為虛構說明，不核對）")
 

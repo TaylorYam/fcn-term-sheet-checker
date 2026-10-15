@@ -3,24 +3,25 @@
 依 5 份真實樣本建立（同說明書 GS1–GS5）。每頁頁底「第- N -頁，共4頁」；第 1 頁第一行就是「中文投資人須知刊印日期:」。
 文字有 CJK 相容字（U+F9DD「利」等），讀之前先轉成標準字（只轉 U+F900–U+FAFF，不動全形括號與冒號）。章名「一. 相關機構」
 …「七. …」；KO／KI 寫法只在「二. 3. 買回價金之計算」到「4. 發行或受託不成立之處理」之間判斷，名詞沒有「(i)」。
-價格表同說明書第一章第 15 項（`gs.price_table`），價格後接標的報價幣別字。
+價格表同說明書第一章第 15 項（`gs.PRICE_TABLE`），價格後接標的報價幣別字。
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
-from . import gs, iis
+from . import gs, iis, price_table
 from .common import RawText, compat_normalized, derived, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "gs-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 SECTIONS = (
     "本商品之投資風險警語",
     "一.相關機構",
@@ -37,6 +38,7 @@ PAGE = r"第-\s*(\d+)\s*-頁，共(\d+)頁"  # 頁底頁碼
 EVENT_MEMORY = "各連結標的至少發生過一次記憶提前出場事件，則視為已發生自動提前出場事件"
 MEMORY_EVENT = "「記憶提前出場事件」：就連結標的而言"
 EVENT_SINGLE = "如於任一提前出場觀察日之參考價格等於或高於提前出場價格，則視為已發生自動提前出場事件"
+PRICE_TABLE = replace(gs.PRICE_TABLE, where="二. 1. (10) 價格表")
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -181,13 +183,14 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     b = next(
         (i for i, ln in enumerate(text_lines) if a is not None and i > a and squash(ln.text).startswith("(11)")), None
     )
-    table = gs.price_table("underlying_table", text_lines[a + 1 : b] if a is not None and b is not None else [])
-    fields["underlyings"] = gs.underlyings_field(table)
-    fields["underlying_prices"] = gs.price_rows(table)
+    region = text_lines[a + 1 : b] if a is not None and b is not None else []
+    table = price_table.read("underlying_table", region, PRICE_TABLE)
+    fields["underlyings"] = price_table.underlyings(table)
+    fields["underlying_prices"] = price_table.price_rows(table)
     for col, key in (("strike", "strike_pct"), ("ko", "ko_pct"), ("ki", "ki_pct")):
         fields[key] = (
-            ParsedField(key, FieldStatus.PRESENT, table.value["pcts"][col], list(table.evidence))
-            if table.ok and col in table.value["pcts"]
+            ParsedField(key, FieldStatus.PRESENT, table.value.pcts[col], list(table.evidence))
+            if table.ok and col in table.value.pcts
             else derived(key, table)
             if not table.ok
             else ParsedField.missing(key, "價格表表頭沒有這一欄的 %")

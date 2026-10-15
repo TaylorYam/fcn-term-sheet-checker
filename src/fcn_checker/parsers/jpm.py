@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import NamedTuple
 
@@ -17,12 +17,12 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money
-from .common import NUM, Mention, dec, derived, number
-from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, join_wrapped_tickers, parse_date
+from . import money, price_table
+from .common import NUM, Mention, derived, number
+from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "jpm-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 CHAPTER_NAMES = {
     1: ("I", "商品基本資料"),
     2: ("II", "相關機構事業概況"),
@@ -75,11 +75,19 @@ VALUE_X = 150.0  # 封面兩欄表：標籤在左（x < 150）、值在右
 WARNING_HEAD = "商品之投資風險警語"
 NAME_TAIL = re.compile(r"\s*[(（]下稱「本商品」[)）]\s*$")
 TRAILING_PLACE = re.compile(r"\s*[(（]營業活動所在地[)）]\s*$")  # 地址後的「(營業活動所在地)」不屬於地址
-# 標的表（第 9 項）與假設價格表（第 15 項）的欄（表頭文字 → 欄）；欄位順序以表頭出現位置為準
-HEADERS = (("initial", "期初價格"), ("strike", "執行價"), ("ko", "自動提前出場價"), ("ki", "觸碰價"))
-ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"  # 表格價格只寫中文幣別
-PRICE_CELL = rf"({money.NUMBER})({ZH_CCY})"
-TICKER_LINE = re.compile(r"([A-Z0-9][A-Z0-9./-]*) ([A-Z]{2})")  # 標的表彭博代碼自成一行（例：6857 JT、TSM UN）
+# 價格表：第 9 項價格表（以彭博代碼切列，價格下一行是幣別字）、第 15 項假設價格表（「連結標的n」各一列，以價格切列）
+PRICE_TABLE = price_table.TableSpec(
+    where="第 9 項價格表",
+    initial="期初價格",
+    columns=(
+        price_table.Column("strike", "執行價"),
+        price_table.Column("ko", "自動提前出場價", required=False),
+        price_table.Column("ki", "觸碰價", required=False),
+    ),
+    anchor="ticker",
+    code="彭博代碼",
+)
+SCENARIO_TABLE = replace(PRICE_TABLE, where="第 15 項假設價格表", anchor="price", code=None)
 DATE_HEADS = {  # 日期表表頭（去空白）→ 欄
     "評價日(t)": "valuation",
     "配息支付日(t)": "payment",
@@ -342,10 +350,12 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
         for i, m in enumerate(t8.finditer(PRO_RATA_RATE), start=1)
     ]
 
-    # 第 9 項標的表
-    table = price_table("underlying_table", table_region(article(9), "連結標的資產、相對權重", "相對權重"))
+    # 第 9 項價格表
+    table = price_table.read(
+        "underlying_table", table_region(article(9), "連結標的資產、相對權重", "相對權重"), PRICE_TABLE
+    )
     fields["underlying_table"] = table
-    fields["underlyings"] = underlyings_field(table)
+    fields["underlyings"] = price_table.underlyings(table)
     fields["underlying_prices"] = price_rows(table)
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
 
@@ -363,7 +373,9 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
     art15 = article(15)
     put("scenario_principal", art15, r"假設原計價幣別本金為" + NUM + CCY, number)
     put("scenario_principal_currency", art15, rf"假設原計價幣別本金為{money.NUMBER}({CCY})")
-    fields["scenario_table"] = scenario_table(table_region(art15, "假設原計價幣別本金為", "(i)"))
+    fields["scenario_table"] = price_table.read(
+        "scenario_table", table_region(art15, "假設原計價幣別本金為", "(i)"), SCENARIO_TABLE
+    )
 
     # 第 II 部分
     ch2 = doc.articles(2)
@@ -540,7 +552,7 @@ def ki_type(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> Parse
     return ParsedField.present(name, kind, lns)
 
 
-# ---------------------------------------------------------------- 標的表與假設價格表
+# ---------------------------------------------------------------- 價格表與假設價格表
 
 
 def table_region(lines: list[Line], start: str, end: str) -> list[Line]:
@@ -552,106 +564,10 @@ def table_region(lines: list[Line], start: str, end: str) -> list[Line]:
     return lines[a + 1 : b]
 
 
-def _columns(head: str) -> list[str]:
-    positions = sorted((head.find(label), col) for col, label in HEADERS if label in head)
-    return [col for _, col in positions]
-
-
-def price_table(name: str, lines: list[Line]) -> ParsedField:
-    """第 9 項標的表：表頭決定欄位與順序；每檔一列（列號、名稱、彭博代碼一行、交易所、價格＋下一行幣別字）。
-
-    值：{"columns", "tickers", "rows": [{欄: Decimal}], "row_lines"}。表頭結束在最後一個價格欄名；
-    代碼以自成一行的「代號 交易所碼」切列（換成兩行的先接回，Issue #257），價格以「數字＋幣別字」切格。
-    """
-    if not lines:
-        return ParsedField.missing(name, "找不到標的表")
-    lines = join_wrapped_tickers(lines)
-    first = next((i for i, ln in enumerate(lines) if TICKER_LINE.fullmatch(ln.text.strip())), None)
-    if first is None:
-        return ParsedField.invalid(name, lines, "標的表找不到彭博代碼")
-    # 表頭結束在第一個代碼之前、最後一個以「(i)」結尾的欄名（欄名可能拆行：「自動提前」／「出場價(i)」）
-    end = next((i for i in range(first - 1, -1, -1) if squash(lines[i].text).endswith("(i)")), None)
-    if end is None:
-        return ParsedField.invalid(name, lines[:first], "標的表找不到表頭")
-    columns = _columns("".join(squash(ln.text) for ln in lines[: end + 1]))
-    if columns[:2] != ["initial", "strike"]:
-        return ParsedField.invalid(name, lines[: end + 1], "標的表表頭不是「期初價格、執行價…」的順序")
-    body = lines[end + 1 :]
-    starts = [i for i, ln in enumerate(body) if TICKER_LINE.fullmatch(ln.text.strip())]
-    tickers = [body[i].text.strip() for i in starts]
-    bti = TextIndex(body, separate_digits=True)
-    cells = list(bti.finditer(PRICE_CELL))
-    ncol = len(columns)
-    if len(cells) != len(tickers) * ncol:
-        return ParsedField.invalid(
-            name, lines, f"標的表有 {len(cells)} 個價格格、{len(tickers)} 個代碼，與 {ncol} 欄不符"
-        )
-    rows, row_lines = [], []
-    for i in range(len(tickers)):
-        row = cells[i * ncol : (i + 1) * ncol]
-        stop = starts[i + 1] if i + 1 < len(starts) else len(body)
-        if any(not starts[i] < bti.line_at(m.start()) < stop for m in row):
-            return ParsedField.invalid(name, lines, f"標的表第 {i + 1} 檔的價格格不在該檔代碼之後")
-        prices: dict[str, Decimal] = {}
-        lns: list[Line] = [body[starts[i]]]
-        for col, m in zip(columns, row, strict=True):
-            prices[col] = dec(m[1])
-            lns += [x for x in bti.lines_for(m.start(), m.end()) if x not in lns]
-        rows.append(prices)
-        row_lines.append(lns)
-    value = {
-        "columns": columns,
-        "tickers": tickers,
-        "rows": rows,
-        "row_lines": row_lines,
-    }
-    return ParsedField.present(name, value, lines)
-
-
-def scenario_table(lines: list[Line]) -> ParsedField:
-    """第 15 項假設價格表：表頭同第 9 項（沒有 (i)），每列「連結標的n」＋各價格（數字與幣別字同一行）。"""
-    name = "scenario_table"
-    if not lines:
-        return ParsedField.missing(name, "第 15 項找不到假設價格表")
-    ti = TextIndex(lines, separate_digits=True)  # 「連結標的1」與下一行的價格之間隔開
-    first = ti.text.find("連結標的1")
-    if first < 0:
-        return ParsedField.invalid(name, lines, "假設價格表找不到「連結標的1」")
-    columns = _columns(ti.text[:first])
-    marks = list(re.finditer(r"連結標的(\d+)", ti.text[first:]))
-    rows = []
-    for k, m in enumerate(marks):
-        a = first + m.end()
-        b = first + marks[k + 1].start() if k + 1 < len(marks) else len(ti.text)
-        cells = [dec(c[1]) for c in re.finditer(PRICE_CELL, ti.text[a:b])]
-        if int(m[1]) != k + 1 or len(cells) != len(columns):
-            return ParsedField.invalid(name, lines, f"假設價格表第 {k + 1} 列的格數與表頭不符")
-        rows.append(dict(zip(columns, cells, strict=True)))
-    return ParsedField.present(name, {"columns": columns, "rows": rows}, lines)
-
-
-def underlyings_field(table: ParsedField) -> ParsedField:
-    """標的表 → 標準欄位 `underlyings`（彭博代號，依表上順序）。"""
-    if not table.ok:
-        return derived("underlyings", table)
-    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-
-
 def price_rows(table: ParsedField) -> ParsedField:
-    """第 9 項標的表 → 標準欄位 `underlying_prices`（順序同 `underlyings`）。"""
-    if not table.ok:
-        return derived("underlying_prices", table)
-    return ParsedField(
-        "underlying_prices",
-        FieldStatus.PRESENT,
-        tuple(
-            standard_fields.PriceRow(ticker, dict(prices), tuple(Evidence.of(ln) for ln in lns), name=f"第 {i} 檔")
-            for i, (ticker, prices, lns) in enumerate(
-                zip(table.value["tickers"], table.value["rows"], table.value["row_lines"], strict=True), start=1
-            )
-        ),
-        list(table.evidence),
-    )
+    """第 9 項價格表 → 標準欄位 `underlying_prices`（順序同 `underlyings`；列名「第 n 檔」）。"""
+    names = [f"第 {i} 檔" for i in range(1, len(table.value.rows) + 1)] if table.ok else None
+    return price_table.price_rows(table, names=names)
 
 
 # ---------------------------------------------------------------- 第 12 項日期表
