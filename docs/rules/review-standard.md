@@ -83,10 +83,11 @@
 | `{underlying_zh}`／`{underlying_en}` | 標的寫法：標的 1 檔填 `single_zh`／`single_en`、2 檔以上填 `basket_zh`／`basket_en`（兩組不同字串，不是「多檔才加前綴」；Issue #135） |
 | `{autocall_zh}`／`{autocall_en}` | 第一個可提前出場期早於到期（Non-Call < 天期）時填入 `autocall_zh`／`autocall_en`，否則空白（BNP，Issue #191）；會提前出場且記憶式、樣板另有 `autocall_memory_zh`／`autocall_memory_en` 時改填它（SG 中文「（記憶式自動提前出場）」，Issue #194） |
 | `{ko_observation_zh}`／`{ko_observation_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`、每期觀察（P 型）時填入 `periodic_zh`／`periodic_en`（UBS 名稱兩種都有字樣，`{daily_*}` 在每期時是空白不夠用；Issue #279，待實作） |
-| `{ki_zh}`／`{ki_en}` | 有 KI（KI 型態不是「無」）時填入 `ki_zh`／`ki_en`，否則空白（UBS 中文「（含觸及下限價事件）」、英文「Kick-In Event and 」；Issue #279，待實作） |
+| `{ki_zh}`／`{ki_en}` | 有 KI（KI 型態不是「無」）時填入 `ki_zh`／`ki_en`，否則空白（DBS 中文「及定價日觸發(歐式)」、英文「European Knock-In 」，Issue #280；UBS 中文「（含觸及下限價事件）」、英文「Kick-In Event and 」，Issue #279 待實作） |
+| `{quanto_zh}`／`{quanto_en}` | 承作幣別和任一檔標的報價幣別（說明書價格旁的幣別字）不同時填入 `quanto_zh`／`quanto_en`，否則空白；幣別字讀不到或不在幣別對照時轉人工覆核（DBS「Quanto」，Issue #280） |
 | `{ccy}` 的別名 | 樣板的 `ccy_aliases`（ISO 代碼 → 名稱用的代碼）：SG 英文名稱把 CNH 寫成 CNY（Issue #194） |
 
-樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
+樣板設 `single_unsupported = true` 時，標的只有 1 檔的名稱轉人工覆核（沒有樣本、寫法未知；`single_*` 可不設，DBS，Issue #280）。樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`（`single_unsupported` 時免設）／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
 
 ### 2.4 各上手共用的出處規則（Issue #55）
 
@@ -323,13 +324,13 @@ OOS 多家上手的舊範本寫「受託投資」（SG 投資人須知警語七�
 - **刊印日期**：標籤寫異體字 `刋印`（也有 `刊印`），兩種都收。
 - 發行人與受託機構以外的機構資訊、發行機構註冊地與評等、情境分析算式（只核對設定參數與情境價格表）不核對。
 
-### 2.18 DBS 的差異（2026-10-15 確認，Issue #280；尚未實作）
+### 2.18 DBS 的差異（2026-10-15 確認並實作，Issue #280）
 
 細節見 [DBS 核對規則](dbs-check-rules.md) §3.2、§3.6。審查通過日期、負責人、受託機構地址（`臺北市105民生東路三段158號6樓` 已在 `address_equivalents`）、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
 
 - **固定警語**（`risk.fixed_warning_by_issuer.dbs`，2026-10-15 確認視為正確）：= **CA 版本**（【RR4】、【證券交易所交易證券】、有「*」、有 OSU 客戶段、5 處都寫 `受託或銷售機構`），在 `依據國際證券業務分公司(下稱「OSU」)辦理受託買賣相關規定` 之後多 `(下稱「OSU相關規範」)`。說明書 **2 次**（封面警語 1.、商品主要風險揭露 五、1.；`risk.fixed_warning_occurrences_by_issuer.dbs = 2`）；投資人須知 1 次（警語 1.；`iis.fixed_warning_occurrences.dbs = 1`）。
 - **風險等級寫法**（`risk.level_formats.dbs`）：`【{level}】`、`風險程度：{level}`（說明書商品基本資料 `商品風險程度：RR4`、投資人須知商品簡介 `本商品風險程度：RR4`；2026-10-15 確認都核對）。
-- **商品名稱樣板**（`product_name.dbs`）：中文 `星展銀行{天期}個月期{幣別中文}計價{quanto_zh}固定利率記憶型每日觀察自動提前出場{ki_zh}一籃子中表現最差股權連結結構型商品(無擔保及無保證機構)(不保本)`；英文 `DBS Bank Ltd {天期}-Month {幣別代碼} {quanto_en}Fixed Coupon Memory Daily Knock-Out {ki_en}Worst of Basket Equity Linked Notes (unsecured and non-guaranteed) (non-principal protected)`。**新佔位符** `{quanto_*}`（`Quanto`／`Quanto `，計價幣別 ≠ 標的報價幣別時填入）、`{ki_*}`（`及定價日觸發(歐式)`／`European Knock-In `，有 KI 時填入），實作時加進共用名稱規則（其他上手沒設定就不填）。中英文都忽略空白、括號統一；名稱後的 `(下稱「本商品」)` 不屬於名稱。單一標的沒有樣本，名稱轉人工覆核。
+- **商品名稱樣板**（`product_name.dbs`）：中文 `星展銀行{天期}個月期{幣別中文}計價{quanto_zh}固定利率記憶型每日觀察自動提前出場{ki_zh}一籃子中表現最差股權連結結構型商品(無擔保及無保證機構)(不保本)`；英文 `DBS Bank Ltd {天期}-Month {幣別代碼} {quanto_en}Fixed Coupon Memory Daily Knock-Out {ki_en}Worst of Basket Equity Linked Notes (unsecured and non-guaranteed) (non-principal protected)`。佔位符 `{quanto_*}`（`Quanto`／`Quanto `，計價幣別 ≠ 標的報價幣別時填入）、`{ki_*}`（`及定價日觸發(歐式)`／`European Knock-In `，有 KI 時填入）、`{underlying_*}`（2 檔以上 `一籃子中表現最差`／`Worst of Basket `）（§2.3）。中英文都忽略空白、括號統一；名稱後的 `(下稱「本商品」)` 不屬於名稱。單一標的沒有樣本，`single_unsupported = true`：名稱轉人工覆核。
 - **發行機構全名**（`issuer_name.dbs`）：`新加坡商星展銀行股份有限公司(DBS Bank Ltd)`；封面、相關機構事業概況 1.(1)、投資人須知相關機構 1. 都相同；沒有只寫中文的出處。DBS 目前只有這一個發行主體（2026-10-15 確認）。
 - **發行人（台北分公司）、保證機構（無）**：**不核對**（2026-10-15 確認），不設 `guarantor_name.dbs`、`agent_name.dbs`。
 - **商品種類**（`product_type.dbs`）：`股權連結債券`（2026-10-15 確認）。
@@ -339,7 +340,7 @@ OOS 多家上手的舊範本寫「受託投資」（SG 投資人須知警語七�
 - **發行價格**：商品基本資料 `發行價格：商品面額的100.00%`；沒有其他出處。
 - **受託機構電話**：只有封面（相關機構事業概況、一般交易事項沒有；`distributor_phone_ch4` 交 `absent`）。
 - **受理申購日期**：只有開始受理申購日期 1 處（= 交易日）。
-- **配息率**：`最大利率值：…為a%（即y%/12），無條件進位至小數點後第四位`：y = 年利率，a = y ÷ 12 **無條件進位**到 4 位（其他上手是四捨五入；共用月配息率規則實作時加進位方式參數）。
+- **配息率**：`最大利率值：…為a%（即y%/12），無條件進位至小數點後第四位`：y = 年利率，a = y ÷ 12 **無條件進位**到 4 位（其他上手是四捨五入；DBS 專屬規則 `derive.monthly_coupon` 與投資人須知範本專屬規則 `iis.monthly_coupon` 依此核對）。
 - 封面 `(請參閱第a-b頁)` 頁碼、觀察起始日、利息金額位數、Quanto 匯率條款、支付日城市、情境分析算式（只核對基本假設、情境價格表、情境一期別、情境二年化報酬率）不核對。
 
 ## 3. 對 14 份 BARC 樣本的驗證結果（2026-10-01，本機探勘）

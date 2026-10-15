@@ -1,7 +1,7 @@
 # 下單資料格式：DBS（參考條件表）
 
 - 設定檔：所有上手共用的 [`config/reference_sheet.toml`](../../config/reference_sheet.toml)
-- 狀態：規格已確認（Issue #280），尚未實作。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 DBS 的說明書來源與差異
+- 狀態：已實作（Issue #280；`config/reference_sheet.toml` 的 `DBS`）。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 DBS 的說明書來源與差異
 
 ## 1. 結構
 
@@ -9,7 +9,7 @@
 
 探勘用的參考條件表是作業人員提供的公司原始待建檔格式（`data/orders/核對表格式..xlsx`，工作表 `ELN待建檔_測試`，4 列 DBS，與 DB1–DB4 全部對上；`ISIN Code`、`發行日`、`比價日_n` 為待回填的空白；沒有 `發行機構` 欄）。
 
-實作時登記：
+已登記：
 
 - `config/reference_sheet.toml` `[issuer_values]`：`DBS = "DBS"`（`發行機構` 欄的寫法，2026-10-15 確認；待建檔表沒有這欄時以商品代號前 3 碼判定）。
 - `src/fcn_checker/issuers.py`：DBS 範本（`dbs-zh-pd`、投資人須知 `dbs-zh-iis`）。
