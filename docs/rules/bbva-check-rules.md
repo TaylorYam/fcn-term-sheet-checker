@@ -3,7 +3,7 @@
 - 文件側：[BBVA 範本規格](../templates/bbva-zh-product-description.md)；投資人須知見 [BBVA 投資人須知範本規格](../templates/bbva-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 BBVA 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [BBVA 下單資料格式](../order-formats/bbva-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.16（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #269）；待實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #269）；已實作（`parsers/bbva.py`、`rules/bbva.py`，投資人須知見[投資人須知核對規則](iis-check-rules.md)）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis 核對規則](natixis-check-rules.md)不同或 BBVA 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -114,7 +114,7 @@
 - **只有天期、幣別兩個佔位符**：不分標的數（單一標的 BV3 也寫「一籃子」／`Basket of`）、記憶式、KO／KI 型態、Non-Call。`memory_zh`／`memory_en` 設空字串。
 - 中文截到 `(下稱「本商品」)` 之前、英文截到 `(the "Product")` 之前；中文、英文都忽略空白（`ignore_whitespace_en = true`）、括號統一（`normalize_brackets = true`）。
 
-**發行機構名稱**（`issuer_name.bbva`）：`荷蘭商BBVA GLOBAL MARKETS, B.V.`（第二章 1.(1)(a)、投資人須知一、 1.）；第一章 3.(1) 寫 `BBVA GLOBAL MARKETS, B.V.`（沒有「荷蘭商」）也算一致（2026-10-15 確認）。建議實作：`issuer_name_ch1` 交出原文，比對時接受「固定值」或「固定值去掉開頭 `荷蘭商`」兩種（證據保留原文），其他出處仍須等於固定值。2026-10-15 確認 BBVA 只有這一個發行主體；其他寫法判不一致或轉人工覆核。
+**發行機構名稱**（`issuer_name.bbva`）：`荷蘭商BBVA GLOBAL MARKETS, B.V.`（第二章 1.(1)(a)、投資人須知一、 1.）；第一章 3.(1) 寫 `BBVA GLOBAL MARKETS, B.V.`（沒有「荷蘭商」）也算一致（2026-10-15 確認）。實作：parser 讀第一章 3.(1) 時沒有「荷蘭商」就補上再交出 `issuer_name_ch1`（證據保留原文），和固定值比；其他出處仍須等於固定值。第 1 頁沒有發行機構名稱欄，`issuer_name_cover` 交 `absent`，共用規則對不適用的出處不產生結果。2026-10-15 確認 BBVA 只有這一個發行主體；其他寫法判不一致或轉人工覆核。
 
 ### 3.7 情境分析（第一章第 16 項）
 
@@ -196,7 +196,7 @@
 
 要有合成 PDF 測試（KO D 記憶式／非記憶式、KO P 記憶式、KI 無／AM、單一／多標的、JPY 計價美股標的、VWAP、標的順序和表上不同、第 1 頁有無受託機構明細、相容字章名、價格表欄序 KO → K → KI、分銷費用子列）、本機 5 份真實樣本測試（`tests/test_real_bbva.py`，結果與 §5 一致：BV3 到期日判不一致、該組不回填；其餘 4 組通過並回填），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM、Nomura、GS、Natixis 樣本的負面測試；既有上手的合成與本機真實樣本測試結果須不變。
 
-### 7.1 建議 rule_id
+### 7.1 實作對照（Issue #269）
 
 說明書有年利率，`REFERENCE_FIELDS` 為空（說明書內部規則不讀參考條件表）。
 
@@ -214,9 +214,12 @@
 | 情境價格表逐格與表頭 % = 價格表；情境總投資金額 ÷ 單位數 = 面額 | `doc.scenario_table` |
 | 日期表（D：起始日 = 發行日、遞增、末列 = 贖回評價日／到期日、觀察期間起日在表內；P：配息日遞增、末列 = 到期日、自動提前贖回表） | `schedule.coupon_dates` |
 | 投資人須知開始受理贖回日期 = 說明書 | `iis.redemption_start`（範本專屬規則） |
-| 投資人須知每期配息率、天數慣例 = 說明書（P 型） | `iis.coupon_per_period`（範本專屬規則） |
+| 第 9 項連結標的表的彭博代碼與順序 = 第 14 項價格表 | `doc.underlying_list` |
+| 投資人須知每期配息率、天數慣例 = 說明書（P 型；每期配息率 × 12 = 年利率另由共用 `iis.coupon_pa` 核對） | `iis.coupon_per_period`（範本專屬規則） |
+| 投資人須知記憶式到期條件的出場值 = 說明書 | `iis.ko_mentions`（範本專屬規則） |
+| 投資人須知無 KI 的到期門檻 = 說明書轉換比例 | `iis.no_ki_barrier`（範本專屬規則） |
 
-KO 型態與日期表種類不一致、P 型表的自動提前贖回日不在配息日表或期別不連續時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。
+第二章依標籤讀、不依條號（BV1 第二章條號 Word 自動編號跑掉，3. 寫成 1.）；費用表在表後說明「分銷費用將反映…」之前截斷（那一行也以「分銷費」開頭）；價格表以彭博代碼那一行為列錨，同一頁 y 相差 6pt 內的價格格依 x 讀（價格擠在同一行也讀得到）；日期表期別與日期可能分行或同行（`separate_digits`）。KO 型態與日期表種類不一致、P 型表的自動提前贖回日不在配息日表或期別不連續時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。
 
 ## 8. 決策紀錄
 
@@ -241,3 +244,5 @@ KO 型態與日期表種類不一致、P 型表的自動提前贖回日不在配
 | 2026-10-15 | 投資人須知核對範圍如[投資人須知核對規則](iis-check-rules.md) §3 BBVA 欄；章名錯字不核對 |
 | 2026-10-15 | 參考條件表 BV3 到期日差一年是表上真錯 |
 | 2026-10-15 | 發行主體只有 BBVA GLOBAL MARKETS, B.V.；參考條件表 `發行機構` 欄 BBVA 寫 `BBVA` |
+| 2026-10-15 | 實作（Issue #269）：共用審查標準規則對不適用（範本沒有）的封面發行機構出處不產生結果；新增 `doc.underlying_list`（第 9 項標的 = 價格表）；本機 5 組：4 組通過並回填，BV3 到期日判不一致（表上錯） |
+| 2026-10-15 | 作業人員確認保留實作時的三項決定（PR #281）：`doc.underlying_list`（第 9 項標的 = 價格表）、KO 每期型配息日逐期遞增、D 型觀察期間起日不在日期表或 P 型表少一列時 Non-Call 與比價日轉人工覆核（不判不一致） |
