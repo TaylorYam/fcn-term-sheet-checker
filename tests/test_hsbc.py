@@ -785,3 +785,12 @@ def test_strike_and_ki_prices_in_the_scenarios_follow_the_underlying(tmp_path):
     assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
     r = check(tmp_path, edits=[Edit("執行價美元70.0000", "執行價日幣71.0000", "ts.art18")])
     assert any(x.rule_id == "doc.scenario_parameters" and x.status == S.MISMATCH for x in r.results)
+
+
+@pytest.mark.parametrize(("written", "status"), [("70.0000", S.PASS), ("69.9999", S.MISMATCH)])
+def test_scenario_ki_price_truncated_instead_of_rounded(tmp_path, written, status):
+    """期初 100 × 70.00005% = 70.00005：表上四捨五入 70.0001，情境寫捨去的 70.0000 也通過；其他值仍不一致（#259）。"""
+    spec = Spec(ki_pct=Decimal("70.00005"))
+    r = check(tmp_path, spec, edits=[Edit("觸及不保本價格美元70.0001", f"觸及不保本價格美元{written}", "ts.art18")])
+    refs = [x for x in r.results if x.rule_id == "doc.scenario_parameters" and ".reference_ki." in x.field]
+    assert refs and {x.status for x in refs} == {status}, [(x.field, x.message) for x in refs]

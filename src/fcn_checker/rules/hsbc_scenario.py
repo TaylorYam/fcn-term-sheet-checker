@@ -274,15 +274,19 @@ def run(ctx):
                 if row is None or key not in row["prices"]:
                     missing(f"s{i + 1}.reference_{key}", name, segment)
                 else:
+                    table, actual = row["prices"][key], number(m[1])
+                    pct = kit.field_value(ts, f"{key}_pct")
                     compare(
                         "doc.scenario_parameters",
                         f"s{i + 1}.reference_{key}",
                         name,
-                        row["prices"][key],
-                        number(m[1]),
+                        table,
+                        actual,
                         segment,
                         m.start(),
                         m.end(),
+                        valid=kit.scenario_price_ok(actual, table, row["prices"].get("initial"), pct),
+                        tolerance=kit.SCENARIO_PRICE_ROUNDING,
                     )
         if worst:
             # Complex redemption is explicitly excluded; do not feed an unchecked redemption into a PASS profit calculation.

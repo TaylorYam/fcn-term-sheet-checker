@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, NamedTuple, Protocol
 
 from ..config import IssuerStandard, ReferenceFormat, ReviewStandard
@@ -188,6 +188,27 @@ def shown(value: Decimal, like: Decimal) -> Decimal:
     """依說明書顯示位數（`like` 的小數位數）四捨五入（half-up）。"""
     exp = like.as_tuple().exponent
     return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
+
+
+SCENARIO_PRICE_ROUNDING = "等於標的表，或期初價格 × % 依文件位數四捨五入／無條件捨去"
+
+
+def scenario_price_ok(actual: Decimal, table: Decimal, initial: Decimal | None, pct: Decimal | None) -> bool:
+    """情境文字的執行價／下限價（Issue #259）：等於標的表的值，或等於期初價格 × `pct`% 依 `actual` 的位數四捨五入
+    或無條件捨去（期初 × % 剛好在 5 時，有發行機構表上四捨五入、情境捨去）。`initial`／`pct` 讀不到時只看標的表。"""
+    if actual == table:
+        return True
+    exp = actual.as_tuple().exponent
+    if initial is None or pct is None or not isinstance(exp, int):
+        return False
+    exact, step = initial * pct / 100, Decimal(1).scaleb(exp)
+    return actual in (exact.quantize(step, ROUND_HALF_UP), exact.quantize(step, ROUND_DOWN))
+
+
+def field_value(ts: TermSheet, name: str) -> Any:
+    """標準欄位讀得到時的值，否則 None（只用來輔助判斷，讀不到不另外報）。"""
+    pf = read_standard(ts, name)
+    return pf.value if pf.ok else None
 
 
 def cumulative_coupon_issues(

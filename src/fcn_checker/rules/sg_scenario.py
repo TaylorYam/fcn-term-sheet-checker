@@ -176,7 +176,8 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             _redemption(out, rid, tag, items["redemption"], s, denom.value, units)
             _profit_return(out, rid, tag, items["return"], s)
         else:
-            _worse(out, rid, tag, items, s, denom.value, units, rows, tenor.value)
+            pct = kit.field_value(ctx.ts, "strike_pct")
+            _worse(out, rid, tag, items, s, denom.value, units, rows, tenor.value, pct)
     return out
 
 
@@ -308,7 +309,7 @@ def _profit_return(out, rid, tag, item, s) -> None:
     )
 
 
-def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
+def _worse(out, rid, tag, items, s, denom, units, rows, tenor, strike_pct) -> None:
     """較差／最差情境：執行價 = 第 8 項該檔執行價；數額 = 面額 ÷ 執行價（÷ 匯率換算）無條件進入 4 位；應實際交付數 = 向下取整；
     現金交割 = 收盤價 × 畸零數（× 匯率）無條件進入 2 位；總單位 = 單位數 × 應實際交付數；總報酬率 = [總投資 × 收盤價 ÷ 執行價 + 累積] ÷ 總投資 − 1；
     平均年化報酬率 = 未四捨五入的總報酬率 × 12 ÷ 天期（依文件顯示位數四捨五入）。"""
@@ -325,12 +326,13 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
         )
         return
     kidx, close = s.close.value.k, s.close.value.close
-    strike_expected = None
+    strike_expected = initial = None
     if rows.ok:
         prices = list(rows.value)
         idx = (kidx or 1) - 1
         if 0 <= idx < len(prices):
             strike_expected = prices[idx].prices.get("strike")
+            initial = prices[idx].prices.get("initial")
     if s.shares is None:
         for key in ("strike", "shares"):
             out.append(
@@ -354,7 +356,7 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor) -> None:
             )
         )
     else:
-        if strike != strike_expected:
+        if not kit.scenario_price_ok(strike, strike_expected, initial, strike_pct):  # 兩種進位都接受（#259）
             issues.append(f"執行價 {strike} 不是第 8 項第 {kidx or 1} 檔的執行價 {strike_expected}")
         out.append(
             kit.calc_result(
