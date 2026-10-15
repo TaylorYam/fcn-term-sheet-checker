@@ -15,7 +15,7 @@
 | 表頭 | 前 10 列（`layout.header_search_rows`）裡有一格剛好是 `TDCC Code` 的那一列（`FCN參考條件` 是第 3 列，公司原始待建檔表是第 2 列）；表頭以上的列不讀。找不到或不只一列 → 整批錯誤 |
 | 資料 | 表頭下一列起，每列一檔商品；`TDCC Code` 空白的列略過 |
 | 配對鍵 | `TDCC Code` = 說明書封面的商品代號（12 位，文字） |
-| 上手 | `發行機構` 欄（不是必要欄），寫法依上手：BARC = `Barclays`、HSBC = `HSBC`、MS = `MS`、BNP = `BNP`、SG = `SG`、Citi = `Citi`、JPM = `JPM`（JPM 待實作，Issue #233） |
+| 上手 | `發行機構` 欄（不是必要欄），寫法依上手：BARC = `Barclays`、HSBC = `HSBC`、MS = `MS`、BNP = `BNP`、SG = `SG`、Citi = `Citi`、JPM = `JPM`（JPM 待實作，Issue #233）、Nomura = `Nomura`（待實作，Issue #239） |
 | 空值 | `-`（例：沒有 KI、沒有第 4 檔標的、不需要填的比價日） |
 | 打勾 | `V`（半形英文字母，`TS`、`IIS` 欄；同表上「當日比價」「私銀註記」的寫法） |
 | 日期 | Excel 日期值 |
