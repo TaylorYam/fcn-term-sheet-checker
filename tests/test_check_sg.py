@@ -504,3 +504,14 @@ def test_cumulative_coupon_rounded_after_multiplying_passes(tmp_path):
     r = check(tmp_path, spec)
     calcs = [x for x in rule(r, "doc.scenario_calculations") if x.field.endswith("_cumulative")]
     assert calcs and {x.status for x in calcs} == {S.PASS}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("trade", "status"), [(dt.datetime(2026, 10, 15), S.PASS), (dt.datetime(2026, 10, 16), S.MISMATCH)]
+)
+def test_forbidden_wording_on_or_before_the_exemption_date_passes(tmp_path, trade, status):
+    """參考條件表交易日在 2026-10-15（含）以前：「受託投資」特例通過並註明（已通知上手改版，Issue #247）；之後照規則判錯。"""
+    r = check(tmp_path, edits=[Edit("為於中華民國境內受託買賣", "為於中華民國境內受託投資", "ts.cover")], 交易日=trade)
+    [res] = rule(r, "standard.forbidden_wording")
+    assert res.status == status and res.actual == 1
+    assert ("特例通過" in res.message) == (status == S.PASS)

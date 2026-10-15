@@ -139,6 +139,8 @@ class ReviewStandard:
     min_amount_multiples: dict[str, dict[str, int | dict[str, int]]] = field(default_factory=dict)
     # 上手 → 固定警語的其他完整寫法（整段逐字；SG 第一章 §2 的風險等級寫 [RRn]），每一處都算一次
     fixed_warning_variants: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # 交易日（參考條件表）在這天（含）以前的文件出現禁用語時特例通過（已通知上手改版，Issue #247）；None 不特例
+    forbidden_exempt_until: dt.date | None = None
 
     def approval_date_on(self, trade_date: dt.date) -> dt.date | None:
         """交易日當天或之前最近一次的審查通過日期；交易日早於最早的日期時為 None。"""
@@ -444,6 +446,7 @@ def load_review_standard(path: Path) -> ReviewStandard:
             fixed_warning_occurrences=int(d["risk"]["fixed_warning_occurrences"]),
             forbidden=tuple(d["wording"]["forbidden"]),
             allowed_phrases=tuple(d["wording"]["allowed_phrases"]),
+            forbidden_exempt_until=d["wording"].get("exempt_until"),
             product_names=names,
             currency_zh_to_iso=dict(d["currency"]),
             denomination={k: int(v) for k, v in d["denomination"].items()},
