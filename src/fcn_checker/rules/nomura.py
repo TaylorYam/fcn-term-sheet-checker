@@ -27,12 +27,12 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.underlying_names",
-        "description": "連結標的英文名稱、交易所、關連交易所不核對；以第 7 項標的表彭博代碼為準（第 8 項名稱只和投資人須知比）",
+        "description": "連結標的英文名稱、交易所、關連交易所不核對；以第 7 項價格表彭博代碼為準（第 8 項名稱只和投資人須知比）",
     },
     {"rule_id": "doc.initial_prices", "description": "期初價格本身的外部正確性（沒有權威來源）"},
     {
         "rule_id": "doc.initial_pricing",
-        "description": "期初定價方式：說明書沒有寫（標的表表頭只寫「期初價格」），參考條件表「期初定價」欄不核對（2026-10-15 確認）",
+        "description": "期初定價方式：說明書沒有寫（價格表表頭只寫「期初價格」），參考條件表「期初定價」欄不核對（2026-10-15 確認）",
     },
     {
         "rule_id": "doc.scenario_calculations",
@@ -223,7 +223,7 @@ def _has(pf: ParsedField, word: str) -> bool | None:
 
 def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
     """記憶式：第 7 項句型 ⇔ 名稱「(記憶式自動提前出場)」／「with Memory Knock-Out」（不一致轉人工覆核）；
-    日期表「自動提前出場價」欄（如有）每列 = 標的表表頭 KO %。KO 觀察方式與日期表排法、D 型起日的一致由 parser 判定。"""
+    日期表「自動提前出場價」欄（如有）每列 = 價格表表頭 KO %。KO 觀察方式與日期表排法、D 型起日的一致由 parser 判定。"""
     f = ctx.ts.f
     mem, zh, en = f("ko_memory"), f("name_zh"), f("name_en")
     label = {True: "記憶式", False: "非記憶式"}
@@ -252,14 +252,14 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
                 ok=not bad,
                 fail=S.REVIEW_REQUIRED,
                 reason="document_inconsistent",
-                fail_message=f"第 {'、'.join(map(str, bad))} 期的自動提前出場價不等於標的表表頭 KO %（樣本沒有逐期不同的 KO）",
+                fail_message=f"第 {'、'.join(map(str, bad))} 期的自動提前出場價不等於價格表表頭 KO %（樣本沒有逐期不同的 KO）",
             )
         )
     return out
 
 
 def underlying_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """標的數：第 7 項單一／多標的句型、第 8 項「連結標的：」／「連結標的n：」檔數、第 9 項彭博代碼 = 標的表。"""
+    """標的數：第 7 項單一／多標的句型、第 8 項「連結標的：」／「連結標的n：」檔數、第 9 項彭博代碼 = 價格表。"""
     f = ctx.ts.f
     uls, style, art8, art9 = f("underlyings"), f("memory_style"), f("art8_names"), f("art9_tickers")
     shape = {True: "多標的", False: "單一標的"}
@@ -270,7 +270,7 @@ def underlying_terms(ctx: IssuerContext) -> list[CheckResult]:
             shape.get(style.value != "single") if style.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="第 7 項自動提前出場事件的單一／多標的句型須與標的表檔數一致",
+            fail_message="第 7 項自動提前出場事件的單一／多標的句型須與價格表檔數一致",
         )
     ]
     art8_shape = (shape[art8.value[0] == "basket"], len(art8.value[1])) if art8.ok else None
@@ -280,19 +280,19 @@ def underlying_terms(ctx: IssuerContext) -> list[CheckResult]:
             art8_shape,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="第 8 項連結標的的寫法（單一「連結標的：」／多標的「連結標的n：」）與檔數須與標的表一致",
+            fail_message="第 8 項連結標的的寫法（單一「連結標的：」／多標的「連結標的n：」）與檔數須與價格表一致",
         )
     )
     out.append(
         kit.doc_check(ctx, "doc.underlying_tickers", "art9_tickers", "第 9 項標的彭博代碼", uls, art9).compare(
-            uls.value, art9.value, fail_message="第 9 項各檔「彭博代碼：」須依序等於第 7 項標的表"
+            uls.value, art9.value, fail_message="第 9 項各檔「彭博代碼：」須依序等於第 7 項價格表"
         )
     )
     return out
 
 
 def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KI：第 7 項下限觸發事件條款 ⇔ 標的表下限觸發價欄 ⇔ 到期贖回款數（無 KI 兩款、有 KI 三款）；
+    """KI：第 7 項下限觸發事件條款 ⇔ 價格表下限觸發價欄 ⇔ 到期贖回款數（無 KI 兩款、有 KI 三款）；
     KI 每期觀察的下限觸發決定日表每列 = 同列自動提前出場決定日（不一致轉人工覆核）。"""
     f = ctx.ts.f
     ki, table, cases = f("ki_type"), f("underlying_table"), f("maturity_cases")
@@ -302,12 +302,12 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
         return [Check("doc.ki_consistency", "ki_type", Item.expected("第 7 項下限觸發"), ctx.document).review(ki)]
     has = doc_ki != "none"
     out = [
-        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "標的表下限觸發價欄", ki, table).compare(
+        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "價格表下限觸發價欄", ki, table).compare(
             label[has],
-            label["ki" in table.value["columns"]] if table.ok else None,
+            label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="標的表有無下限觸發價欄須與第 7 項下限觸發事件條款一致",
+            fail_message="價格表有無下限觸發價欄須與第 7 項下限觸發事件條款一致",
         ),
         kit.doc_check(ctx, "doc.ki_consistency", "maturity_cases", "第 7 項到期贖回款數", ki, cases).compare(
             3 if has else 2,
@@ -379,7 +379,7 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def scenario(ctx: IssuerContext) -> list[CheckResult]:
-    """第 14 項設定參數面額 = 第 7 項面額；百分比表每列 = 標的表表頭（期初 100%、K／KO／KI %），列數 = 標的數。
+    """第 14 項設定參數面額 = 第 7 項面額；百分比表每列 = 價格表表頭（期初 100%、K／KO／KI %），列數 = 標的數。
     設定參數年期、固定配息率、發行價格另由 `periods`、`coupon_mentions` 與共用發行價格規則核對。"""
     f = ctx.ts.f
     denom, scen = f("denomination"), f("scenario_denomination")
@@ -391,22 +391,22 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
     table, pcts = f("underlying_table"), f("scenario_table")
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 14 項百分比表", table, pcts)
     if table.ok and pcts.ok:
-        expected_row = [Decimal(100) if c == "initial" else table.value["pcts"][c] for c in table.value["columns"]]
+        expected_row = [Decimal(100) if c == "initial" else table.value.pcts[c] for c in table.value.columns]
         issues = []
-        if pcts.value["columns"] != table.value["columns"]:
-            issues.append("欄位與標的表表頭不同")
-        if len(pcts.value["rows"]) != len(table.value["tickers"]):
-            issues.append(f"有 {len(pcts.value['rows'])} 列，標的表有 {len(table.value['tickers'])} 檔")
+        if pcts.value["columns"] != list(table.value.columns):
+            issues.append("欄位與價格表表頭不同")
+        if len(pcts.value["rows"]) != len(table.value.rows):
+            issues.append(f"有 {len(pcts.value['rows'])} 列，價格表有 {len(table.value.rows)} 檔")
         bad = [n for n, row in enumerate(pcts.value["rows"], 1) if row != expected_row]
         if bad:
-            issues.append(f"第 {'、'.join(map(str, bad))} 列百分比不等於標的表表頭 {[str(x) for x in expected_row]}")
+            issues.append(f"第 {'、'.join(map(str, bad))} 列百分比不等於價格表表頭 {[str(x) for x in expected_row]}")
         out.append(
             check.compare(
                 None,
                 None,
                 ok=not issues,
                 reason="value_mismatch",
-                message="；".join(issues) or "每列等於標的表表頭百分比",
+                message="；".join(issues) or "每列等於價格表表頭百分比",
             )
         )
     else:

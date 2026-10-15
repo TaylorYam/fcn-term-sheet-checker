@@ -16,12 +16,12 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import full_brackets, squash
-from . import dbs, iis
+from . import dbs, iis, price_table
 from .common import RawText, capture_group, derived, fee_rates, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "dbs-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 TITLE = "中文投資人須知(最終版本)"
 SECTIONS = (
     "※投資風險警語：",
@@ -171,17 +171,17 @@ def _terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
 
 def _prices(fields: dict[str, ParsedField], lines: list[Line]) -> set[str]:
     """商品簡介價格表（同說明書表1）→ 各標的價格與 K／KO／KI %；回傳額外交出的欄位（有下限觸發價格欄時的 ki_pct）。"""
-    table = dbs.price_table("price_table", lines, "連結標的資產：", "商品面額：")
+    table = price_table.read("price_table", dbs.table_region(lines, "連結標的資產：", "商品面額："), dbs.IIS_TABLE)
     uls = fields["underlyings"]
-    if table.ok and uls.ok and table.value["tickers"] != uls.value:
-        note = f"價格表的彭博代碼 {table.value['tickers']} 和「連結標的資產：」{uls.value} 不同"
+    if table.ok and uls.ok and table.value.tickers != uls.value:
+        note = f"價格表的彭博代碼 {table.value.tickers} 和「連結標的資產：」{uls.value} 不同"
         table = ParsedField(table.name, FieldStatus.INVALID, evidence=list(table.evidence), note=note)
     fields["price_table"] = table
     fields["underlying_prices"] = dbs.price_rows(table)
     for key, col in (("strike_pct", "strike"), ("ko_pct", "ko")):
-        fields[key] = derived(key, table, table.value["pcts"][col] if table.ok else None)
-    if table.ok and "ki" in table.value["pcts"]:
-        fields["ki_pct"] = derived("ki_pct", table, table.value["pcts"]["ki"])
+        fields[key] = derived(key, table, table.value.pcts[col] if table.ok else None)
+    if table.ok and "ki" in table.value.pcts:
+        fields["ki_pct"] = derived("ki_pct", table, table.value.pcts["ki"])
         return {"ki_pct"}
     return set()
 

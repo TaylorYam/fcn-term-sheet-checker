@@ -1,5 +1,5 @@
 """各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%，
-以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS），
+以及保留空白的原文合併文字 `RawText`、同一句另一組的 `capture_group`（Nomura、GS），
 費用表依座標讀費率的 `fee_rates`（GS、Natixis、CA）。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
@@ -105,7 +105,7 @@ class Mention:
         return cls.missing(where, fallback) if hit is None else cls.of_hit(where, pick(hit.value), hit)
 
 
-# ---------------------------------------------------------------- 原文合併文字與表格分欄（Nomura、GS）
+# ---------------------------------------------------------------- 原文合併文字（Nomura、GS）
 
 
 class RawText:
@@ -147,33 +147,6 @@ class RawText:
         return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
 
 
-def by_column(lines: list[Line], gap: float = 20) -> list[Line]:
-    """表格的行依 x 座標分欄（相鄰兩行 x 相差超過 `gap` 為不同欄），由左到右、每欄由上到下。
-
-    一格拆成多行時，擷取順序可能逐欄也可能逐列；分欄後的順序固定（`執行價 (期初價格之X% )`、`ABC` / `UW Equity` 會接在一起）。"""
-    columns: list[list[Line]] = []
-    for ln in sorted(lines, key=lambda x: x.x0):
-        if columns and ln.x0 - columns[-1][-1].x0 <= gap:
-            columns[-1].append(ln)
-        else:
-            columns.append([ln])
-    return [ln for col in columns for ln in sorted(col, key=lambda x: (x.page, x.y0))]
-
-
-def header_columns(header: list[Line], gap: float = 15) -> list[tuple[float, str]]:
-    """表頭各行依 x 中心分欄（相鄰兩行相差 `gap` 內同一欄），回傳（欄中心, 欄文字去空白、欄內由上到下）由左到右（Natixis、BBVA、UBS、DBS 的價格表）。"""
-    cols: list[list[Line]] = []
-    for ln in sorted(header, key=lambda x: x.xc):
-        if cols and ln.xc - cols[-1][-1].xc <= gap:
-            cols[-1].append(ln)
-        else:
-            cols.append([ln])
-    return [
-        (sum(x.xc for x in col) / len(col), "".join(squash(x.text) for x in sorted(col, key=lambda x: (x.page, x.y0))))
-        for col in cols
-    ]
-
-
 ZH_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 
 
@@ -197,11 +170,6 @@ def compat_standard(text: str) -> str:
 def compat_normalized(lines: Sequence[Line]) -> list[Line]:
     """每行的 CJK 相容字轉成標準字（GS 投資人須知、CA 兩種文件）；字數不變，字座標照舊。"""
     return [replace(ln, text=t) if (t := compat_standard(ln.text)) != ln.text else ln for ln in lines]
-
-
-def column_text(lines: list[Line]) -> str:
-    """`by_column` 順序接起來、去空白（表頭）。"""
-    return "".join(squash(ln.text) for ln in by_column(lines))
 
 
 def capture_group(lns: list[Line], pattern: str, group: int, name: str, convert: Callable = lambda x: x) -> ParsedField:

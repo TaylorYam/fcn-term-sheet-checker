@@ -3,7 +3,7 @@
 只用 tests/pdf_writer.py 排版：封面 `‧` 兩欄表（標籤 x 60、‧ x 260、值 x 273）；章名「一、商品基本資料」x 42；第一章條號「N.」
 x 42、標題同一列 x 67（`legacy=True` 舊文件：「N. 標題」同一行、價格固定 4 位、受託機構商品代號 `[ ]`、分銷費用單列）；
 子項「(n)」x 42、內容同一列 x 67；表格一格一行。
-改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`、第一章各條 `ts.art{n}`（標的表
+改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`、第一章各條 `ts.art{n}`（價格表
 `ts.art9.table`、日期表 `ts.art12.table`、假設價格表 `ts.art15.table`）、其他各章 `ts.ch二`～`ts.ch五`。
 投資人須知（docs/templates/citi-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
 每頁頁首「第N頁，共M頁」；段落代號 `iis.cover`、`iis.warn`（警語 1.～13.）、`iis.org`（一、相關機構）、`iis.summary`
@@ -78,8 +78,8 @@ class Spec(ProductSpec):
     underlyings: tuple[UL, ...] = field(init=False)
     count: int = 3  # 標的數
     autocall: bool = True  # False → 無自動提前出場
-    vwap: bool = False  # 標的表表頭寫「期初評價日之VWAP」
-    pricing_text: str | None = None  # 標的表表頭「期初評價日之X」的 X；None 依 vwap（VWAP／收盤價格）
+    vwap: bool = False  # 價格表表頭寫「期初評價日之VWAP」
+    pricing_text: str | None = None  # 價格表表頭「期初評價日之X」的 X；None 依 vwap（VWAP／收盤價格）
     legacy: bool = False  # 舊文件版面（2024）
     trustee_code: str | None = None  # 受託或銷售機構商品代號；None 同商品代號，"" 為 `[ ]`
     units: int = 10  # 情境假設的投資單位數
@@ -202,8 +202,14 @@ class _Doc:
             self.text(273, v)
 
 
+# 價格表各欄的左緣（真實樣本的欄序：列號、名稱、彭博代碼、分類、交易所、期初股價、執行價、下限價、自動提前出場界限）
+TABLE_X = {"n": 48, "name": 62, "code": 150, "class": 196, "exchange": 222, "prices": (264, 344, 424, 504)}
+
+
 def _price_table(d: _Doc, s: Spec, *, reprint: bool) -> None:
-    """第 9 項標的表（`reprint` 為第 15 項假設價格表：沒有分類與交易所欄，執行價、下限價欄標「(假設)」）。"""
+    """第 9 項價格表（8 號字；`reprint` 為第 15 項假設價格表：沒有分類與交易所欄，執行價、下限價欄標「(假設)」）。
+    表頭每格拆成多行（每行 6 字）；每檔一列，代碼「代號 交易所碼」下一行是「Equity」（真實樣本）。"""
+    x = TABLE_X
     hypo = "(假設)" if reprint else ""
     pricing = s.pricing_text or ("VWAP" if s.vwap else "收盤價格")
     cols: list[tuple[str, Decimal | None]] = [
@@ -214,24 +220,26 @@ def _price_table(d: _Doc, s: Spec, *, reprint: bool) -> None:
         cols.append((f"下限價 (期初股價的{s.ki_pct:.2f}%){hypo}", s.ki_pct))
     if s.autocall:
         cols.append((f"自動提前出場界限 (期初股價的{s.ko:.2f}%)", s.ko))
-    heads = ["連結標的", "彭博代碼"] + ([] if reprint else ["連結標的分類", "交易所"])
-    for t in heads:
-        d.cell(60, t)
-    for label, _ in cols:
-        for k in range(0, len(label), 6):  # 表頭每格拆成多行
-            d.cell(300, label[k : k + 6])
+    heads = [[(x["name"], "連結標的"), (x["code"], "彭博代碼")]]
+    if not reprint:  # 「連結標的分類」欄窄，拆成「連結」／「標的」／「分類」三行
+        heads[0] += [(x["class"], "連結"), (x["exchange"], "交易所")]
+        heads += [[(x["class"], "標的")], [(x["class"], "分類")]]
+    parts = [[label[k : k + 6] for k in range(0, len(label), 6)] for label, _ in cols]
+    rows = max(len(heads), *(len(p) for p in parts))
+    d.w.need(30 + 12 * rows + 26 * s.count)
+    for k in range(rows):
+        cells = [(px, p[k]) for px, p in zip(x["prices"], parts, strict=False) if k < len(p)]
+        d.w.row([*(heads[k] if k < len(heads) else []), *cells], gap=11, size=8)
+    d.w.space(4)
     for i, u in enumerate(s.underlyings, 1):
-        d.cell(48, str(i))
-        d.cell(60, u.name)
         code, exch = u.ticker.split(" ")
-        d.cell(150, f"{code} {exch}")
-        d.cell(150, "Equity")
+        cells = [(x["n"], str(i)), (x["name"], u.name), (x["code"], f"{code} {exch}")]
         if not reprint:
-            d.cell(200, "股份")
-            d.cell(240, u.exchange)
-        for _, pct in cols:
-            value = u.initial if pct is None else price(u.initial, pct)
-            d.cell(300, s.price_text(value))
+            cells += [(x["class"], "股份"), (x["exchange"], u.exchange[:4])]  # 交易所名稱拆兩行（真實樣本）
+        for px, (_, pct) in zip(x["prices"], cols, strict=False):
+            cells.append((px, s.price_text(u.initial if pct is None else price(u.initial, pct))))
+        d.w.row(cells, gap=11, size=8)
+        d.w.row([(x["code"], "Equity"), *([] if reprint else [(x["exchange"], u.exchange[4:])])], gap=15, size=8)
 
 
 def _article8(d: _Doc, s: Spec) -> None:

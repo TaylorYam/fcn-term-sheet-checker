@@ -19,12 +19,12 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import full_brackets, squash
-from . import money
-from .common import RawText, capture_group, compat_normalized, dec, derived, fee_rates, header_columns, number
+from . import money, price_table
+from .common import RawText, capture_group, compat_normalized, derived, fee_rates, number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "dbs-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 TITLE = "中文產品說明書(最終版本)"
 SECTIONS = (
     "商品基本資料",
@@ -59,9 +59,23 @@ FULL_RATE = r"利率：1?\)?對於第1(?:~(\d{1,2}))?個觀察期間而言，利
 KI_EVENT = "下限觸發事件：若任一連結標的於定價日的參考價格小於其下限觸發價格，則視為發生下限觸發事件"
 KI_MATURITY = r"\(a\)如果未發生下限觸發事件，將適用現金結算"
 NO_KI_MATURITY = r"\(a\)若表現最差連結標的之最終價格等於或高於其執行價格，將適用現金結算"
-# 價格表欄（依表頭關鍵字的出現順序決定欄序；DBS 是 K → KO → KI）
-PRICE_HEADS = (("strike", "執行價格"), ("ko", "自動提前出場價格"), ("ki", "下限觸發價格"))
-CELL = re.compile(rf"^({ZH_CCY})?\s*([\d,]+\.\d+)?$")  # 價格格：「美元 123.4567」或分兩行「美元」／「123.4567」
+# 價格表（表1、情境、投資人須知商品簡介）：以彭博代碼切列（代碼在列首），欄序 K → KO → KI；
+# 表頭 %「(期初價格的X%)」可能跨頁（欄名在前一頁）；每格「美元 123.4567」或分兩行「美元」／「123.4567」
+PRICE_TABLE = price_table.TableSpec(
+    where="表1 價格表",
+    initial="期初價格",
+    columns=(
+        price_table.Column("strike", "執行價格"),
+        price_table.Column("ko", "自動提前出場價格"),
+        price_table.Column("ki", "下限觸發價格", required=False),
+    ),
+    anchor="ticker",
+    pct=r"期初價格的?(\d+(?:\.\d+)?)%",
+    pct_label="(期初價格的X%)",
+    code="彭博代碼",
+)
+SCENARIO_TABLE = replace(PRICE_TABLE, where="情境分析價格表")
+IIS_TABLE = replace(PRICE_TABLE, where="商品簡介價格表")
 
 
 def body(lines: Sequence[Line]) -> list[Line]:
@@ -222,7 +236,7 @@ def _basic(fields: dict[str, ParsedField], basic: list[Line], put: Callable) -> 
     fields["full_rate_periods"] = full_rate_periods("full_rate_periods", ti, FULL_RATE)
     fields["ko_wording"] = ko_wording(ti)
     fields["ko_memory"] = memory(ti, "ko_memory")
-    table = price_table("underlying_table", basic, "表1", "到期贖回計算公式，含")
+    table = price_table.read("underlying_table", table_region(basic, "表1", "到期贖回計算公式，含"), PRICE_TABLE)
     fields["underlying_table"] = table
     fields["ki_type"] = ki_type(ti, table)
     _table_fields(fields)
@@ -294,7 +308,7 @@ def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:
     """下限觸發事件（範本規格 §4.4）：到期 (a)、下限觸發事件定義、價格表下限觸發價格欄三者須一致（說明書、投資人須知共用）。"""
     am, none = list(ti.finditer(KI_MATURITY)), list(ti.finditer(NO_KI_MATURITY))
     event = ti.text.count(KI_EVENT)
-    has_col = table.ok and "ki" in table.value["columns"]
+    has_col = table.ok and "ki" in table.value.columns
     if len(am) == 1 and not none and event == 1:
         if table.ok and not has_col:
             return ParsedField.invalid(
@@ -313,116 +327,28 @@ def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:
 
 def price_rows(table: ParsedField) -> ParsedField:
     """價格表 → 標準欄位 `underlying_prices`（代碼、各價格、證據、價格旁的幣別字）；價格表有問題時沿用它的狀態。"""
-    if not table.ok:
-        return derived("underlying_prices", table)
-    v = table.value
-    rows = tuple(
-        standard_fields.PriceRow(t, dict(p), tuple(Evidence.of(ln) for ln in lns), currency=c)
-        for t, p, lns, c in zip(v["tickers"], v["rows"], v["row_lines"], v["currencies"], strict=True)
-    )
-    return ParsedField("underlying_prices", FieldStatus.PRESENT, rows, list(table.evidence))
+    return price_table.price_rows(table, currency=True)
 
 
-def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) -> ParsedField:
-    """價格表（表1、情境、投資人須知）：`start_marker` 那一行之後、`end_marker` 那一行之前。
-
-    每檔一列，列首是彭博代碼（`ABC UW`）；代碼以上是表頭（可能跨頁：欄名在前一頁、「(期初價格的X%)」在下一頁），
-    表頭各行依 x 中心分欄，欄序依關鍵字（K → KO → KI）。每格「美元 123.4567」，或分兩行「美元」／「123.4567」，依 x 中心
-    歸到最近的欄、依 y 歸到所在的列（下一列代碼之前）。
-
-    值：{"columns", "pcts", "rows": [{欄: Decimal}], "row_lines", "tickers", "currencies"}。"""
-    ti = TextIndex(lns)
+def table_region(lns: list[Line], start_marker: str, end_marker: str) -> list[Line]:
+    """價格表的範圍：開頭是 `start_marker` 的那一行之後、開頭是 `end_marker` 的那一行之前（去空白比對）。"""
     a = next((i for i, ln in enumerate(lns) if squash(ln.text).startswith(start_marker)), None)
     if a is None:
-        return ParsedField.missing(name, f"找不到價格表（「{start_marker}」）")
+        return []
     b = next((i for i in range(a + 1, len(lns)) if squash(lns[i].text).startswith(end_marker)), None)
-    if b is None:
-        return ParsedField.missing(name, f"找不到價格表的結尾（「{end_marker}」）")
-    lines = lns[a + 1 : b]
-    codes = [ln for ln in lines if TICKER.match(ln.text.strip())]
-    if not codes:
-        return ParsedField.invalid(name, lines or ti.lines, "價格表讀不到任何彭博代碼")
-    first = min(codes, key=lambda x: (x.page, x.y0))
-    top = next((ln for ln in lines if squash(ln.text) == "彭博代碼"), None)
-    if top is None:
-        return ParsedField.invalid(name, lines, "價格表找不到表頭「彭博代碼」")
-    header = [
-        ln for ln in lines if (top.page, top.y0) <= (ln.page, ln.y0) and (ln.page, ln.y1) <= (first.page, first.y0 + 1)
-    ]
-    head = header_columns(header)
-    cols: dict[str, float] = {}
-    pcts: dict[str, Decimal] = {}
-    for col, word in PRICE_HEADS:
-        hit = [(x, t) for x, t in head if word in t]
-        if len(hit) > 1:
-            return ParsedField.invalid(name, header, f"價格表表頭「{word}」出現多欄")
-        if hit:
-            m = re.search(r"期初價格的?" + PCT, hit[0][1])
-            if m is None:
-                return ParsedField.invalid(name, header, f"價格表表頭「{word}」讀不到「(期初價格的X%)」")
-            cols[col], pcts[col] = hit[0][0], Decimal(m[1])
-    initial = [x for x, t in head if t == "期初價格"]
-    if "strike" not in cols or "ko" not in cols or len(initial) != 1:
-        return ParsedField.invalid(
-            name, header, "價格表表頭不是「彭博代碼、期初價格、執行價格、自動提前出場價格(、下限觸發價格)」"
-        )
-    centers = {"initial": initial[0], **cols}
-    columns = [c for c, _ in sorted(cols.items(), key=lambda kv: kv[1])]
-    codes.sort(key=lambda x: (x.page, x.y0))
-    cells = [ln for ln in lines if ln not in header and ln not in codes and (ln.page, ln.y0) > (top.page, top.y0)]
-    rows, row_lines, tickers, currencies = [], [], [], []
-    for k, code in enumerate(codes):
-        nxt = codes[k + 1] if k + 1 < len(codes) else None
-        height = code.y1 - code.y0
-        mine = [  # 以每行的 y 中心歸列：代碼那一行（略高一點）起、到下一列代碼之前；最後一列只到代碼下方一行半
-            ln
-            for ln in cells
-            if (ln.page, (ln.y0 + ln.y1) / 2) >= (code.page, code.y0 - 3)
-            and (nxt is None or (ln.page, (ln.y0 + ln.y1) / 2) < (nxt.page, nxt.y0 - 3))
-            and (nxt is not None or (ln.page == code.page and ln.y0 < code.y1 + 1.5 * height))
-        ]
-        found: dict[str, list[Line]] = {}
-        for ln in mine:
-            col = min(centers, key=lambda c: abs(centers[c] - ln.xc))
-            found.setdefault(col, []).append(ln)
-        values, ccys = {}, set()
-        for col in centers:
-            text = "".join(squash(x.text) for x in sorted(found.get(col, []), key=lambda x: (x.page, x.y0)))
-            m = re.fullmatch(rf"({ZH_CCY})([\d,]+\.\d+)", text)
-            if m is None:
-                return ParsedField.invalid(
-                    name, [code, *mine], f"價格表 {code.text.strip()} 那一列「{col}」欄讀不到「幣別 價格」"
-                )
-            values[col], ccy = dec(m[2]), m[1]
-            ccys.add(ccy)
-        if len(ccys) != 1:
-            return ParsedField.invalid(name, [code, *mine], f"價格表 {code.text.strip()} 那一列各格幣別字不同")
-        t = TICKER.match(code.text.strip())
-        rows.append(values)
-        row_lines.append([code, *sorted(mine, key=lambda x: (x.page, x.y0, x.x0))])
-        tickers.append(f"{t[1]} {t[2]}")
-        currencies.append(ccys.pop())
-    value = {
-        "columns": columns,
-        "pcts": pcts,
-        "rows": rows,
-        "row_lines": row_lines,
-        "tickers": tickers,
-        "currencies": currencies,
-    }
-    return ParsedField.present(name, value, lines)
+    return lns[a + 1 : b] if b is not None else []
 
 
 def _table_fields(fields: dict[str, ParsedField]) -> None:
     """表1＋標的表代碼 → 標準欄位：標的、各標的價格、K／KO／KI %（表頭是唯一來源）。"""
     table, tickers = fields["underlying_table"], fields["basic_tickers"]
-    if table.ok and tickers.ok and table.value["tickers"] == tickers.value:
+    if table.ok and tickers.ok and table.value.tickers == tickers.value:
         fields["underlyings"] = ParsedField(
             "underlyings", FieldStatus.PRESENT, list(tickers.value), list(tickers.evidence)
         )
         fields["underlying_prices"] = price_rows(table)
     elif table.ok and tickers.ok:
-        note = f"表1 的彭博代碼 {table.value['tickers']} 和連結標的資產表 {tickers.value} 不同（代碼、順序或檔數）"
+        note = f"表1 的彭博代碼 {table.value.tickers} 和連結標的資產表 {tickers.value} 不同（代碼、順序或檔數）"
         ev = list(table.evidence) + list(tickers.evidence)
         for key in ("underlyings", "underlying_prices"):
             fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
@@ -431,7 +357,7 @@ def _table_fields(fields: dict[str, ParsedField]) -> None:
         fields["underlyings"] = derived("underlyings", bad)
         fields["underlying_prices"] = derived("underlying_prices", bad)
     for key, col in (("strike_pct", "strike"), ("ko_pct", "ko")):
-        fields[key] = derived(key, table, table.value["pcts"][col] if table.ok else None)
+        fields[key] = derived(key, table, table.value.pcts[col] if table.ok else None)
     ki = fields["ki_type"]
     if ki.ok and ki.value == "none":
         fields["ki_pct"] = ParsedField(
@@ -439,7 +365,7 @@ def _table_fields(fields: dict[str, ParsedField]) -> None:
         )
     else:
         bad = next((p for p in (ki, table) if not p.ok), None)
-        fields["ki_pct"] = derived("ki_pct", bad or table, None if bad else table.value["pcts"]["ki"])
+        fields["ki_pct"] = derived("ki_pct", bad or table, None if bad else table.value.pcts["ki"])
 
 
 def _schedule(fields: dict[str, ParsedField]) -> None:
@@ -485,7 +411,9 @@ def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) ->
     )
     put("scenario_monthly_pct", sec, r"最大利率值：" + PCT + r"自動提前出場決定日", Decimal)
     put("scenario_ko_start", sec, r"自動提前出場決定日：從第(\d{1,2})個觀察期間結束日", int)
-    fields["scenario_table"] = price_table("scenario_table", sec, "各連結標的之相關價格", "1.")
+    fields["scenario_table"] = price_table.read(
+        "scenario_table", table_region(sec, "各連結標的之相關價格", "1."), SCENARIO_TABLE
+    )
     put(
         "scenario_first_period",
         sec,
