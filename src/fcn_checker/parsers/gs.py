@@ -344,7 +344,7 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
 
 def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
     """價格表 → 標準欄位：標的、各標的價格、K／KO／KI %（K、KI 主來源是定義，表頭 % 由規則交叉驗證；KO 只在表頭）。"""
-    fields["underlyings"] = underlyings_field(table)
+    fields["underlyings"] = price_table.underlyings(table)
     fields["underlying_prices"] = price_table.price_rows(table)
     fields["strike_pct"] = fields["strike_def_pct"]
     ki_t = fields["ki_type"]
@@ -354,21 +354,12 @@ def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
         )
     else:
         fields["ki_pct"] = fields["ki_def_pct"]
-    if table.ok and "ko" in table.value.pcts:
-        fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, table.value.pcts["ko"], list(table.evidence))
-    elif table.ok:
-        fields["ko_pct"] = ParsedField.invalid(
-            "ko_pct", list(table.value.header_lines), "價格表表頭讀不到提前出場價格的 %"
-        )
-    else:
-        fields["ko_pct"] = derived("ko_pct", table)
+    fields["ko_pct"] = derived("ko_pct", table, table.value.pcts["ko"] if table.ok else None)  # 價格表一定有 KO 欄與 %
 
 
-def underlyings_field(table: ParsedField) -> ParsedField:
-    """價格表 → 標準欄位 `underlyings`（彭博代號，依表上順序）。"""
-    if not table.ok:
-        return derived("underlyings", table)
-    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value.tickers), list(table.evidence))
+def indexed(table: price_table.PriceTable) -> bool:
+    """價格表表頭寫「(i)」＝多標的寫法。"""
+    return any("(i)" in h for h in table.heads.values())
 
 
 def ki_type(ti: TextIndex, lns: list[Line], where: str = "第一章第 15 項") -> ParsedField:

@@ -75,7 +75,7 @@ VALUE_X = 150.0  # 封面兩欄表：標籤在左（x < 150）、值在右
 WARNING_HEAD = "商品之投資風險警語"
 NAME_TAIL = re.compile(r"\s*[(（]下稱「本商品」[)）]\s*$")
 TRAILING_PLACE = re.compile(r"\s*[(（]營業活動所在地[)）]\s*$")  # 地址後的「(營業活動所在地)」不屬於地址
-# 價格表：第 9 項標的表（以彭博代碼切列，價格下一行是幣別字）、第 15 項假設價格表（「連結標的n」各一列，以價格切列）
+# 價格表：第 9 項價格表（以彭博代碼切列，價格下一行是幣別字）、第 15 項假設價格表（「連結標的n」各一列，以價格切列）
 PRICE_TABLE = price_table.TableSpec(
     where="第 9 項價格表",
     initial="期初價格",
@@ -350,12 +350,12 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
         for i, m in enumerate(t8.finditer(PRO_RATA_RATE), start=1)
     ]
 
-    # 第 9 項標的表
+    # 第 9 項價格表
     table = price_table.read(
         "underlying_table", table_region(article(9), "連結標的資產、相對權重", "相對權重"), PRICE_TABLE
     )
     fields["underlying_table"] = table
-    fields["underlyings"] = underlyings_field(table)
+    fields["underlyings"] = price_table.underlyings(table)
     fields["underlying_prices"] = price_rows(table)
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
 
@@ -552,7 +552,7 @@ def ki_type(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> Parse
     return ParsedField.present(name, kind, lns)
 
 
-# ---------------------------------------------------------------- 標的表與假設價格表
+# ---------------------------------------------------------------- 價格表與假設價格表
 
 
 def table_region(lines: list[Line], start: str, end: str) -> list[Line]:
@@ -564,15 +564,8 @@ def table_region(lines: list[Line], start: str, end: str) -> list[Line]:
     return lines[a + 1 : b]
 
 
-def underlyings_field(table: ParsedField) -> ParsedField:
-    """標的表 → 標準欄位 `underlyings`（彭博代號，依表上順序）。"""
-    if not table.ok:
-        return derived("underlyings", table)
-    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value.tickers), list(table.evidence))
-
-
 def price_rows(table: ParsedField) -> ParsedField:
-    """第 9 項標的表 → 標準欄位 `underlying_prices`（順序同 `underlyings`；列名「第 n 檔」）。"""
+    """第 9 項價格表 → 標準欄位 `underlying_prices`（順序同 `underlyings`；列名「第 n 檔」）。"""
     names = [f"第 {i} 檔" for i in range(1, len(table.value.rows) + 1)] if table.ok else None
     return price_table.price_rows(table, names=names)
 

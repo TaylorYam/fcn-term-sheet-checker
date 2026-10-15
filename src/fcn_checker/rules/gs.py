@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from ..parsers import gs
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
@@ -222,7 +223,7 @@ def underlying_terms(ctx: IssuerContext) -> list[CheckResult]:
         ),
         kit.doc_check(ctx, "doc.underlying_count", "price_table_header", "價格表表頭「(i)」", uls, table).compare(
             shape.get(len(uls.value) > 1) if uls.ok else None,
-            shape.get(any("(i)" in h for h in table.value.heads.values())) if table.ok else None,
+            shape.get(gs.indexed(table.value)) if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="價格表表頭有無「(i)」（多標的寫法）須與價格表檔數一致",

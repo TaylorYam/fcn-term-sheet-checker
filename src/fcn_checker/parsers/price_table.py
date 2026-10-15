@@ -26,13 +26,13 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from .. import standard_fields
 from ..schema import Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import money
-from .common import dec, derived
+from .common import by_column, dec, derived
 from .layout import join_text
 
 NUMBER = r"\d[\d,]*(?:\.\d+)?"
@@ -80,14 +80,12 @@ class TableSpec:
     where: str
     initial: str
     columns: tuple[Column, ...]
-    anchor: str
+    anchor: Literal["number", "ticker", "price"]
     pct: str | None = None
     pct_label: str = ""
     code: str | None = None
 
     def __post_init__(self) -> None:
-        if self.anchor not in ANCHOR_WORDS:
-            raise ValueError(f"未知的列錨點：{self.anchor}")
         if self.anchor == "ticker" and self.code is None:
             raise ValueError("以彭博代碼為列錨點時要宣告代碼欄")
 
@@ -163,12 +161,12 @@ def price_rows(
     *,
     names: Sequence[str | None] | None = None,
     currency: bool = False,
-    name: str = "underlying_prices",
 ) -> ParsedField:
     """價格表 → 標準欄位 `underlying_prices`（順序同表上的列）；表有問題時沿用它的狀態。
 
     tickers：代碼不在表內時由上手依列序交出（例：另一張標的表）；預設用表上的代碼。names：列名（預設表上的名稱）。
     currency：`PriceRow.currency` 是否帶價格旁的幣別字。列數須相同，由上手先檢查。"""
+    name = "underlying_prices"
     if not table.ok:
         return derived(name, table)
     t: PriceTable = table.value
@@ -185,6 +183,13 @@ def price_rows(
         for r, code, label in zip(t.rows, codes, labels, strict=True)
     )
     return ParsedField(name, FieldStatus.PRESENT, rows, list(table.evidence))
+
+
+def underlyings(table: ParsedField) -> ParsedField:
+    """表上的彭博代碼 → 標準欄位 `underlyings`（依表上順序）；表有問題時沿用它的狀態。"""
+    if not table.ok:
+        return derived("underlyings", table)
+    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value.tickers), list(table.evidence))
 
 
 # ---------------------------------------------------------------- 讀法
@@ -215,12 +220,22 @@ def _page_key(ln: Line) -> tuple[int, float]:
     return ln.page, ln.y0
 
 
+def _reading(ln: Line) -> tuple[int, float, float]:
+    """由上到下、同一列由左到右。"""
+    return ln.page, ln.y0, ln.x0
+
+
 def _yc(ln: Line) -> float:
     return (ln.y0 + ln.y1) / 2
 
 
 def _overlap(a: Line, b: Line) -> float:
-    return min(a.x1, b.x1) - max(a.x0, b.x0)
+    return _span_overlap(a, b.x0, b.x1)
+
+
+def _span_overlap(ln: Line, x0: float, x1: float) -> float:
+    """這一行與 x 範圍重疊的寬度（不重疊時為負，絕對值是相隔的距離）。"""
+    return min(ln.x1, x1) - max(ln.x0, x0)
 
 
 def _first_anchor(lines: list[Line], spec: TableSpec) -> Line:
@@ -314,7 +329,7 @@ def _cells(lines: list[Line]) -> list[list[Line]]:
     groups: dict[int, list[Line]] = {}
     for i, ln in enumerate(lines):
         groups.setdefault(find(i), []).append(ln)
-    cells = [sorted(g, key=lambda x: (x.page, x.y0, x.x0)) for g in groups.values()]
+    cells = [sorted(g, key=_reading) for g in groups.values()]
     return sorted(cells, key=lambda c: min(x.x0 for x in c))
 
 
@@ -398,7 +413,7 @@ def _anchors(lines: list[Line], body: list[Line], cols: dict[str, _Col], spec: T
     found = [
         ln
         for ln in sorted(body, key=_page_key)
-        if PRICE_START.match(ln.text.strip()) and min(ln.x1, strike.x1) - max(ln.x0, strike.x0) > 0
+        if PRICE_START.match(ln.text.strip()) and _span_overlap(ln, strike.x0, strike.x1) > 0
     ]
     if not found:
         raise _Unreadable(body, f"{spec.where}找不到第 1 列（{ANCHOR_WORDS[spec.anchor]}）")
@@ -449,11 +464,10 @@ def _column_of(ln: Line, cols: dict[str, _Col], others: list[list[Line]]) -> str
     都不重疊時取 `NEAR` pt 內最近的表頭格（例：表頭沒有欄名的列號、情境表的「連結標的1」不算到期初價格欄）。"""
     spans: list[tuple[str | None, float, float]] = [(k, c.x0, c.x1) for k, c in cols.items()]
     spans += [(None, min(x.x0 for x in c), max(x.x1 for x in c)) for c in others]
-    best = max(spans, key=lambda s: min(ln.x1, s[2]) - max(ln.x0, s[1]))
-    if min(ln.x1, best[2]) - max(ln.x0, best[1]) > 0:
+    best = max(spans, key=lambda s: _span_overlap(ln, s[1], s[2]))
+    if _span_overlap(ln, best[1], best[2]) > 0:
         return best[0]
-    near = min(spans, key=lambda s: max(s[1] - ln.x1, ln.x0 - s[2]))
-    return near[0] if max(near[1] - ln.x1, ln.x0 - near[2]) < NEAR else None
+    return best[0] if -_span_overlap(ln, best[1], best[2]) < NEAR else None
 
 
 def _row(
@@ -468,7 +482,7 @@ def _row(
     by_col: dict[str | None, list[Line]] = {}
     for ln in lns:
         by_col.setdefault(_column_of(ln, cols, others), []).append(ln)
-    ordered = sorted(lns, key=lambda x: (x.page, x.y0, x.x0))
+    ordered = sorted(lns, key=_reading)
     keys = [c for c in order if c != "code"]
     found: list[tuple[Decimal, str | None]] = []
     for col in keys:
@@ -480,14 +494,14 @@ def _row(
         raise _Unreadable(ordered, f"{spec.where}第 {k} 列各格的幣別字不同")
     ticker = None
     if spec.code is not None:
-        text = join_text(sorted(by_col.get("code", []), key=lambda x: (x.page, x.y0, x.x0)))
+        text = join_text(sorted(by_col.get("code", []), key=_reading))
         hits = TICKER.findall(text)
         if len(hits) != 1:
             raise _Unreadable(ordered, f"{spec.where}第 {k} 列讀不到彭博代碼")
         ticker = f"{hits[0][0]} {hits[0][1]}"
-    left = min(c.x0 for k, c in cols.items() if k in ("code", "initial"))
+    left = min(c.x0 for key, c in cols.items() if key in ("code", "initial"))
     label = [ln for ln in lns if ln.xc < left and ln is not anchor and not re.fullmatch(r"\d{1,2}", ln.text.strip())]
-    name = re.sub(r"^\d{1,2}\s+", "", join_text(_by_column(label))).strip()
+    name = re.sub(r"^\d{1,2}\s+", "", join_text(by_column(label))).strip()
     return TableRow(
         prices=dict(zip(keys, (v for v, _ in found), strict=True)),
         ticker=ticker,
@@ -498,29 +512,23 @@ def _row(
 
 
 def _values(cell: list[Line]) -> list[tuple[Decimal, str | None]]:
-    """一格的值（價格與旁邊的幣別字）：行由上到下接起來（換行的數字或幣別字接回），同一行內以空白分開的是不同的值。"""
-    text = "".join(ln.text.strip() for ln in sorted(cell, key=lambda x: (x.page, x.y0, x.x0)))
+    """一格的值（價格與旁邊的幣別字）：上下兩行接起來（換行的數字或幣別字接回）；同一行內以空白分開的、左右並排
+    的兩行（例：價格旁的上標註腳）是不同的值。"""
+    text, prev = "", None
+    for ln in sorted(cell, key=_reading):
+        side_by_side = prev is not None and prev.page == ln.page and abs(_yc(prev) - _yc(ln)) < (ln.y1 - ln.y0) / 2
+        text += (" " if side_by_side else "") + ln.text.strip()
+        prev = ln
     if re.match(CURRENCY, text):
         return [(dec(m[2]), m[1]) for m in PREFIXED.finditer(text)]
     return [(dec(m[1]), m[2]) for m in SUFFIXED.finditer(text)]
 
 
-def _by_column(lines: list[Line], gap: float = 20) -> list[Line]:
-    """依 x 分欄（相鄰兩行左緣相差超過 `gap` 為不同欄），由左到右、每欄由上到下。"""
-    columns: list[list[Line]] = []
-    for ln in sorted(lines, key=lambda x: x.x0):
-        if columns and ln.x0 - columns[-1][-1].x0 <= gap:
-            columns[-1].append(ln)
-        else:
-            columns.append([ln])
-    return [ln for col in columns for ln in sorted(col, key=lambda x: (x.page, x.y0))]
-
-
 def split_at_columns(lines: list[Line], tol: float = ALIGN) -> list[Line]:
     """一行橫跨好幾欄（PDF 把相鄰幾格擷取成同一行）時切回各欄。欄的左緣取這些行中至少兩行共有的 x0；空白之後的字
     也可以對齊只有一行的 x0（例：欄內只有一行表頭續行）。行內某個字的左緣落在欄的左緣上、且和前一個字之間有空白或
-    間隙時從那裡切開；緊接在數字之後不切（數字中間或數字與幣別字之間恰好對齊時，仍是同一個值）。沒有字座標
-    （`Line.aligned_char_spans`）的行不動。"""
+    間隙時從那裡切開；字和前一個字相接（數字中間）或是價格後面的幣別字時不切。沒有字座標（`Line.aligned_char_spans`）
+    的行不動。"""
     starts = sorted(ln.x0 for ln in lines)
     shared = [
         x
@@ -530,10 +538,13 @@ def split_at_columns(lines: list[Line], tol: float = ALIGN) -> list[Line]:
 
     def cut(ln: Line, spans: tuple[tuple[float, float], ...], i: int) -> bool:
         prev = ln.text[i - 1]
-        if not i or ln.text[i].isspace() or prev in NUMBER_CHARS:
+        if ln.text[i].isspace():
             return False
         if not prev.isspace() and spans[i][0] - spans[i - 1][1] < GAP:
-            return False  # 字和前一個字相接：同一格的字（例：表頭「期初價格」的「初」恰好對齊下面某一格的左緣）
+            return False  # 字和前一個字相接：同一格的字（例：數字中間、表頭「期初價格」的「初」恰好對齊某一格的左緣）
+        before = ln.text[:i].rstrip()
+        if re.match(CURRENCY, ln.text[i:]) and before and before[-1] in NUMBER_CHARS:
+            return False  # 價格後面的幣別字（`457.0000 美元`）屬於同一格
         edges = starts if prev.isspace() else shared
         return any(abs(spans[i][0] - e) <= tol for e in edges)
 

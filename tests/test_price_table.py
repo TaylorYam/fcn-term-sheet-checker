@@ -195,6 +195,30 @@ def test_cells_squeezed_into_one_line_without_character_boxes_still_fill_the_col
     }
 
 
+def test_cells_squeezed_into_one_line_without_a_space_are_cut_at_the_gap():
+    """相鄰兩格擠成一行、中間沒有空白但有間隙（`121.5700` `91.1775`）：依其他列共有的左緣從間隙切開，不接成一個數字。"""
+    left = {k: X[k] - 20 for k in ("initial", "strike", "ko", "ki")}
+    lines = [*header()]
+    for y, n, prices in ((150, 1, ROW1), (170, 2, ROW2), (190, 3, ROW2)):
+        lines += [centered(1, X["n"], y, str(n)), centered(1, X["code"], y, f"Z{n}Z UW")]
+        if n == 1:
+            lines.append(cell(1, y, (left["initial"], prices[0]), (left["strike"], prices[1])))
+        else:
+            lines += [cell(1, y, (left["initial"], prices[0])), cell(1, y, (left["strike"], prices[1]))]
+        lines += [cell(1, y, (left["ko"], prices[2])), cell(1, y, (left["ki"], prices[3]))]
+    table = read("t", lines, SPEC)
+    assert table.ok, table.note
+    assert table.value.prices[0]["initial"] == Decimal("100.0000")
+    assert table.value.prices[0]["strike"] == Decimal("80.0000")
+
+
+def test_a_stray_mark_beside_a_price_is_not_read_as_part_of_it():
+    """價格旁並排的另一行（例：上標註腳 `5`）不接進價格：個數不符轉人工覆核，不悄悄讀成 `80.00005`。"""
+    ok_row = row(1, 150, 1, "甲公司", "AAA UW", ROW1)
+    mark = Line(1, X["strike"] + 32, 150, X["strike"] + 36, 156, "5")
+    assert bad([*header(), *ok_row, mark]) == "測試價格表第 1 列有 5 個價格，與 4 欄不符"
+
+
 def test_rows_spread_over_two_pages_are_read_by_their_own_anchors():
     lines = [*header(), *row(1, 750, 1, "甲公司", "AAA UW", ROW1), *row(2, 60, 2, "乙公司", "BBB UN", ROW2)]
     table = read("t", lines, SPEC)

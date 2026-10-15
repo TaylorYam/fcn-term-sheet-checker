@@ -161,7 +161,7 @@ def by_column(lines: list[Line], gap: float = 20) -> list[Line]:
 
 
 def header_columns(header: list[Line], gap: float = 15) -> list[tuple[float, str]]:
-    """表頭各行依 x 中心分欄（相鄰兩行相差 `gap` 內同一欄），回傳（欄中心, 欄文字去空白、欄內由上到下）由左到右（Natixis、CA）。"""
+    """表頭各行依 x 中心分欄（相鄰兩行相差 `gap` 內同一欄），回傳（欄中心, 欄文字去空白、欄內由上到下）由左到右（Natixis、BBVA、UBS、DBS 的價格表）。"""
     cols: list[list[Line]] = []
     for ln in sorted(header, key=lambda x: x.xc):
         if cols and ln.xc - cols[-1][-1].xc <= gap:

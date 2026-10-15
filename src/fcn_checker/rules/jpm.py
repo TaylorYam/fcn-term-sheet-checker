@@ -26,7 +26,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.underlying_names",
-        "description": "連結標的中文名稱與交易所不核對；以第 9 項標的表彭博代碼為準",
+        "description": "連結標的中文名稱與交易所不核對；以第 9 項價格表彭博代碼為準",
     },
     {
         "rule_id": "doc.initial_prices",
@@ -34,7 +34,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項標的表、假設本金 = 面額；情境算式、假設收盤價、適用匯率、"
+        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表、假設本金 = 面額；情境算式、假設收盤價、適用匯率、"
         "交割股數與平均年化報酬率不核對（2026-10-15 確認）",
     },
     {
@@ -131,7 +131,7 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def underlying_count(ctx: IssuerContext) -> list[CheckResult]:
-    """第 8 項單一標的／多標的寫法（有無「最差表現連結標的：」定義句）與第 9 項標的表檔數一致（1 檔／2 檔以上）。"""
+    """第 8 項單一標的／多標的寫法（有無「最差表現連結標的：」定義句）與第 9 項價格表檔數一致（1 檔／2 檔以上）。"""
     f = ctx.ts.f
     worst, table = f("worst_of_wording"), f("underlying_table")
     label = {True: "多標的（最差表現）", False: "單一標的"}
@@ -141,13 +141,13 @@ def underlying_count(ctx: IssuerContext) -> list[CheckResult]:
             label.get(worst.value) if worst.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="第 8 項有無「最差表現連結標的：」定義須與第 9 項標的表檔數（1 檔／2 檔以上）一致",
+            fail_message="第 8 項有無「最差表現連結標的：」定義須與第 9 項價格表檔數（1 檔／2 檔以上）一致",
         )
     ]
 
 
 def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KI：第 8 項觸碰事件寫法 ⇔ 有無「觸碰價：」 ⇔ 標的表觸碰價欄（範本規格 §4.4）。"""
+    """KI：第 8 項觸碰事件寫法 ⇔ 有無「觸碰價：」 ⇔ 價格表觸碰價欄（範本規格 §4.4）。"""
     f = ctx.ts.f
     ki, pct, table = f("ki_type"), f("ki_pct"), f("underlying_table")
     doc_ki = kit.doc_ki(ki)
@@ -166,12 +166,12 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
             evidence=ki.evidence + pct.evidence,
             fail_message="第 8 項有無「觸碰價：」須與觸碰事件的寫法一致",
         ),
-        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "標的表觸碰價欄", ki, table).compare(
+        kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "價格表觸碰價欄", ki, table).compare(
             label[doc_ki != "none"],
             label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="標的表有無觸碰價欄須與 KI 型態一致",
+            fail_message="價格表有無觸碰價欄須與 KI 型態一致",
         ),
     ]
 
@@ -184,7 +184,7 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def scenario(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項假設價格表逐格 = 第 9 項標的表（同順序）；假設原計價幣別本金 = 每單位面額（核對規則 §3.4、§3.7）。"""
+    """第 15 項假設價格表逐格 = 第 9 項價格表（同順序）；假設原計價幣別本金 = 每單位面額（核對規則 §3.4、§3.7）。"""
     f = ctx.ts.f
     table, scen = f("underlying_table"), f("scenario_table")
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 15 項假設價格表", table, scen)
@@ -192,7 +192,7 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
         []
         if not (table.ok and scen.ok)
         else [
-            f"假設價格表{what}與標的表不同（{a}／{b}）"
+            f"假設價格表{what}與第 9 項價格表不同（{a}／{b}）"
             for what, a, b in (
                 ("欄位", scen.value.columns, table.value.columns),
                 ("列數", len(scen.value.rows), len(table.value.rows)),
@@ -204,12 +204,12 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
         result = check.result(S.REVIEW_REQUIRED, reason="document_inconsistent", message="；".join(shape))
     elif table.ok and scen.ok:
         issues = [
-            f"第 {i} 列 {'、'.join(diff)} 與標的表第 {i} 檔不同"
+            f"第 {i} 列 {'、'.join(diff)} 與第 9 項價格表第 {i} 檔不同"
             for i, (a, b) in enumerate(zip(scen.value.prices, table.value.prices, strict=True), start=1)
             if (diff := [c for c in b if a.get(c) != b[c]])
         ]
         result = check.compare(
-            None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項標的表"
+            None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項價格表"
         )
     else:
         result = check.compare(None, None)

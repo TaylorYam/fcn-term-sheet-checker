@@ -185,7 +185,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     )
     region = text_lines[a + 1 : b] if a is not None and b is not None else []
     table = price_table.read("underlying_table", region, PRICE_TABLE)
-    fields["underlyings"] = gs.underlyings_field(table)
+    fields["underlyings"] = price_table.underlyings(table)
     fields["underlying_prices"] = price_table.price_rows(table)
     for col, key in (("strike", "strike_pct"), ("ko", "ko_pct"), ("ki", "ki_pct")):
         fields[key] = (
