@@ -16,7 +16,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import gs, iis
-from .common import RawText, derived, number, unify_compat
+from .common import RawText, compat_normalized, derived, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "gs-zh-iis"
@@ -75,7 +75,7 @@ PROVIDED = frozenset(
 
 def body(lines: Sequence[Line]) -> list[Line]:
     """相容字轉換後、頁底頁碼以外的行（頁碼另由 `iis.page_totals` 讀）。"""
-    return [ln for ln in unify_compat(lines) if not re.fullmatch(PAGE, ln.text.strip())]
+    return [ln for ln in compat_normalized(lines) if not re.fullmatch(PAGE, ln.text.strip())]
 
 
 def detect(lines: Sequence[Line]) -> DetectionResult:
@@ -140,7 +140,9 @@ def _redeem_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
 def read(lines: Sequence[Line]) -> iis.IisSheet:
     text_lines = body(lines)
     ti = TextIndex(text_lines)
-    fields: dict[str, ParsedField] = {"page_totals": iis.page_totals(unify_compat(lines), PAGE, "第- N -頁，共M頁")}
+    fields: dict[str, ParsedField] = {
+        "page_totals": iis.page_totals(compat_normalized(lines), PAGE, "第- N -頁，共M頁")
+    }
 
     def put(name, pattern, convert=lambda x: x):
         fields[name] = iis.capture(name, ti, pattern, convert)

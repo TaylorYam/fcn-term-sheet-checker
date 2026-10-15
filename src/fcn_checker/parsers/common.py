@@ -1,7 +1,6 @@
 """各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%，
-以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`／表頭分欄 `header_columns`、同一句另一組的 `capture_group`（Nomura、GS）、
-CJK 相容字轉換 `unify_compat`，
-費用表依座標讀費率的 `fee_rates`（GS、Natixis）。
+以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS），
+費用表依座標讀費率的 `fee_rates`（GS、Natixis、CA）。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
 """
@@ -190,27 +189,27 @@ def split_at_columns(lines: list[Line], tol: float = 0.6) -> list[Line]:
 
 
 def header_columns(header: list[Line], gap: float = 15) -> list[tuple[float, str]]:
-    """表頭各行依 x 中心分欄（相差 `gap` 內同一欄），回傳（欄中心, 去空白的欄文字）由左到右（Natixis、BBVA 價格表）。"""
+    """表頭各行依 x 中心分欄（相鄰兩行相差 `gap` 內同一欄），回傳（欄中心, 欄文字去空白、欄內由上到下）由左到右（Natixis、CA）。"""
     cols: list[list[Line]] = []
     for ln in sorted(header, key=lambda x: x.xc):
         if cols and ln.xc - cols[-1][-1].xc <= gap:
             cols[-1].append(ln)
         else:
             cols.append([ln])
-    out = []
-    for col in cols:
-        lns = sorted(col, key=lambda x: (x.page, x.y0))
-        out.append((sum(x.xc for x in lns) / len(lns), "".join(squash(x.text) for x in lns)))
-    return out
+    return [
+        (sum(x.xc for x in col) / len(col), "".join(squash(x.text) for x in sorted(col, key=lambda x: (x.page, x.y0))))
+        for col in cols
+    ]
 
 
-def unify_compat(lines: Sequence[Line]) -> list[Line]:
-    """CJK 相容字（U+F900–U+FAFF，例：U+F9DD → 利、U+F938 → 露）轉成標準字；其他字元不動（一對一換字，字座標不變；GS 投資人須知、BBVA）。"""
+def compat_standard(text: str) -> str:
+    """CJK 相容字（U+F900–U+FAFF）轉成標準字（例：U+F9DD → 利、U+F98E → 年）；其他字元不動，字數不變。"""
+    return "".join(unicodedata.normalize("NFKC", c) if 0xF900 <= ord(c) <= 0xFAFF else c for c in text)
 
-    def fix(text: str) -> str:
-        return "".join(unicodedata.normalize("NFKC", ch) if 0xF900 <= ord(ch) <= 0xFAFF else ch for ch in text)
 
-    return [ln if fix(ln.text) == ln.text else replace(ln, text=fix(ln.text)) for ln in lines]
+def compat_normalized(lines: Sequence[Line]) -> list[Line]:
+    """每行的 CJK 相容字轉成標準字（GS 投資人須知、CA 兩種文件）；字數不變，字座標照舊。"""
+    return [replace(ln, text=t) if (t := compat_standard(ln.text)) != ln.text else ln for ln in lines]
 
 
 def column_text(lines: list[Line]) -> str:
@@ -230,7 +229,7 @@ def capture_group(lns: list[Line], pattern: str, group: int, name: str, convert:
     return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
 
 
-# ---------------------------------------------------------------- 費用表（GS、Natixis）
+# ---------------------------------------------------------------- 費用表（GS、Natixis、CA）
 
 FEE_RATE = r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)"
 # 費用表：左欄項目名稱的開頭 → 審查標準 [fees] 的鍵（投資人須知寫「贖回費用」）
@@ -256,8 +255,13 @@ def fee_rates(lines: list[Line]) -> dict[str, ParsedField]:
     head = next((ln for ln in lines if squash(ln.text).startswith("費率")), None)
     if head is None:
         return {name: ParsedField.missing(name, "找不到費用表表頭「費率（百分比）」") for name in out}
+    # 下一欄表頭：和「費率」那一行垂直重疊（CA 表頭「費率（百分」／「比）」兩行，其他欄置中在兩行之間）
     right = min(
-        (ln.x0 for ln in lines if ln.page == head.page and abs(ln.y0 - head.y0) < 4 and ln.x0 > head.x0 + 10),
+        (
+            ln.x0
+            for ln in lines
+            if ln.page == head.page and ln.y0 < head.y1 and ln.y1 > head.y0 and ln.x0 > head.x0 + 10
+        ),
         default=None,
     )
     lo = head.x0 - 40

@@ -19,7 +19,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import RawText, capture_group, dec, derived, fee_rates, header_columns, number, unify_compat
+from .common import RawText, capture_group, compat_normalized, dec, derived, fee_rates, header_columns, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "bbva-zh-pd"
@@ -74,7 +74,7 @@ STRIKE_DEF = r"轉換比例\(PutStrikePercentage\)：" + PCT
 
 def clean(lines: Sequence[Line]) -> list[Line]:
     """相容字轉成標準字；去掉頁底「N/M」頁碼。"""
-    return unify_compat([ln for ln in lines if not (ln.y0 >= FOOTER_Y and PAGE_NO.match(ln.text.strip()))])
+    return compat_normalized([ln for ln in lines if not (ln.y0 >= FOOTER_Y and PAGE_NO.match(ln.text.strip()))])
 
 
 def document(lines: Sequence[Line]) -> Document:

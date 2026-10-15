@@ -3,7 +3,7 @@
 - 文件側：[CA 範本規格](../templates/ca-zh-product-description.md)；投資人須知見 [CA 投資人須知範本規格](../templates/ca-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 CA 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [CA 下單資料格式](../order-formats/ca-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.15（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #274）；尚未實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #274）；已實作（`parsers/ca.py`、`rules/ca.py`，投資人須知見[投資人須知核對規則](iis-check-rules.md)）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis 核對規則](natixis-check-rules.md)不同或 CA 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -43,7 +43,7 @@
 | 標的 `underlyings`、各標的價格 | 共用 `field.underlyings`、價格規則 | 代號取第 10 項；價格表只有中文名稱，第 n 列對第 10 項第 n 列；照順序比對（5 份順序相同，不加 `any_order_issuers`） |
 | 期初定價 `initial_pricing` | 共用 `field.initial_pricing` | 交 `absent`：不和說明書比，只檢查表上是允許值（2026-10-15 確認）；表上 `VWAP` 時價格欄照 Issue #122、#246 不比對、通過後覆寫（CA2） |
 | 最低金額 `min_amounts` | 共用 `field.min_amounts` | 第四章 4. 兩筆（最低申購、最低累加申購）、8. 一筆（最低贖回）；倍數都是預設 1（不設 `min_amount_multiples.ca`） |
-| 金額旁的幣別 `currency_others` | 共用 `field.currency`（Issue #170） | 第一章第 6 項面額與發行價格 `即X幣別`；第四章 4.、8.；第 16 項基本假設 `每單位面額`、`初始投資金額`；各情境金額。**價格表幣別字、情境三含股價／`股`／匯率的行不列入**（CA1 港股、CA4 歐元連美股；比照 BNP BN7、Citi CT5；2026-10-15 確認） |
+| 金額旁的幣別 `currency_others` | 共用 `field.currency`（Issue #170） | 第一章第 6 項面額與發行價格 `即X幣別`；第四章 4.、8.；第 16 項基本假設 `每單位面額`、`初始投資金額`；情境一 `累積配息金額`（共 8 筆）。**價格表幣別字、情境二／三的金額與股價算式不列入**（CA1 港股、CA4 歐元連美股；2026-10-15 確認） |
 
 ### 3.2 審查標準規則（共用 `rules/review_standard.py`）
 
@@ -72,7 +72,7 @@
 | 年利率 | 第 16 項基本假設 `年化配息率為y%` 的 y = 參考條件表 `Coupon p.a. (%)`（共用 `field.coupon_pa_pct`） |
 | 月配息率 | 第 9 項配息表每列 `配息率` x 相同，且 = y ÷ 12 四捨五入（half-up）到 4 位（5 份成立） |
 | 其他出處 | 第 16 項基本假設 `配息率：x%` = 配息表 x；第 15 項 `(4)最低保證配息率：第一個月／前k個月配息 x%` 的 x = 配息表 x、月數 = Non-Call（5 份成立） |
-| 配息頻率 | 配息表列數 = 天期（每月一期）；不同 → 轉人工覆核（樣本都是每月） |
+| 配息頻率 | 配息表列數 = 天期（每月一期）；不同判不一致（`doc.coupon_periods`，同 Natixis；樣本都是每月） |
 | `n/N` | KO 每日型提前出場當期按預定交易日數比例配息：不推算（只作型態佐證） |
 
 ### 3.4 價格與百分比
@@ -160,7 +160,7 @@
 | 10 | 型態判定 | 記憶式兩句、KO D／P 寫法、KI 界限事件定義；`UL_n_Memo` 不核對；多標的非記憶式轉人工覆核 |
 | 11 | 名稱 | 只依天期、幣別的樣板；`(ISIN：…)` 不算名稱 |
 | 12 | 說明書內部 | 兩張價格表、表頭 %、配息表、KO 觀察日表、情境基本假設與情境一月數都核對；不重算股數與報酬率；營業日不重算 |
-| 13 | 第四章固定值 | 發行價格 100%；最低申購／累加申購／最低贖回 1 單位；受理申購起迄 = 交易日；**發行不成立門檻不核對** |
+| 13 | 第四章固定值 | 發行價格 100%；最低申購／累加申購／最低贖回 1 單位；受理申購起迄 = 交易日（共用 `doc.subscription_start_date`：不晚於交易日，#254）；**發行不成立門檻不核對** |
 | 14 | 跨幣別 | 價格表與情境三股價的幣別字不和承作幣別比；假設匯率不核對 |
 | 15 | 投資人須知 | 見[投資人須知核對規則](iis-check-rules.md) §3 CA 欄 |
 | 16 | 發行主體 | 只有 Crédit Agricole CIB Financial Solutions；參考條件表 `發行機構` 欄寫 `CA` |
@@ -216,13 +216,13 @@
 | 第一章第 1 項中文名稱 = 封面 | `doc.name_consistency` |
 | 三個 `(ISIN：…)` 相同 | `doc.isin_consistency` |
 | 第一章第 5 項中文幣別、ISO 代碼；封面幣別 ISO 代碼 | `doc.currency_consistency` |
-| 期數（配息表列數、中英文名稱月數、情境基本假設天期） | `doc.coupon_periods` |
-| 記憶式句型（只有一句、多標的沒有句型 → 轉人工覆核） | `doc.ko_memory` |
-| `(c)` 界限事件寫法 ⇔ 價格表下限價欄 ⇔ `界限事件：` 定義 | `doc.ki_consistency` |
-| 價格表列數 = 第 10 項標的數 | `doc.underlying_count` |
-| 情境價格表逐格與表頭 % = 第 9 項價格表；基本假設天期、面額 | `doc.scenario_table`、`doc.scenario_parameters` |
+| 期數（配息表列數、中英文名稱月數、情境基本假設天期；不同判不一致） | `doc.coupon_periods` |
+| 多標的沒有記憶式句型 → 轉人工覆核（只有一句時 parser 交出不合法，`field.ko_memory` 轉人工覆核） | `doc.ko_memory` |
+| `(c)` 界限事件寫法 ⇔ 價格表下限價欄 ⇔ `界限事件：` 定義：不一致時 parser 交出不合法（`field.ki_type` 轉人工覆核） | （parser） |
+| 價格表列數 = 第 10 項標的數：不同時 parser 交出不合法（`field.underlyings` 與價格欄轉人工覆核） | （parser） |
+| 情境價格表逐格與表頭 % = 第 9 項價格表；基本假設面額 = 商品面額 | `doc.scenario_table` |
 | 配息表（列數、期別、末列 = 到期日；D 末列結束日 = 期末訂價日） | `schedule.coupon_dates` |
-| P 型 KO 觀察日表（列數、末列、出場日在配息日表） | `schedule.autocall_dates` |
+| P 型 KO 觀察日表（末列 = 期末訂價日／到期日、觀察日早於出場日；出場日在配息日表且期別連續由 parser 檢查） | `schedule.coupon_dates` |
 
 KO 型態與配息表種類不一致、P 型觀察日表的出場日不在配息日表或期別不連續時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。價格表依座標讀：表頭各行依 x 中心分欄（欄序依關鍵字順序），以價格行的 y 切列，幣別字拆行接回，名稱另依 y 對到最近的列。費用表沿用 GS 的座標讀法（`gs.fee_rates`）。
 
@@ -248,3 +248,4 @@ KO 型態與配息表種類不一致、P 型觀察日表的出場日不在配息
 | 2026-10-15 | 跨幣別：價格表與情境三股價幣別字不和承作幣別比；假設匯率不核對 |
 | 2026-10-15 | 投資人須知核對範圍如[投資人須知核對規則](iis-check-rules.md) §3 CA 欄 |
 | 2026-10-15 | 發行主體只有 Crédit Agricole CIB Financial Solutions；參考條件表 `發行機構` 欄 CA 寫 `CA` |
+| 2026-10-15 | 實作時決定：投資人須知有無 KI 和同商品說明書比（範本專屬規則 `iis.has_ki`，說明書已和參考條件表比過）；情境的 `currency_others` 取基本假設兩處與情境一累積配息金額（code review 後補上配息金額）；共用 `fee_rates` 的下一欄表頭改成以和「費率」垂直重疊的行為準（CA 表頭兩行；既有上手結果不變） |

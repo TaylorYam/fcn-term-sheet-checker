@@ -18,7 +18,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import bbva, iis
-from .common import RawText, fee_rates, unify_compat
+from .common import RawText, compat_normalized, fee_rates
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "bbva-zh-iis"
@@ -65,7 +65,7 @@ PROVIDED = frozenset(
 
 def body(lines: Sequence[Line]) -> list[Line]:
     """相容字轉成標準字；頁底頁碼「N/4」另由 `iis.page_totals` 讀，不算內文。"""
-    return unify_compat([ln for ln in lines if not re.fullmatch(iis.PAGE_SLASH, ln.text.strip())])
+    return compat_normalized([ln for ln in lines if not re.fullmatch(iis.PAGE_SLASH, ln.text.strip())])
 
 
 def detect(lines: Sequence[Line]) -> DetectionResult:
