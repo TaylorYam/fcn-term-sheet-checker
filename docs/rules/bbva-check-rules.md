@@ -2,7 +2,7 @@
 
 - 文件側：[BBVA 範本規格](../templates/bbva-zh-product-description.md)；投資人須知見 [BBVA 投資人須知範本規格](../templates/bbva-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 BBVA 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [BBVA 下單資料格式](../order-formats/bbva-fcn-reference.md)
-- 會隨時間改變的基準見[審查標準](review-standard.md) §2.15（設定檔 `config/review_standard.toml`）
+- 會隨時間改變的基準見[審查標準](review-standard.md) §2.16（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #269）；待實作
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis 核對規則](natixis-check-rules.md)不同或 BBVA 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
