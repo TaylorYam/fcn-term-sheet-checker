@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import re
-from decimal import ROUND_HALF_UP, Decimal
 
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
@@ -51,11 +50,6 @@ NOT_COVERED = [
 MEMORY_ZH, MEMORY_EN = "記憶式", "Memory"
 
 
-def monthly_of(annual: Decimal) -> Decimal:
-    """每月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（範本規格 §4.6）。"""
-    return (annual / 12).quantize(kit.Q4, ROUND_HALF_UP)
-
-
 # ---------------------------------------------------------------- 配息率（核對規則 §3.3）
 
 
@@ -63,7 +57,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
     """第 14 項「約為Y%」= 年利率 ÷ 12（4 位）；第 15 項(2) 最低保證收益率、第 17 項情境假設的年利率 = 第 14 項。"""
     f = ctx.ts.f
     annual, monthly = f("coupon_pa_pct"), f("monthly_coupon_pct")
-    expected = monthly_of(annual.value) if annual.ok else None
+    expected = kit.monthly_of_annual(annual.value) if annual.ok else None
     out = [
         kit.doc_check(
             ctx, "derive.monthly_coupon", "monthly_coupon_pct", "每月配息率 %（年利率 ÷ 12）", annual, monthly

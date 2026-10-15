@@ -131,6 +131,11 @@ Q4 = Decimal("0.0001")  # 價格與月配息率四捨五入到 4 位
 Q2 = Decimal("0.01")  # 金額（情境配息與損益）四捨五入到 2 位
 
 
+def monthly_of_annual(annual: Decimal) -> Decimal:
+    """月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位：GS、Natixis 說明書的月配息率推算（Issue #248、#261）。"""
+    return (annual / 12).quantize(Q4, ROUND_HALF_UP)
+
+
 def annual_of_period(period: Decimal) -> Decimal:
     """每期（每月）配息率 × 12，四捨五入（half-up）到 2 位：Nomura 說明書與投資人須知的年利率推算（Issue #239）。"""
     return (period * 12).quantize(Q2, ROUND_HALF_UP)
