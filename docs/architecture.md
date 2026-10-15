@@ -4,7 +4,7 @@
 
 協助作業人員將 FCN Term Sheet 與已確認的下單資料逐欄比對，輸出可回溯到原文件的例外清單。第一階段先支援一家 issuer 的一個文字型 PDF 範本；不做產品定價、交易執行、法律條款解釋或無人覆核的交易放行。
 
-已實作 BARC／HSBC／MS 文字型 PDF 的核對（Issue #7、#9、#41、#34、#135、#137）、BNP 說明書與投資人須知的核對（Issue #191、#197）、SG 說明書與投資人須知的核對（Issue #194、#213）、Citi 說明書與投資人須知的核對（Issue #220）、JPM 說明書與投資人須知的核對（Issue #233）、Nomura 說明書與投資人須知的核對（Issue #239）與 GS 說明書與投資人須知的核對（Issue #248），以參考條件表批量核對多份說明書並回填 ISIN 與比價日（Issue #43、#46，[ADR 0004](adr/0004-reference-sheet-as-check-source.md)）；說明書與同商品投資人須知成對核對，兩份都通過或放行才回填（Issue #124，[ADR 0007](adr/0007-iis-paired-with-term-sheet.md)）；OCR 與更多範本仍為目標設計。名詞見 [CONTEXT.md](../CONTEXT.md)。
+已實作 BARC／HSBC／MS 文字型 PDF 的核對（Issue #7、#9、#41、#34、#135、#137）、BNP 說明書與投資人須知的核對（Issue #191、#197）、SG 說明書與投資人須知的核對（Issue #194、#213）、Citi 說明書與投資人須知的核對（Issue #220）、JPM 說明書與投資人須知的核對（Issue #233）、Nomura 說明書與投資人須知的核對（Issue #239）、GS 說明書與投資人須知的核對（Issue #248）與 Natixis 說明書與投資人須知的核對（Issue #261），以參考條件表批量核對多份說明書並回填 ISIN 與比價日（Issue #43、#46，[ADR 0004](adr/0004-reference-sheet-as-check-source.md)）；說明書與同商品投資人須知成對核對，兩份都通過或放行才回填（Issue #124，[ADR 0007](adr/0007-iis-paired-with-term-sheet.md)）；OCR 與更多範本仍為目標設計。名詞見 [CONTEXT.md](../CONTEXT.md)。
 
 ## 系統資料流
 

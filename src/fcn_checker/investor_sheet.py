@@ -46,6 +46,8 @@ IIS_FIELDS: dict[str, str] = {
     "coupon_per_period_pct": "Decimal：每期配息率 %，保留顯示位數（× 12 四捨五入到 2 位 = 年利率；Nomura）",
     "underlying_names_en": "list[str]：標的英文名稱，依說明書順序（Nomura 商品簡介；= 說明書第一章第 8 項）",
     "redemption_start_text": "str：開始受理贖回日期的文字（Nomura；= 說明書第四章 1.(3)）",
+    "distributor_code": "str：「受託機構商品代號為」的值（Natixis 舊版有標籤但空白；沒有標籤的範本交 absent）",
+    "ko_definition": "str：KO 價格定義原文（Natixis「自動提前到期贖回價格為…期初進場價格之Y%」；沒寫 % 判不一致）",
     "redemption_later_text": "str：後續受理贖回日期的文字（Nomura；= 說明書第四章 1.(4)）",
 }
 

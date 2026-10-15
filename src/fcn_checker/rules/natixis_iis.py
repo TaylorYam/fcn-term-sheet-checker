@@ -1,0 +1,43 @@
+"""Natixis 投資人須知專屬規則（docs/rules/iis-check-rules.md §3 B19、A4）：KO 價格定義必須寫出百分比、空白的受託機構商品代號。
+
+只用投資人須知讀出結果，不碰參考條件表；其他檢查點都是各上手共用的投資人須知規則（rules/iis.py、
+review_standard.iis_review_standard_rules）。KO 定義寫了 % 時由共用規則比 KO %（`ko_pct`）。
+"""
+
+from __future__ import annotations
+
+import re
+
+from ..investor_sheet import read_iis
+from ..schema import CheckResult, Item, ParsedField
+from .iis import IisIssuerContext
+from .kit import Check
+from .natixis import distributor_code
+
+
+def ko_definition(ctx: IisIssuerContext) -> CheckResult:
+    """「自動提前到期贖回價格為期初進場價格之Y%」才算寫出 KO %；寫成「…所列之期初進場價格」（沒有 %）判不一致（NX7；
+    2026-10-15 確認）。"""
+    pf = read_iis(ctx.sheet, "ko_definition")
+    check = Check("iis.ko_definition", "ko_definition", Item.expected("KO 價格定義的百分比"), ctx.document).needs(pf)
+    if (problem := check.blocked) is not None:
+        return problem
+    has_pct = bool(re.fullmatch(r"期初進場價格之\d+(?:\.\d+)?%", pf.value))
+    return check.compare(
+        "期初進場價格之X%",
+        pf.value,
+        ok=has_pct,
+        fail_message="KO 價格定義沒有寫出期初進場價格的百分比（說明書第一章第 14 項有寫），請上手更正",
+    )
+
+
+def run_all(ctx: IisIssuerContext) -> list[CheckResult]:
+    return [ko_definition(ctx), *distributor_code(ctx, read_iis(ctx.sheet, "distributor_code"), _first_code(ctx))]
+
+
+def _first_code(ctx: IisIssuerContext):
+    """封面 TDCC 商品代號（出處清單的第 1 處）。"""
+    codes = read_iis(ctx.sheet, "product_codes")
+    if not codes.ok or not codes.value:
+        return ParsedField.missing("product_code", "讀不到封面 TDCC 商品代號")
+    return codes.value[0].value

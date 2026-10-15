@@ -13,13 +13,14 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, citi_iis, gs_iis, hsbc_iis, jpm_iis, ms_iis, nomura_iis, sg_iis
+from .parsers import barc_iis, bnp_iis, citi_iis, gs_iis, hsbc_iis, jpm_iis, ms_iis, natixis_iis, nomura_iis, sg_iis
 from .parsers import bnp as bnp_parser
 from .parsers import citi as citi_parser
 from .parsers import gs as gs_parser
 from .parsers import hsbc as hsbc_parser
 from .parsers import jpm as jpm_parser
 from .parsers import ms as ms_parser
+from .parsers import natixis as natixis_parser
 from .parsers import nomura as nomura_parser
 from .parsers import sg as sg_parser
 from .rules import barc as barc_rules
@@ -32,6 +33,8 @@ from .rules import jpm as jpm_rules
 from .rules import jpm_iis as jpm_iis_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
+from .rules import natixis as natixis_rules
+from .rules import natixis_iis as natixis_iis_rules
 from .rules import nomura as nomura_rules
 from .rules import nomura_iis as nomura_iis_rules
 from .rules import sg as sg_rules
@@ -270,7 +273,28 @@ GS = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS)
+NATIXIS = Issuer(
+    code=natixis_rules.ISSUER,
+    template_id=natixis_parser.TEMPLATE_ID,
+    label="Natixis 中文產品說明書",
+    parser_version=natixis_parser.PARSER_VERSION,
+    not_covered=tuple(natixis_rules.NOT_COVERED),
+    detect=natixis_parser.detect,
+    read=natixis_parser.read,
+    rules=natixis_rules.run_all,
+    reference_fields=natixis_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=natixis_iis.TEMPLATE_ID,
+        label="Natixis 中文投資人須知",
+        parser_version=natixis_iis.PARSER_VERSION,
+        detect=natixis_iis.detect,
+        read=natixis_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=natixis_iis_rules.run_all,
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

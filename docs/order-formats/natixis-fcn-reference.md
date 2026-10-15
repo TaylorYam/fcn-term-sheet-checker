@@ -1,7 +1,7 @@
 # 下單資料格式：Natixis（參考條件表）
 
 - 設定檔：所有上手共用的 [`config/reference_sheet.toml`](../../config/reference_sheet.toml)
-- 狀態：規格完成、待實作（Issue #261）。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 Natixis 的說明書來源與差異
+- 狀態：已實作（Issue #261；`config/reference_sheet.toml` 的 `NATIXIS`）。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 Natixis 的說明書來源與差異
 
 ## 1. 結構
 
@@ -9,7 +9,7 @@
 
 探勘用的參考條件表是作業人員提供的公司原始待建檔格式（`data/orders/核對表格式..xlsx`，工作表 `ELN待建檔_測試`，7 列 Natixis，與 NX1–NX7 全部對上；NX8 沒有表上列；`ISIN Code`、`發行日`、`比價日_n` 為待回填的空白；沒有 `發行機構` 欄）。
 
-實作時登記：
+已登記：
 
 - `config/reference_sheet.toml` `[issuer_values]`：`NATIXIS = "Natixis"`（`發行機構` 欄的寫法，2026-10-15 作業人員確認；待建檔表沒有這欄時以商品代號前 3 碼判定）。
 - `src/fcn_checker/issuers.py`：Natixis 範本（`natixis-zh-pd`、投資人須知 `natixis-zh-iis`）。
@@ -35,7 +35,7 @@
 | 天期(月) | `tenor_months` | 第 12 項 `商品年期：N 個月` |
 | Non-Call(月) | `first_callable_period` | D：第 12 項 `從第k個配息觀察期間結束日` 的 k（中文數字）；P：觀察日表第 1 列自動提前到期日在配息日表的期別 |
 | 比價日_1～12 | `autocall_date_n` | 見 §4（表上空白時回填） |
-| 期初定價 | `initial_pricing` | **說明書沒寫**，交 `absent`，不核對（2026-10-15 確認） |
+| 期初定價 | `initial_pricing` | **說明書沒寫**，交 `absent`：只檢查表上是允許值，不和說明書比（2026-10-15 確認） |
 | UL_n | `underlying_n` | 第 9 項連結標的表 `彭博代碼` 欄（`ABC UW`，本來就沒有 ` Equity`）；**照順序比對** |
 | UL_n_進場價／執行價／下限價／KO價 | `underlying_n_initial_price`／`_strike_price`／`_ki_price`／`_ko_price` | 第 9 項連結標的表 期初進場價格／執行價格／**界限價格**／自動提前到期贖回價格 |
 
