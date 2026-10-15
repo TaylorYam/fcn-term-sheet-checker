@@ -18,7 +18,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import Mention, RawText, by_column, capture_group, dec, derived, number
+from .common import Mention, RawText, by_column, capture_group, dec, derived, number, split_at_columns
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "gs-zh-pd"
@@ -430,11 +430,13 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
     """連結標的價格表：表頭決定 K／KO／KI %（`(初始參考價格(i)之X%)`），每檔一列（以左欄列號切列）。
 
     表頭與各格依座標分欄（`common.by_column`）後接起來：一格可能拆成多行（`12,345.000` / `0`、`13.6800美` / `元`），
-    相鄰兩格也可能擷取成同一行。價格取彭博代碼之後的 4 位小數數字（投資人須知後面接幣別字）。
+    相鄰幾格也可能擷取成同一行，先依字座標切回各欄（`common.split_at_columns`，Issue #264）。表頭與列都可能跨頁；
+    沒有列號的那一頁接在上一頁最後一列。價格取彭博代碼之後的 4 位小數數字（投資人須知後面接幣別字）。
     值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines", "header_lines", "indexed"}。
     """
     if not lines:
         return ParsedField.missing(name, "找不到連結標的價格表")
+    lines = split_at_columns(lines)
     marks: list[int] = []
     for i, ln in enumerate(lines):
         if re.fullmatch(r"\d{1,2}", squash(ln.text)) and int(squash(ln.text)) == len(marks) + 1:
@@ -458,9 +460,13 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
     rows_lines: list[list[Line]] = [[] for _ in marks]
     for ln in lines[marks[0] :]:
         same = [k for k, a in enumerate(anchors) if a.page == ln.page]
-        if not same:
+        before = [k for k, a in enumerate(anchors) if a.page < ln.page]
+        if not same and not before:
             return ParsedField.invalid(name, [ln], "價格表跨頁時讀不到該頁的列號")
-        k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
+        if same:
+            k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
+        else:  # 這一頁沒有列號：上一頁最後一列溢過來的部分
+            k = before[-1]
         rows_lines[k].append(ln)
     tickers, names, rows = [], [], []
     for k, lns in enumerate(rows_lines, start=1):

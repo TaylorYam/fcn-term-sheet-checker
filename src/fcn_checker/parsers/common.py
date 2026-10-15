@@ -9,7 +9,7 @@ from __future__ import annotations
 import bisect
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Generic, NamedTuple, TypeVar
 
@@ -155,6 +155,34 @@ def by_column(lines: list[Line], gap: float = 20) -> list[Line]:
         else:
             columns.append([ln])
     return [ln for col in columns for ln in sorted(col, key=lambda x: (x.page, x.y0))]
+
+
+def split_at_columns(lines: list[Line], tol: float = 0.6) -> list[Line]:
+    """一行橫跨好幾欄（PDF 把相鄰幾格擷取成同一行）時切回各欄：欄的左緣取這些行中至少兩行共有的 x0，
+    行內某個字的左緣落在其他欄的左緣上就從那裡切開。沒有字座標（`Line.char_boxes`）的行不動。"""
+    starts = sorted(ln.x0 for ln in lines)
+    edges = [
+        x
+        for i, x in enumerate(starts)
+        if (i and x - starts[i - 1] <= tol) or (i + 1 < len(starts) and starts[i + 1] - x <= tol)
+    ]
+    out: list[Line] = []
+    for ln in lines:
+        boxes = ln.char_boxes
+        cuts = [
+            i
+            for i, (a, _) in enumerate(boxes)
+            if i and not ln.text[i].isspace() and any(abs(a - e) <= tol for e in edges)
+        ]
+        if not cuts:
+            out.append(ln)
+            continue
+        for a, b in zip([0, *cuts], [*cuts, len(boxes)], strict=True):
+            keep = [i for i in range(a, b) if not ln.text[i].isspace()]
+            if keep:
+                i, j = keep[0], keep[-1] + 1
+                out.append(replace(ln, x0=boxes[i][0], x1=boxes[j - 1][1], text=ln.text[i:j], chars=boxes[i:j]))
+    return out
 
 
 def column_text(lines: list[Line]) -> str:
