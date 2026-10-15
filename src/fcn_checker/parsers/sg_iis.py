@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 from .. import standard_fields
@@ -46,6 +47,8 @@ KO_P = r"自動提前出場事件：若於任一評價日i\(i=(\d+)-(\d+)\)"
 P_RANGE = r"評價日i\(i=(\d+)-(\d+)\)"
 PRICE = rf"(\d[\d,]*\.\d{{4}})({money.CURRENCY})"
 PCT = r"\(連結標的期初價格的(\d+(?:\.\d+)?)%\)"
+SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9./-]*")  # 換行後只剩代號的一行（交易所碼在下一行）
+EXCHANGE = re.compile(r"[A-Z]{2}")
 PROVIDED = frozenset(
     {
         "product_codes",
@@ -105,6 +108,25 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
     return DetectionResult(not failed, failed, [Evidence.of(x) for x in lines[:2]])
 
 
+def _join_wrapped_tickers(lines: list[Line]) -> list[Line]:
+    """彭博代碼欄窄，4 碼以上的代號會換成兩行（`AVGO` / `UW`）；接回一行 `AVGO UW` 才認得出標的列。"""
+    out: list[Line] = []
+    for ln in lines:
+        prev = out[-1] if out else None
+        if prev and EXCHANGE.fullmatch(ln.text.strip()) and SYMBOL.fullmatch(prev.text.strip()):
+            out[-1] = replace(
+                prev,
+                x0=min(prev.x0, ln.x0),
+                y0=min(prev.y0, ln.y0),
+                x1=max(prev.x1, ln.x1),
+                y1=max(prev.y1, ln.y1),
+                text=f"{prev.text.strip()} {ln.text.strip()}",
+            )
+        else:
+            out.append(ln)
+    return out
+
+
 def _table(lines: list[Line], fields: dict[str, ParsedField]) -> None:
     """商品簡介標的表（範本規格 §4.4）：代碼一列一個，價格依表頭欄序切到各列；表頭的 % 讀成 KO／KI／執行價 %。"""
     start = next((i for i, ln in enumerate(lines) if squash(ln.text).startswith("連結標的資產：")), None)
@@ -113,7 +135,7 @@ def _table(lines: list[Line], fields: dict[str, ParsedField]) -> None:
     if start is None or end is None or end <= start:
         fields.update({n: ParsedField.missing(n, "找不到商品簡介「連結標的資產」標的表") for n in names})
         return
-    region = lines[start + 1 : end]
+    region = _join_wrapped_tickers(lines[start + 1 : end])
     rows = [i for i, ln in enumerate(region) if sg.TICKER.fullmatch(ln.text.strip())]
     header = TextIndex(region[: rows[0]] if rows else region)
     cols = ["initial"]

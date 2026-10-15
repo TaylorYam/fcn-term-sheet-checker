@@ -81,6 +81,7 @@ class Spec(ProductSpec):
     annex_text: str | None = None  # 第二章後加一頁年報附件（標題＋這段文字）；None 不加
     iis_pages: int = 4  # 投資人須知頁數（不足補空白頁、多的刪掉最後幾頁）
     iis_strike_pct: bool = True  # 投資人須知標的表「執行價」表頭寫出 %（舊版面 SG6 沒寫）
+    iis_ticker_wrap: bool = False  # 投資人須知標的表彭博代碼換成兩行（代號／交易所碼，4 碼以上代號的真實樣本）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -506,7 +507,8 @@ def _iis_table(d: _Doc, s: Spec) -> None:
     for i, u in enumerate(s.underlyings, 1):
         d.cell(40, str(i))
         d.cell(60, u.name)
-        d.cell(150, u.ticker)
+        for part in u.ticker.split(" ") if s.iis_ticker_wrap else (u.ticker,):
+            d.cell(150, part)
         d.cell(220, "股票")
         values = [s.money(u.initial if pct is None else price(u.initial, pct), s.underlying_ccy, 4) for _, pct in cols]
         d.cell(300, values[0] + values[1])
