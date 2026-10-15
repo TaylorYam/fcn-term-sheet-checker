@@ -39,9 +39,11 @@ def test_other_issuers_are_unsupported(reports):
     others = [
         i
         for i in reports.values()
-        if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037", "159", "076", "156", "148", "328"))
+        if not i.term_sheet.name.startswith(
+            ("029", "325", "147", "082", "037", "159", "076", "156", "148", "328", "086")
+        )
     ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py、SG 見 test_real_sg.py、Citi 見 test_real_citi.py、JPM 見 test_real_jpm.py、
-    # Nomura 見 test_real_nomura.py、GS 見 test_real_gs.py、Natixis 見 test_real_natixis.py
+    # Nomura 見 test_real_nomura.py、GS 見 test_real_gs.py、Natixis 見 test_real_natixis.py、CA 見 test_real_ca.py
     assert others, "本機應有其他上手的負面樣本"
     assert all(i.unsupported and i.report.status == CheckStatus.REVIEW_REQUIRED for i in others)
 
@@ -65,6 +67,13 @@ def test_no_other_issuer_is_recognised_as_natixis(reports):
     natixis = {"natixis-zh-pd", "natixis-zh-iis"}
     others = [i for i in reports.values() if not i.term_sheet.name.startswith("328")]
     assert others and all(i.report.template not in natixis for i in others)
+
+
+def test_no_other_issuer_is_recognised_as_ca(reports):
+    """其他上手的說明書與投資人須知都不會被判成 CA 範本（Issue #274）。"""
+    ca = {"ca-zh-pd", "ca-zh-iis"}
+    others = [i for i in reports.values() if not i.term_sheet.name.startswith("086")]
+    assert others and all(i.report.template not in ca for i in others)
 
 
 def test_document_rules_only_flag_old_format_documents(reports):

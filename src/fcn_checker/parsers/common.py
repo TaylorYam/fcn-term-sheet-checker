@@ -1,6 +1,6 @@
 """各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%，
 以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS），
-費用表依座標讀費率的 `fee_rates`（GS、Natixis）。
+費用表依座標讀費率的 `fee_rates`（GS、Natixis、CA）。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
 """
@@ -204,7 +204,7 @@ def capture_group(lns: list[Line], pattern: str, group: int, name: str, convert:
     return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
 
 
-# ---------------------------------------------------------------- 費用表（GS、Natixis）
+# ---------------------------------------------------------------- 費用表（GS、Natixis、CA）
 
 FEE_RATE = r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)"
 # 費用表：左欄項目名稱的開頭 → 審查標準 [fees] 的鍵（投資人須知寫「贖回費用」）
@@ -230,8 +230,13 @@ def fee_rates(lines: list[Line]) -> dict[str, ParsedField]:
     head = next((ln for ln in lines if squash(ln.text).startswith("費率")), None)
     if head is None:
         return {name: ParsedField.missing(name, "找不到費用表表頭「費率（百分比）」") for name in out}
+    # 下一欄表頭：和「費率」那一行垂直重疊（CA 表頭「費率（百分」／「比）」兩行，其他欄置中在兩行之間）
     right = min(
-        (ln.x0 for ln in lines if ln.page == head.page and abs(ln.y0 - head.y0) < 4 and ln.x0 > head.x0 + 10),
+        (
+            ln.x0
+            for ln in lines
+            if ln.page == head.page and ln.y0 < head.y1 and ln.y1 > head.y0 and ln.x0 > head.x0 + 10
+        ),
         default=None,
     )
     lo = head.x0 - 40
