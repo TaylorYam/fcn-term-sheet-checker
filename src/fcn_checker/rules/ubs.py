@@ -224,9 +224,9 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     if check.blocked is not None:
         return [check.blocked]
     issues = []
-    if scen.value["pcts"] != table.value["pcts"]:
+    if scen.value.pcts != table.value.pcts:
         issues.append("情境價格表表頭 % 和商品基本資料八價格表不同")
-    rows, own = scen.value["rows"], table.value["rows"]
+    rows, own = scen.value.prices, table.value.prices
     if len(rows) != len(own):
         issues.append(f"情境價格表 {len(rows)} 列，商品基本資料八價格表 {len(own)} 列")
     else:

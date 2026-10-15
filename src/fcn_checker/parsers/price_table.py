@@ -32,7 +32,7 @@ from .. import standard_fields
 from ..schema import Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import money
-from .common import by_column, dec, derived
+from .common import dec, derived
 from .layout import join_text
 
 NUMBER = r"\d[\d,]*(?:\.\d+)?"
@@ -50,6 +50,7 @@ TICKER_START = re.compile(r"^[A-Z0-9][A-Z0-9./-]*\s+[A-Z]{2}(?![A-Za-z0-9])")
 TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})(?![A-Za-z0-9])")
 NUMBER_CHARS = "0123456789,."
 NEAR = 20.0  # 和任何表頭格都不重疊的行，離表頭格幾 pt 內仍算那一欄
+SAME_COLUMN = 0.25  # 同一欄上下兩行的 x 重疊至少是較窄那一行的幾成
 ADJACENT = 0.6  # 同一格上下兩行的間距上限（行高的倍數）
 GAP = 1.0  # 擷取成同一行的相鄰兩格之間至少的間隙（pt）
 ALIGN = 0.6  # 擷取成同一行的幾格：字的左緣與其他行的左緣相差幾 pt 內算同一欄的左緣
@@ -294,22 +295,22 @@ def _split(lines: list[Line], first: Line, spec: TableSpec) -> tuple[list[Line],
         return above, below
     start = min((ln.page, ln.y0) for c in keyed for ln in c)
     bottom = max((ln.page, ln.y1) for c in keyed for ln in c)
-    attached: list[Line] = []
-    for c in cells:
-        if c in keyed or (c[0].page, c[0].y0) <= bottom:
-            continue
-        if any(_adjacent(c[-1], b) for b in below):
-            attached += c
+    attached = [ln for c in cells if c not in keyed and (c[0].page, c[0].y0) > bottom for ln in c]
     header = [ln for ln in above if ln not in attached and (ln.page, _yc(ln)) >= start]
     return header, below + attached
 
 
 def _adjacent(upper: Line, lower: Line) -> bool:
-    """同一頁、x 重疊、上下相接（間距不到行高的 `ADJACENT` 倍，或上下重疊）。"""
-    if upper is lower or upper.page != lower.page or _overlap(upper, lower) <= 0.5:
+    """同一頁、同一欄（x 重疊至少較窄那一行的 `SAME_COLUMN`）、上下相接（間距不到行高的 `ADJACENT` 倍，或上下重疊）。"""
+    if upper is lower or upper.page != lower.page or not _same_column(upper, lower):
         return False
     height = max(upper.y1 - upper.y0, lower.y1 - lower.y0)
     return upper.y0 <= lower.y0 and lower.y0 - upper.y1 <= ADJACENT * height and lower.y1 > upper.y0
+
+
+def _same_column(a: Line, b: Line) -> bool:
+    """x 重疊至少較窄那一行寬度的 `SAME_COLUMN`（相鄰兩欄的格可能只碰到邊）。"""
+    return _overlap(a, b) > max(0.5, SAME_COLUMN * min(a.x1 - a.x0, b.x1 - b.x0))
 
 
 def _cells(lines: list[Line]) -> list[list[Line]]:
@@ -348,7 +349,7 @@ def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]]) -> bool:
     upper, lower = (a, b) if (a.page, a.y0) <= (b.page, b.y0) else (b, a)
     if upper.page == lower.page:
         return _adjacent(upper, lower)
-    if lower.page != upper.page + 1 or _overlap(upper, lower) <= 0.5:
+    if lower.page != upper.page + 1 or not _same_column(upper, lower):
         return False
     # 跨頁：上一頁最下面的那一列接下一頁最上面的那一列
     reach = ADJACENT * max(upper.y1 - upper.y0, lower.y1 - lower.y0)
@@ -485,7 +486,20 @@ def _rows(
     rows: list[list[Line]] = [[] for _ in anchors]
     for i, ln in enumerate(body):
         rows[row_of[i]].append(ln)
+    rows[-1] = _last_row(rows[-1], anchors[-1])
     return rows
+
+
+def _last_row(lines: list[Line], anchor: Line) -> list[Line]:
+    """最後一列在列錨點那一頁、錨點以下的行，要和這一列上下相接（一路接下去）才算；表後的說明文字不算進表。
+    溢到下一頁的部分照收。"""
+    kept = [ln for ln in lines if ln.page != anchor.page or ln.y0 < anchor.y1]
+    rest = sorted((ln for ln in lines if ln not in kept), key=_page_key)
+    for ln in rest:
+        reach = ADJACENT * (ln.y1 - ln.y0)
+        if any(x.page == ln.page and x.y0 <= ln.y0 and ln.y0 - x.y1 <= reach for x in kept):
+            kept.append(ln)
+    return kept
 
 
 def _continues(upper: str, lower: str) -> bool:
@@ -543,7 +557,7 @@ def _row(
         ticker = f"{hits[0][0]} {hits[0][1]}"
     left = min(c.x0 for key, c in cols.items() if key in ("code", "initial"))
     label = [ln for ln in lns if ln.xc < left and ln is not anchor and not re.fullmatch(r"\d{1,2}", ln.text.strip())]
-    name = re.sub(r"^\d{1,2}\s+", "", join_text(by_column(label))).strip()
+    name = re.sub(r"^\d{1,2}\s+", "", join_text(sorted(label, key=_reading))).strip()
     return TableRow(
         prices=dict(zip(keys, (v for v, _ in found), strict=True)),
         ticker=ticker,
