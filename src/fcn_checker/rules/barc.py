@@ -52,7 +52,7 @@ ISSUER = "BARC"
 
 # 單份核對以 IssuerContext 呼叫本模組規則；ctx.ts 為 BarcTermSheet
 
-# 本上手規則可讀的參考條件表欄位（ADR 0005 唯一例外：月配息率推算用表上年利率與天期，Issue #54）
+# 本上手規則可讀的參考條件表欄位（ADR 0009，須在 reference_fields 宣告：月配息率推算用表上年利率與天期，Issue #54）
 REFERENCE_FIELDS = ("coupon_pa_pct", "tenor_months")
 
 

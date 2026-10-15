@@ -4,7 +4,7 @@
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [MS 下單資料格式](../order-formats/ms-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md)（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-08，Issue #132）；已實作（Issue #135，`src/fcn_checker/parsers/ms*.py`、`src/fcn_checker/rules/ms*.py`），rule_id 對照見 §9
-- 本文件只寫與 [BARC 核對規則](barc-check-rules.md)、[HSBC 核對規則](hsbc-check-rules.md)不同或 MS 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
+- 本文件只寫與 [BARC 核對規則](barc-check-rules.md)、[HSBC 核對規則](hsbc-check-rules.md)不同或 MS 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
 
@@ -23,7 +23,7 @@
 
 ### 3.1 參考條件表欄位（共用 `rules/reference.py`）
 
-語意與 rule_id 同 BARC（HSBC Issue #54 的決定：兩家不同時以 BARC 為準）。MS parser 只負責交出標準欄位；來源見 [MS 下單資料格式](../order-formats/ms-fcn-reference.md) §2。
+語意見[共用核對規則](shared-check-rules.md) §3（[ADR 0009](../adr/0009-shared-rules-defined-per-rule.md)）。MS parser 只負責交出標準欄位；來源見 [MS 下單資料格式](../order-formats/ms-fcn-reference.md) §2。
 
 | 標準欄位 | 規則（rule_id） | MS 差異 |
 |---|---|---|
@@ -58,7 +58,7 @@
 | 月配息率 | §15(2) `固定配息率 (X%)`、D 型 §15 `{X%×n(j)/N(j)}`、§18 假設 `月配息率=X%`、§18 每個情境算式中的 `×X%`：每處都 = 參考條件表 `Coupon p.a. (%)` ÷ 12，四捨五入（half-up）到 4 位 |
 | 年利率 | §18 獲利情境（標題不含 `較差` 的情境）每處 `年化報酬率為Y%` = 參考條件表年利率（2 位） |
 
-這兩條要讀參考條件表的年利率，屬 [ADR 0005](../adr/0005-issuer-adapter-and-shared-rules.md) 的例外：MS 在 `reference_fields` 宣告 `coupon_pa_pct`（同 BARC 宣告年利率與天期的做法）。6 份新版樣本全部成立。
+這兩條要讀參考條件表的年利率，依 [ADR 0009](../adr/0009-shared-rules-defined-per-rule.md)：MS 在 `reference_fields` 宣告 `coupon_pa_pct`（同 BARC 宣告年利率與天期的做法）。6 份新版樣本全部成立。
 
 ### 3.4 價格
 

@@ -54,7 +54,7 @@ def _approval_date(ctx: Context) -> CheckResult:
     )
 
 
-# ---------------------------------------------------------------- 審查標準：說明書各出處（各上手共用，BARC 語意）
+# ---------------------------------------------------------------- 審查標準：說明書各出處（各上手共用，語意見 docs/rules/review-standard.md）
 
 
 def _denomination(ctx: Context) -> CheckResult:

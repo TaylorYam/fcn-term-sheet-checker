@@ -4,7 +4,7 @@
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [SG 下單資料格式](../order-formats/sg-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.8（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #192）；已實作（Issue #194）。rule_id 對照：§3.3 `derive.monthly_coupon`／`derive.annualized_return`；§3.4 `derive.prices`（共用）、`doc.scenario_table`／`doc.scenario_header_pct`；§3.5 `doc.trustee_product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_observation`、`doc.ko_memory`、`doc.ki_consistency`、`doc.worst_of_count`、`doc.redemption_pct`、`schedule.coupon_dates`／`schedule.period_starts`／`schedule.autocall_dates`；§3.6 `standard.fixed_warning`（含 `risk.fixed_warning_variants.sg`）、`standard.risk_level`、`standard.product_name`、`standard.issuer_name`、`standard.guarantor_name`、`standard.agent_name`、`standard.product_type`、`standard.distributor`（`name_equivalents`、`address_equivalents`）；§3.1 最低申購倍數 `field.min_amounts`（`min_amount_multiples.sg` 依幣別，沒列的幣別 `multiple_not_configured` 轉人工覆核）；§3.7 `doc.scenario_parameters`、`doc.scenario_calculations`（欄位 `情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_strike`／`_shares`／`_cash`／`_annualized`／`_assumed`）。無自動提前出場（Non-Call = 天期：機制仍在、只是不會觸發）時 `ko_pct` 交出 100、各標的 KO 價 = 期初價格，與表上 `100`／進場價照常比對（2026-10-14 確認）。第二章後的年報附件（`YYYY年發行機構年報之會計師查核報告` 到第三章章名之前）不算內文
-- 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP 核對規則](bnp-check-rules.md)不同或 SG 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
+- 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP 核對規則](bnp-check-rules.md)不同或 SG 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
 
@@ -66,7 +66,7 @@
 | 年利率 | §8 `(年率 Y%)` = 參考條件表 `Coupon p.a. (%)`（共用 `field.coupon_pa_pct`）；§15 獲利情境（有自動提前出場：情境一、二；無：情境一）每處 `平均年化報酬率：Y%` = 年利率（2 位寫法，比對數值） |
 | 配息率 | §8 `配息率 ＝X%`、§15 假設 `配息率 = X %`、§15 每個情境算式 `×X%`：每處都 = 年利率 ÷ 12，四捨五入（half-up）到 **4 位**（6 份成立，JPY 也 4 位；與 BNP 的「依顯示位數」不同，SG 固定 4 位） |
 
-這些規則讀參考條件表的年利率（ADR 0005 例外，同 BARC／MS／BNP）。
+這些規則讀參考條件表的年利率（在 `reference_fields` 宣告，ADR 0009；同 BARC／MS／BNP）。
 
 ### 3.4 價格
 

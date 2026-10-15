@@ -203,7 +203,7 @@ def _check_with_issuer_rules(tmp_path, rules, **overrides):
 
 
 def _reads_annual_coupon(ctx):
-    """上手規則讀參考條件表「年利率」（ADR 0005 唯一例外的寫法）。"""
+    """上手規則讀參考條件表「年利率」（ADR 0009 宣告的參考條件表欄位）。"""
     from fcn_checker.rules.kit import order_value, result, to_decimal
     from fcn_checker.schema import Item
 
@@ -255,7 +255,7 @@ def test_issuer_rules_get_no_reference_row_or_format(tmp_path):
     report = _check_with_issuer_rules(tmp_path, lambda ctx: seen.append(ctx) or [])
     assert report.status == PASS
     [ctx] = seen
-    assert not hasattr(ctx, "order") and not hasattr(ctx, "fmt"), "上手規則不碰參考條件表（ADR 0005）"
+    assert not hasattr(ctx, "order") and not hasattr(ctx, "fmt"), "上手規則不碰參考條件表（ADR 0009）"
     assert ctx.ts is not None and ctx.std is not None and ctx.issuer == "BARC"
 
 

@@ -1,6 +1,6 @@
 # 0004: 核對條件統一改用參考條件表
 
-- Status: Accepted
+- Status: Superseded by [0008](0008-reference-sheet-and-import-format.md)
 - Date: 2026-10-02
 
 ## Context

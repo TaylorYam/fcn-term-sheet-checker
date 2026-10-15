@@ -87,7 +87,7 @@ class Context(_IssuerStandardOf):
 
 @dataclass
 class IssuerContext(_IssuerStandardOf):
-    """上手說明書內部規則的輸入：讀出結果、審查標準、上手代號，不含參考條件表（ADR 0005）。
+    """上手說明書內部規則的輸入：讀出結果、審查標準、上手代號，不含參考條件表（ADR 0009）。
 
     唯一例外是上手在註冊表宣告的參考條件表欄位（`Issuer.reference_fields`），只有這些讀得到。
     """
