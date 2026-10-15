@@ -155,8 +155,9 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
             out.append(kit.calc_result(rid, field, name, [why], kit.evidence(s.strike.lines), review=True))
             continue
         expected = target.prices["strike"]
+        pct = kit.field_value(ctx.ts, "strike_pct")
         issues = []
-        if strike != expected:
+        if not kit.scenario_price_ok(strike, expected, target.prices.get("initial"), pct):  # 兩種進位都接受（#259）
             issues.append(f"執行價格 {strike} 不是表現最差標的 {target.ticker} 的執行價格 {expected}")
         if s.shares is not None and s.shares.value.strike != strike:
             issues.append(f"股數算式的執行價格 {s.shares.value.strike} 與假設句的 {strike} 不同")

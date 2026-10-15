@@ -113,7 +113,9 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
             )
             continue
         expected = rows[0]["prices"]["strike"]
-        issues = [] if strike == expected else ["與第 16 項價格表的執行價不同"]
+        pct = kit.field_value(ctx.ts, "strike_pct")
+        ok = kit.scenario_price_ok(strike, expected, rows[0]["prices"].get("initial"), pct)  # 兩種進位都接受（#259）
+        issues = [] if ok else ["與第 16 項價格表的執行價不同"]
         out.append(
             kit.calc_result(
                 rid, "scenario_strike", name, issues, kit.evidence(s.strike[0].lines), expected=expected, actual=strike
