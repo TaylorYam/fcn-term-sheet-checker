@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import openpyxl
 import pytest
@@ -12,7 +13,7 @@ import pytest
 from fcn_checker import report_bundle
 from fcn_checker.ingestion import IngestionError
 from fcn_checker.panel_workflow import PanelSession
-from fcn_checker.schema import CheckStatus
+from fcn_checker.schema import CheckStatus, DocKind
 from harness import CONFIG, ROOT, check_all, with_iis
 from reference_synth import REFERENCE_HEADERS, build_reference_sheet, reference_row
 from synth import Spec, build_pdf
@@ -82,25 +83,56 @@ def test_bundle_holds_only_the_failing_products(tmp_path):
     assert record["result_file"] is None and record["metadata"]["inputs"]["reference_sheet"]["sha256"]
 
 
-def test_report_sheet_has_one_row_per_message_with_a_judgement_dropdown(tmp_path):
+def test_report_sheet_has_one_row_per_tdcc_with_a_judgement_dropdown(tmp_path):
     ok, bad, rows = failing_pair()
     outcome, _ = checked(tmp_path, [ok, bad], rows)
-    failing = [i for i in outcome.items if i.product_code == bad.product_code]
+    ts, iis = sorted(
+        (i for i in outcome.items if i.product_code == bad.product_code), key=lambda i: i.kind != DocKind.TERM_SHEET
+    )
 
     out = export(outcome, tmp_path)
 
     path = out / "回報總表.xlsx"
-    report = sheet_dicts(path, "回報")
-    expected = [(i.term_sheet.stem.rsplit("_", 1)[1], m) for i in failing for m in i.problem_messages]
-    assert [(r["TS or IIS"], r["錯訊"]) for r in report] == expected
-    assert {r["TS or IIS"] for r in report} == {"TS", "IIS"}
-    assert list(report[0]) == ["上手", "TDCC", "TS or IIS", "錯訊", "我的判斷", "備註"]
-    assert all(r["上手"] == "BARC" and r["TDCC"] == bad.product_code for r in report)
-    assert all(r["我的判斷"] is None and r["備註"] is None for r in report)
+    (row,) = sheet_dicts(path, "回報")
+    assert list(row) == ["上手", "TDCC", "TS or IIS", "錯訊", "我的判斷", "備註"]
+    assert (row["上手"], row["TDCC"], row["TS or IIS"]) == ("BARC", bad.product_code, "TS & IIS")
+    assert row["錯訊"] == report_bundle.report_rows([ts, iis])[0][3]
+    lines = row["錯訊"].split("\n")
+    assert lines[0].startswith("1. (TS) ") and lines[-1].startswith(f"{len(lines)}. (IIS) ")
+    assert row["我的判斷"] is None and row["備註"] is None
     ws = openpyxl.load_workbook(path)["回報"]
     (dv,) = ws.data_validations.dataValidation
     assert dv.type == "list" and dv.formula1 == '"誤報,真錯,不確定"'
-    assert str(dv.sqref) == f"E2:E{len(report) + 1}"
+    assert str(dv.sqref) == "E2"
+
+
+def fake_item(code: str | None, kind: DocKind | None, *messages: str) -> SimpleNamespace:
+    pdf = Path(f"{code or 'x'}_{'TS' if kind == DocKind.TERM_SHEET else 'IIS'}.pdf")
+    ident = SimpleNamespace(product_code=code, pdf=pdf)
+    return SimpleNamespace(identification=ident, kind=kind, issuer="SG", problem_messages=messages, status_label="")
+
+
+def test_report_rows_merge_by_tdcc_number_messages_and_mark_their_document():
+    a_iis = fake_item("037199990001", DocKind.IIS, "找不到列", "UL_1 執行價對不起來")
+    a_ts = fake_item("037199990001", DocKind.TERM_SHEET, "發行日對不起來", "找不到列")
+    b_ts = fake_item("037199990002", DocKind.TERM_SHEET, "期初定價空白", "K 對不起來")
+    c_iis = fake_item("037199990003", DocKind.IIS, "UL_2 執行價對不起來")
+    blank1, blank2 = fake_item(None, None, "檔名無法辨識"), fake_item(None, None, "檔名無法辨識")
+
+    rows = report_bundle.report_rows([a_iis, b_ts, a_ts, blank1, c_iis, blank2])
+
+    assert rows == [
+        (
+            "SG",
+            "037199990001",
+            "TS & IIS",
+            "1. (TS) 發行日對不起來\n2. (TS & IIS) 找不到列\n3. (IIS) UL_1 執行價對不起來",
+        ),
+        ("SG", "037199990002", "TS", "1. 期初定價空白\n2. K 對不起來"),
+        ("SG", None, None, "1. 檔名無法辨識"),
+        ("SG", "037199990003", "IIS", "1. UL_2 執行價對不起來"),
+        ("SG", None, None, "1. 檔名無法辨識"),
+    ]
 
 
 def test_report_sheet_leaves_the_document_kind_blank_when_the_file_name_has_none(tmp_path):
