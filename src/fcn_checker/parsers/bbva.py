@@ -54,7 +54,7 @@ PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
 ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"
 TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})\s+Equity(?![A-Za-z])")
-PRICE = re.compile(rf"^([\d,]+\.\d+)\s*({ZH_CCY})$")
+PRICE = re.compile(rf"([\d,]+\.\d+)\s*({ZH_CCY})")
 # 價格表欄（依表頭關鍵字的出現順序決定欄序；BBVA 是 KO → K → KI）
 PRICE_HEADS = (("ko", "出場值"), ("strike", "轉換比例"), ("ki", "下限值"))
 # 第 12 項 KO 觀察（範本規格 §4.1）
@@ -179,7 +179,7 @@ def read(lines: Sequence[Line]) -> BbvaTermSheet:
     put("coupon_annual_art13", art13, r"年利率：" + PCT, Decimal)
     put("coupon_m", art13, r"m：(\d+)", int)
     put("monthly_coupon_pct", art13, r"配息率（RateofInterest）：" + PCT, Decimal)
-    put("day_count", art13, r"計息天數慣例（DayCountFraction）：「(.+?)｣")
+    put("day_count", art13, r"計息天數慣例（DayCountFraction）：「([^｣」（]+)")
     art14 = article(14)
     put("strike_def_pct", art14, STRIKE_DEF, Decimal)
     put("ki_def_pct", art14, KI_DEF, Decimal)
@@ -300,23 +300,20 @@ def price_table(name: str, lns: list[Line], start: str, end: str) -> ParsedField
     tickers, rows, currencies, row_lines = [], [], [], []
     for k, anchor in enumerate(anchors, start=1):
         m = TICKER.search(anchor.text)
-        cells = sorted(
-            (
-                ln
-                for ln in lines
-                if ln.page == anchor.page and abs(ln.y0 - anchor.y0) < 6 and PRICE.match(ln.text.strip())
-            ),
+        band = sorted(
+            (ln for ln in lines if ln.page == anchor.page and abs(ln.y0 - anchor.y0) < 6),
             key=lambda x: x.x0,
         )
-        if len(cells) != 1 + len(columns):
+        # 列錨以後的價格格（價格與彭博代碼可能擠在同一行，依 x 由左到右、行內依出現順序）
+        values = [v for ln in band for v in PRICE.findall(ln.text[m.end() :] if ln is anchor else ln.text)]
+        if len(values) != 1 + len(columns):
             return ParsedField.invalid(
-                name, [anchor, *cells], f"價格表第 {k} 列有 {len(cells)} 個價格，與 {1 + len(columns)} 欄不符"
+                name, band, f"價格表第 {k} 列有 {len(values)} 個價格，與 {1 + len(columns)} 欄不符"
             )
-        values = [PRICE.match(c.text.strip()) for c in cells]
         tickers.append(f"{m[1]} {m[2]}")
-        rows.append(dict(zip(["initial", *columns], [dec(v[1]) for v in values], strict=True)))
-        currencies.append(sorted({v[2] for v in values}))
-        row_lines.append([anchor, *cells])
+        rows.append(dict(zip(["initial", *columns], [dec(v[0]) for v in values], strict=True)))
+        currencies.append(sorted({v[1] for v in values}))
+        row_lines.append(band)
     value = {
         "columns": columns,
         "pcts": pcts,
@@ -404,9 +401,10 @@ def _coupon(fields: dict[str, ParsedField]) -> None:
 # ---------------------------------------------------------------- 第 12 項日期表與 KO 排程
 
 
-ROW3 = re.compile(r"(\d{1,2})\|" + D * 3)
-ROW1 = re.compile(r"(\d{1,2})\|" + D)
-KO_ROW = re.compile(r"(\d{1,2})\|" + D + D + r"(\d{1,2})\|" + D)
+# 期別與日期之間：分行時有「|」（`separate_digits`），同一行時直接相接（`12030年…` 只能是期別 1 接 2030 年）
+ROW3 = re.compile(r"(\d{1,2})\|?" + D * 3)
+ROW1 = re.compile(r"(\d{1,2})\|?" + D)
+KO_ROW = re.compile(r"(\d{1,2})\|?" + D + D + r"(\d{1,2})\|?" + D)
 
 
 def _rows(text: str, pattern: re.Pattern[str]) -> list[tuple[int, list]]:
@@ -551,7 +549,7 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     total = rf"總投資金額=(\d+)單位面額=([\d,]+)({CCY})"
     fields["scenario_units"] = capture("scenario_units", ti, total, int, whole_match=True)
     fields["scenario_amount"] = capture_group(art16, total, 2, "scenario_amount", number)
-    fields["scenario_tenor"] = capture("scenario_tenor", ti, r"•商品年期：(\d+)個月", int, whole_match=True)
+    fields["scenario_tenor"] = capture("scenario_tenor", ti, r"[•‧]商品年期：(\d+)個月", int, whole_match=True)
     if fields["date_table"].ok and fields["date_table"].value["kind"] == "P":
         fields["scenario_monthly_pct"] = capture(
             "scenario_monthly_pct", ti, r"配息率：每月利率" + PCT, Decimal, whole_match=True
@@ -565,7 +563,7 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
         )
     else:
         fields["scenario_coupon_pct"] = capture(
-            "scenario_coupon_pct", ti, r"•年利率：" + PCT, Decimal, whole_match=True
+            "scenario_coupon_pct", ti, r"[•‧]年利率：" + PCT, Decimal, whole_match=True
         )
         first = rf"情境一.*?配息金額＝\d+單位面額X配息率＝\d+X[\d,.]+{CCY}X" + PCT
         fields["scenario_first_coupon_pct"] = capture("scenario_first_coupon_pct", ti, first, Decimal, whole_match=True)

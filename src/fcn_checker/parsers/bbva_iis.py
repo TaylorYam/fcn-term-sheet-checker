@@ -128,7 +128,7 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
         fields["coupon_per_period_pct"] = iis.capture(
             "coupon_per_period_pct", st, r"配息率（RateofInterest）：" + PCT, Decimal
         )
-        fields["day_count"] = iis.capture("day_count", st, r"計息天數慣例（DayCountFraction）：「(.+?)｣")
+        fields["day_count"] = iis.capture("day_count", st, r"計息天數慣例（DayCountFraction）：「([^｣」（]+)")
         provided.update({"coupon_per_period_pct", "day_count"})
     else:
         fields["coupon_pa_pct"] = ParsedField.invalid(
