@@ -2,11 +2,11 @@
 
 斷言與探勘結論一致（docs/rules/sg-check-rules.md §5）：6 份（含 2 份舊版面）都辨識為 SG 範本；只有 §5 列出的差異
 （舊範本的「受託投資」、舊負責人、交易日早於審查標準最早日期的審查通過日期、一檔標的除權息同比例轉人工覆核；
-沿用舊字的 2026 年文件也判「受託投資」）。參考條件表用含 SG 列的 data/核對表格式..xlsx（2026-10-14 起
+沿用舊字的 2026 年文件也有「受託投資」，交易日在 2026-10-15 以前特例通過，#247）。參考條件表用含 SG 列的 data/核對表格式..xlsx（2026-10-14 起
 orders/FCN參考條件.xlsx 沒有 SG 的列）；表上沒有 SG 的列時，依賴參考條件表的斷言略過。
 投資人須知（Issue #213，docs/templates/sg-zh-iis.md）：6 份都辨識為 SG 投資人須知、每個範本欄位都讀得到，和同商品說明書
-讀出的值一致；只有探勘結論的差異（6 份警語七「受託投資」、舊範本固定警語 0 次、舊範本一檔標的除權息的 4 個價格）。
-說明書通過的 3 份在投資人須知人工放行後回填並打 V。
+讀出的值一致；只有探勘結論的差異（舊範本固定警語 0 次、舊範本一檔標的除權息的 4 個價格；6 份警語七「受託投資」特例通過）。
+說明書通過的 4 份連同投資人須知都通過，回填並打 V。
 """
 
 import datetime as dt
@@ -72,12 +72,13 @@ def test_samples_only_differ_where_the_exploration_said(items):
             ("standard.approval_date", "approval_date_not_configured"): 1,
             ("standard.chairman", "value_mismatch"): 1,  # 舊範本的前任負責人
             ("standard.fixed_warning", "occurrence_count"): 1,  # 舊範本的警語用「受託投資」
-            ("standard.forbidden_wording", "forbidden_wording"): 2,  # 舊範本 4 處；沿用舊字的 2026 年舊版面文件 1 處
+            # 「受託投資」（舊範本 4 處；沿用舊字的 2026 年舊版面文件 1 處）：交易日在 2026-10-15 以前，特例通過（#247）
         }
     )
     passed = [i for i in term_sheets if i.report.status == S.PASS]
-    # 新版面 2026 年的 3 份（含單一標的、VWAP）與寫 2025-06-24 的 2025 年那份（Issue #239）通過
-    assert len(passed) == 4
+    # 新版面 2026 年的 3 份（含單一標的、VWAP）、寫 2025-06-24 的 2025 年那份（Issue #239），
+    # 以及只差「受託投資」的 2026 年舊版面那份（#247）
+    assert len(passed) == 5
     # 封面受託機構地址「3段」與第二章簡稱「玉山證券」都是審查標準的等價寫法
     for field in ("distributor_address_cover", "distributor_name_ch2"):
         found = [r for i in term_sheets for r in i.report.results if r.field == field]
@@ -110,18 +111,16 @@ def test_sg_investor_sheets_are_recognised(items):
     bad = Counter((r.rule_id, r.status) for i in investor_sheets for r in i.report.results if r.status in PROBLEMS)
     assert bad == Counter(
         {
-            (
-                "standard.forbidden_wording",
-                S.MISMATCH,
-            ): 6,  # 警語七「為於中華民國境內受託投資」（2026-10-14 決定照現行規則判錯）
+            # 警語七「為於中華民國境內受託投資」6 份：交易日在 2026-10-15 以前，特例通過（#247）
             ("standard.fixed_warning", S.MISMATCH): 1,  # 2023 舊範本警語一用「受託投資」，固定警語 0 次
             ("iis.underlying_prices", S.REVIEW_REQUIRED): 4,  # 同說明書：一檔標的四個價格是除權息後的同一比例（#222）
         }
     )
 
 
-def test_term_sheets_that_pass_are_filled_once_their_investor_sheets_are_released(tmp_path, items):
-    """說明書通過的 4 份：投資人須知人工放行後兩份都視同通過，回填並打 V；其他 2 份進錯誤清單。"""
+def test_term_sheets_that_pass_are_filled_with_their_investor_sheets(tmp_path, items):
+    """說明書通過的 5 份：投資人須知的「受託投資」特例通過（#247）後也都通過，直接回填並打 V；
+    另 1 檔（舊範本，分割調整等）的說明書與投資人須知進錯誤清單。"""
     if _no_reference_rows(items):
         pytest.skip("本機參考條件表沒有 SG 的列，無法回填")
     session = PanelSession(REVIEW_STANDARD, ROOT / "config", install_root=tmp_path)
@@ -130,9 +129,8 @@ def test_term_sheets_that_pass_are_filled_once_their_investor_sheets_are_release
     batch = session.start_check().batch.items
     pairs = {i.term_sheet.name[:12]: i for i in batch if i.term_sheet.name.endswith("_IIS.pdf")}
     passed = [i for i in batch if i.term_sheet.name.endswith("_TS.pdf") and i.report.status == S.PASS]
-    assert len(passed) == 4  # 2025 年那份寫 2025-06-24（Issue #239 加入審查日期）
-    for ts in passed:
-        session.release(pairs[ts.term_sheet.name[:12]])
+    assert len(passed) == 5  # 2025 年那份寫 2025-06-24（Issue #239）；2026 年舊版面那份「受託投資」特例通過（#247）
+    assert all(pairs[ts.term_sheet.name[:12]].report.status == S.PASS for ts in passed)
     assert all(ts.fills_sheet for ts in passed)
     receipt = session.save(tmp_path / "reports", now=dt.datetime(2030, 1, 1, 9, 0))
     wb = openpyxl.load_workbook(receipt.output, data_only=True)
@@ -148,7 +146,7 @@ def test_term_sheets_that_pass_are_filled_once_their_investor_sheets_are_release
     errors = [
         r for r in wb["錯誤清單"].iter_rows(values_only=True) if r and any(str(c).startswith("037") for c in r if c)
     ]
-    assert len(errors) == 4  # 另外 2 檔的說明書與投資人須知
+    assert len(errors) == 2  # 舊範本那 1 檔的說明書與投資人須知
 
 
 def _lines(path):

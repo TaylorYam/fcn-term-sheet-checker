@@ -2,7 +2,7 @@
 
 - 文件側：[GS 範本規格](../templates/gs-zh-product-description.md)；投資人須知見 [GS 投資人須知範本規格](../templates/gs-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 GS 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [GS 下單資料格式](../order-formats/gs-fcn-reference.md)
-- 會隨時間改變的基準見[審查標準](review-standard.md) §2.12（設定檔 `config/review_standard.toml`）
+- 會隨時間改變的基準見[審查標準](review-standard.md) §2.13（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #248）；待實作
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura 核對規則](nomura-check-rules.md)不同或 GS 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
@@ -187,7 +187,7 @@
 | 說明書 | 上手登記（`issuers.py`）；GS `LayoutSpec`（`第一章:` 章名六章、頁底 `第- N -頁，共M頁` 與右上角重複章名排除、第 1 頁 1–13 項與第一章 1–36(37) 項分開）；範本辨識；`read` 交出全部標準欄位（`distributor_phone_ch4`、`issue_price_others` 交 `absent`；`subscription_dates` 2 筆；`min_amounts` 由單位數換算；`initial_pricing` 依範本規格 §4.7）；§3.3–§3.8 |
 | 投資人須知 | `parsers/gs_iis.py`（先轉 CJK 相容字 U+F900–U+FAFF）、`IisTemplate`（頁底 `第- N -頁，共4頁` 的 `page_totals`；刊印日期在第 1 行）、範本專屬規則：每月配息率 = 年利率 ÷ 12（4 位）；[投資人須知核對規則](iis-check-rules.md) GS 欄 |
 | 共用設定 | 審查標準 GS 分節（`fixed_warning_by_issuer.gs`、名稱樣板、`issuer_name.gs`、`product_type.gs`、`min_amount_multiples.gs`、`iis.fixed_warning_occurrences.gs`）；`config/reference_sheet.toml` 的 `[issuer_values] GS`、`[underlyings] any_order_issuers` 加 `GS` |
-| 禁用語特例 | 依 Issue #247（PR #250）的共用設定，GS 不另寫；#250 若晚於 GS 實作合併，GS 投資人須知本機樣本照原規則判不一致 |
+| 禁用語特例 | 依 Issue #247（PR #250，已合併）的共用設定 `wording.exempt_until`，GS 不另寫 |
 
 要有合成 PDF 測試（D 型記憶式／單一標的非記憶式、KI 無／AM／D、Non-Call 1／3、JPY、CNH（CNY 寫法）、VWAP 與開盤價、收盤價間接寫法、非整數 K %、頁底 `第- N -頁`、價格數字拆行、投資人須知相容字「利」）、本機 5 份真實樣本測試（`tests/test_real_gs.py`，結果與 §5 一致：GS2 說明書與投資人須知因一檔價格疑似分割轉人工覆核，其餘 4 組通過並回填；投資人須知「受託投資」依 #247 特例通過），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM、Nomura 樣本的負面測試；既有上手的合成與本機真實樣本測試結果須不變。
 
