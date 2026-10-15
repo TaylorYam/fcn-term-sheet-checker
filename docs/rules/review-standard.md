@@ -193,6 +193,25 @@
 - **年利率**：說明書只寫 `每單位面額 x Y% x 1/12`，沒有月配息率，不做月配息率推算。
 - 發行機構／保證機構／總代理人地址電話、情境分析算式不核對。
 
+### 2.11 Nomura 的差異（2026-10-15 確認，Issue #239；待實作）
+
+細節見 [Nomura 核對規則](nomura-check-rules.md) §3.2、§3.6。負責人、受託機構名稱、電話（`+886 2 5556 1313` 已在 `phone_equivalents`）與地址（`台北市民生東路三段158號6樓` 已在 `address_equivalents`）、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
+
+- **審查通過日期**（`distributor.approval_dates`，所有上手生效）：加入 **2025-06-24**（2026-10-15 作業人員確認是受託機構真實的歷次審查日期；Nomura 2025 年的兩份樣本寫這一天）。比現有最早一筆早，PANEL 只能加較晚的日期，所以實作時直接改設定檔。交易日早於 2025-12-18 的既有上手樣本會從「轉人工覆核（`approval_date_not_configured`）」改成和 2025-06-24 比。
+- **固定警語**（`risk.fixed_warning_by_issuer.nomura`，2026-10-15 確認視為正確）：= SG 版本（無【】、有「*」、結尾有句號）。說明書只出現 **2 次**（封面(一)、第三章 6.(1)；第一章第 2 項只寫等級）——現行 `risk.fixed_warning_occurrences = 3` 是所有上手共用，**需要新增上手別的說明書次數設定**（沒列出的上手沿用 3）；投資人須知 1 次（`iis.fixed_warning_occurrences.nomura = 1`）。
+- **風險等級寫法**（`risk.level_formats.nomura`）：沒有【】，寫在 `風險程度等級為`、`歸類為` 之後；另有 `商品風險程度：RR4`（說明書第一章第 2 項）、`本商品風險程度：RR4`（投資人須知第二 3.）。
+- **商品名稱樣板**（`product_name.nomura`）：中文 `Nomura International Funding Pte. Ltd.發行{天期}個月{幣別中文}計價固定配息({記憶式}自動提前出場){標的}結構型商品(無擔保)`（`memory_zh = "記憶式"`；`single_zh = "股票連結"`、`basket_zh = "連結一籃子股票"`）；英文 `{天期}-Month {幣別代碼} Autocall Fixed Coupon Notes {記憶式}linked to {標的} issued by Nomura International Funding Pte. Ltd. (unsecured)`（`memory_en = "with Memory Knock-Out "`；`single_en = "a Single Stock"`、`basket_en = "a basket of stocks"`）。不分 KI、Non-Call；英文忽略空白比對（`ignore_whitespace_en`）。封面名稱後的 `(ISIN No. … / TDCC…)` 不屬於名稱。
+- **發行機構全名**（`issuer_name.nomura`）：`Nomura International Funding Pte. Ltd.`（只有英文名）；封面、第二章 1.(1) 兩處相同；第一章沒有出處。Nomura 目前只有這一個發行主體（2026-10-15 確認）。
+- **保證機構名稱**（`guarantor_name.nomura`）：cover = ch1 = ch2 = `Nomura Holdings, Inc.`；地址電話不核對。投資人須知第一 2. 用 cover。
+- **總代理人名稱**（`agent_name.nomura`，cover／ch2）：`香港商野村國際證券有限公司台北分公司`；地址電話、負責人不核對。
+- **商品種類**（`product_type.nomura`）：`連結股權之結構型債券`，不隨標的數改變。
+- **發行不成立門檻**（`minimum_issue_size.nomura`）：`三十萬美元`（說明書第四章 7.、投資人須知第五 1.；AUD、JPY 商品也寫美元）。
+- **最低金額倍數**：最低申購、最低加價申購、最低贖回、增加贖回單位（第四章、第一章第 16 項(1)）都 = 單位面額（不需要 `min_amount_multiples.nomura`）。
+- **受託機構電話**：封面與第四章第 15 項 `受託機構聯絡方式：`（`distributor_phone_ch4`，同 BNP）；投資人須知第九 1.。
+- **受理申購日期**：開始受理申購日期、接受申購截止日 2 處（= 交易日）。
+- **配息率**：說明書只寫每期（每月）配息率，沒有年利率；每期配息率 × 12 四捨五入到 2 位 = 年利率，第 14 項情境一、二年化報酬率 = 年利率（2026-10-15 確認）。
+- 發行機構／保證機構／總代理人地址電話、情境三算式不核對。
+
 ## 3. 對 14 份 BARC 樣本的驗證結果（2026-10-01，本機探勘）
 
 | 檢查 | 結果 |
