@@ -4,7 +4,7 @@
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [Citi 下單資料格式](../order-formats/citi-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.9（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-14，Issue #220）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 Citi 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對；期初定價 `field.initial_pricing`）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.monthly_coupon`（第 13 項各處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d)）、`derive.coupon_pa_mentions`（第 14 項(2)、第 13 項末段舉例的年化配息率）；§3.4 `derive.prices`（共用）、`doc.table_header_pct`、`doc.scenario_table`；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`（含 ISO 代碼）、`doc.initial_valuation_date`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_memory`、`doc.memory_wording`、`doc.ki_consistency`（含 KI 每期觀察 t=1-n）、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`；§3.6 共用 `standard.*`（Citi 分節）。第 12 項(9)、第 13 項與日期表的 KO 觀察寫法不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
-- 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG 核對規則](sg-check-rules.md)不同或 Citi 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
+- 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG 核對規則](sg-check-rules.md)不同或 Citi 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
 
@@ -68,7 +68,7 @@
 | 年利率 | §13 `(約等同年息為Y%)`／`(等同年息為Y%)` = 參考條件表 `Coupon p.a. (%)`（共用 `field.coupon_pa_pct`）；§14(2) `(年化配息率約為Y%)`、§13 末段 `（即年化配息率為Y%）` = 年利率 |
 | 配息率 | §13 每處 `每單位商品面額 × X%`（D 型 3 處：第 1 期、之後各期、`m ÷ M ×` 按比例條款；P 型／無自動提前出場 1 處）、§14(2)、§13 末段 `配息率為X%`、§15 假設 d)：每處都 = 年利率 ÷ 12，四捨五入（half-up）到 **4 位**後數值相等（文件可能去尾零，例 `0.375%`；8 份成立） |
 
-這些規則讀參考條件表的年利率（ADR 0005 例外，同 BARC／MS／BNP／SG）。
+這些規則讀參考條件表的年利率（在 `reference_fields` 宣告，ADR 0009；同 BARC／MS／BNP／SG）。
 
 ### 3.4 價格
 

@@ -4,7 +4,7 @@
 
 - 適用：新增上手，或同一上手的新範本版本（例如說明書改版、詢價表改版）。
 - 通用開發流程（Issue → branch → 實作 → PR）見 [AGENTS.md](../AGENTS.md)；本文件補充新增上手特有的步驟。
-- 參考範例：BARC 的[範本規格](templates/barc-zh-product-description.md)、[詢價格式](order-formats/barc-inquiry.md)、[核對規則](rules/barc-check-rules.md)、[審查標準](rules/review-standard.md)。
+- 參考範例：BARC 的[範本規格](templates/barc-zh-product-description.md)、[詢價格式](order-formats/barc-inquiry.md)、[核對規則](rules/barc-check-rules.md)（各上手共用的規則見[共用核對規則](rules/shared-check-rules.md)）、[審查標準](rules/review-standard.md)。
 
 ## 0. 總覽
 
@@ -121,7 +121,7 @@
 | 合成測試資料 | `tests/<上手>_synth.py` | `Spec` 繼承 `reference_synth.ProductSpec`（補預設商品代號、該上手專屬的文件選項），依該上手版面把規格畫成虛構 PDF（版面文字由規格算出），只用 `tests/pdf_writer.py` 排版；`build_pdf`／`build_iis_pdf` 收 `edits`（`pdf_writer.Edit`，每個至少換到一處）製造錯誤，模組說明列出段落代號；參考條件表列一律 `reference_synth.reference_row(spec)`（不自己產），固定文字取 `harness.STANDARD`，單份核對用 `tests/harness.py`；不引用其他上手合成器 |
 | 測試 | `tests/test_check_<上手>*.py`、`tests/test_real_samples.py` | 合成測試進 CI；真實樣本測試只在本機 |
 
-### 6.2a 新上手要提供什麼、哪些自動沿用（[ADR 0005](adr/0005-issuer-adapter-and-shared-rules.md)）
+### 6.2a 新上手要提供什麼、哪些自動沿用（[ADR 0009](adr/0009-shared-rules-defined-per-rule.md)）
 
 | 新上手提供 | 說明 |
 |---|---|
@@ -129,7 +129,7 @@
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
 | `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作；範本本身沒有的欄位（例：MS 沒有年利率、受理申購日）要明確交出 `standard_fields.absent(name, 說明)`（不適用），共用規則不核對、不報缺漏 |
 | `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構；價格推算已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
-| `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位（ADR 0005 的例外，需經審查才加；BARC 為年利率與天期、MS、BNP 與 SG 為年利率）；讀未宣告的欄位是開發期錯誤 |
+| `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位：只有說明書印的值是由參考條件表才有的條件推算出來時才宣告（ADR 0009；BARC 為年利率與天期，MS、BNP、SG、Citi、JPM、Nomura 為年利率）；讀未宣告的欄位是開發期錯誤 |
 
 自動沿用（不必再寫）：
 
@@ -146,7 +146,7 @@
 - 審查標準有該上手分節才核對的固定值（例外：沒有分節的上手不會被讀，可不交出，也不必交 `absent`）：商品種類 `product_type`（`product_type.<上手>`）、保證機構名稱 `guarantor_name_cover`／`guarantor_name_ch1`／`guarantor_name_ch2`（`guarantor_name.<上手>` 的 cover／ch1／ch2）、總代理人名稱 `agent_name_cover`／`agent_name_ch2`（`agent_name.<上手>` 的 cover／ch2）、發行不成立門檻 `minimum_issue_size`（`minimum_issue_size.<上手>`）；最低金額倍數 `min_amount_multiples.<上手>` 不是欄位，由共用 `field.min_amounts` 讀設定。
 - 範本另有、其他範本沒有的出處（範本沒有就交 `absent`，共用規則不核對、不產生結果）：第一章只寫中文的發行機構名稱 `issuer_name_ch1`（MS、BNP）、封面發行機構名稱 `issuer_name_cover`（BBVA 沒有封面發行機構欄，交 `absent`）、第四章受託機構電話 `distributor_phone_ch4`（BNP；UBS 取一般交易事項十六「受託機構聯絡方式」；由共用 `standard.distributor` 核對，含電話等價寫法）；說明書寫明的期初定價 `initial_pricing`（Citi 標的表表頭；範本沒有就交 `absent`，共用 `field.initial_pricing` 只檢查表上是允許值）。
 
-各欄位值的形狀見 `STANDARD_FIELDS` 與 `FEE_FIELD_SHAPE`。共用規則只透過 `rules/kit.py` 的 `read_standard` 讀欄位，讀不在清單上的名稱會直接失敗；新增共用規則需要的欄位時，同步更新 `STANDARD_FIELDS`、本節與各上手的 `read`。adapter 少交某個標準欄位時，相關規則轉人工覆核並寫出欄位名稱，不會整份變成執行錯誤；兩家上手語意不同時以 BARC 為準。
+各欄位值的形狀見 `STANDARD_FIELDS` 與 `FEE_FIELD_SHAPE`。共用規則只透過 `rules/kit.py` 的 `read_standard` 讀欄位，讀不在清單上的名稱會直接失敗；新增共用規則需要的欄位時，同步更新 `STANDARD_FIELDS`、本節與各上手的 `read`。adapter 少交某個標準欄位時，相關規則轉人工覆核並寫出欄位名稱，不會整份變成執行錯誤；共用規則的語意見[共用核對規則](rules/shared-check-rules.md)，範本差異由 adapter 宣告（ADR 0009）。
 
 ### 6.2 實作原則
 

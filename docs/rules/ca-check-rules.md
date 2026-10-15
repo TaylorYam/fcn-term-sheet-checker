@@ -4,7 +4,7 @@
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [CA 下單資料格式](../order-formats/ca-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.15（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #274）；已實作（`parsers/ca.py`、`rules/ca.py`，投資人須知見[投資人須知核對規則](iis-check-rules.md)）
-- 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis 核對規則](natixis-check-rules.md)不同或 CA 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
+- 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis 核對規則](natixis-check-rules.md)不同或 CA 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
 

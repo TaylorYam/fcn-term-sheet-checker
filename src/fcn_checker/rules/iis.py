@@ -48,7 +48,7 @@ _NAME_TAIL = re.compile(r"（(?:以下簡稱|下稱)「本商品」）.*$")
 @dataclass
 class IisIssuerContext:
     """上手投資人須知專屬規則的輸入：投資人須知讀出結果與同商品說明書（上手自己 parser 的讀出結果，可讀專屬欄位；
-    這批沒有、讀不到或沒有配對成功時為 None）。不含參考條件表（同 ADR 0005 的說明書內部規則）。"""
+    這批沒有、讀不到或沒有配對成功時為 None）。不含參考條件表（同 ADR 0009 的說明書內部規則）。"""
 
     sheet: IisSheet
     term_sheet: TermSheet | None

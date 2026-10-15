@@ -4,7 +4,7 @@
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [BNP 下單資料格式](../order-formats/bnp-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.7（設定檔 `config/review_standard.toml`）
 - 狀態：核對範圍與規則已與作業人員確認（2026-10-13，Issue #189）；已實作（Issue #191；rule_id 對照見 §9），本機 7 份真實樣本結果與 §5 一致
-- 本文件只寫與 [BARC 核對規則](barc-check-rules.md)、[HSBC 核對規則](hsbc-check-rules.md)、[MS 核對規則](ms-check-rules.md)不同或 BNP 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）沿用 BARC
+- 本文件只寫與 [BARC 核對規則](barc-check-rules.md)、[HSBC 核對規則](hsbc-check-rules.md)、[MS 核對規則](ms-check-rules.md)不同或 BNP 特有的部分；未提到的原則（判定原則、數值處理、標的只核對彭博代號、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
 
@@ -64,7 +64,7 @@
 | 年利率 | §15 `(即年利率Y%)` = 參考條件表 `Coupon p.a. (%)`（共用 `field.coupon_pa_pct`）；§17 `最低配息率為Y%（年化）` = 年利率；§18 獲利情境（自動提前贖回情況、最佳情況 (A)(B)）每處 `年化報酬率：Y%` = 年利率（3 位小數寫法，比對數值） |
 | 月配息率 | §15 `月配息率：X%`、§15 `固定配息金額 = 每單位面額 × X%`、§18 `每月配息率：X%`、§18 每個情境算式 `× X%`：每處都 = 年利率 ÷ 12，四捨五入（half-up）到**說明書顯示的位數**（USD／GBP 4 位、JPY 6 位；7 份成立） |
 
-這些規則讀參考條件表的年利率（ADR 0005 例外，同 BARC／MS）。
+這些規則讀參考條件表的年利率（在 `reference_fields` 宣告，ADR 0009；同 BARC／MS）。
 
 ### 3.4 價格
 

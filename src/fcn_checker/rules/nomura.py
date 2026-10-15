@@ -2,7 +2,7 @@
 
 參考條件表欄位、價格推算、審查標準（含 Nomura 分節：保證機構與總代理人名稱、商品種類、發行不成立門檻、上手別的固定警語
 次數）與回填是各上手共用的規則。說明書沒有年利率（`coupon_pa_pct` 交 absent），每期配息率 × 12 與情境年化報酬率改由這裡
-讀參考條件表年利率核對（ADR 0005 的例外，見 REFERENCE_FIELDS）。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
+讀參考條件表年利率核對（ADR 0009，見 REFERENCE_FIELDS）。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "NOMURA"
-# 本上手規則可讀的參考條件表欄位（ADR 0005 的例外：說明書只有每期配息率，年利率由每期 × 12 與情境年化報酬率核對）
+# 本上手規則可讀的參考條件表欄位（ADR 0009，須在 reference_fields 宣告：說明書只有每期配息率，年利率由每期 × 12 與情境年化報酬率核對）
 REFERENCE_FIELDS = ("coupon_pa_pct",)
 NOT_COVERED = [
     {
