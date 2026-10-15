@@ -43,6 +43,10 @@ IIS_FIELDS: dict[str, str] = {
     "redemption_start": "date：開始受理贖回日期",
     "memory_wording": "int：商品事項段「記憶式」出現的次數（Citi：非記憶式商品不得出現）",
     "coupon_pa_mentions": "tuple[Occurrence, ...]：年利率主來源以外的出處（JPM D 型自動提前出場配息金額；每處 = 主來源）",
+    "coupon_per_period_pct": "Decimal：每期配息率 %，保留顯示位數（× 12 四捨五入到 2 位 = 年利率；Nomura）",
+    "underlying_names_en": "list[str]：標的英文名稱，依說明書順序（Nomura 商品簡介；= 說明書第一章第 8 項）",
+    "redemption_start_text": "str：開始受理贖回日期的文字（Nomura；= 說明書第四章 1.(3)）",
+    "redemption_later_text": "str：後續受理贖回日期的文字（Nomura；= 說明書第四章 1.(4)）",
 }
 
 

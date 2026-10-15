@@ -1,7 +1,7 @@
 # 下單資料格式：Nomura（參考條件表）
 
 - 設定檔：所有上手共用的 [`config/reference_sheet.toml`](../../config/reference_sheet.toml)
-- 狀態：規格（待實作，Issue #239）。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 Nomura 的說明書來源與差異
+- 狀態：已實作（Issue #239）。共用的版面、配對、回填規則見[參考條件表格式](reference-sheet.md)，本文件只寫 Nomura 的說明書來源與差異
 
 ## 1. 結構
 
