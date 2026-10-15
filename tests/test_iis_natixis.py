@@ -46,11 +46,12 @@ def test_ko_definition_without_a_percentage_reads_as_100_percent(tmp_path):
 
 
 def test_ko_definition_without_a_percentage_is_a_mismatch_when_ko_is_not_100(tmp_path):
-    """同上寫法、但 KO 是 105%（NX7 的情況）：KO % 判不一致（100 ≠ 105）。"""
+    """同上寫法、但 KO 是 105%（NX7 的情況）：KO % 判不一致（100 ≠ 105），KO 定義也寫出為什麼等於 100%。"""
     edit = Edit("自動提前到期贖回價格為期初進場價格之105.00%。", NO_PCT, "iis.coupon")
     r = check_iis(tmp_path, edits=[edit]).report
     assert rule(r, "field.ko_pct")[0].status == S.MISMATCH
-    assert rule(r, "iis.ko_definition")[0].status == S.PASS
+    definition = rule(r, "iis.ko_definition")[0]
+    assert definition.status == S.MISMATCH and "105" in definition.message
 
 
 def test_currency_bullet_may_be_a_black_circle_with_a_space(tmp_path):

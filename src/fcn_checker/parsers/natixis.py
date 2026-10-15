@@ -23,7 +23,7 @@ from .common import RawText, by_column, capture_group, dec, derived, fee_rates, 
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：第一章條號中途重編、新版受託機構標籤（Issue #270）
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -100,7 +100,8 @@ def _is_noise(ln: Line) -> bool:
 
 class NatixisDocument(Document):
     """第一章條號可能中途重新從 1 編起（Word 自動編號跑掉，例：第 12 條之後接「1. 配息資料」…「14. 掛牌交易」；
-    Issue #270）：依順序讀不滿 26 條時，改讀「編號中途從 1 重來、和第 1 條同一個 x、合計剛好 26 條」，依先後當成第 1～26 條。"""
+    Issue #270）：依順序讀不滿 26 條時，改讀「編號中途從 1 重來一次、和第 1 條同一個 x、合計剛好 26 條」，依先後當成第 1～26 條。
+    只容許重來一次，條內 x 相同的 `1.` 清單不會被當成條號一路接下去。"""
 
     def articles(self, chapter: int) -> dict[int, Span]:
         strict = super().articles(chapter)
@@ -111,24 +112,21 @@ class NatixisDocument(Document):
 
     def _renumbered_articles(self, chapter: int, x: float) -> dict[int, Span]:
         sp = self.chapters[chapter]
-        marks: list[int] = []
-        printed = 1  # 下一個預期印出的編號
+        marks: list[tuple[int, int]] = []
+        printed, restarted = 1, False  # 下一個預期印出的編號；是否已重來過
         for i in range(sp.start + 1, sp.end):
             ln = self.lines[i]
             m = self.spec.article_re.match(ln.text)
             if not m or abs(ln.x0 - x) > 2:
                 continue
             if int(m.group(1)) == printed:
-                marks.append(i)
                 printed += 1
-            elif int(m.group(1)) == 1 and marks:  # 重新從 1 編起
-                marks.append(i)
-                printed = 2
-        out: dict[int, Span] = {}
-        for k, i in enumerate(marks):
-            end = marks[k + 1] if k + 1 < len(marks) else sp.end
-            out[k + 1] = Span(i, end, self._title_after(i, end))
-        return out
+            elif int(m.group(1)) == 1 and marks and not restarted:  # 重新從 1 編起
+                printed, restarted = 2, True
+            else:
+                continue
+            marks.append((len(marks) + 1, i))
+        return self._article_spans(marks, sp.end)
 
 
 def document(lines: Sequence[Line]) -> Document:

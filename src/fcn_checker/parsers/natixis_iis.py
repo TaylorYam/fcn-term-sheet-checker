@@ -20,7 +20,10 @@ from .common import RawText, fee_rates, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "natixis-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：計價幣別「● 」、KO 定義沒寫 % 讀成 100%（Issue #270）
+# 貳 2. KO 定義的兩種寫法：寫出 %，或沒寫 %（KO 價格就是期初進場價格，即 100%）
+KO_DEF_PCT = r"期初進場價格之(\d+(?:\.\d+)?)%"
+KO_DEF_INITIAL = "中文產品說明書第一章第14項所列之期初進場價格"
 SECTIONS = (
     "本商品之投資風險警語",
     "壹、相關機構",
@@ -149,9 +152,10 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
         m = found[0]
         ev = st.lines_for(m.start(), m.end())
         fields["ko_definition"] = ParsedField.present("ko_definition", m[1], ev)
-        pct = re.fullmatch(r".*期初進場價格之" + PCT, m[1])
-        fields["ko_pct"] = ParsedField.present("ko_pct", Decimal(pct[1]) if pct else Decimal(100), ev)
-        provided.add("ko_pct")
+        pct = re.fullmatch(KO_DEF_PCT, m[1])
+        if pct or m[1] == KO_DEF_INITIAL:  # 其他寫法不交出 ko_pct，由範本專屬規則判寫法不一致
+            fields["ko_pct"] = ParsedField.present("ko_pct", Decimal(pct[1]) if pct else Decimal(100), ev)
+            provided.add("ko_pct")
     day = natixis.ki_day(st, sec, r"觸及事件判定日：(.+?)，?並依「中斷日」", "商品簡介")
     if day.status == FieldStatus.MISSING:  # 舊版只有到期贖回段的定義（NX1）
         day = natixis.ki_day(st, sec, r"「觸及事件判定日」係指於(.+?)，並依「中斷日」", "到期贖回")

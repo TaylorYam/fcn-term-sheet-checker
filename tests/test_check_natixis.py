@@ -21,7 +21,7 @@ from fcn_checker.schema import CheckStatus as S
 from harness import check_all
 from harness import field_problems as problems
 from harness import results as rule
-from natixis_synth import ADDRESS, DIST, PRODUCT_TYPE, WARNING, Spec, build_pdf, check, check_item, row
+from natixis_synth import ADDRESS, DIST, PRODUCT_TYPE, WARNING, Spec, article_title, build_pdf, check, check_item, row
 from pdf_writer import Edit
 from reference_synth import build_reference_sheet, reference_row
 
@@ -38,22 +38,11 @@ VARIANTS = {
 }
 
 
-TITLES = {
-    9: "連結標的資產、相對權重與投資績效之關聯情形：",
-    12: "本商品年期、交易日、期初進場日、發行日、到期日、配息日、最終評價日及其他期日(依本商品性質決定之)：",
-    13: "配息資料及其計算公式：",
-    14: "自動提前到期事件之贖回計算公式：",
-    15: "到期日贖回之計算公式，包含最低保證配息及參與率：",
-    16: "投資收益計算方法，包含本金虧損之機率及以情境分析解說最大可能獲利、損失及其他狀況之年化平均報酬率：",
-}  # 合成器第 13～16 條的標題；其他條是「第n項說明（不核對）」
-
-
-def _renumbered_from(start: int) -> list[Edit]:
+def _renumbered_from(start: int, stop: int = 27) -> list[Edit]:
     """第一章第 start 條起條號重新從 1 編起（Word 自動編號跑掉，Issue #270）。"""
     edits = []
-    for n in range(start, 27):
-        title = TITLES.get(n, f"第{n}項說明（不核對）")
-        edits.append(Edit(f"{n}. {title}", f"{n - start + 1}. {title}", f"ts.art{n}"))
+    for n in range(start, stop):
+        edits.append(Edit(f"{n}. {article_title(n)}", f"{n - start + 1}. {article_title(n)}", f"ts.art{n}"))
     return edits
 
 
@@ -284,4 +273,10 @@ def test_numbering_restarting_with_articles_missing_is_still_not_natixis(tmp_pat
     """重編後合計不是 26 條（第 26 條不見）：仍認不出範本。"""
     edits = [*_renumbered_from(13), Edit("14. 第26項說明（不核對）", "", "ts.art26")]
     item = check_item(tmp_path, edits=edits)
+    assert item.report.template != NATIXIS.template_id
+
+
+def test_only_one_restart_is_accepted(tmp_path):
+    """重編只容許一次（Issue #270）：第 13 條起從 1 重編、第 20 條起又從 1 重編 → 不當成 26 條，仍認不出範本。"""
+    item = check_item(tmp_path, edits=[*_renumbered_from(13, 20), *_renumbered_from(20)])
     assert item.report.template != NATIXIS.template_id

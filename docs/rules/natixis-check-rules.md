@@ -189,7 +189,7 @@
 | 內容 | 說明 |
 |---|---|
 | 說明書 | 上手登記（`issuers.py`）；Natixis `LayoutSpec`（`第一章、` 章名五章；頁底英文名稱兩行、`第N頁/共計M頁`、分類標記排除；NX8 左上角單獨數字略過）；範本辨識；`read` 交出全部標準欄位（`initial_pricing`、`distributor_phone_ch4` 交 `absent`；`subscription_dates` 2 筆；`min_amounts` 4 筆；`issue_price_others` 1 筆；KO D／P、KI AM／D／P／無）；§3.3–§3.8 |
-| 投資人須知 | `parsers/natixis_iis.py`、`IisTemplate`（頁底 `第N頁/共M頁` 的 `page_totals`；刊印日期在第 1 行標題同一行）；投資人須知的 KO % 定義讀不到 % 要能判不一致（不是讀不到就轉人工）；[投資人須知核對規則](iis-check-rules.md) Natixis 欄 |
+| 投資人須知 | `parsers/natixis_iis.py`、`IisTemplate`（頁底 `第N頁/共M頁` 的 `page_totals`；刊印日期在第 1 行標題同一行）；投資人須知的 KO 定義沒寫 % 讀成 KO 100%（Issue #270；原本判不一致），其他寫法判不一致（不是讀不到就轉人工）；[投資人須知核對規則](iis-check-rules.md) Natixis 欄 |
 | 共用設定 | 審查標準 Natixis 分節（`fixed_warning_by_issuer.natixis`、`level_formats.natixis`、`product_name.natixis`、`issuer_name.natixis`、`product_type.natixis`、`iis.fixed_warning_occurrences.natixis = 2`）；`distributor.approval_dates` 加 2024-03-20；`config/reference_sheet.toml` 的 `[issuer_values] NATIXIS = "Natixis"` |
 
 要有合成 PDF 測試（KO D 記憶式／非記憶式、KO P（含 Non-Call = 天期、觀察日表 1 列）、KI 無／AM／D／P、單一／多標的、JPY 整數期初價格、AUD、VWAP、新舊兩版標籤、頁底英文名稱兩行、連結標的表數字拆行、欄序 KO → KI → K、投資人須知 5 頁、投資人須知 KO 定義少 %）、本機 8 份真實樣本測試（`tests/test_real_natixis.py`，結果與 §5 一致：NX6 投資人須知頁數、NX7 投資人須知 KO 定義判不一致，該兩組不回填；NX8 沒有參考條件表列；其餘有表上列的組別通過並回填），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM、Nomura、GS 樣本的負面測試；既有上手的合成與本機真實樣本測試結果須不變（`approval_dates` 加 2024-03-20 造成的改變要逐份列出）。
