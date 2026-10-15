@@ -3,7 +3,7 @@
 PANEL「匯出回報包…」呼叫 `export_bundle`，不需要先儲存核對結果，也不寫核對紀錄。資料夾結構是平的，
 維護者拿到後可以直接用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 原樣重跑：
 
-- `回報總表.xlsx`：「回報」一條錯訊一列（上手、TDCC Code、PDF 檔名、錯訊、我的判斷、備註），「我的判斷」是
+- `回報總表.xlsx`：「回報」一條錯訊一列（上手、TDCC、TS or IIS、錯訊、我的判斷、備註；不列檔名，Issue #234），「我的判斷」是
   誤報／真錯／不確定的下拉選單，由作業人員填；「摘要」是這批各類別的份數。
 - `參考條件表_未通過.xlsx`：只有這些商品的列，只留匯入格式的欄、核對欄與發行機構（其他欄拿掉），版面位置照原表。
 - `核對紀錄_未通過.json`：核對紀錄中這些商品的部分，格式相同。
@@ -37,7 +37,7 @@ from .config import ReferenceFormat
 from .ingestion import IngestionError
 from .orders.reference import header_columns, locate
 from .result_file import tdcc_code
-from .schema import overall_status
+from .schema import DocKind, overall_status
 
 REPORT_FILE = "回報總表.xlsx"
 REFERENCE_FILE = "參考條件表_未通過.xlsx"
@@ -45,7 +45,8 @@ RECORD_FILE = "核對紀錄_未通過.json"
 PDF_DIR = "PDF"
 REPORT_SHEET = "回報"
 SUMMARY_SHEET = "摘要"
-REPORT_COLUMNS = (("上手", 10), ("TDCC Code", 16), ("PDF 檔名", 32), ("錯訊", 90), ("我的判斷", 12), ("備註", 40))
+REPORT_COLUMNS = (("上手", 10), ("TDCC", 16), ("TS or IIS", 10), ("錯訊", 90), ("我的判斷", 12), ("備註", 40))
+DOC_KIND_LABELS = {DocKind.TERM_SHEET: "TS", DocKind.IIS: "IIS"}  # 檔名無法判斷種類時留空
 JUDGEMENT_COLUMN = "我的判斷"
 JUDGEMENTS = ("誤報", "真錯", "不確定")
 UNSUPPORTED_LABEL = "未支援上手（已知不支援，未列入回報包）"
@@ -179,7 +180,7 @@ def _report_book(
     for item in failing:
         code = tdcc_code(item.identification)
         for message in item.problem_messages or (item.status_label,):
-            ws.append((item.issuer, code, item.term_sheet.name, message, None, None))
+            ws.append((item.issuer, code, DOC_KIND_LABELS.get(item.kind), message, None, None))
     judgement = get_column_letter([h for h, _ in REPORT_COLUMNS].index(JUDGEMENT_COLUMN) + 1)
     dv = DataValidation(type="list", formula1='"' + ",".join(JUDGEMENTS) + '"', allow_blank=True)
     dv.error, dv.errorTitle, dv.showErrorMessage = "請從清單選擇：" + "、".join(JUDGEMENTS), JUDGEMENT_COLUMN, True

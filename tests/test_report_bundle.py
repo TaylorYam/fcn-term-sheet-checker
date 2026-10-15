@@ -91,14 +91,27 @@ def test_report_sheet_has_one_row_per_message_with_a_judgement_dropdown(tmp_path
 
     path = out / "回報總表.xlsx"
     report = sheet_dicts(path, "回報")
-    expected = [(i.term_sheet.name, m) for i in failing for m in i.problem_messages]
-    assert [(r["PDF 檔名"], r["錯訊"]) for r in report] == expected
-    assert all(r["上手"] == "BARC" and r["TDCC Code"] == bad.product_code for r in report)
+    expected = [(i.term_sheet.stem.rsplit("_", 1)[1], m) for i in failing for m in i.problem_messages]
+    assert [(r["TS or IIS"], r["錯訊"]) for r in report] == expected
+    assert {r["TS or IIS"] for r in report} == {"TS", "IIS"}
+    assert list(report[0]) == ["上手", "TDCC", "TS or IIS", "錯訊", "我的判斷", "備註"]
+    assert all(r["上手"] == "BARC" and r["TDCC"] == bad.product_code for r in report)
     assert all(r["我的判斷"] is None and r["備註"] is None for r in report)
     ws = openpyxl.load_workbook(path)["回報"]
     (dv,) = ws.data_validations.dataValidation
     assert dv.type == "list" and dv.formula1 == '"誤報,真錯,不確定"'
     assert str(dv.sqref) == f"E2:E{len(report) + 1}"
+
+
+def test_report_sheet_leaves_the_document_kind_blank_when_the_file_name_has_none(tmp_path):
+    ok, bad, rows = failing_pair()
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", rows)
+    unnamed = build_pdf(tmp_path / f"{bad.product_code}.pdf", bad)  # 檔名沒有 _TS／_IIS
+    outcome = check_all(sheet, [pdf_for(tmp_path, ok), unnamed])
+
+    report = sheet_dicts(export(outcome, tmp_path) / "回報總表.xlsx", "回報")
+
+    assert report and all(r["TS or IIS"] is None for r in report)
 
 
 def test_summary_counts_every_pdf_by_category(tmp_path):
@@ -165,7 +178,7 @@ def test_unsupported_variants_are_left_out_and_only_counted(tmp_path):
     assert (
         sum(counts[k] for k in categories) + counts["不支援樣態（已知不支援，未列入回報包）"] == counts["PDF 總數"] == 8
     )
-    assert {r["TDCC Code"] for r in sheet_dicts(out / "回報總表.xlsx", "回報")} == {bad.product_code}
+    assert {r["TDCC"] for r in sheet_dicts(out / "回報總表.xlsx", "回報")} == {bad.product_code}
     assert not [p for p in (out / "PDF").rglob("*.pdf") if p.name.startswith(variant.product_code)]
     assert variant.product_code not in (out / "核對紀錄_未通過.json").read_text(encoding="utf-8")
     extract = openpyxl.load_workbook(out / "參考條件表_未通過.xlsx").active
