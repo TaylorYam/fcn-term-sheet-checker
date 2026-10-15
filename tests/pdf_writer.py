@@ -70,12 +70,15 @@ class PdfWriter:
 
     寫入的每個文字單位（`put`／`line`／`row` 一格／`para` 整段／`numbered` 標題）先套用 `edits` 中涵蓋
     目前段落（`kind`.`section`）的改字；合成器自行分行的文字先以 `edit` 整段改過，再在 `verbatim()` 內寫入。
+
+    同一頁的文字共用一個 `Shape`，換頁或取用 `doc` 時才 commit（每段各自 `page.insert_text` 太慢）。
     """
 
     TOP, BOTTOM = 80.0, 770.0
 
     def __init__(self, edits: Sequence[Edit] = (), kind: str = "ts", used: set[Edit] | None = None) -> None:
-        self.doc = fitz.open()
+        self._doc = fitz.open()
+        self._shape: fitz.Shape | None = None
         self.page: fitz.Page
         self.y = 0.0
         self.edits, self.kind = tuple(edits), kind  # kind：文件層段落代號（ts／iis）
@@ -108,8 +111,25 @@ class PdfWriter:
         finally:
             self._verbatim = before
 
+    @property
+    def doc(self) -> fitz.Document:
+        """先 commit 目前頁尚未寫出的文字，再交出文件（合成器加頁尾、增刪頁時用）。"""
+        self.flush()
+        return self._doc
+
+    def flush(self) -> None:
+        if self._shape is not None:
+            self._shape.commit()
+            self._shape = None
+
+    def shape(self) -> fitz.Shape:
+        if self._shape is None:
+            self._shape = self.page.new_shape()
+        return self._shape
+
     def new_page(self) -> None:
-        self.page = self.doc.new_page(width=595, height=842)
+        self.flush()  # 必須在換頁前 commit：留到最後才 commit 會因頁面已失效而失敗
+        self.page = self._doc.new_page(width=595, height=842)
         self.y = self.TOP
 
     def need(self, h: float) -> None:
@@ -123,10 +143,10 @@ class PdfWriter:
         """
         for western, run in _runs(self.edit(text, section)):
             if western:
-                self.page.insert_text((x, y + size), run, fontname="helv", fontsize=size)
+                self.shape().insert_text((x, y + size), run, fontname="helv", fontsize=size)
                 x += fitz.get_text_length(run, fontname="helv", fontsize=size)
             else:
-                self.page.insert_text((x, y + size), run, fontname=FONT, fontsize=size)
+                self.shape().insert_text((x, y + size), run, fontname=FONT, fontsize=size)
                 x += size * len(run)
 
     def line(self, x: float, text: str, size: float = 10, gap: float = 13) -> None:

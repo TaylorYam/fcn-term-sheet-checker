@@ -151,8 +151,10 @@ PANEL 只有維護者本人使用。更新方式：在專案資料夾執行 `git
 ## 開發與測試
 
 ```bash
-pytest -q
+pytest -q -n auto
 ```
+
+`-n auto` 由 pytest-xdist 依 CPU 核心數平行跑；要逐一除錯時拿掉即可。
 
 ```bash
 ruff check src tests
