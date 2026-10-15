@@ -272,3 +272,10 @@ def test_initial_price_wrapped_onto_two_lines_stays_in_its_row(tmp_path):
     item = check_item(tmp_path, Spec(wrap_initial=True))
     assert item.report.status == S.PASS, problems(item.report)
     assert item.fills_sheet
+
+
+@pytest.mark.parametrize("market", ["US", "JT"])
+def test_every_price_with_its_currency_wrapped_is_read_row_by_row(tmp_path, market):
+    """每格價格的幣別字都換到下一行（`1,234.0000 日` / `圓`）：換行的字接回各自那格，相鄰兩列不會併成一列（Issue #278）。"""
+    item = check_item(tmp_path, Spec(wrap_currency=True, market=market))
+    assert item.report.status == S.PASS, problems(item.report)

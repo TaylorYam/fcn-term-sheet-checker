@@ -84,6 +84,7 @@ class Spec(ProductSpec):
     approval: dt.date = APPROVAL
     iis_pages: int = 4
     wrap_initial: bool = False  # 說明書第 9 項、第 16 項價格表第 1 檔期初訂價的幣別字換到下一行（真實樣本，Issue #278）
+    wrap_currency: bool = False  # 說明書價格表每格的幣別字都換到下一行（`1,234.0000 日` / `圓`，範本規格 §5）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count, self.market)
@@ -281,6 +282,16 @@ def _price_table(d: _Doc, s: Spec, *, index: bool) -> None:
             d.w.put(cx - _width(number + " " + quote[0], 8) / 2, d.w.y - up, number + " " + quote[0], 8)
             d.w.put(cx - _width(quote[1:], 8) / 2, d.w.y + down, quote[1:], 8)
             d.centered_row(cells, gap=24 if index else 16)  # 置中換行的那一列較高（真實樣本列距 24）
+            continue
+        if s.wrap_currency:  # 每格價格的幣別字最後一字換到下一行，這一列兩行高
+            d.w.need(26)
+            tails = []
+            for i, (cx, text) in enumerate(cells):
+                if text.endswith(s.quote) and len(s.quote) > 1:
+                    cells[i] = (cx, text[:-1])
+                    tails.append((cx, text[-1]))
+            d.centered_row(cells, gap=10)
+            d.centered_row(tails, gap=16)
             continue
         d.centered_row(cells, gap=16)
 
