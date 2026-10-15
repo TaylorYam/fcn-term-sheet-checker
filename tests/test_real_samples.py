@@ -40,12 +40,13 @@ def test_other_issuers_are_unsupported(reports):
         i
         for i in reports.values()
         if not i.term_sheet.name.startswith(
-            ("029", "325", "147", "082", "037", "159", "076", "156", "148", "328", "086", "326", "078")
+            ("029", "325", "147", "082", "037", "159", "076", "156", "148", "328", "086", "326", "078", "092")
         )
     ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py、SG 見 test_real_sg.py、Citi 見 test_real_citi.py、JPM 見 test_real_jpm.py、
     # Nomura 見 test_real_nomura.py、GS 見 test_real_gs.py、Natixis 見 test_real_natixis.py、CA 見 test_real_ca.py、BBVA 見 test_real_bbva.py、
-    # DBS 見 test_real_dbs.py
-    assert others, "本機應有其他上手的負面樣本"
+    # DBS 見 test_real_dbs.py、UBS 見 test_real_ubs.py
+    if not others:  # 上手編號對照上的上手都有範本了；本機有未登記上手的樣本時才測得到
+        pytest.skip("本機沒有未支援上手的樣本")
     assert all(i.unsupported and i.report.status == CheckStatus.REVIEW_REQUIRED for i in others)
 
 

@@ -161,6 +161,8 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
         # Nomura 分節（Issue #239）：上手別說明書固定警語次數須是正整數
         ("nomura = 2\n", "nomura = 0\n", "risk.fixed_warning_occurrences_by_issuer.nomura"),
         ("nomura = 2\n", 'nomura = "2"\n', "risk.fixed_warning_occurrences_by_issuer.nomura"),
+        # UBS 分節（Issue #279）：名稱用了 {ko_observation_*} 就要有每日與每期兩種寫法
+        ('periodic_zh = "定期觀察"\n', "", "periodic_zh"),
     ],
 )
 def test_invalid_ms_review_standard_is_a_batch_config_error(tmp_path, old, new, where):

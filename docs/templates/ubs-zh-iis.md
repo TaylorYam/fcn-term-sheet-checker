@@ -3,7 +3,7 @@
 - 範本代號：`ubs-zh-iis`
 - 對應說明書範本：[`ubs-zh-pd`](ubs-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-15 對 6 份真實樣本（UB1-IIS～UB6-IIS，與說明書 UB1–UB6 同商品）的探勘與核對範圍決定（Issue #279）
-- 狀態：規格完成、待實作（Issue #279）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
+- 狀態：已實作（Issue #279：`parsers/ubs_iis.py`、範本專屬規則 `rules/ubs_iis.py`：發行分行 `iis.issuing_branch`）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
 
 > 真實樣本與擷取文字只放在被 Git 忽略的 `data/`。本文件的數值範例都是虛構的；樣本代號與真實商品代號的對照只存在本機（`data/tmp/ubs/sample_map.txt`）。產品條件以參考條件表（`data/orders/核對表格式..xlsx` 有 6 列 UBS）與同商品說明書為基準。
 

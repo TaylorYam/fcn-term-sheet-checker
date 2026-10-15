@@ -27,6 +27,7 @@ from .parsers import (
     natixis_iis,
     nomura_iis,
     sg_iis,
+    ubs_iis,
 )
 from .parsers import bbva as bbva_parser
 from .parsers import bnp as bnp_parser
@@ -40,6 +41,7 @@ from .parsers import ms as ms_parser
 from .parsers import natixis as natixis_parser
 from .parsers import nomura as nomura_parser
 from .parsers import sg as sg_parser
+from .parsers import ubs as ubs_parser
 from .rules import barc as barc_rules
 from .rules import bbva as bbva_rules
 from .rules import bbva_iis as bbva_iis_rules
@@ -62,6 +64,8 @@ from .rules import nomura as nomura_rules
 from .rules import nomura_iis as nomura_iis_rules
 from .rules import sg as sg_rules
 from .rules import sg_iis as sg_iis_rules
+from .rules import ubs as ubs_rules
+from .rules import ubs_iis as ubs_iis_rules
 from .rules.iis import IisIssuerContext
 from .rules.kit import IssuerContext
 from .schema import CheckResult, CheckStatus, DetectionResult, Evidence, Item, Line
@@ -380,7 +384,28 @@ DBS = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS, CA, BBVA, DBS)
+UBS = Issuer(
+    code=ubs_rules.ISSUER,
+    template_id=ubs_parser.TEMPLATE_ID,
+    label="UBS 中文產品說明書",
+    parser_version=ubs_parser.PARSER_VERSION,
+    not_covered=tuple(ubs_rules.NOT_COVERED),
+    detect=ubs_parser.detect,
+    read=ubs_parser.read,
+    rules=ubs_rules.run_all,
+    reference_fields=ubs_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=ubs_iis.TEMPLATE_ID,
+        label="UBS 中文投資人須知",
+        parser_version=ubs_iis.PARSER_VERSION,
+        detect=ubs_iis.detect,
+        read=ubs_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=ubs_iis_rules.run_all,
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS, CA, BBVA, DBS, UBS)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:
