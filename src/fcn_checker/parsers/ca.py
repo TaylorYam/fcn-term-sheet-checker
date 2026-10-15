@@ -23,7 +23,7 @@ from .common import RawText, capture_group, compat_normalized, dec, derived, fee
 from .layout import Document, LayoutSpec, TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表幣別字換行的那格仍歸到同一列（Issue #278）
 # 第七章章名在部分文件拆成兩行（「第七章、股權連結商」／「品的額外條款及條件」），只用前六章定位；辨識另查第七章全文
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
@@ -71,6 +71,8 @@ KI_D_PERIOD = "界限事件觀察期間：從期初訂價日(含)至期末訂價
 KI_MATURITY = "若未發生界限事件"
 # 價格表欄（依表頭關鍵字的出現順序決定欄序；CA 是 K → KI → KO）
 PRICE_HEADS = (("strike", "執行價"), ("ki", "下限價"), ("ko", "自動提前出場價"))
+TAIL_REACH = 2.5  # 換行的幣別字最遠在價格下方幾個行高（第 16 項數字高一整行時約 1.3）
+ROW_OVERLAP = 1  # 兩格上下範圍重疊超過幾 pt 才算同一列（相鄰兩列不重疊）
 PRICE = re.compile(r"^([\d,]+\.\d+)(?!\d|\s*%)")  # 價格（後接幣別字）；表頭的「60.00% )」不算
 
 
@@ -363,7 +365,7 @@ def ki_type(ti: TextIndex, c: int, e: int, table: ParsedField) -> ParsedField:
 
 def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) -> ParsedField:
     """價格表（第 9 項 (2)、第 16 項情境）：`start_marker` 那一行之後、`end_marker` 之前；表頭決定欄序與 %
-    （K → KI → KO），每檔一列（以價格那一行的 y 切列）。表頭各格的擷取順序不一定由上而下，所以不用表頭文字找起點。
+    （K → KI → KO），每檔一列（價格的上下範圍重疊即同一列；幣別字換行的那格先接回，見 `_currency_tails`）。表頭各格的擷取順序不一定由上而下，所以不用表頭文字找起點。
 
     值：{"columns", "pcts", "rows": [{欄: Decimal}], "row_lines", "names"}。"""
     ti = TextIndex(lns)
@@ -394,16 +396,30 @@ def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) 
             name, header, "價格表表頭不是「連結標的、期初訂價、執行價、(下限價、)自動提前出場價」"
         )
     columns = [c for _, c in sorted(found)]
+    owner = _currency_tails(lines, prices)  # 換行的幣別字 → 它的價格
+    bottom = {x: x.y1 for x in prices}  # 每格價格的下緣（有換行的幣別字時算到那一行）
+    for tail, price in owner.items():
+        bottom[price] = tail.y1
+    # 同一頁、上下範圍有重疊的價格是同一列（換行的那格可能置中、也可能比同列其他格高一行）
     groups: list[list[Line]] = []
     for ln in sorted(prices, key=lambda x: (x.page, x.y0, x.x0)):
-        if groups and groups[-1][0].page == ln.page and abs(groups[-1][0].y0 - ln.y0) < 3:
-            groups[-1].append(ln)
+        g = groups[-1] if groups else None
+        if (
+            g
+            and g[0].page == ln.page
+            and ln.y0 < max(bottom[x] for x in g) - ROW_OVERLAP
+            and bottom[ln] > min(x.y0 for x in g) + ROW_OVERLAP
+        ):
+            g.append(ln)
         else:
             groups.append([ln])
-    # 價格以外的行（名稱、列號、拆到下一行的幣別字）分給同一頁 y 中心最近的那一列
+    # 價格以外的行（名稱、列號）分給同一頁 y 中心最近的那一列；換行的幣別字跟著它的價格
     extra: list[list[Line]] = [[] for _ in groups]
     for ln in lines:
         if ln in header or ln in prices:
+            continue
+        if ln in owner:
+            extra[next(k for k, g in enumerate(groups) if owner[ln] in g)].append(ln)
             continue
         same = [k for k, g in enumerate(groups) if g[0].page == ln.page]
         if same:
@@ -421,6 +437,34 @@ def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) 
         row_lines.append(sorted(g + mine, key=lambda x: (x.page, x.y0, x.x0)))
     value = {"columns": columns, "pcts": pcts, "rows": rows, "row_lines": row_lines, "names": names}
     return ParsedField.present(name, value, lines)
+
+
+def _ends_with_currency(text: str) -> bool:
+    return bool(re.search(ZH_CCY + "$", squash(text)))
+
+
+def _currency_tails(lines: list[Line], prices: list[Line]) -> dict[Line, Line]:
+    """價格的幣別字換到下一行（`1,029.2100 美` / `元`、`1,234.0000 日` / `圓`；Issue #278）：換行的那一行 → 它的價格。
+
+    候選價格在同一頁、那一行的 x 中心落在價格那格之內、價格在它上方 `TAIL_REACH` 行高以內，且價格本身不以幣別字
+    結尾、接起來才以幣別字結尾；取最近的那一格（下一列同欄的價格也換行時不會搶到上一列的）。"""
+    owner: dict[Line, Line] = {}
+    for ln in lines:
+        if ln in prices:
+            continue
+        above = [
+            x
+            for x in prices
+            if x.page == ln.page
+            and x.x0 <= ln.xc <= x.x1
+            and 0 < ln.y0 - x.y0 < TAIL_REACH * (x.y1 - x.y0)
+            and not _ends_with_currency(x.text)
+            and _ends_with_currency(x.text + ln.text)
+            and x not in owner.values()
+        ]
+        if above:
+            owner[ln] = max(above, key=lambda x: x.y0)
+    return owner
 
 
 def art10_tickers(art10: list[Line]) -> ParsedField:
