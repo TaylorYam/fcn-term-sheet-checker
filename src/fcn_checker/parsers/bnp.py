@@ -460,8 +460,8 @@ def _hit_field(name: str, hit: Hit | None, missing: str, pick: Callable = lambda
 
 
 def _art11_region(art11: list[Line]) -> list[Line]:
-    """第 11 項標的表：「連結標的名稱」那一行起，到「「籃子」指…」或「相對權重」之前。"""
-    start = next((i for i, ln in enumerate(art11) if squash(ln.text).startswith("連結標的名稱")), None)
+    """第 11 項標的表：「連結標的名稱」那一行起（標籤可能換行成「連結標的名」「稱：」），到「「籃子」指…」或「相對權重」之前。"""
+    start = next((i for i, ln in enumerate(art11) if squash(ln.text).startswith("連結標的名")), None)
     if start is None:
         return []
     end = next(

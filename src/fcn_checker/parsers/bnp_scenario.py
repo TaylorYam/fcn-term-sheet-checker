@@ -231,9 +231,9 @@ def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
         hits(
             ti,
             r"股數計算=(?:每單位面額|\(每單位面額×匯率\))÷(?:表現最差)?連結標的之?執行價格="
-            rf"(?:{NUM}({U})|\({NUM}({U})×(\d+(?:\.\d+)?)\))÷([\d,]+\.\d{{4}})({U})=(\d+(?:\.\d+)?)"
-            r"\(四捨五入至小數點以下第四位\)無條件捨去至整數位=(\d+)股",
-            lambda m: Shares(dec(m[1] or m[3]), m[2] or m[4], _fx(m[5]), dec(m[6]), m[7], Decimal(m[8]), int(m[9])),
+            rf"(?:{NUM}({U})|\({NUM}({U})×(\d+(?:\.\d+)?)\))÷([\d,]+\.\d{{4}})({U})=(\d[\d,]*(?:\.\d+)?)"
+            r"\(四捨五入至小數點以下第四位\)無條件捨去至整數位=(\d[\d,]*)股",  # 股數破千時有千分位逗號
+            lambda m: Shares(dec(m[1] or m[3]), m[2] or m[4], _fx(m[5]), dec(m[6]), m[7], dec(m[8]), int(dec(m[9]))),
         )
     )
     s.remainder = one(
@@ -248,10 +248,10 @@ def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
     s.worse_return = one(
         hits(
             ti,
-            rf"總報酬率=\[\((\d+)股×.+?收盤價格{NUM}({U})(÷匯率)?\+現金交割{NUM}({U})\+累積總月配息金額{NUM}({U})\)"
+            rf"總報酬率=\[\((\d[\d,]*)股×.+?收盤價格{NUM}({U})(÷匯率)?\+現金交割{NUM}({U})\+累積總月配息金額{NUM}({U})\)"
             rf"÷總投資金額{NUM}({U})\]-1={PCT}",
             lambda m: WorseReturn(
-                int(m[1]),
+                int(dec(m[1])),
                 dec(m[2]),
                 m[3],
                 bool(m[4]),

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from decimal import Decimal
 
 from ..schema import Line, ParsedField
@@ -27,6 +28,9 @@ PRICE = r"([\d,]+\.\d{4})"
 PRICE_PCT = PRICE + r"[，,]?即期初價格之(\d+(?:\.\d+)?)%"
 TICKER = re.compile(r"^[A-Z0-9][A-Z0-9./-]*\s+[A-Z]{2}$")
 NAME_LABEL, TICKER_LABEL, EXCHANGE_LABEL = "連結標的名稱：", "彭博代碼：", "交易所："
+WRAP_LABELS = (NAME_LABEL, TICKER_LABEL, EXCHANGE_LABEL)
+# 標的表每一列的標籤開頭（去空白）：跨頁時用來找下一頁續行到哪裡為止
+ROW_STARTS = ("連結標的名", "彭博代碼", "交易所", "期初價格", "執行價格", "自動提前贖回", "下限價格", "貨幣")
 
 # 日期表：表頭（去空白、接在「j」之後）→ 表型
 DATE_HEADERS = {"配息期開始日配息期結束日配息日": "D", "自動提前贖回評價日配息日": "P"}
@@ -48,6 +52,7 @@ def price_table(name: str, lines: list[Line], *, with_tickers: bool) -> ParsedFi
     """
     if not lines:
         return ParsedField.missing(name, "找不到標的表")
+    lines = join_wrapped_labels(stitch_page_break(lines))
     ti = TextIndex(lines, separate_digits=True)
     found: dict[str, re.Match[str]] = {}
     for col, pattern in PRICE_LABELS:
@@ -109,6 +114,61 @@ def price_table(name: str, lines: list[Line], *, with_tickers: bool) -> ParsedFi
     return ParsedField.present(name, value, evidence)
 
 
+def _row_start(ln: Line, label_x: float) -> bool:
+    return abs(ln.x0 - label_x) < 2 and squash(ln.text).startswith(ROW_STARTS)
+
+
+def stitch_page_break(lines: list[Line]) -> list[Line]:
+    """表格跨頁時，上一頁最後一列在下一頁頂端的續行（列標籤後半、各格後半）接回上一頁同一欄（x 相同）的最後一行之後。
+
+    擷取順序是一頁讀完才換頁，跨頁的那一列會變成「標籤前半、各格前半、標籤後半、各格後半」，標籤與格都認不出來。
+    續行＝下一頁開頭到下一個列標籤之前的行；只接到上一頁最後一列裡同一欄的行，該欄在最後一列沒有行時留在原位。
+    """
+    if not lines:
+        return lines
+    label_x = lines[0].x0
+    out = list(lines)
+    b = 1
+    while b < len(out):
+        if out[b].page == out[b - 1].page:
+            b += 1
+            continue
+        e = next((i for i in range(b, len(out)) if _row_start(out[i], label_x)), len(out))
+        head, block, tail = out[:b], out[b:e], out[e:]
+        last_row = max((i for i, ln in enumerate(head) if _row_start(ln, label_x)), default=0)
+        stay = []
+        for ln in block:
+            j = max((i for i, h in enumerate(head) if abs(h.x0 - ln.x0) < 2), default=-1)
+            if j >= last_row:
+                head.insert(j + 1, ln)
+            else:
+                stay.append(ln)
+        out = head + stay + tail
+        b = len(head) + len(stay) + 1
+    return out
+
+
+def join_wrapped_labels(lines: list[Line]) -> list[Line]:
+    """「連結標的名稱：」等列標籤在標籤欄裡換行（`連結標的名` / `稱：`）時接回一行，`_names`、`_tickers` 才找得到。"""
+    out: list[Line] = []
+    for ln in lines:
+        prev = out[-1] if out else None
+        if prev is not None and abs(prev.x0 - ln.x0) < 2:
+            a, joined = squash(prev.text), squash(prev.text) + squash(ln.text)
+            if any(
+                squash(lb).startswith(a) and a != squash(lb) and joined.startswith(squash(lb)) for lb in WRAP_LABELS
+            ):
+                out[-1] = replace(
+                    prev,
+                    x1=max(prev.x1, ln.x1),
+                    y1=max(prev.y1, ln.y1),
+                    text=prev.text.rstrip() + ln.text.strip(),
+                )
+                continue
+        out.append(ln)
+    return out
+
+
 def _tickers(lines: list[Line]) -> list[str] | None:
     """「彭博代碼：」列到「交易所：」列之前的每一格（標籤後同一行的文字也算一格）；代碼格式不符時為 None。"""
     starts = [i for i, ln in enumerate(lines) if squash(ln.text).startswith(squash(TICKER_LABEL))]
@@ -143,6 +203,10 @@ def _names(lines: list[Line], n: int) -> list[str] | None:
     for x, text in cells:
         key = next((k for k in groups if k is not None and x is not None and abs(k - x) < 2), x)
         groups.setdefault(key, []).append(text)
+    if None in groups and len(groups) == n + 1:  # 第一格和標籤同一行又換行：後半在最左一欄
+        first = min(k for k in groups if k is not None)
+        groups[first] = groups.pop(None) + groups[first]
+        groups = dict(sorted(groups.items()))
     if len(groups) != n:
         return None
     return ["".join(parts) for parts in groups.values()]
