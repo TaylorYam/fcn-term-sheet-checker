@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -20,7 +19,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import RawText, capture_group, dec, derived, fee_rates, number
+from .common import RawText, capture_group, dec, derived, fee_rates, header_columns, number, unify_compat
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "bbva-zh-pd"
@@ -73,21 +72,9 @@ KO_AT_MATURITY = r"最佳表現值大於或等於" + PCT + r"（出場值）：1
 STRIKE_DEF = r"轉換比例\(PutStrikePercentage\)：" + PCT
 
 
-def unify(text: str) -> str:
-    """CJK 相容字（U+F900–U+FAFF）轉成標準字（例：U+F938 → 露）；其他字元不動（一對一換字，字座標不變）。"""
-    return "".join(unicodedata.normalize("NFKC", c) if 0xF900 <= ord(c) <= 0xFAFF else c for c in text)
-
-
 def clean(lines: Sequence[Line]) -> list[Line]:
     """相容字轉成標準字；去掉頁底「N/M」頁碼。"""
-    out = []
-    for ln in lines:
-        text = ln.text.strip()
-        if ln.y0 >= FOOTER_Y and PAGE_NO.match(text):
-            continue
-        fixed = unify(ln.text)
-        out.append(ln if fixed == ln.text else replace(ln, text=fixed))
-    return out
+    return unify_compat([ln for ln in lines if not (ln.y0 >= FOOTER_Y and PAGE_NO.match(ln.text.strip()))])
 
 
 def document(lines: Sequence[Line]) -> Document:
@@ -187,9 +174,11 @@ def read(lines: Sequence[Line]) -> BbvaTermSheet:
     put("ko_at_maturity_pct", art14, KO_AT_MATURITY, Decimal)
     fields["price_table"] = price_table("price_table", art14, "交割營業日", "最低保證收益率")
     fields["ki_type"] = ki_type(fields, art14)
-    _ko_event(fields, article(15))
+    art15 = article(15)
+    fields["ko_memory"], fields["ko_def_pct"] = ko_event(TextIndex(art15), art15)
     _table_fields(fields, fields["price_table"])
-    _coupon(fields)
+    # 年利率：KO 每日型在第 13 項；KO 每期型第 13 項只有每期配息率，由 _article16 改取第 16 項「年利率相當於約y%」
+    fields["coupon_pa_pct"] = fields["coupon_annual_art13"]
     _schedule(fields)
     _article16(fields, article(16))
 
@@ -249,20 +238,6 @@ def underlying_list(name: str, art9: list[Line]) -> ParsedField:
     return ParsedField.present(name, tickers, lines)
 
 
-def _header_columns(header: list[Line]) -> list[tuple[float, str]]:
-    """表頭各行依 x 中心分欄（相差 15pt 內同一欄），回傳（欄中心, 欄文字）由左到右。"""
-    cols: list[list[Line]] = []
-    for ln in sorted(header, key=lambda x: x.xc):
-        if cols and ln.xc - cols[-1][-1].xc <= 15:
-            cols[-1].append(ln)
-        else:
-            cols.append([ln])
-    return [
-        (sum(x.xc for x in col) / len(col), "".join(squash(x.text) for x in sorted(col, key=lambda x: (x.page, x.y0))))
-        for col in cols
-    ]
-
-
 def price_table(name: str, lns: list[Line], start: str, end: str) -> ParsedField:
     """價格表（第 14 項：`交割營業日` 之後到 `最低保證收益率` 之前；第 16 項：假設之後到 `情境一` 之前）。
 
@@ -282,7 +257,7 @@ def price_table(name: str, lns: list[Line], start: str, end: str) -> ParsedField
     if head_top is None:
         return ParsedField.invalid(name, lines, "價格表找不到表頭（「k」欄）")
     header = [ln for ln in lines[head_top:] if (ln.page, ln.y1) < (top.page, top.y0 + 1) and squash(ln.text) != "k"]
-    cols = _header_columns(header)
+    cols = header_columns(header)
     found, pcts = [], {}
     for col, word in PRICE_HEADS:
         hit = [(x, t) for x, t in cols if t.startswith(word)]
@@ -368,9 +343,10 @@ def ki_type(fields: dict[str, ParsedField], art14: list[Line]) -> ParsedField:
     return ParsedField.invalid("ki_type", art14, "第一章第 14 項到期條件的下限值寫法缺漏、重複或不在範本規格內")
 
 
-def ko_event(ti: TextIndex, lns: list[Line], where: str) -> tuple[ParsedField, ParsedField]:
-    """自動提前贖回事件 → (ko_memory, ko_def_pct)：「最佳表現值」＋「不須出現在同一個…觀察日」→ 記憶式；
-    「最差表現值」→ 非記憶式（範本規格 §4.2）。說明書第 15 項與投資人須知二、 2.(3) 共用。"""
+def ko_event(ti: TextIndex, lns: list[Line]) -> tuple[ParsedField, ParsedField]:
+    """第一章第 15 項自動提前贖回事件 → (ko_memory, ko_def_pct)：「最佳表現值」＋「不須出現在同一個…觀察日」→ 記憶式；
+    「最差表現值」→ 非記憶式（範本規格 §4.2）。投資人須知二、 2.(3) 沒有「不須出現在同一個」那句，另在 bbva_iis 讀。"""
+    where = "第一章第 15 項"
     found = list(ti.finditer(KO_EVENT))
     if len(found) != 1:
         bad = ParsedField.invalid("ko_memory", lns, f"{where}自動提前贖回事件的句型缺漏、重複或不在範本規格內")
@@ -384,18 +360,6 @@ def ko_event(ti: TextIndex, lns: list[Line], where: str) -> tuple[ParsedField, P
     if "最差表現值" in subject and MEMORY not in ti.text:
         return ParsedField.present("ko_memory", False, ev), pct
     return ParsedField.invalid("ko_memory", ev, f"{where}自動提前贖回事件的記憶式寫法不在範本規格內"), pct
-
-
-def _ko_event(fields: dict[str, ParsedField], art15: list[Line]) -> None:
-    fields["ko_memory"], fields["ko_def_pct"] = ko_event(TextIndex(art15), art15, "第一章第 15 項")
-
-
-# ---------------------------------------------------------------- 配息（範本規格 §4.6）
-
-
-def _coupon(fields: dict[str, ParsedField]) -> None:
-    """KO 每日：第 13 項年利率；KO 每期：第 13 項只有每期配息率，年利率取第 16 項「年利率相當於約y%」（_article16 再設）。"""
-    fields["coupon_pa_pct"] = fields["coupon_annual_art13"]
 
 
 # ---------------------------------------------------------------- 第 12 項日期表與 KO 排程

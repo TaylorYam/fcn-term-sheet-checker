@@ -18,7 +18,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import bbva, iis
-from .common import RawText, fee_rates
+from .common import RawText, fee_rates, unify_compat
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "bbva-zh-iis"
@@ -65,13 +65,7 @@ PROVIDED = frozenset(
 
 def body(lines: Sequence[Line]) -> list[Line]:
     """相容字轉成標準字；頁底頁碼「N/4」另由 `iis.page_totals` 讀，不算內文。"""
-    out = []
-    for ln in lines:
-        if re.fullmatch(iis.PAGE_SLASH, ln.text.strip()):
-            continue
-        fixed = bbva.unify(ln.text)
-        out.append(ln if fixed == ln.text else replace(ln, text=fixed))
-    return out
+    return unify_compat([ln for ln in lines if not re.fullmatch(iis.PAGE_SLASH, ln.text.strip())])
 
 
 def detect(lines: Sequence[Line]) -> DetectionResult:
@@ -135,7 +129,8 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
             "coupon_pa_pct", sec, "收益分配事項的配息率寫法缺漏或不在範本規格內"
         )
         provided.add("coupon_pa_pct")
-    # 自動提前贖回事件：「最佳表現值」→ 記憶式、「最差表現值」→ 非記憶式；KO %
+    # 自動提前贖回事件：「最佳表現值」→ 記憶式、「最差表現值」→ 非記憶式；KO %（句型同說明書第 15 項，但沒有「不須出現在
+    # 同一個…觀察日」那句，所以不共用 bbva.ko_event）
     found = list(st.finditer(KO_EVENT))
     if len(found) != 1:
         bad = ParsedField.invalid("ko_memory", sec, "自動提前贖回事件的句型缺漏、重複或不在範本規格內")

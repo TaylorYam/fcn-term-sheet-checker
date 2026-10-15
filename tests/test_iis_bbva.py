@@ -144,3 +144,10 @@ def test_missing_section_title_fails_recognition(tmp_path):
 def test_ki_percentage_is_compared_with_the_sheet(tmp_path):
     r = check_iis(tmp_path, Spec(ki_pct=Decimal("60.00")), **{"KI(%)": 55.0}).report
     assert rule(r, "field.ki_pct")[0].status == S.MISMATCH
+
+
+def test_chapter_three_title_missing_a_character_is_still_recognised(tmp_path):
+    """BV4、BV5 第三章章名寫成「三、 品風險揭露」（少「商」字）：照常辨識，章名錯字不核對。"""
+    r = check_iis(tmp_path, Spec(), edits=[Edit("三、 商品風險揭露", "三、 品風險揭露", "iis.rest")]).report
+    assert r.template == BBVA.iis.template_id
+    assert r.status == S.PASS, problems(r)

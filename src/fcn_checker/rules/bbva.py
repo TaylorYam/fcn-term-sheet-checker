@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from ..parsers.bbva import ISSUER_EN
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
@@ -139,7 +140,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
             cz.value, art5.value
         )
     )
-    iso = re.match(r"BBVA GLOBAL MARKETS, B\.V\.\s+([A-Z]{3})\s", en.value) if en.ok else None
+    iso = re.match(re.escape(ISSUER_EN) + r"\s+([A-Z]{3})\s", en.value) if en.ok else None
     iso_pf = (
         ParsedField("name_en_iso", en.status, iso[1] if iso else None, list(en.evidence), note=en.note)
         if not en.ok or iso
@@ -343,7 +344,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
         if any(b <= a for a, b in zip(pays, pays[1:], strict=False)):
             issues.append("配息日沒有逐期遞增")
         ko = table.value["ko_rows"]
-        same = [r["t"] for r in ko if r["j"] != r["t"] or r["observation_j"] != r["observation"]]
+        same = [r["t"] for r in ko if r["observation_j"] != r["observation"]]
         if same:
             issues.append(
                 f"自動提前贖回觀察日表第 {'、'.join(map(str, same))} 列的「觀察日」和「自動提前贖回觀察日」不同"

@@ -1,5 +1,6 @@
 """各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%，
-以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS），
+以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`／表頭分欄 `header_columns`、同一句另一組的 `capture_group`（Nomura、GS）、
+CJK 相容字轉換 `unify_compat`，
 費用表依座標讀費率的 `fee_rates`（GS、Natixis）。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
@@ -9,6 +10,7 @@ from __future__ import annotations
 
 import bisect
 import re
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
@@ -185,6 +187,30 @@ def split_at_columns(lines: list[Line], tol: float = 0.6) -> list[Line]:
                 i, j = keep[0], keep[-1] + 1
                 out.append(replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=ln.text[i:j], char_spans=spans[i:j]))
     return out
+
+
+def header_columns(header: list[Line], gap: float = 15) -> list[tuple[float, str]]:
+    """表頭各行依 x 中心分欄（相差 `gap` 內同一欄），回傳（欄中心, 去空白的欄文字）由左到右（Natixis、BBVA 價格表）。"""
+    cols: list[list[Line]] = []
+    for ln in sorted(header, key=lambda x: x.xc):
+        if cols and ln.xc - cols[-1][-1].xc <= gap:
+            cols[-1].append(ln)
+        else:
+            cols.append([ln])
+    out = []
+    for col in cols:
+        lns = sorted(col, key=lambda x: (x.page, x.y0))
+        out.append((sum(x.xc for x in lns) / len(lns), "".join(squash(x.text) for x in lns)))
+    return out
+
+
+def unify_compat(lines: Sequence[Line]) -> list[Line]:
+    """CJK 相容字（U+F900–U+FAFF，例：U+F9DD → 利、U+F938 → 露）轉成標準字；其他字元不動（一對一換字，字座標不變；GS 投資人須知、BBVA）。"""
+
+    def fix(text: str) -> str:
+        return "".join(unicodedata.normalize("NFKC", ch) if 0xF900 <= ord(ch) <= 0xFAFF else ch for ch in text)
+
+    return [ln if fix(ln.text) == ln.text else replace(ln, text=fix(ln.text)) for ln in lines]
 
 
 def column_text(lines: list[Line]) -> str:

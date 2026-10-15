@@ -249,3 +249,20 @@ def test_other_issuers_are_not_mistaken_for_bbva(tmp_path, report):
     """其他上手的說明書照常辨識為自己的範本（BBVA 範本不會同時符合而變成 template_ambiguous）。"""
     r = report(tmp_path)
     assert r.template not in (BBVA.template_id, None)
+
+
+def test_periodic_autocall_table_missing_a_row_needs_review(tmp_path):
+    """KO 每期型自動提前贖回表少一列（期別不連續到天期 − 1）：KO 觀察方式與 Non-Call 轉人工覆核。"""
+    spec = Spec(ko_obs="P")
+    last = spec.tenor - 1
+    # 表上第 tenor − 1 列整列拿掉（期別、觀察日、自動提前贖回日、j、觀察日每格都換成空字串）
+    cells = (str(last), spec.date(spec.ends[last - 1]), spec.date(spec.payments[last - 1]))
+    r = check(tmp_path, spec, edits=[Edit(x, "", "ts.art12.table.ko") for x in cells])
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+
+
+def test_issuer_name_in_chapter_one_must_match_besides_the_prefix(tmp_path):
+    """第一章 3.(1) 沒有「荷蘭商」算一致，但名稱本身不同仍判不一致。"""
+    edit = Edit(f"(1) 發行機構：{ISSUER_EN}", "(1) 發行機構：BBVA GLOBAL MARKET, B.V.", "ts.art3")
+    r = check(tmp_path, Spec(), edits=[edit])
+    assert rule(r, "standard.issuer_name", "issuer_name_ch1")[0].status == S.MISMATCH

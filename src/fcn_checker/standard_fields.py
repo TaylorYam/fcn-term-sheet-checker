@@ -133,7 +133,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "chairman": "str：受託或銷售機構負責人姓名，保留原字碼（不做異體字轉換）",
     "issue_price_pct": "Decimal：發行價格為商品面額之 N%",
     "issue_price_others": "tuple[Occurrence, ...]：發行價格的其他出處（MS 第四章申購價金）；範本沒有時交出 absent",
-    "issuer_name_cover": "str：封面「發行機構」中英文法人全名",
+    "issuer_name_cover": "str：封面「發行機構」中英文法人全名；範本沒有封面發行機構欄時交出 absent（BBVA）",
     "issuer_name_ch2": "str：第二章「發行機構」事業名稱",
     "issuer_name_ch1": "str：第一章只寫中文的發行機構名稱（MS 第一章第 3 項）；範本沒有這處時交出 absent",
     "distributor_name_cover": "str：封面受託或銷售機構名稱",
