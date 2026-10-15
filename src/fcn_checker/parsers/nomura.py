@@ -82,7 +82,6 @@ PRICE_TABLE = price_table.TableSpec(
     pct_label="(期初價格之X% )",
     code="彭博代碼",
 )
-TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})\s+(?:Equity|EQUITY)\b")
 # 第 7 項 KO 觀察方式（範本規格 §4.1）：每日觀察的起日；每期觀察看第 11 項(6) 日期表
 KO_DAILY = r"自動提前出場決定日：自" + D + r"起（含）至最終評價日止（含）之各預定交易日。"
 KO_PERIODIC = r"自動提前出場決定日：各自動提前出場決定日即下述第11項\(6\)「自動提前出場決定日」之表格所示。"

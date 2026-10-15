@@ -77,7 +77,6 @@ PRICE_TABLE = price_table.TableSpec(
 )
 SCENARIO_TABLE = replace(PRICE_TABLE, where="情境分析價格表")
 IIS_TABLE = replace(PRICE_TABLE, where="商品簡介價格表")
-CELL = re.compile(rf"^({ZH_CCY})?\s*([\d,]+\.\d+)?$")  # 價格格：「美元 123.4567」或分兩行「美元」／「123.4567」
 
 
 def body(lines: Sequence[Line]) -> list[Line]:

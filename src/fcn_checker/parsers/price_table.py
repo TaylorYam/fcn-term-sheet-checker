@@ -423,7 +423,7 @@ def _columns(
         out[col.key] = _one(hit, col.word, header, spec)
         if spec.pct is not None:
             m = re.search(spec.pct, _text(out[col.key]))
-            below = [c for c in cells if _pct_only(c, spec) and _below(c, out[col.key])]
+            below = [c for c in cells if _pct_only(c, spec) and _below(c, out[col.key], cells, spec)]
             if m is None and len(below) == 1:  # 百分比和欄名分開：歸到正上方的欄名
                 out[col.key] = sorted(out[col.key] + below[0], key=_reading)
                 m = re.search(spec.pct, _text(out[col.key]))
@@ -447,10 +447,17 @@ def _columns(
     return cols, pcts, {k: _text(c) for k, c in out.items()}
 
 
-def _below(cell: list[Line], head: list[Line]) -> bool:
-    """`cell` 在 `head` 下面、x 範圍重疊（同一欄）。"""
-    x0, x1 = min(x.x0 for x in head), max(x.x1 for x in head)
-    return _span_overlap(cell[0], x0, x1) > 0 and _page_key(cell[0]) > max(_page_key(x) for x in head)
+def _below(cell: list[Line], head: list[Line], cells: list[list[Line]], spec: TableSpec) -> bool:
+    """`cell` 在 `head` 下面，而且在有價格欄關鍵字的格裡和 `head` 的 x 重疊最多（同一欄）。"""
+    if _page_key(cell[0]) <= max(_page_key(x) for x in head):
+        return False
+    heads = [c for c in cells if any(col.word in _text(c) for col in spec.columns)]
+
+    def overlap(c: list[Line]) -> float:
+        return _span_overlap(cell[0], min(x.x0 for x in c), max(x.x1 for x in c))
+
+    best = max(heads, key=overlap)
+    return best is head and overlap(head) > 0
 
 
 def _one(hit: list[list[Line]], word: str, header: list[Line], spec: TableSpec) -> list[Line]:

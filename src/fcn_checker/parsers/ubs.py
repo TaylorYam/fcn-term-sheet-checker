@@ -73,7 +73,6 @@ PRICE_TABLE = price_table.TableSpec(
     pct_label="（即期初價格的X%）",
 )
 SCENARIO_TABLE = replace(PRICE_TABLE, where="商品基本資料十五情境價格表")
-PRICE = re.compile(r"^([\d,]+\.\d{4})(?!\d|\s*%)")
 
 
 def clean_lines(lines: Sequence[Line]) -> list[Line]:
