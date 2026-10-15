@@ -148,12 +148,14 @@ def read(name: str, lines: Sequence[Line], spec: TableSpec) -> ParsedField:
     """`lines` 為這張表所在的範圍（表的位置由上手決定）；讀不出時錯訊寫出原因與那幾行。"""
     if not lines:
         return ParsedField.missing(name, f"找不到{spec.where}")
-    lines = split_at_columns(list(lines))
+    source = list(lines)  # 切開的每一段記著來自哪一行（id），讀完之前原來的行都要留著
+    origin: dict[int, int] = {}
+    pieces = split_at_columns(source, origin=origin)
     try:
-        table = _read(lines, spec)
+        table = _read(pieces, spec, origin)
     except _Unreadable as e:
         return ParsedField.invalid(name, e.lines, e.note)
-    return ParsedField.present(name, table, lines)
+    return ParsedField.present(name, table, pieces)
 
 
 def price_rows(
@@ -196,15 +198,16 @@ def underlyings(table: ParsedField) -> ParsedField:
 # ---------------------------------------------------------------- 讀法
 
 
-def _read(lines: list[Line], spec: TableSpec) -> PriceTable:
+def _read(lines: list[Line], spec: TableSpec, origin: dict[int, int]) -> PriceTable:
     first = _first_anchor(lines, spec)
-    header, body = _split(lines, first, spec)
+    header, body = _split(lines, first, spec, origin)
     cells = _cells(header)
     cols, pcts, heads = _columns(cells, header, spec)
     anchors = _anchors(lines, body, cols, spec)
     if _page_key(min(_keyword_lines(cells, spec), key=_page_key)) < (anchors[0].page - 1, 0):
         raise _Unreadable(header, f"{spec.where}跨頁時讀不到該頁的列")
-    others = [c for c in cells if all(c is not col.cell for col in cols.values())]
+    used = {id(x) for col in cols.values() for x in col.cell}
+    others = [c for c in cells if not any(id(x) in used for x in c)]  # 表頭的其他欄（名稱、交易所…）
     rows_lines = _rows(body, anchors, cols, others, spec)
     order = sorted(cols, key=lambda k: cols[k].x0)
     rows = [_row(k, lns, anchors[k - 1], others, cols, order, spec) for k, lns in enumerate(rows_lines, start=1)]
@@ -278,7 +281,7 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
     return [ln for ln in codes if _overlap(ln, left) > 0]
 
 
-def _split(lines: list[Line], first: Line, spec: TableSpec) -> tuple[list[Line], list[Line]]:
+def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, int]) -> tuple[list[Line], list[Line]]:
     """第 1 列錨點的上緣以上是表頭，以下是列。表頭從有關鍵字的那幾格的上緣起，更上面的文字（範圍裡表前的說明、
     上一頁頁底的註腳）不算；第 1 列那一頁的表頭已經有全部必要的關鍵字時，不往上一頁找。格內垂直置中、比列錨點高的
     行（沒有表頭關鍵字、從表頭最後一行之下才開始、緊接著下面的列）仍屬於列。"""
@@ -288,7 +291,7 @@ def _split(lines: list[Line], first: Line, spec: TableSpec) -> tuple[list[Line],
     same_page = [ln for ln in above if ln.page == first.page]
     if same_page and _complete_header(_cells(same_page), spec):
         above = same_page
-    above = _from_first_row(above)
+    above = _from_first_row(above, origin)
     cells = _cells(above)
     keyed = [c for c in cells if _has_keyword(c, spec)]
     if not keyed:
@@ -360,7 +363,7 @@ def _text(cell: Sequence[Line]) -> str:
     return "".join(squash(ln.text) for ln in cell)
 
 
-def _from_first_row(lines: list[Line]) -> list[Line]:
+def _from_first_row(lines: list[Line], origin: dict[int, int]) -> list[Line]:
     """表頭從第一個「至少兩格並排」的列開始（上下重疊的行算同一列）；更上面單獨成行的文字（表前的說明、上一頁的
     註腳）不算表頭。"""
     ordered = sorted(lines, key=_page_key)
@@ -371,11 +374,11 @@ def _from_first_row(lines: list[Line]) -> list[Line]:
             row.append(ln)
         else:
             rows.append([ln])
-    first = next((r for r in rows if len(r) >= 2), None)
+    first = next((r for r in rows if len({origin.get(id(x), id(x)) for x in r}) >= 2), None)  # 同一行切開的幾段只算一格
     if first is None:
         return lines
     top = min((x.page, x.y0) for x in first)
-    return [ln for ln in lines if (ln.page, ln.y1) > top]
+    return [ln for ln in lines if (ln.page, _yc(ln)) >= top]
 
 
 def _complete_header(cells: list[list[Line]], spec: TableSpec) -> bool:
@@ -390,8 +393,17 @@ def _words(spec: TableSpec) -> list[str]:
 
 
 def _has_keyword(cell: list[Line], spec: TableSpec) -> bool:
+    """表頭的格：有關鍵字，或是表頭百分比（和欄名分開的那一格）。"""
     text = _text(cell)
-    return any(w in text for w in _words(spec))
+    return any(w in text for w in _words(spec)) or _pct_only(cell, spec)
+
+
+def _pct_only(cell: list[Line], spec: TableSpec) -> bool:
+    """只有表頭百分比、沒有價格欄關鍵字的格（例：欄名一行、「(期初價格的X%)」隔一段距離在下一行）。"""
+    text = _text(cell)
+    return (
+        spec.pct is not None and re.search(spec.pct, text) is not None and not any(c.word in text for c in spec.columns)
+    )
 
 
 def _keyword_lines(cells: list[list[Line]], spec: TableSpec) -> list[Line]:
@@ -411,12 +423,20 @@ def _columns(
         out[col.key] = _one(hit, col.word, header, spec)
         if spec.pct is not None:
             m = re.search(spec.pct, _text(out[col.key]))
+            below = [c for c in cells if _pct_only(c, spec) and _below(c, out[col.key])]
+            if m is None and len(below) == 1:  # 百分比和欄名分開：歸到正上方的欄名
+                out[col.key] = sorted(out[col.key] + below[0], key=_reading)
+                m = re.search(spec.pct, _text(out[col.key]))
             if m is None:
                 raise _Unreadable(out[col.key], f"{spec.where}表頭「{col.word}」讀不到「{spec.pct_label}」")
             pcts[col.key] = Decimal(m[1])
     words = [c.word for c in spec.columns]
     out["initial"] = _one(
-        [c for c in cells if spec.initial in _text(c) and not any(w in _text(c) for w in words)],
+        [
+            c
+            for c in cells
+            if spec.initial in _text(c) and not any(w in _text(c) for w in words) and not _pct_only(c, spec)
+        ],
         spec.initial,
         header,
         spec,
@@ -425,6 +445,12 @@ def _columns(
         out["code"] = _one([c for c in cells if spec.code in _text(c)], spec.code, header, spec)
     cols = {k: _Col(min(x.x0 for x in c), max(x.x1 for x in c), c) for k, c in out.items()}
     return cols, pcts, {k: _text(c) for k, c in out.items()}
+
+
+def _below(cell: list[Line], head: list[Line]) -> bool:
+    """`cell` 在 `head` 下面、x 範圍重疊（同一欄）。"""
+    x0, x1 = min(x.x0 for x in head), max(x.x1 for x in head)
+    return _span_overlap(cell[0], x0, x1) > 0 and _page_key(cell[0]) > max(_page_key(x) for x in head)
 
 
 def _one(hit: list[list[Line]], word: str, header: list[Line], spec: TableSpec) -> list[Line]:
@@ -593,7 +619,7 @@ def _values(cell: list[Line]) -> list[tuple[Decimal, str | None]]:
     return [(dec(m[1]), m[2]) for m in SUFFIXED.finditer(text)]
 
 
-def split_at_columns(lines: list[Line], tol: float = ALIGN) -> list[Line]:
+def split_at_columns(lines: list[Line], tol: float = ALIGN, origin: dict[int, int] | None = None) -> list[Line]:
     """一行橫跨好幾欄（PDF 把相鄰幾格擷取成同一行）時切回各欄。欄的左緣取這些行中至少兩行共有的 x0；空白之後的字
     也可以對齊只有一行的 x0（例：欄內只有一行表頭續行）。行內某個字的左緣落在欄的左緣上、且和前一個字之間有空白或
     間隙時從那裡切開；字和前一個字相接（數字中間）或是價格後面的幣別字時不切。沒有字座標（`Line.aligned_char_spans`）
@@ -628,5 +654,8 @@ def split_at_columns(lines: list[Line], tol: float = ALIGN) -> list[Line]:
             keep = [i for i in range(a, b) if not ln.text[i].isspace()]
             if keep:
                 i, j = keep[0], keep[-1] + 1
-                out.append(replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=ln.text[i:j], char_spans=spans[i:j]))
+                piece = replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=ln.text[i:j], char_spans=spans[i:j])
+                out.append(piece)
+                if origin is not None:
+                    origin[id(piece)] = id(ln)
     return out

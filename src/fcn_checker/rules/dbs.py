@@ -211,11 +211,11 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     if (problem := check.blocked) is not None:
         return [problem]
     issues = []
-    if scen.value["pcts"] != table.value["pcts"]:
+    if scen.value.pcts != table.value.pcts:
         issues.append("情境價格表表頭 % 和表1 不同")
-    if scen.value["tickers"] != table.value["tickers"]:
+    if scen.value.tickers != table.value.tickers:
         issues.append("情境價格表的彭博代碼和表1 不同")
-    rows, own = scen.value["rows"], table.value["rows"]
+    rows, own = scen.value.prices, table.value.prices
     if len(rows) == len(own):
         for n, (a, b) in enumerate(zip(rows, own, strict=True), start=1):
             diff = [c for c in b if a.get(c) != b[c]]
