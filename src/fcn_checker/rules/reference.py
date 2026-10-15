@@ -17,7 +17,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from ..orders.reference import UNDERLYING_SLOTS
-from ..schema import CheckResult, Evidence, FieldStatus, Item, OrderValue, ParsedField
+from ..schema import CheckResult, DocKind, Evidence, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..standard_fields import AutocallSchedule, Occurrence
 from .kit import (
@@ -32,6 +32,7 @@ from .kit import (
     order_review,
     order_value,
     price_item,
+    read_standard,
     standard_field,
     to_date,
     to_decimal,
@@ -404,19 +405,37 @@ def ki_pct(ctx: Context) -> CheckResult:
 
 
 def is_vwap(ctx: Context) -> bool:
-    """參考條件表的期初定價是 VWAP（空白或不在允許值內都不算，價格欄照常比對）。"""
+    """期初定價是 VWAP：看參考條件表；表上空白時看說明書寫明的期初定價（Citi 標的表表頭，Issue #246）。
+
+    不在允許值內、空白且說明書沒寫或讀不到時都不算，價格欄照常比對。投資人須知看同商品說明書。
+    """
     ov = ctx.order.get("initial_pricing")
-    return ov is not None and ctx.fmt.initial_pricing_values.get(ov.value) == VWAP
+    if ov is None:
+        return False
+    if ov.value is not None:
+        return ctx.fmt.initial_pricing_values.get(ov.value) == VWAP
+    pf = _stated_pricing(ctx)
+    return pf is not None and pf.ok and pf.value == VWAP
+
+
+def _stated_pricing(ctx: Context) -> ParsedField | None:
+    """說明書寫明的期初定價（標準欄位 `initial_pricing`）；投資人須知取同商品說明書，沒有時為 None。"""
+    ts = ctx.term_sheet if ctx.document == DocKind.IIS else ctx.ts
+    return None if ts is None else read_standard(ts, "initial_pricing")
 
 
 def initial_pricing(ctx: Context) -> CheckResult:
     """期初定價：表上須是允許值（開盤價／收盤價／VWAP）；說明書寫明期初定價時（Citi 標的表表頭）另須相同。
 
     範本沒有期初定價（`absent`）時只檢查允許值；寫明的範本讀不到或寫法未知時轉人工覆核。
+    表上空白不報錯（Issue #246）：說明書沒寫時價格照常比對；說明書寫明時依說明書（VWAP 改以說明書覆寫）。
     """
     rid, key, name = "field.initial_pricing", "initial_pricing", "期初定價"
     pf = standard_field(ctx, key)
     doc = None if pf.status == FieldStatus.NOT_APPLICABLE else pf
+    ov = ctx.order.get(key)
+    if ov is not None and ov.value is None:
+        return _blank_pricing(ctx, rid, key, name, ov, doc)
     mapped, ov, problem = _mapped(ctx, rid, key, doc, ctx.fmt.initial_pricing_values, name, name)
     if problem:
         return problem
@@ -429,6 +448,21 @@ def initial_pricing(ctx: Context) -> CheckResult:
             ov.value, labels.get(doc.value, doc.value), ok=mapped == doc.value, message=_pricing_message(mapped)
         )
     return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=_pricing_message(mapped))
+
+
+def _blank_pricing(ctx: Context, rid: str, key: str, name: str, ov: OrderValue, doc: ParsedField | None) -> CheckResult:
+    """表上期初定價空白：說明書沒寫（`absent`）時通過、價格照常比對；寫明時依說明書，讀不到或寫法未知轉人工覆核。"""
+    check = _column(ctx, rid, key, name, ov)
+    if doc is None:
+        return check.result(S.PASS, message=f"表上未填期初定價，{_pricing_message('')}")
+    check = check.needs(doc)
+    if (blocked := check.blocked) is not None:
+        return blocked
+    labels = {v: k for k, v in ctx.fmt.initial_pricing_values.items()}
+    shown = labels.get(doc.value, doc.value)
+    return check.result(
+        S.PASS, actual=shown, message=f"表上未填期初定價，依{ctx.document}（{shown}）；{_pricing_message(doc.value)}"
+    )
 
 
 def _pricing_message(mapped: str) -> str:
