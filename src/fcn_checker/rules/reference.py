@@ -257,19 +257,29 @@ def _sheet_tickers(ctx: Context) -> list[Any]:
 def sheet_slots(ctx: Context, rows: int) -> list[int]:
     """說明書第 i 檔（順序同標準欄位 `underlyings`，共 `rows` 檔）對到表上第幾檔 UL_n（從 1 起）。
 
-    標的不看順序的上手（參考條件表格式 `underlyings.any_order_issuers`，Citi、JPM）且表上與文件是同一組代號
-    （數量相同、不重複）時依代號配對，保留表上原本的欄位位置；其他情況（含讀不到代號）一律依順序。
+    標的不看順序的上手（參考條件表格式 `underlyings.any_order_issuers`，Citi、JPM、GS）依代號配對，保留表上原本的
+    欄位位置：先比完整代碼，剩下的再比代號（不含交易所碼，例 `ABC UN` ↔ `ABC UQ`；Issue #265），兩邊都唯一才配。
+    代碼不符照樣由 `field.underlyings` 報錯，這裡只決定價格和表上哪一檔比。數量不同、有重複、有一檔配不起來或
+    讀不到代號時一律依順序。
     """
     identity = list(range(1, rows + 1))
     uls = standard_field(ctx, "underlyings")
     if ctx.issuer not in ctx.fmt.underlyings_any_order or not uls.ok or len(uls.value) != rows:
         return identity
-    sheet = _sheet_tickers(ctx)
-    filled = [t for t in sheet if t is not None]
-    positions = {t: n for n, t in enumerate(sheet, start=1) if t is not None}
-    if sorted(map(str, filled)) != sorted(uls.value) or len(positions) != len(filled):
+    sheet = {n: str(t) for n, t in enumerate(_sheet_tickers(ctx), start=1) if t is not None}
+    docs = list(uls.value)
+    if len(sheet) != rows or len(set(sheet.values())) != rows or len(set(docs)) != rows:
         return identity
-    return [positions[t] for t in uls.value]
+    slots: dict[int, int] = {}
+    for key in (lambda t: t, lambda t: t.split()[0]):
+        free = {n: key(t) for n, t in sheet.items() if n not in slots.values()}
+        for i, t in enumerate(docs):
+            if i in slots:
+                continue
+            hits = [n for n, k in free.items() if k == key(t)]
+            if len(hits) == 1 and sum(key(d) == key(t) for j, d in enumerate(docs) if j not in slots) == 1:
+                slots[i] = hits[0]
+    return [slots[i] for i in range(rows)] if len(slots) == rows else identity
 
 
 def underlyings(ctx: Context) -> CheckResult:
