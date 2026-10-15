@@ -428,10 +428,6 @@ EUR = 10000
 GBP = 10000
 ZAR = 100000
 
-[dates]
-# 中文產品說明書刊印日期：交易日當天或之後 N 個日曆日內
-print_date_max_days_after_trade = 1
-
 [iis]
 # 投資人須知（檔名結尾 _IIS，docs/rules/iis-check-rules.md）：必須剛好 N 頁。
 # 使用者 2026-10-08 確認：比外規「不超過 5 頁」嚴格，5 頁也判不一致。

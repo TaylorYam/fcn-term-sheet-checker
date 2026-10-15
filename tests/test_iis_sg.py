@@ -256,7 +256,7 @@ def test_page_count(tmp_path, spec, rule, message):
             ("cover", "商品種類：股權連結結構型債券", "商品種類：股權連結結構型商品"),
             ("standard.product_type", "product_type"),
         ),
-        (("cover", "刊印日期：2030年1月7日", "刊印日期：2030年1月9日"), ("doc.print_date", "print_date_iis")),
+        (("cover", "刊印日期：2030年1月7日", "刊印日期：2030年1月14日"), ("doc.print_date", "print_date_iis")),
         (
             ("warn", "為於中華民國境內受託買賣", "為於中華民國境內受託投資"),
             ("standard.forbidden_wording", "forbidden_wording"),
