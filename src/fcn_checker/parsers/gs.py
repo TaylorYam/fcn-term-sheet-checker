@@ -431,7 +431,7 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
 
     表頭與各格依座標分欄（`common.by_column`）後接起來：一格可能拆成多行（`12,345.000` / `0`、`13.6800美` / `元`），
     相鄰幾格也可能擷取成同一行，先依字座標切回各欄（`common.split_at_columns`，Issue #264）。表頭與列都可能跨頁；
-    沒有列號的那一頁接在上一頁最後一列。價格取彭博代碼之後的 4 位小數數字（投資人須知後面接幣別字）。
+    最後一列之後的下一頁沒有列號時，那一頁接在最後一列（其他沒有列號的頁仍讀不到）。價格取彭博代碼之後的 4 位小數數字（投資人須知後面接幣別字）。
     值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines", "header_lines", "indexed"}。
     """
     if not lines:
@@ -460,13 +460,12 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
     rows_lines: list[list[Line]] = [[] for _ in marks]
     for ln in lines[marks[0] :]:
         same = [k for k, a in enumerate(anchors) if a.page == ln.page]
-        before = [k for k, a in enumerate(anchors) if a.page < ln.page]
-        if not same and not before:
-            return ParsedField.invalid(name, [ln], "價格表跨頁時讀不到該頁的列號")
         if same:
             k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
-        else:  # 這一頁沒有列號：上一頁最後一列溢過來的部分
-            k = before[-1]
+        elif ln.page == anchors[-1].page + 1:  # 最後一列之後的下一頁沒有列號：最後一列溢過來的部分
+            k = len(anchors) - 1
+        else:
+            return ParsedField.invalid(name, [ln], "價格表跨頁時讀不到該頁的列號")
         rows_lines[k].append(ln)
     tickers, names, rows = [], [], []
     for k, lns in enumerate(rows_lines, start=1):

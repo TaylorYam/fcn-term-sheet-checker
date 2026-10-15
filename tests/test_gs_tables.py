@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import fitz
+
+from fcn_checker.extraction import extract_lines
 from fcn_checker.parsers import gs
 from fcn_checker.parsers.common import split_at_columns
 from fcn_checker.schema import Line
@@ -170,6 +173,42 @@ def test_last_row_overflowing_onto_the_next_page_belongs_to_that_row():
     assert v["tickers"] == ["ZAAA UW", "ZBBB UW"]
     assert v["rows"][1]["strike"] == Decimal("130.5850")
     assert any(ln.page == 2 and ln.text == "Equity" for ln in v["row_lines"][1])
+
+
+def test_overflow_is_only_accepted_on_the_page_right_after_the_last_row():
+    """沒有列號的頁只有緊接最後一列的下一頁算溢出；隔一頁以上仍判讀不到（轉人工覆核），不把無關文字接進最後一檔。"""
+    init, k, ko = 351.3, 410.1, 481.8
+    head = [
+        cell(1, 100.0, (init, "初始參考價格(i)")),
+        cell(1, 100.0, (k, "執行價格(i)(初始參考價格(i)之80.00%)")),
+        cell(1, 100.0, (ko, "提前出場價格(i)(初始參考價格(i)之100.00%)")),
+    ]
+    body = [
+        cell(1, 120.0, (N, "1")),
+        cell(1, 120.0, (CODE, "ZAAA UW Equity")),
+        cell(1, 120.0, (init, "100.0000")),
+        cell(1, 120.0, (k, "80.0000")),
+        cell(1, 120.0, (ko, "100.0000")),
+    ]
+    assert gs.price_table("t", [*head, *body, cell(2, 10.0, (CODE, "附註"))]).ok
+    far = gs.price_table("t", [*head, *body, cell(3, 10.0, (CODE, "附註"))])
+    assert not far.ok and "跨頁" in far.note
+
+
+def test_extracted_lines_carry_one_span_per_character(tmp_path):
+    """擷取時每行帶每個字的 x 範圍，個數與文字相同；同一列兩格擠成一行時可依另一行的左緣切開。"""
+    path = tmp_path / "t.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((100, 100), "ALPHA", fontsize=10)
+    page.insert_text((140, 100), "BETA", fontsize=10)
+    page.insert_text((140, 120), "GAMMA", fontsize=10)
+    page.insert_text((140, 140), "DELTA", fontsize=10)
+    doc.save(path)
+    lines = extract_lines(fitz.open(path))
+    assert "ALPHA BETA" in [ln.text for ln in lines]  # 兩段擠成同一行
+    assert all(len(ln.aligned_char_spans) == len(ln.text) for ln in lines)
+    assert {ln.text for ln in split_at_columns(lines)} >= {"ALPHA", "BETA", "GAMMA", "DELTA"}
 
 
 def test_lines_without_character_boxes_are_left_alone():
