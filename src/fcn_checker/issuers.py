@@ -13,7 +13,20 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, citi_iis, gs_iis, hsbc_iis, jpm_iis, ms_iis, natixis_iis, nomura_iis, sg_iis
+from .parsers import (
+    barc_iis,
+    bbva_iis,
+    bnp_iis,
+    citi_iis,
+    gs_iis,
+    hsbc_iis,
+    jpm_iis,
+    ms_iis,
+    natixis_iis,
+    nomura_iis,
+    sg_iis,
+)
+from .parsers import bbva as bbva_parser
 from .parsers import bnp as bnp_parser
 from .parsers import citi as citi_parser
 from .parsers import gs as gs_parser
@@ -24,6 +37,8 @@ from .parsers import natixis as natixis_parser
 from .parsers import nomura as nomura_parser
 from .parsers import sg as sg_parser
 from .rules import barc as barc_rules
+from .rules import bbva as bbva_rules
+from .rules import bbva_iis as bbva_iis_rules
 from .rules import bnp as bnp_rules
 from .rules import citi as citi_rules
 from .rules import citi_iis as citi_iis_rules
@@ -294,7 +309,28 @@ NATIXIS = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS)
+BBVA = Issuer(
+    code=bbva_rules.ISSUER,
+    template_id=bbva_parser.TEMPLATE_ID,
+    label="BBVA 中文產品說明書",
+    parser_version=bbva_parser.PARSER_VERSION,
+    not_covered=tuple(bbva_rules.NOT_COVERED),
+    detect=bbva_parser.detect,
+    read=bbva_parser.read,
+    rules=bbva_rules.run_all,
+    reference_fields=bbva_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=bbva_iis.TEMPLATE_ID,
+        label="BBVA 中文投資人須知",
+        parser_version=bbva_iis.PARSER_VERSION,
+        detect=bbva_iis.detect,
+        read=bbva_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=bbva_iis_rules.run_all,
+    ),
+)
+
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA, GS, NATIXIS, BBVA)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

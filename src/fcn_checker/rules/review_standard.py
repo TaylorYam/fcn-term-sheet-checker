@@ -269,12 +269,15 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
     """
     rid, issuer, std = "standard.issuer_name", ctx.issuer, ctx.issuer_std
     expected = std.issuer_name
-    fields = [  # 標準欄位、說明的開頭、項目名稱、是否只比中文
-        ("issuer_name_cover", "封面「發行機構」", "封面發行機構名稱", False),
-        ("issuer_name_ch2", "第二章「發行機構」事業名稱", "第二章發行機構名稱", False),
+    fields = [  # 標準欄位、說明的開頭、項目名稱、是否只比中文；範本沒有的出處（不適用，例：BBVA 沒有封面發行機構欄）不核對
+        (name, what, zh, zh_only)
+        for name, what, zh, zh_only in (
+            ("issuer_name_cover", "封面「發行機構」", "封面發行機構名稱", False),
+            ("issuer_name_ch2", "第二章「發行機構」事業名稱", "第二章發行機構名稱", False),
+            ("issuer_name_ch1", "第一章發行機構中文名稱", "第一章發行機構名稱", True),
+        )
+        if standard_field(ctx, name).status != FieldStatus.NOT_APPLICABLE
     ]
-    if standard_field(ctx, "issuer_name_ch1").status != FieldStatus.NOT_APPLICABLE:
-        fields.append(("issuer_name_ch1", "第一章發行機構中文名稱", "第一章發行機構名稱", True))
     if expected is None:
         return [
             Check(rid, name, Item.standard(zh), ctx.document)

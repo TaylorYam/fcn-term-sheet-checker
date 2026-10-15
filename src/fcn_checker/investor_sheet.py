@@ -49,6 +49,9 @@ IIS_FIELDS: dict[str, str] = {
     "redemption_later_text": "str：後續受理贖回日期的文字（Nomura；= 說明書第四章 1.(4)）",
     "distributor_code": "str：「受託機構商品代號為」的值（Natixis 舊版有標籤但空白；沒有標籤的範本交 absent）",
     "ko_definition": "str：KO 價格定義原文（Natixis「自動提前到期贖回價格為…期初進場價格之Y%」；沒寫 % 判不一致）",
+    "no_ki_barrier_pct": "Decimal：無 KI 時到期條件「最差表現值大於或等於y%：100%」的 y（BBVA；= 說明書轉換比例）",
+    "ko_at_maturity_pct": "Decimal：記憶式到期條件「最佳表現值大於或等於x%（出場值）」的 x（BBVA；= 說明書 KO %）",
+    "day_count": "str：計息天數慣例（BBVA KO 每期型，例：1/1；= 說明書第 13 項）",
 }
 
 
