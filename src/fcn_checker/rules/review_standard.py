@@ -1,6 +1,6 @@
 """審查標準規則：各上手共用，依上手代號取得已解析的審查標準（docs/rules/review-standard.md）。
 
-只用說明書標準欄位、全文索引與審查標準，不碰參考條件表。對外只有兩個進入點：說明書的 `review_standard_rules`，
+只用說明書標準欄位、全文索引與審查標準；參考條件表只有禁用語特例要看的交易日，由呼叫端傳入。對外只有兩個進入點：說明書的 `review_standard_rules`，
 與投資人須知的 `iis_review_standard_rules`（只核對範本有的項目，ADR 0007）。
 項目：standard.* 的預期值出自審查標準；面額、受理申購日、刊印日期（doc.*）的錯訊沿用「預期」。
 """
@@ -185,7 +185,9 @@ def _risk_level(ctx: Context) -> CheckResult:
     )
 
 
-def _forbidden_wording(ctx: Context) -> CheckResult:
+def _forbidden_wording(ctx: Context, trade: ParsedField) -> CheckResult:
+    """片語以外出現禁用語即不一致；`trade`（參考條件表交易日）在審查標準 `wording.exempt_until`（含）以前時
+    特例通過並註明（已通知上手改版，Issue #247）。讀不到交易日時照原規則判。"""
     check = Check("standard.forbidden_wording", "forbidden_wording", Item.standard("禁用語「受託投資」"), ctx.document)
     ti = ctx.ts.full_text
     text = ti.text
@@ -194,12 +196,23 @@ def _forbidden_wording(ctx: Context) -> CheckResult:
         text = text.replace(p, "□" * len(p))  # 遮蔽允許片語，保留字元位置
     hits = [m for w in ctx.std.forbidden for m in re.finditer(re.escape(squash(w)), text)]
     evidence = [Evidence.of(ti.lines_for(m.start(), m.end())[0]) for m in hits]
+    found = f"允許片語以外出現「{'、'.join(ctx.std.forbidden)}」{len(hits)} 處"
+    until = ctx.std.forbidden_exempt_until
+    if hits and until is not None and trade.ok and trade.value <= until:
+        return check.compare(
+            0,
+            len(hits),
+            ok=True,
+            message=f"{found}；交易日 {trade.value} 在 {until}（含）以前，已通知上手改版，特例通過",
+            tolerance=f"交易日（參考條件表）在 {until}（含）以前的文件特例通過",
+            evidence=evidence,
+        )
     return check.compare(
         0,
         len(hits),
         evidence=evidence,
         reason="forbidden_wording",
-        fail_message=f"允許片語以外出現「{'、'.join(ctx.std.forbidden)}」{len(hits)} 處（SOP：須改為「受託買賣」）",
+        fail_message=f"{found}（SOP：須改為「受託買賣」）",
     )
 
 
@@ -653,7 +666,7 @@ def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[Check
     std, provides = ctx.issuer_std, ctx.provides
     issuer_name = std.issuer_name
     issuer_name_zh = re.split(r"[（(]", issuer_name, maxsplit=1)[0] if issuer_name is not None else None
-    out = [_risk_level(ctx), _iis_warning(ctx), _forbidden_wording(ctx)]
+    out = [_risk_level(ctx), _iis_warning(ctx), _forbidden_wording(ctx, trade)]
     if provides("risk_level_summary"):
         out.append(_iis_risk_summary(ctx))
     if provides("print_dates"):
@@ -688,8 +701,9 @@ def iis_review_standard_rules(ctx: Context, *, trade: ParsedField) -> list[Check
 # ---------------------------------------------------------------- 入口
 
 
-def review_standard_rules(ctx: Context) -> list[CheckResult]:
-    """審查標準規則：各上手共用，依上手代號取得已解析的審查標準；只用說明書，不碰參考條件表。"""
+def review_standard_rules(ctx: Context, *, reference_trade: ParsedField) -> list[CheckResult]:
+    """審查標準規則：各上手共用，依上手代號取得已解析的審查標準；只用說明書，唯一例外是禁用語特例看的
+    參考條件表交易日（`reference_trade`，由呼叫端給，同投資人須知）。"""
     return [
         _denomination(ctx),
         *_subscription_dates(ctx),
@@ -698,7 +712,7 @@ def review_standard_rules(ctx: Context) -> list[CheckResult]:
         _chairman(ctx),
         _fixed_warning(ctx),
         _risk_level(ctx),
-        _forbidden_wording(ctx),
+        _forbidden_wording(ctx, reference_trade),
         *_product_name(ctx),
         *_issuer_name(ctx),
         *_distributor_info(ctx),

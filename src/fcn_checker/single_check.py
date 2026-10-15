@@ -77,7 +77,7 @@ def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config
         results.extend(reference.field_rules(ctx))
         results.extend(derivation.prices(ctx))
         results.extend(paired.issuer.rules(_issuer_context(paired, config)))
-        results.extend(review_standard_rules(ctx))
+        results.extend(review_standard_rules(ctx, reference_trade=iis.trade_date(ctx)))
         results.append(reference.first_callable_period(ctx))
         decisions, backfill_results = [], []
         rules = (
