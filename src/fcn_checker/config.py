@@ -120,7 +120,6 @@ class ReviewStandard:
     product_names: dict[str, ProductNameTemplate]  # 上手代號（小寫）→ 名稱樣板
     currency_zh_to_iso: dict[str, str]
     denomination: dict[str, int]
-    print_date_max_days_after_trade: int
     iis_pages: int  # 投資人須知必須剛好的頁數
     iis_fixed_warning_occurrences: dict[str, int]  # 上手代號（小寫）→ 固定警語在投資人須知出現的次數
     fixed_warning_by_issuer: dict[str, str] = field(default_factory=dict)
@@ -460,7 +459,6 @@ def load_review_standard(path: Path) -> ReviewStandard:
             product_names=names,
             currency_zh_to_iso=dict(d["currency"]),
             denomination={k: int(v) for k, v in d["denomination"].items()},
-            print_date_max_days_after_trade=int(d["dates"]["print_date_max_days_after_trade"]),
             iis_pages=int(d["iis"]["pages"]),
             iis_fixed_warning_occurrences={k: int(v) for k, v in d["iis"]["fixed_warning_occurrences"].items()},
             guarantor_names=_place_texts(d.get("guarantor_name", {}), "guarantor_name", GUARANTOR_PLACES),

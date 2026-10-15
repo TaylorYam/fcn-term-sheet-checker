@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import re
 from collections.abc import Callable
 
@@ -80,41 +79,52 @@ def _denomination(ctx: Context) -> CheckResult:
 
 
 def _subscription_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckResult]:
-    """各受理申購日出處（開始、結束）= 交易日；交易日預設取說明書（投資人須知由呼叫端給參考條件表的交易日）。"""
+    """各受理申購日出處（開始、結束）不晚於交易日（2026-10-15，#254）；交易日預設取說明書（投資人須知由呼叫端給
+    參考條件表的交易日）。"""
     rid, trade = "doc.subscription_start_date", trade or standard_field(ctx, "trade_date")
     items, problem = occurrences_of(ctx, rid, "subscription_dates", Item.expected("受理申購日"))
     if problem:
         return [problem]
-    return [
-        Check(rid, occ.field, Item.expected(occ.name), ctx.document)
-        .needs(occ.value, trade)
-        .compare(trade.value, occ.value.value, message=f"{occ.where}須等於交易日")
-        for occ in items
-    ]
+    out = []
+    for occ in items:
+        check = Check(rid, occ.field, Item.expected(occ.name), ctx.document).needs(occ.value, trade)
+        if (problem := check.blocked) is not None:
+            out.append(problem)
+            continue
+        out.append(
+            check.compare(
+                f"{trade.value} 當天或之前",
+                occ.value.value,
+                ok=occ.value.value <= trade.value,
+                tolerance="不晚於交易日",
+                fail_message=f"{occ.where}不可晚於交易日",
+            )
+        )
+    return out
 
 
 def _print_dates(ctx: Context, trade: ParsedField | None = None) -> list[CheckResult]:
-    """各刊印日期出處在交易日當天至交易日後允許天數內（審查標準）；交易日預設取說明書。"""
+    """各刊印日期出處在交易日（含）至發行日（不含）之間（2026-10-15，#254）。交易日預設取說明書（投資人須知由呼叫端給
+    參考條件表的交易日）；發行日取同一份文件的發行日。"""
     rid, trade = "doc.print_date", trade or standard_field(ctx, "trade_date")
     items, problem = occurrences_of(ctx, rid, "print_dates", Item.expected("刊印日期"))
     if problem:
         return [problem]
-    limit = ctx.std.print_date_max_days_after_trade
+    issue = standard_field(ctx, "issue_date")
     out = []
     for occ in items:
         pf = occ.value
-        check = Check(rid, occ.field, Item.expected(occ.name), ctx.document).needs(pf, trade)
+        check = Check(rid, occ.field, Item.expected(occ.name), ctx.document).needs(pf, trade, issue)
         if (problem := check.blocked) is not None:
             out.append(problem)
             continue
-        gap = (pf.value - trade.value).days
         out.append(
             check.compare(
-                f"{trade.value} ～ {trade.value + dt.timedelta(days=limit)}",
+                f"{trade.value}（含）～ {issue.value}（不含）",
                 pf.value,
-                ok=0 <= gap <= limit,
-                tolerance=f"交易日當天至交易日後 {limit} 天",
-                message=f"刊印日期為交易日 {gap:+d} 天",
+                ok=trade.value <= pf.value < issue.value,
+                tolerance="交易日（含）至發行日（不含）之間",
+                fail_message="刊印日期須在交易日（含）至發行日（不含）之間",
             )
         )
     return out

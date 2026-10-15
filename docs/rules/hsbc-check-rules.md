@@ -74,7 +74,7 @@
 | 情境分析 | §18 重印價格表 = §12(1)（代號與各價格逐格相等）；§18 月配息率 = 年利率 ÷ 12。算式只認數字，金額前的幣別字任一已知寫法都讀得到（寫錯幣別由 `field.currency` 逐處報不一致，不是讀不到算式；Issue #170） |
 | 面額 | §7 最低交易金額、第四章 §5 最低申購金額與最低加購金額 = 參考條件表「單位面額」（共用 `field.min_amounts`） |
 | 金額旁的幣別（2026-10-10，Issue #170） | §6 面額、§7 最低交易金額、第四章最低申購／加購金額各一筆，§18 情境假設一筆、每個情境一筆（列出該情境裡幣別不符的金額）：金額前的幣別字 = 參考條件表承作幣別（共用 `field.currency`）。商品幣別不必等於標的幣別：執行價、觸及不保本價格跟著標的走，和含「股」的實物交割算式一樣不列入（2026-10-10 使用者確認）。情境假設的匯率（`期末匯率為1 日圓 =美元 0.006`）不列入；實物交割算式說明在上一行、數字在下一行（`…期末股價×零股數/期末匯率` ／ `=美元 83.30 × 0.0166 / 0.006`）也不列入，但以承作幣別支付的結果（`=日圓 230.45` 剩餘金額、到期贖回價值）仍列入，贖回價值算式裡的 `+日圓 230.45` 不列入（剩餘金額由它自己那一行的結果核對）；`觸`／`及不保本價格` 被換行拆開同樣認得（Issue #179） |
-| 申購日期 | 第四章 §1 商品開始受理申購日、申購結束受理日 = 交易日（共用 `doc.subscription_start_date`） |
+| 申購日期 | 第四章 §1 商品開始受理申購日、申購結束受理日 ≤ 交易日（共用 `doc.subscription_start_date`）（2026-10-15 起不晚於交易日即可，#254） |
 
 ### 3.6 文件資訊與用語
 
@@ -190,7 +190,7 @@
 | `derive.prices` | 價格 = 期初股價 × 百分比（half-up 4 位）；價格表列數須等於標的數、有無下限價欄須與 KI 型態一致，否則轉人工覆核（各上手共用 `rules/derivation.py`，BARC 語意，Issue #94；兩項表格檢查為此新增，項目名稱為「UL_n 執行價／KO價／下限價」；HSBC 的標的清單取自價格表各列，列數檢查在現行範本上不會觸發，保留給讀出不一致時） |
 | `doc.price_header_pct` | 表頭百分比 = 定義句（HSBC 說明書內部；價格表讀不到時與情境表一起轉人工覆核） |
 | `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
-| `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 = 交易日、兩個刊印日期在允許天數內（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
+| `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 ≤ 交易日、兩個刊印日期在交易日（含）至發行日（不含）之間（#254）（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
 | `doc.currency_consistency`、`doc.name_consistency` | 文件重複欄位 |
 | `field.currency`（其他出處） | 面額與最低金額、情境假設與各情境金額前的幣別字 = 參考條件表承作幣別（共用，Issue #170；欄位 `denomination_currency`、`minimum_trade_currency`、`minimum_subscription_currency`、`minimum_additional_currency`、`scenario_assumption_currency`、`scenario_n_currency`） |
 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_parameters` | 情境每處參數與正式條款一致 |

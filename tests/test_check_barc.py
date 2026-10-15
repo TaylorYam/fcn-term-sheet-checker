@@ -296,21 +296,29 @@ def test_english_name_format(tmp_path):
     assert problems(report) == {("standard.product_name", MISMATCH)}
 
 
-def test_print_date_two_days_after_trade(tmp_path):
-    report = check(tmp_path, edits=[Edit(zh_date(Spec().print_date), zh_date(dt.date(2030, 1, 9)), "ts.cover")])
+@pytest.mark.parametrize("printed", [dt.date(2030, 1, 6), dt.date(2030, 1, 14)], ids=["交易日前一天", "發行日當天"])
+def test_print_date_outside_trade_to_issue_date(tmp_path, printed):
+    """刊印日期須在交易日（含）至發行日（不含）之間（#254；合成交易日 2030-01-07、發行日 2030-01-14）。"""
+    report = check(tmp_path, edits=[Edit(zh_date(Spec().print_date), zh_date(printed), "ts.cover")])
     assert problems(report) == {("doc.print_date", MISMATCH)}
 
 
-@pytest.mark.parametrize("offset", [0, 1])
-def test_print_date_same_or_next_day(tmp_path, offset):
+@pytest.mark.parametrize("offset", [0, 1, 6])
+def test_print_date_from_trade_date_up_to_the_day_before_issue(tmp_path, offset):
     printed = dt.date(2030, 1, 7) + dt.timedelta(days=offset)
     report = check(tmp_path, edits=[Edit(zh_date(Spec().print_date), zh_date(printed), "ts.cover")])
     assert results(report, "doc.print_date")[0].status == PASS
 
 
-def test_subscription_start_must_equal_trade_date(tmp_path):
+def test_subscription_start_after_trade_date_is_a_mismatch(tmp_path):
     report = check(tmp_path, edits=[Edit("申購日期：2030 年1 月7 日", "申購日期：2030 年1 月8 日", "ts.ch四")])
     assert problems(report) == {("doc.subscription_start_date", MISMATCH)}
+
+
+def test_subscription_start_before_trade_date_passes(tmp_path):
+    """受理申購日不晚於交易日即可（#254；HSBC 有受理申購從交易日前幾天開始的說明書）。"""
+    report = check(tmp_path, edits=[Edit("申購日期：2030 年1 月7 日", "申購日期：2030 年1 月3 日", "ts.ch四")])
+    assert results(report, "doc.subscription_start_date")[0].status == PASS
 
 
 # ---------------------------------------------------------------- 執行錯誤
