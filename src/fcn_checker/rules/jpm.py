@@ -188,16 +188,26 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
     f = ctx.ts.f
     table, scen = f("underlying_table"), f("scenario_table")
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 15 項假設價格表", table, scen)
-    if table.ok and scen.ok:
-        issues = []
-        if scen.value["columns"] != table.value["columns"]:
-            issues.append("欄位與標的表不同")
-        if len(scen.value["rows"]) != len(table.value["rows"]):
-            issues.append(f"有 {len(scen.value['rows'])} 列，標的表有 {len(table.value['rows'])} 檔")
-        for i, (a, b) in enumerate(zip(scen.value["rows"], table.value["rows"], strict=False), start=1):
-            diff = [c for c in b if a.get(c) != b[c]]
-            if diff:
-                issues.append(f"第 {i} 列 {'、'.join(diff)} 與標的表第 {i} 檔不同")
+    shape = (
+        []
+        if not (table.ok and scen.ok)
+        else [
+            f"假設價格表{what}與標的表不同（{a}／{b}）"
+            for what, a, b in (
+                ("欄位", scen.value["columns"], table.value["columns"]),
+                ("列數", len(scen.value["rows"]), len(table.value["rows"])),
+            )
+            if a != b
+        ]
+    )
+    if shape:  # 欄數或列數不符：表格讀法有疑義，轉人工覆核（核對規則 §3.7）
+        result = check.result(S.REVIEW_REQUIRED, reason="document_inconsistent", message="；".join(shape))
+    elif table.ok and scen.ok:
+        issues = [
+            f"第 {i} 列 {'、'.join(diff)} 與標的表第 {i} 檔不同"
+            for i, (a, b) in enumerate(zip(scen.value["rows"], table.value["rows"], strict=True), start=1)
+            if (diff := [c for c in b if a.get(c) != b[c]])
+        ]
         result = check.compare(
             None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項標的表"
         )
@@ -246,11 +256,11 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
             issues,
         )
     ]
-    if kind == "D-3" and k.ok:  # 觀察期間起始日為 N.A 的期別 = 第 1～k 期（JP2、JP4）
+    if kind == "D-3":  # 觀察期間起始日為 N.A 的期別 = 第 1～k 期（JP2、JP4）；k 讀不到時轉人工覆核
         blank = [r["period"] for r in rows if r["start"] is None]
         issues = (
             []
-            if blank == list(range(1, k.value + 1))
+            if not k.ok or blank == list(range(1, k.value + 1))
             else [f"觀察期間起始日為「N.A」的期別應為第 1～{k.value} 期，實際為 {blank or '無'}"]
         )
         out.append(

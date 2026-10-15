@@ -10,6 +10,7 @@ import pytest
 
 import bnp_synth
 import citi_synth
+import hsbc_synth
 import ms_synth
 import sg_synth
 import synth
@@ -177,6 +178,34 @@ def test_daily_product_without_pro_rata_coupon_requires_review(tmp_path):
     assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
 
 
+def test_redemption_clause_must_agree_with_the_touch_event(tmp_path):
+    """有觸碰價（到期觀察），到期贖回第 (1) 款卻寫成無 KI 的寫法：KI 型態轉人工覆核（範本規格 §4.4）。"""
+    r = check(
+        tmp_path,
+        Spec(ki="AM"),
+        edits=[
+            Edit(
+                "(1) 若觸碰事件未發生：",
+                "(1) 若於最後評價日時最差表現連結標的之股票收盤價大於或等於其執行價：",
+                "ts.art8",
+            )
+        ],
+    )
+    assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
+
+
+def test_pro_rata_coupon_in_an_unknown_formula_requires_review(tmp_path):
+    """D 型自動提前出場配息金額的算式改寫（年利率讀不到）：KO 觀察方式轉人工覆核，不會默默通過。"""
+    r = check(tmp_path, edits=[Edit("x 12.34% x 1/12 x n/N", "x 12.43% x n/N x 1/12", "ts.art8")])
+    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
+
+
+def test_scenario_table_with_a_missing_column_requires_review(tmp_path):
+    r = check(tmp_path, edits=[Edit("自動提前出場價", "", "ts.art15.table")])
+    found = [x for x in rule(r, "doc.scenario_table") if x.field == "scenario_table"]
+    assert found[0].status == S.REVIEW_REQUIRED
+
+
 def test_ki_line_without_a_touch_event_requires_review(tmp_path):
     r = check(tmp_path, Spec(ki="AM"), edits=[Edit("觸碰事件：若計算代理機構判定，", "觸碰條件：", "ts.art8")])
     assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
@@ -240,8 +269,9 @@ def test_risk_level_is_written_without_brackets(tmp_path):
         lambda p: bnp_synth.build_pdf(p, bnp_synth.Spec()),
         lambda p: sg_synth.build_pdf(p, sg_synth.Spec()),
         lambda p: citi_synth.build_pdf(p, citi_synth.Spec()),
+        lambda p: hsbc_synth.build_pdf(p, hsbc_synth.Spec()),
     ],
-    ids=["BARC", "MS", "BNP", "SG", "Citi"],
+    ids=["BARC", "MS", "BNP", "SG", "Citi", "HSBC"],
 )
 def test_other_issuers_are_not_jpm(tmp_path, build):
     pdf = build(tmp_path / "076199990001_TS.pdf")

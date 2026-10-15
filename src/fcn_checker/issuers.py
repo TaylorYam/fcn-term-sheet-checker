@@ -26,6 +26,7 @@ from .rules import citi as citi_rules
 from .rules import citi_iis as citi_iis_rules
 from .rules import hsbc as hsbc_rules
 from .rules import jpm as jpm_rules
+from .rules import jpm_iis as jpm_iis_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
 from .rules import sg as sg_rules
@@ -219,6 +220,7 @@ JPM = Issuer(
         detect=jpm_iis.detect,
         read=jpm_iis.read,
         not_covered=(_IIS_SAMPLES,),
+        rules=jpm_iis_rules.run_all,
     ),
 )
 

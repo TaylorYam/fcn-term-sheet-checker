@@ -22,6 +22,7 @@ TEMPLATE_ID = "jpm-zh-iis"
 PARSER_VERSION = "1"
 TITLE = "中文投資人須知"
 SECTIONS = (
+    "本商品之投資風險警語",
     "一、相關機構",
     "二、境外結構型商品事項",
     "1.商品簡介",
@@ -56,6 +57,7 @@ PROVIDED = frozenset(
         "final_valuation_date",
         "maturity_date",
         "coupon_pa_pct",
+        "coupon_pa_mentions",
         "strike_pct",
         "ko_pct",
         "ko_observation",
@@ -80,7 +82,7 @@ def body(lines: Sequence[Line]) -> list[Line]:
 
 def page_totals(lines: Sequence[Line]) -> ParsedField:
     """每頁頁碼「N/M」的 M（共用讀法只認「第 N 頁，共 M 頁」）。"""
-    hits = [(int(m[2]), ln) for ln in lines if (m := re.fullmatch(r"(\d+)\s*/\s*(\d+)", ln.text.strip()))]
+    hits = [(int(m[2]), ln) for ln in lines if (m := jpm.PAGE_MARK.match(ln.text.strip()))]
     if not hits:
         return ParsedField.missing("page_totals", "找不到頁碼「N/M」")
     return ParsedField.present("page_totals", tuple(m for m, _ in hits), [ln for _, ln in hits])
@@ -132,13 +134,13 @@ def _ko_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
     fields["ki_type"] = jpm.ki_type(sec_ti, sec, where)
     wording = jpm.ko_wording(sec_ti, sec, where)
     tenor = fields["tenor_months"]
-    if wording.ok and wording.value[0] == "P" and tenor.ok and wording.value[2] != tenor.value:
+    if wording.ok and wording.value.observation == "P" and tenor.ok and wording.value.last != tenor.value:
         wording = ParsedField.invalid(
-            "ko_wording", list(wording.evidence), f"自動提前出場評價日的最後一期 t={wording.value[2]} 不等於商品年期"
+            "ko_wording", list(wording.evidence), f"自動提前出場評價日的最後一期 t={wording.value.last} 不等於商品年期"
         )
-    fields["ko_observation"] = derived("ko_observation", wording, wording.value[0] if wording.ok else None)
+    fields["ko_observation"] = derived("ko_observation", wording, wording.value.observation if wording.ok else None)
     fields["first_callable_period"] = derived(
-        "first_callable_period", wording, wording.value[1] if wording.ok else None
+        "first_callable_period", wording, wording.value.first if wording.ok else None
     )
 
 
@@ -177,25 +179,37 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     # 商品簡介
     put("currency_zh", rf"計價幣別：({CCY})●?原計價幣別本金保本率")
     table = jpm.price_table("underlying_table", jpm.table_region(text_lines, "連結標的資產：", "商品年期："))
-    fields["underlyings"] = (
-        ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-        if table.ok
-        else derived("underlyings", table)
-    )
+    fields["underlyings"] = jpm.underlyings_field(table)
     fields["underlying_prices"] = jpm.price_rows(table)
     put("tenor_months", r"商品年期：(\d+)個月", int)
     put("trade_date", r"交易日/期初評價日：" + iis.DATE, parse_date)
     put("issue_date", r"發行日：" + iis.DATE, parse_date)
     put("final_valuation_date", r"最後評價日：" + iis.DATE, parse_date)
     put("maturity_date", r"到期日：" + iis.DATE, parse_date)
-    # 收益分配事項與贖回價金：年利率在配息金額與 D 型自動提前出場配息金額兩處，不同時歧義（轉人工覆核）
-    put("coupon_pa_pct", r"配息金額：每單位面額x" + PCT + r"x1/12", Decimal)
+    # 收益分配事項與贖回價金：年利率主來源是配息金額；D 型自動提前出場配息金額的年利率每處 = 主來源（範本專屬規則）
+    put("coupon_pa_pct", r"(?<!出場)配息金額：每單位面額x" + PCT + r"x1/12", Decimal)
+    fields["coupon_pa_mentions"] = iis.occurrences(
+        "coupon_pa_mentions",
+        ti,
+        (
+            (
+                "coupon_pa_pro_rata",
+                "年利率（自動提前出場配息金額）",
+                "贖回價金之計算自動提前出場配息金額",
+                jpm.PRO_RATA_RATE,
+            ),
+        )
+        if jpm.PRO_RATA in ti.text
+        else (),
+        Decimal,
+    )
     put("strike_pct", r"執行價：" + PCT + r"x期初價格", Decimal)
     put("ko_pct", r"自動提前出場價：" + PCT + r"x期初價格", Decimal)
     ki = iis.capture("ki_pct", ti, r"觸碰價：" + PCT + r"x期初價格", Decimal)
     _ko_terms(ti, fields)
     provided = set(PROVIDED)
-    if ki.ok:
+    ki_type = fields["ki_type"]
+    if ki.status != FieldStatus.MISSING or not (ki_type.ok and ki_type.value == "none"):  # 有觸碰價或讀不出無 KI
         fields["ki_pct"] = ki
         provided.add("ki_pct")
     # 警語與相關機構（審查標準）

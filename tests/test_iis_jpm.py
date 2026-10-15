@@ -11,6 +11,7 @@ import pytest
 
 import bnp_synth
 import citi_synth
+import hsbc_synth
 import ms_synth
 import sg_synth
 import synth
@@ -88,6 +89,7 @@ def test_consistent_jpm_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tmp
     ]:
         assert (rule, field) in checked, (rule, field)
     assert (("field.ki_pct", "ki_pct") in checked) == (spec.ki != "none")
+    assert (("iis.coupon_pa_mentions", "coupon_pa_pro_rata") in checked) == (spec.ko_obs == "D")
     prices = [r for r in iis.report.results if r.rule_id == "iis.underlying_prices"]
     assert prices and all(r.status == PASS for r in prices)  # 價格和參考條件表比；VWAP 時和說明書比
     assert not [r for r in iis.report.results if r.rule_id == "iis.redemption_start"]  # 只有文字，不核對
@@ -98,13 +100,15 @@ def test_underlyings_in_a_different_order_on_the_sheet_pass(tmp_path):
     ts, iis = pair(tmp_path, order=(3, 1, 2))
     assert bad(iis) == set(), bad(iis)
     prices = [r for r in iis.report.results if r.rule_id == "iis.underlying_prices"]
-    assert any(r.field == "UL_1 進場價" and r.item.name == "UL_2 進場價" for r in prices)
+    assert any(
+        r.field == "UL_2 進場價" and r.item.name == "UL_2 進場價" for r in prices
+    )  # 投資人須知第 1 檔在表上第 2 檔
     assert ts.fills_sheet
 
 
 def test_a_wrong_price_on_the_sheet_is_found_after_matching_by_ticker(tmp_path):
     ts, iis = pair(tmp_path, order=(3, 1, 2), **{"UL_2_KO價": 1.0})  # 表上第 2 檔是投資人須知第 1 檔
-    assert ("iis.underlying_prices", "UL_1 KO 價", MISMATCH) in bad(iis)
+    assert ("iis.underlying_prices", "UL_2 KO 價", MISMATCH) in bad(iis)
     assert not ts.fills_sheet
 
 
@@ -127,7 +131,7 @@ def test_daily_ko_written_as_valuation_date_matches_a_three_column_term_sheet(tm
         (Edit("商品年期：6個月", "商品年期：7個月", "iis.summary"), ("field.tenor_months", MISMATCH)),
         (Edit(f"交易日/期初評價日：{jdate(S.trade_date)}", "交易日/期初評價日：2030年01月08日", "iis.summary"), ("field.trade_date", MISMATCH)),
         (Edit(f"到期日：{jdate(S.maturity_date)}", "到期日：2031年01月01日", "iis.summary"), ("field.maturity_date", MISMATCH)),
-        (Edit("每單位面額 x 12.34% x 1/12", "每單位面額 x 12.43% x 1/12", "iis.coupon"), ("field.coupon_pa_pct", REVIEW)),
+        (Edit("每單位面額 x 12.34% x 1/12", "每單位面額 x 12.43% x 1/12", "iis.coupon"), ("field.coupon_pa_pct", MISMATCH)),
         (Edit("執行價：70.00%", "執行價：71.00%", "iis.redeem"), ("field.strike_pct", MISMATCH)),
         (Edit("自動提前出場價：100.00%", "自動提前出場價：101.00%", "iis.redeem"), ("field.ko_pct", MISMATCH)),
         (Edit("(t=1)(含)起", "(t=2)(含)起", "iis.redeem"), ("field.first_callable_period", MISMATCH)),
@@ -146,6 +150,18 @@ def test_each_checkpoint_catches_a_wrong_investor_sheet(tmp_path, edit, broken):
     ts, iis = pair(tmp_path, edits=[edit])
     assert broken in {(rid, st) for rid, _, st in bad(iis)}, bad(iis)
     assert ts.report.status == PASS and not ts.fills_sheet  # 投資人須知沒通過：說明書不回填
+
+
+def test_pro_rata_coupon_rate_must_equal_the_coupon_rate(tmp_path):
+    """D 型贖回價金段自動提前出場配息金額的年利率寫錯：逐處比對判不一致（B16「每處 = 年利率」）。"""
+    _, iis = pair(tmp_path, edits=[Edit("x 12.34% x 1/12 x n/N", "x 12.43% x 1/12 x n/N", "iis.redeem")])
+    assert bad(iis) == {("iis.coupon_pa_mentions", "coupon_pa_pro_rata", MISMATCH)}
+
+
+def test_unreadable_ki_percentage_requires_review(tmp_path):
+    """有觸碰事件、觸碰價 % 卻讀不到：KI % 轉人工覆核（不會默默不核對）。"""
+    _, iis = pair(tmp_path, Spec(ki="AM"), edits=[Edit("觸碰價：60.00% x 期初價格", "觸碰價：見說明書", "iis.redeem")])
+    assert ("field.ki_pct", "ki_pct", REVIEW) in bad(iis)
 
 
 def test_ki_percentage_is_checked_when_present(tmp_path):
@@ -174,8 +190,9 @@ def test_page_count_must_be_four(tmp_path):
         lambda p: bnp_synth.build_pdf(p, bnp_synth.Spec()),
         lambda p: sg_synth.build_pdf(p, sg_synth.Spec()),
         lambda p: citi_synth.build_pdf(p, citi_synth.Spec()),
+        lambda p: hsbc_synth.build_pdf(p, hsbc_synth.Spec()),
     ],
-    ids=["BARC", "MS", "BNP", "SG", "Citi"],
+    ids=["BARC", "MS", "BNP", "SG", "Citi", "HSBC"],
 )
 def test_other_issuers_investor_sheets_are_not_jpm(tmp_path, build):
     ts = build(tmp_path / "076199990001_TS.pdf")

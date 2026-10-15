@@ -11,6 +11,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import NamedTuple
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
@@ -44,7 +45,7 @@ NAME_ZH_HEAD = "摩根大通"
 NAME_EN_HEAD = "JPMorgan"
 NAME_EN_BODY = "Link to Equity Securities Callable Fixed Coupon Note"
 ARTICLES = 26  # 第 I 部分條數
-PAGE_MARK = re.compile(r"^\d+\s*/\s*\d+$")  # 頁碼「N/M」（頁面底部）
+PAGE_MARK = re.compile(r"^(\d+)\s*/\s*(\d+)$")  # 頁碼「N/M」（頁面底部；第 2 組為總頁數）
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
@@ -98,8 +99,23 @@ KO_COLUMN = {"評價日": "valuation", "觀察期間終止日": "end"}
 MEMORY_YES = "所有連結標的(i)同時於該自動提前出場評價日或分別於不同自動提前出場評價日"
 MEMORY_NO = "所有連結標的(i)於該自動提前出場評價日之股票收盤價大於或等於"
 MEMORY_SINGLE = "連結標的於該自動提前出場評價日之股票收盤價大於或等於自動提前出場價"
-PRO_RATA = "自動提前出場配息金額："  # D 型才有的按日計息配息（x n/N）
+NO_KI_CLAUSE = r"\(1\)若於最後評價日時(?:最差表現)?連結標的之股票收盤價大於或等於其執行價"  # 無 KI 的到期贖回第 (1) 款
+KI_CLAUSES = {  # 有 KI 的到期贖回款（範本規格 §4.4）
+    "AM": ("(1)若觸碰事件未發生：", "(2)若觸碰事件已發生，則"),
+    "D": ("(1)若觸碰事件未發生：", "(2)若觸碰事件已發生，且"),
+}
+PRO_RATA = "自動提前出場配息金額："  # D 型才有的按日計息配息
+PRO_RATA_RATE = r"自動提前出場配息金額：每單位面額x" + PCT + r"x1/12xn/N"  # 其中的年利率 Y
 WORST_DEFINITION = "最差表現連結標的："  # 多標的才有的定義句
+
+
+class KoWording(NamedTuple):
+    """第 8 項「自動提前出場評價日：」讀出的寫法（範本規格 §4.1）。"""
+
+    observation: str  # D 期間每日觀察／P 每期定日觀察
+    first: int  # 起始期 k（Non-Call）
+    column: str | None  # D 型起始那期取日期表的哪一欄（valuation 評價日／end 觀察期間終止日）；P 型為 None
+    last: int | None  # P 型 t=k-N 的 N（只有一期時同 k）；D 型為 None
 
 
 def document(lines: Sequence[Line]) -> Document:
@@ -312,10 +328,7 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
     )
     fields["ko_wording"] = ko_wording(t8, art8)
     fields["ko_memory"] = ko_memory(t8, art8)
-    pro = t8.text.find(PRO_RATA)
-    fields["pro_rata"] = ParsedField.present(
-        "pro_rata", pro >= 0, t8.lines_for(pro, pro + len(PRO_RATA)) if pro >= 0 else art8[:1]
-    )
+    fields["pro_rata"] = pro_rata(t8, art8)
     worst = t8.text.find(WORST_DEFINITION)
     fields["worst_of_wording"] = ParsedField.present(
         "worst_of_wording", worst >= 0, t8.lines_for(worst, worst + len(WORST_DEFINITION)) if worst >= 0 else art8[:1]
@@ -326,17 +339,13 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
             Decimal(m[1]),
             tuple(Evidence.of(x) for x in t8.lines_for(m.start(), m.end())),
         )
-        for i, m in enumerate(t8.finditer(r"自動提前出場配息金額：每單位面額x" + PCT + r"x1/12xn/N"), start=1)
+        for i, m in enumerate(t8.finditer(PRO_RATA_RATE), start=1)
     ]
 
     # 第 9 項標的表
     table = price_table("underlying_table", table_region(article(9), "連結標的資產、相對權重", "相對權重"))
     fields["underlying_table"] = table
-    fields["underlyings"] = (
-        ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-        if table.ok
-        else derived("underlyings", table)
-    )
+    fields["underlyings"] = underlyings_field(table)
     fields["underlying_prices"] = price_rows(table)
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
 
@@ -383,9 +392,9 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
     put("minimum_additional_currency", art4, rf"最低加購金額：{money.NUMBER}({CCY})")
     put("issue_price_ch4", doc.span_lines(ch4.get(5)), r"申購單位數x每單位面額x" + PCT, Decimal)
     fields["minimum_issue_size"] = standard_fields.absent("minimum_issue_size", "發行不成立的金額門檻")
-    art8_ch4 = doc.span_lines(ch4.get(8))
-    put("minimum_redemption", art8_ch4, r"最低贖回金額或單位數：" + NUM + CCY, number)
-    put("minimum_redemption_currency", art8_ch4, rf"最低贖回金額或單位數：{money.NUMBER}({CCY})")
+    part4_item8 = doc.span_lines(ch4.get(8))
+    put("minimum_redemption", part4_item8, r"最低贖回金額或單位數：" + NUM + CCY, number)
+    put("minimum_redemption_currency", part4_item8, rf"最低贖回金額或單位數：{money.NUMBER}({CCY})")
 
     occ = Occurrence
     fields["min_amounts"] = standard_fields.occurrences(
@@ -462,7 +471,7 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
 
 
 def ko_wording(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> ParsedField:
-    """「自動提前出場評價日：」→ (KO 觀察方式 D／P, 起始期 k, D 型起始欄 valuation／end 或 P 型最後一期)（範本規格 §4.1）。
+    """「自動提前出場評價日：」→ `KoWording`（KO 觀察方式、起始期、D 型起始欄或 P 型最後一期；範本規格 §4.1）。
 
     投資人須知贖回價金段的句型相同（parsers/jpm_iis.py），`where` 是錯訊裡的出處。"""
     name = "ko_wording"
@@ -474,11 +483,11 @@ def ko_wording(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> Pa
     body, lns = found[0][1], ti.lines_for(found[0].start(), found[0].end())
     daily = KO_DAILY.fullmatch(body)
     if daily:
-        return ParsedField.present(name, ("D", int(daily[2]), KO_COLUMN[daily[1]]), lns)
+        return ParsedField.present(name, KoWording("D", int(daily[2]), KO_COLUMN[daily[1]], None), lns)
     periodic = KO_PERIODIC.fullmatch(body)
     if periodic:
         k = int(periodic[1])
-        return ParsedField.present(name, ("P", k, int(periodic[2] or k)), lns)
+        return ParsedField.present(name, KoWording("P", k, None, int(periodic[2] or k)), lns)
     return ParsedField.invalid(name, lns, f"{where}自動提前出場評價日的寫法不在範本規格內")
 
 
@@ -486,12 +495,24 @@ def ko_memory(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> Par
     """「自動提前出場事件：」句型 → 記憶式（範本規格 §4.2）；單一標的（沒有記憶條款）判非記憶式。"""
     name = "ko_memory"
     text = ti.text
-    found = [(v, text.find(p)) for v, p in ((True, MEMORY_YES), (False, MEMORY_NO), (False, MEMORY_SINGLE))]
-    hits = [(v, i) for v, i in found if i >= 0]
+    found = [(v, p, text.find(p)) for v, p in ((True, MEMORY_YES), (False, MEMORY_NO), (False, MEMORY_SINGLE))]
+    hits = [(v, p, i) for v, p, i in found if i >= 0]
     if len(hits) != 1:
         return ParsedField.invalid(name, lines, f"{where}自動提前出場事件的句型不在範本規格內或出現多種")
-    v, i = hits[0]
-    return ParsedField.present(name, v, ti.lines_for(i, i + 20))
+    v, phrase, i = hits[0]
+    return ParsedField.present(name, v, ti.lines_for(i, i + len(phrase)))
+
+
+def pro_rata(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> ParsedField:
+    """有沒有 D 型的「自動提前出場配息金額：每單位面額 x Y% x 1/12 x n/N」；有標籤但算式寫法不同 → 不合法（轉人工覆核）。"""
+    name = "pro_rata"
+    i = ti.text.find(PRO_RATA)
+    if i < 0:
+        return ParsedField.present(name, False, lines[:1])
+    lns = ti.lines_for(i, i + len(PRO_RATA))
+    if not re.search(PRO_RATA_RATE, ti.text):
+        return ParsedField.invalid(name, lns, f"{where}自動提前出場配息金額的算式不在範本規格內")
+    return ParsedField.present(name, True, lns)
 
 
 def ki_type(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> ParsedField:
@@ -502,16 +523,21 @@ def ki_type(ti: TextIndex, lines: list[Line], where: str = "第 8 項") -> Parse
     if m is None:
         if "觸碰價" in text or "觸碰事件" in text:
             return ParsedField.invalid(name, lines, f"{where}有觸碰價，但觸碰事件的寫法不在範本規格內")
-        n = re.search(r"\(1\)若於最後評價日時(?:最差表現)?連結標的之股票收盤價大於或等於其執行價", text)
+        n = re.search(NO_KI_CLAUSE, text)
         if n is None:
             return ParsedField.invalid(name, lines, f"{where}到期贖回的寫法不在範本規格內")
         return ParsedField.present(name, "none", ti.lines_for(n.start(), n.end()))
     body, lns = m[1], ti.lines_for(m.start(), m.end())
     if body.startswith("在最後評價日時"):
-        return ParsedField.present(name, "AM", lns)
-    if body.startswith("在觸碰事件評價日時") and "觸碰事件評價日：自交易日(含)起至最後評價日(含)止" in text:
-        return ParsedField.present(name, "D", lns)
-    return ParsedField.invalid(name, lns, f"{where}觸碰事件的觀察寫法不在範本規格內")
+        kind = "AM"
+    elif body.startswith("在觸碰事件評價日時") and "觸碰事件評價日：自交易日(含)起至最後評價日(含)止" in text:
+        kind = "D"
+    else:
+        return ParsedField.invalid(name, lns, f"{where}觸碰事件的觀察寫法不在範本規格內")
+    # 到期贖回款須與觸碰事件寫法一致（範本規格 §4.4）
+    if re.search(NO_KI_CLAUSE, text) or not all(c in text for c in KI_CLAUSES[kind]):
+        return ParsedField.invalid(name, lns, f"{where}到期贖回款與觸碰事件的寫法不一致")
+    return ParsedField.present(name, kind, lns)
 
 
 # ---------------------------------------------------------------- 標的表與假設價格表
@@ -534,7 +560,7 @@ def _columns(head: str) -> list[str]:
 def price_table(name: str, lines: list[Line]) -> ParsedField:
     """第 9 項標的表：表頭決定欄位與順序；每檔一列（列號、名稱、彭博代碼一行、交易所、價格＋下一行幣別字）。
 
-    值：{"columns", "tickers", "rows": [{欄: Decimal}], "row_lines", "currencies"}。表頭結束在最後一個價格欄名；
+    值：{"columns", "tickers", "rows": [{欄: Decimal}], "row_lines"}。表頭結束在最後一個價格欄名；
     代碼以自成一行的「代號 交易所碼」切列，價格以「數字＋幣別字」切格。
     """
     if not lines:
@@ -577,7 +603,6 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
         "tickers": tickers,
         "rows": rows,
         "row_lines": row_lines,
-        "currencies": [{m[2] for m in cells[i * ncol : (i + 1) * ncol]} for i in range(len(tickers))],
     }
     return ParsedField.present(name, value, lines)
 
@@ -602,6 +627,13 @@ def scenario_table(lines: list[Line]) -> ParsedField:
             return ParsedField.invalid(name, lines, f"假設價格表第 {k + 1} 列的格數與表頭不符")
         rows.append(dict(zip(columns, cells, strict=True)))
     return ParsedField.present(name, {"columns": columns, "rows": rows}, lines)
+
+
+def underlyings_field(table: ParsedField) -> ParsedField:
+    """標的表 → 標準欄位 `underlyings`（彭博代號，依表上順序）。"""
+    if not table.ok:
+        return derived("underlyings", table)
+    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
 
 
 def price_rows(table: ParsedField) -> ParsedField:
@@ -703,22 +735,22 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
             fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
 
     kind, rows = table.value["kind"], table.value["rows"]
-    observation, k, extra = wording.value
+    observation, k, column, last = wording.value
     n = len(rows)
     if observation == "D":
         if not kind.startswith("D"):
             invalid("第 8 項自動提前出場評價日是每日觀察，但日期表是每期觀察的排法")
             return
-        if extra not in table.value["columns"]:
+        if column not in table.value["columns"]:
             invalid("第 8 項自動提前出場評價日的起始欄不在日期表上")
             return
         if not pro.value:
             invalid("每日觀察的商品第 8 項沒有自動提前出場配息金額（x n/N）")
             return
-        if not 1 <= k <= n or rows[k - 1][extra] is None:
+        if not 1 <= k <= n or rows[k - 1][column] is None:
             invalid(f"第一個可提前出場期 {k} 在日期表沒有日期")
             return
-        dates = {k: rows[k - 1][extra], n: final.value}
+        dates = {k: rows[k - 1][column], n: final.value}
     else:
         if kind != "P":
             invalid("第 8 項自動提前出場評價日是每期觀察，但日期表是每日觀察的排法")
@@ -726,8 +758,8 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
         if pro.value:
             invalid("每期觀察的商品第 8 項卻有自動提前出場配息金額（x n/N）")
             return
-        if not 1 <= k <= extra == n:
-            invalid(f"第 8 項自動提前出場評價日 t={k}–{extra} 不是到最後一期（共 {n} 期）")
+        if not 1 <= k <= last == n:
+            invalid(f"第 8 項自動提前出場評價日 t={k}–{last} 不是到最後一期（共 {n} 期）")
             return
         dates = {r["period"]: r["valuation"] for r in rows if r["period"] >= k}
     fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, observation, ev)
