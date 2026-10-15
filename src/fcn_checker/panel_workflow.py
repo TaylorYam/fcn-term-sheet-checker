@@ -74,9 +74,12 @@ class PanelOutcome:
         """有問題的說明書排前面（ERROR、不一致、需人工覆核／未支援上手），再列通過與人工放行。"""
         return tuple(sorted(self.batch.items, key=lambda i: i.status.display_rank))
 
-    def selection_after_release_change(self, item: BatchItem) -> BatchItem:
-        """放行後選清單第一份（下一份要處理的說明書），不跟著放行的那份排到下方；取消放行後仍選那份。"""
-        return self.ordered_items[0] if item.released else item
+    def selection_after_release_change(self, items: Sequence[BatchItem]) -> tuple[BatchItem, ...]:
+        """放行後選清單第一份（下一份要處理的說明書），不跟著放行的那幾份排到下方；取消放行後仍選那幾份。
+
+        items 是同一次一起放行或一起取消放行的那幾份，看第一份就知道是哪一種。
+        """
+        return (self.ordered_items[0],) if items[0].released else tuple(items)
 
     @staticmethod
     def ordered_results(item: BatchItem) -> tuple[CheckResult, ...]:
@@ -164,6 +167,51 @@ class PanelOutcome:
         )
 
     @staticmethod
+    def release_plan_prompt(plan: ReleasePlan) -> str:
+        """多選人工放行確認視窗內文：逐份列 PDF 檔名與全部錯訊，再列略過的與原因（Issue #219）。"""
+        parts = [f"將人工放行以下 {len(plan.targets)} 份，放行後視同通過：儲存時回填，不列入錯誤清單。"]
+        parts += [
+            f"{n}. {item.term_sheet.name}（{item.document}）\n" + "\n".join(f"・{m}" for m in item.problem_messages)
+            for n, item in enumerate(plan.targets, 1)
+        ]
+        if plan.skipped:
+            parts.append(
+                f"略過以下 {len(plan.skipped)} 份（不能人工放行）：\n"
+                + "\n".join(f"・{item.term_sheet.name}：{reason}" for item, reason in plan.skipped)
+            )
+        parts.append(f"確認人工放行這 {len(plan.targets)} 份？")
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def release_plan_button(plan: ReleasePlan) -> str:
+        """多選時人工放行按鈕的文字：要處理幾份；沒有可以放行的（按鈕不能按）時不寫份數。"""
+        if plan.cancel:
+            return f"取消放行（{len(plan.targets)} 份）"
+        return f"人工放行 {len(plan.targets)} 份…" if plan.targets else "人工放行…"
+
+    @staticmethod
+    def release_plan_confirm(plan: ReleasePlan) -> str:
+        """多選人工放行確認視窗的確認按鈕文字。"""
+        return f"人工放行 {len(plan.targets)} 份"
+
+    @staticmethod
+    def release_plan_note(plan: ReleasePlan) -> str:
+        """多選時人工放行按鈕旁的說明：選了幾份、各幾份可以放行／已放行／已通過／不能放行（列出不同的原因）。"""
+        selected = len(plan.selected)
+        if plan.cancel:
+            return f"已選 {selected} 份，都已人工放行：儲存時視同通過並回填，不列入錯誤清單。"
+        counts = (
+            ("可以放行", len(plan.targets)),
+            ("已放行", sum(i.released for i in plan.selected)),
+            ("已通過", sum(i.category == Category.PASSED for i in plan.selected)),
+            ("不能放行", len(plan.skipped)),
+        )
+        note = f"已選 {selected} 份：" + "、".join(f"{label} {n} 份" for label, n in counts if n)
+        if plan.skipped:
+            note += "（" + "；".join(dict.fromkeys(reason for _, reason in plan.skipped)) + "）"
+        return note + "。"
+
+    @staticmethod
     def release_note(item: BatchItem, reason: str) -> str:
         """人工放行按鈕旁的說明：已放行的說明怎麼處理；不能放行時說明原因（reason 來自 PanelSession.release_state）。"""
         if item.released:
@@ -198,6 +246,19 @@ class ReleaseState(NamedTuple):
 
     allowed: bool
     reason: str
+
+
+class ReleasePlan(NamedTuple):
+    """PANEL 多選時按下人工放行按鈕要做的事（Issue #219）。
+
+    選取的全部都已放行時取消放行全部（cancel）；否則放行其中還沒放行、可以放行的（targets），
+    不能放行的與原因列在 skipped（已通過的不必說明，不列）。targets 為空時按鈕不能按。
+    """
+
+    selected: tuple[BatchItem, ...]
+    cancel: bool
+    targets: tuple[BatchItem, ...]
+    skipped: tuple[tuple[BatchItem, str], ...]
 
 
 class PanelSession:
@@ -357,15 +418,15 @@ class PanelSession:
         self.message = self._outcome.headline
         return self._outcome
 
-    def _current(self, item: BatchItem) -> PanelOutcome:
+    def _current(self, *items: BatchItem) -> PanelOutcome:
         outcome = self.outcome
-        if outcome is None or not any(i is item for i in outcome.batch.items):
+        if outcome is None or not all(any(i is item for i in outcome.batch.items) for item in items):
             raise IngestionError("result_required", "這份結果已失效，請重新核對後再人工放行。")
         return outcome
 
-    def _current_checked(self, item: BatchItem) -> PanelOutcome:
-        """放行／取消放行前：先確認是當次結果，再明確檢查來源。"""
-        outcome = self._current(item)
+    def _current_checked(self, *items: BatchItem) -> PanelOutcome:
+        """放行／取消放行前：先確認是當次結果，再明確檢查來源（多份也只檢查一次）。"""
+        outcome = self._current(*items)
         self._require_sources()
         return outcome
 
@@ -383,15 +444,25 @@ class PanelSession:
         shown = "" if item.category == Category.PASSED else problem
         return ReleaseState(not problem, shown)
 
-    def release(self, item: BatchItem) -> None:
-        """人工放行：視同通過，儲存時回填、不列入錯誤清單；重新載入或重新核對即清除。"""
-        outcome = self._current_checked(item)
-        outcome.batch.release(item)
+    def release_plan(self, items: Sequence[BatchItem]) -> ReleasePlan:
+        """PANEL 多選時的放行按鈕：全部已放行就取消放行全部，否則放行其中可以放行的；不讀檔。"""
+        selected = tuple(items)
+        if selected and all(i.released for i in selected):
+            return ReleasePlan(selected, True, selected, ())
+        problems = [(i, self.release_problem(i)) for i in selected if not i.released]
+        targets = tuple(i for i, problem in problems if not problem)
+        skipped = tuple((i, problem) for i, problem in problems if problem and i.category != Category.PASSED)
+        return ReleasePlan(selected, False, targets, skipped)
+
+    def release(self, *items: BatchItem) -> None:
+        """人工放行一份或多份：視同通過，儲存時回填、不列入錯誤清單；任一份不能放行時都不變。重新載入或重新核對即清除。"""
+        outcome = self._current_checked(*items)
+        outcome.batch.release(*items)
         self._after_release_change(outcome)
 
-    def cancel_release(self, item: BatchItem) -> None:
-        outcome = self._current_checked(item)
-        outcome.batch.cancel_release(item)
+    def cancel_release(self, *items: BatchItem) -> None:
+        outcome = self._current_checked(*items)
+        outcome.batch.cancel_release(*items)
         self._after_release_change(outcome)
 
     def _after_release_change(self, outcome: PanelOutcome) -> None:

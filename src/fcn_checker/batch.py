@@ -223,20 +223,27 @@ class BatchOutcome:
             return CheckStatus.ERROR
         return overall_status([i.status for i in self.items] + [e.status for e in self.errors])
 
-    def release(self, item: BatchItem) -> None:
-        """人工放行：視同通過，儲存時回填、不列入錯誤清單；不能放行時丟出 IngestionError（原因見 release_problem）。"""
-        self._require_member(item)
-        if item.release_problem:
-            raise IngestionError("release_refused", item.release_problem)
-        self._set_released(item, True)
+    def release(self, *items: BatchItem) -> None:
+        """人工放行：視同通過，儲存時回填、不列入錯誤清單；任一份不能放行時丟出 IngestionError（原因見 release_problem），每一份都不變。"""
+        self._require_members(items)
+        refused = next((i for i in items if i.release_problem), None)
+        if refused is not None:
+            reason = refused.release_problem
+            raise IngestionError(
+                "release_refused", reason if len(items) == 1 else f"{refused.term_sheet.name}：{reason}"
+            )
+        for item in items:
+            self._set_released(item, True)
 
-    def cancel_release(self, item: BatchItem) -> None:
-        self._require_member(item)
-        self._set_released(item, False)
+    def cancel_release(self, *items: BatchItem) -> None:
+        self._require_members(items)
+        for item in items:
+            self._set_released(item, False)
 
-    def _require_member(self, item: BatchItem) -> None:
-        if not any(i is item for i in self.items):
-            raise IngestionError("result_required", "這份文件不在這次核對結果中，請重新核對後再人工放行。")
+    def _require_members(self, items: tuple[BatchItem, ...]) -> None:
+        if not all(any(i is item for i in self.items) for item in items):
+            which = "這份文件" if len(items) == 1 else "選取的文件有些"
+            raise IngestionError("result_required", f"{which}不在這次核對結果中，請重新核對後再人工放行。")
 
     def _set_released(self, item: BatchItem, released: bool) -> None:
         item._released = released

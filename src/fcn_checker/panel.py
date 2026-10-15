@@ -16,7 +16,7 @@ from typing import Any
 from .approval_dates import parse_input_date
 from .check_config import CONFIG_DIR, DEFAULTS
 from .ingestion import IngestionError, SourceSnapshot
-from .panel_workflow import PanelOutcome, PanelSession, ReleaseState
+from .panel_workflow import PanelOutcome, PanelSession, ReleasePlan, ReleaseState
 from .saving import SaveReceipt
 
 
@@ -118,11 +118,15 @@ class LastFolders:
             pass
 
 
-def _table(parent, columns: tuple[tuple[str, str, int], ...], pixels, height: int = 6) -> ttk.Treeview:
+def _table(
+    parent, columns: tuple[tuple[str, str, int], ...], pixels, height: int = 6, selectmode: str = "browse"
+) -> ttk.Treeview:
     frame = ttk.Frame(parent)
     frame.columnconfigure(0, weight=1)
     frame.rowconfigure(0, weight=1)
-    table = ttk.Treeview(frame, columns=[c for c, _, _ in columns], show="headings", selectmode="browse", height=height)
+    table = ttk.Treeview(
+        frame, columns=[c for c, _, _ in columns], show="headings", selectmode=selectmode, height=height
+    )
     for column, label, width in columns:
         table.heading(column, text=label)
         table.column(column, width=pixels(width), minwidth=pixels(80), anchor="w")
@@ -159,7 +163,9 @@ def _write(widget: tk.Text, text: str) -> None:
 class ResultPane(ttk.Frame):
     """左側逐份說明書清單（問題優先）；右側選取那份的逐欄結果，選取列可查看完整值與原文證據。
 
-    下方「人工放行」按鈕對選取的說明書操作；能否放行與不能放行的原因由 release_state 提供，說明文字由 PanelOutcome.release_note 組好，按下時呼叫 on_release。
+    下方「人工放行」按鈕對選取的說明書操作，清單可用 Shift／Ctrl 多選（Issue #219）。選一份時能否放行與不能放行的原因由 release_state 提供，
+    說明文字由 PanelOutcome.release_note 組好；多選時由 release_plan 決定要處理哪幾份，文字由 PanelOutcome.release_plan_* 組好。
+    按下時以選取的那幾份呼叫 on_release；明細區顯示游標所在那份。
     """
 
     def __init__(
@@ -167,10 +173,11 @@ class ResultPane(ttk.Frame):
         parent,
         pixels,
         release_state: Callable[..., ReleaseState],
+        release_plan: Callable[..., ReleasePlan],
         on_release: Callable[..., None],
     ):
         super().__init__(parent, padding=8)
-        self.release_state, self.on_release = release_state, on_release
+        self.release_state, self.release_plan, self.on_release = release_state, release_plan, on_release
         self.items: dict[str, Any] = {}  # 結果清單列 → PanelOutcome.ordered_items 的一份
         self.rows: dict[str, str] = {}  # 明細清單列 → 選取時顯示的明細
         self.outcome: PanelOutcome | None = None
@@ -185,6 +192,7 @@ class ResultPane(ttk.Frame):
             (("status", "狀態", 150), ("kind", "種類", 90), ("file", "PDF 檔名", 220), ("problems", "問題數", 70)),
             pixels,
             height=8,
+            selectmode="extended",
         )
         self.item_table.frame.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
         self.table = _table(
@@ -224,26 +232,36 @@ class ResultPane(ttk.Frame):
         self.table.delete(*self.table.get_children())
         self.summary.set("尚未執行核對。")
         _write(self.detail, "")
-        self._release_state(None)
+        self._release_state(())
 
-    def show(self, outcome: PanelOutcome, select: Any = None):
-        """顯示結果並選取 select（沒給或不在結果中時選第一份）。"""
+    def show(self, outcome: PanelOutcome, select: tuple = (), focus: Any = None):
+        """顯示結果並選取 select 裡的那幾份（沒給或都不在結果中時選第一份）；focus 也在選取中時游標停在那份，否則停在選取的第一份。"""
         self.clear()
         self.outcome = outcome
         self.summary.set(outcome.headline)
-        chosen = None
+        chosen = []
         for item in outcome.ordered_items:
             key = self.item_table.insert("", "end", values=outcome.item_row(item))
             self.items[key] = item
-            if item is select:
-                chosen = key
+            if any(item is s for s in select):
+                chosen.append(key)
         if self.items:
-            chosen = chosen or next(iter(self.items))
+            chosen = chosen or [next(iter(self.items))]
+            cursor = next((k for k in chosen if self.items[k] is focus), chosen[0])
             self.item_table.selection_set(chosen)
-            self.item_table.see(chosen)
+            self.item_table.focus(cursor)
+            self.item_table.see(cursor)
             self._item_selected(None)
 
-    def _release_state(self, item) -> None:
+    def _release_state(self, items: tuple) -> None:
+        if len(items) > 1:
+            plan = self.release_plan(items)
+            self.release_button.configure(
+                text=PanelOutcome.release_plan_button(plan), state="normal" if plan.targets else "disabled"
+            )
+            self.release_reason.set(PanelOutcome.release_plan_note(plan))
+            return
+        item = items[0] if items else None
         if item is None:
             self.release_button.configure(text="人工放行…", state="disabled")
             self.release_reason.set("")
@@ -256,21 +274,29 @@ class ResultPane(ttk.Frame):
             self.release_reason.set(PanelOutcome.release_note(item, reason))
 
     def _release(self):
-        item = self.selected_item()
-        if item is not None:
-            self.on_release(item)
+        items = self.selected_items()
+        if items:
+            self.on_release(items)
 
-    def selected_item(self):
+    def selected_items(self) -> tuple:
+        """選取的那幾份，依清單順序。"""
+        return tuple(self.items[key] for key in self.item_table.selection() if key in self.items)
+
+    def focused_item(self):
+        """明細區顯示的那份：游標所在且仍選取的那份，否則選取的第一份。"""
         selection = self.item_table.selection()
-        return self.items.get(selection[0]) if selection else None
+        focus = self.item_table.focus()
+        key = focus if focus in selection else (selection[0] if selection else None)
+        return self.items.get(key) if key else None
 
     def _item_selected(self, _):
-        item = self.selected_item()
-        if item is None or self.outcome is None:
-            return
-        self._release_state(item)
+        self._release_state(self.selected_items())
         self.rows.clear()
         self.table.delete(*self.table.get_children())
+        item = self.focused_item()
+        if item is None or self.outcome is None:  # Ctrl 點選取消了全部選取
+            _write(self.detail, "")
+            return
         for row in self.outcome.result_rows(item):
             self.rows[self.table.insert("", "end", values=row.values)] = row.detail
         _write(self.detail, self.outcome.backfill_text(item))
@@ -279,6 +305,49 @@ class ResultPane(ttk.Frame):
         selection = self.table.selection()
         if selection and selection[0] in self.rows:
             _write(self.detail, self.rows[selection[0]])
+
+
+class ConfirmDialog(tk.Toplevel):
+    """內文可捲動的確認視窗（多選人工放行逐份列錯訊時可能超過螢幕高度）；ask 回傳是否按下確認。"""
+
+    def __init__(self, parent: tk.Misc, title: str, text: str, confirm: str, pixels):
+        super().__init__(parent)
+        self.confirmed = False
+        self.title(title)
+        self.transient(parent)
+        frame = ttk.Frame(self, padding=pixels(16))
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        body = _text(frame, 20)
+        body.configure(width=80)
+        body.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(frame, command=body.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        body.configure(yscrollcommand=scroll.set)
+        _write(body, text)
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=1, column=0, columnspan=2, sticky="e", pady=(pixels(12), 0))
+        ttk.Button(buttons, text=confirm, command=self._confirm).pack(side="left", padx=(0, pixels(8)))
+        cancel = ttk.Button(buttons, text="取消", command=self.destroy)
+        cancel.pack(side="left")
+        self.bind("<Escape>", lambda _: self.destroy())
+        self.update_idletasks()  # 置中在主視窗上
+        x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        cancel.focus_set()
+        self.grab_set()
+
+    def _confirm(self) -> None:
+        self.confirmed = True
+        self.destroy()
+
+    @classmethod
+    def ask(cls, parent: tk.Misc, title: str, text: str, confirm: str, pixels) -> bool:
+        dialog = cls(parent, title, text, confirm, pixels)
+        parent.wait_window(dialog)
+        return dialog.confirmed
 
 
 class ApprovalDatesDialog(tk.Toplevel):
@@ -458,7 +527,9 @@ class PanelWindow:
             pixels,
         )
         self.preview_table.frame.grid(row=0, column=0, sticky="nsew")
-        self.results = ResultPane(self.tabs, pixels, self.session.release_state, self.toggle_release)
+        self.results = ResultPane(
+            self.tabs, pixels, self.session.release_state, self.session.release_plan, self.toggle_release
+        )
         self.tabs.add(self.results, text="核對結果")
         self.not_covered = ttk.Frame(self.tabs, padding=12)
         self.tabs.add(self.not_covered, text="待處理")
@@ -596,19 +667,34 @@ class PanelWindow:
         self.tabs.tab(self.not_covered, text=f"待處理（{outcome.not_covered_count}）")
         self.status.set(outcome.headline)
 
-    def toggle_release(self, item):
-        """人工放行（先確認全部錯訊）或取消放行；放行前的來源檢查在背景執行，結果失效時清空畫面並顯示原因。"""
+    def toggle_release(self, items):
+        """人工放行（先確認全部錯訊）或取消放行選取的那幾份；放行前的來源檢查在背景執行，結果失效時清空畫面並顯示原因。
+
+        選一份照原本的確認視窗；多選時依 release_plan 只處理可以放行（或全部已放行時取消放行）的那幾份，
+        放行前以可捲動視窗列出逐份錯訊與略過的原因（Issue #219）。
+        """
         if self._busy_any():
             return
-        action = self.session.cancel_release if item.released else self.session.release
-        if not item.released and not messagebox.askyesno(
-            "人工放行", PanelOutcome.release_prompt(item), parent=self.root
-        ):
-            return
+        if len(items) == 1:
+            cancel, targets = items[0].released, tuple(items)
+            if not cancel and not messagebox.askyesno(
+                "人工放行", PanelOutcome.release_prompt(items[0]), parent=self.root
+            ):
+                return
+        else:
+            plan = self.session.release_plan(items)
+            cancel, targets = plan.cancel, plan.targets
+            if not targets:
+                return
+            prompt, confirm = PanelOutcome.release_plan_prompt(plan), PanelOutcome.release_plan_confirm(plan)
+            if not cancel and not ConfirmDialog.ask(self.root, "人工放行", prompt, confirm, self.pixels):
+                return
+        focus = self.results.focused_item()  # 取消放行後游標留在原本那份
+        action = self.session.cancel_release if cancel else self.session.release
 
         def run() -> IngestionError | None:
             try:
-                action(item)
+                action(*targets)
             except IngestionError as e:
                 return e
             return None
@@ -617,17 +703,17 @@ class PanelWindow:
         self.status.set("確認來源中…")
         self.release_pending = self.executor.submit(run)
         self.root.after(
-            80, lambda: self._after("release_pending", lambda e: self._show_release(item, e), "人工放行失敗")
+            80, lambda: self._after("release_pending", lambda e: self._show_release(targets, focus, e), "人工放行失敗")
         )
 
-    def _show_release(self, item, error: IngestionError | None):
+    def _show_release(self, items, focus, error: IngestionError | None):
         if error is not None:
             if self.session.outcome is None:  # 來源已變更、結果失效：清空畫面，不顯示空結果
                 self._clear()
             self.status.set(str(error))
             return
         outcome = self.session.outcome
-        self.results.show(outcome, select=outcome.selection_after_release_change(item))
+        self.results.show(outcome, select=outcome.selection_after_release_change(items), focus=focus)
         self.status.set(self.session.message)
 
     def save(self):

@@ -989,7 +989,31 @@ def test_only_items_of_this_outcome_can_be_released(tmp_path):
     second = checked(tmp_path / "b", [pdf_for(tmp_path, spec)], rows)
     with pytest.raises(IngestionError, match="重新核對"):
         second.release(first.items[0])
-    assert not first.items[0].released and second.status == MISMATCH
+    with pytest.raises(IngestionError, match="選取的文件有些不在這次核對結果中"):
+        second.release(second.items[0], first.items[0])
+    assert not first.items[0].released and not second.items[0].released and second.status == MISMATCH
+
+
+def test_several_documents_are_released_and_cancelled_together(tmp_path):
+    first, second = Spec(), Spec(product_code="029199990002")
+    pdfs = [pdf_for(tmp_path, s) for s in (first, second)]
+    outcome = checked(tmp_path, pdfs, [reference_row(s, **{"K(%)": 71}) for s in (first, second)])
+    outcome.release(*outcome.items)
+    assert all(i.released for i in outcome.items) and outcome.status == PASS
+    outcome.cancel_release(*outcome.items)
+    assert not any(i.released for i in outcome.items) and outcome.status == MISMATCH
+
+
+def test_one_refused_document_leaves_every_document_unchanged(tmp_path):
+    paired, alone = Spec(), Spec(product_code="029199990002")
+    pdfs = [pdf_for(tmp_path, paired), build_pdf(tmp_path / f"{alone.product_code}_TS.pdf", alone, iis=False)]
+    outcome = checked(tmp_path, pdfs, [reference_row(s, **{"K(%)": 71}) for s in (paired, alone)])
+    releasable = next(i for i in outcome.items if not i.release_problem)
+    refused = next(i for i in outcome.items if i.term_sheet.name == f"{alone.product_code}_TS.pdf")
+    assert "缺同商品的投資人須知" in refused.release_problem, "前提：這批缺投資人須知，不能放行"
+    with pytest.raises(IngestionError, match=f"{alone.product_code}_TS.pdf：這批缺同商品的投資人須知"):
+        outcome.release(releasable, refused)
+    assert not releasable.released, "任一份不能放行就都不放行，不會只放行一半"
 
 
 def test_cancelled_release_returns_to_the_original_result(tmp_path):
