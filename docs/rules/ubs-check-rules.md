@@ -3,7 +3,7 @@
 - 文件側：[UBS 範本規格](../templates/ubs-zh-product-description.md)；投資人須知見 [UBS 投資人須知範本規格](../templates/ubs-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 UBS 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [UBS 下單資料格式](../order-formats/ubs-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.17（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #279）；待實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #279）；已實作（`parsers/ubs.py`、`rules/ubs.py`，投資人須知見[投資人須知核對規則](iis-check-rules.md)）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis](natixis-check-rules.md)、[CA](ca-check-rules.md)、[BBVA 核對規則](bbva-check-rules.md)不同或 UBS 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -257,3 +257,4 @@ KO 型態與配息表種類不一致時，parser 交出不合法，`field.ko_obs
 | 2026-10-15 | 投資人須知核對範圍如[投資人須知核對規則](iis-check-rules.md) §3 UBS 欄（沒有商品代號、ISIN 等欄位不核對、不報缺漏） |
 | 2026-10-15 | UB4 表上計價幣別是表上填錯 |
 | 2026-10-15 | 發行主體只有瑞士銀行經由倫敦分行；參考條件表 `發行機構` 欄 UBS 寫 `UBS` |
+| 2026-10-15 | 實作時決定：名稱的括號版與句尾「。」由 parser 正規化（說明書第 1 頁、商品基本資料一、投資人須知都適用）；名稱新佔位符 `{ko_observation_*}`（`daily_*`／`periodic_*`）、`{ki_*}`；投資人須知的發行分行用範本專屬規則 `iis.issuing_branch`；發行價格寫「每單位面額之100%」（沒有金額）時不列入金額旁的幣別出處；最低交易金額的倍數鍵為 `minimum_trade`；本機 6 份結果與 §5 一致（新版 3 份通過並回填） |

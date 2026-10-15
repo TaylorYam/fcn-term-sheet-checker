@@ -53,6 +53,7 @@ IIS_FIELDS: dict[str, str] = {
     "no_ki_barrier_pct": "Decimal：無 KI 時到期條件「最差表現值大於或等於y%：100%」的 y（BBVA；= 說明書轉換比例）",
     "ko_at_maturity_pct": "Decimal：記憶式到期條件「最佳表現值大於或等於x%（出場值）」的 x（BBVA；= 說明書 KO %）",
     "day_count": "str：計息天數慣例（BBVA KO 每期型，例：1/1；= 說明書第 13 項）",
+    "issuing_branch": "str：相關機構「發行機構：」的完整寫法（UBS；發行分行須是倫敦分行，同說明書）",
 }
 
 

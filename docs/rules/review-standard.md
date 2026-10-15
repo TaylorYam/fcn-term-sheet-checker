@@ -82,8 +82,8 @@
 | `{daily_zh}`／`{daily_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`，否則空白 |
 | `{underlying_zh}`／`{underlying_en}` | 標的寫法：標的 1 檔填 `single_zh`／`single_en`、2 檔以上填 `basket_zh`／`basket_en`（兩組不同字串，不是「多檔才加前綴」；Issue #135） |
 | `{autocall_zh}`／`{autocall_en}` | 第一個可提前出場期早於到期（Non-Call < 天期）時填入 `autocall_zh`／`autocall_en`，否則空白（BNP，Issue #191）；會提前出場且記憶式、樣板另有 `autocall_memory_zh`／`autocall_memory_en` 時改填它（SG 中文「（記憶式自動提前出場）」，Issue #194） |
-| `{ko_observation_zh}`／`{ko_observation_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`、每期觀察（P 型）時填入 `periodic_zh`／`periodic_en`（UBS 名稱兩種都有字樣，`{daily_*}` 在每期時是空白不夠用；Issue #279，待實作） |
-| `{ki_zh}`／`{ki_en}` | 有 KI（KI 型態不是「無」）時填入 `ki_zh`／`ki_en`，否則空白（UBS 中文「（含觸及下限價事件）」、英文「Kick-In Event and 」；Issue #279，待實作） |
+| `{ko_observation_zh}`／`{ko_observation_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`、每期觀察（P 型）時填入 `periodic_zh`／`periodic_en`（UBS 名稱兩種都有字樣，`{daily_*}` 在每期時是空白不夠用；Issue #279） |
+| `{ki_zh}`／`{ki_en}` | 有 KI（KI 型態不是「無」）時填入 `ki_zh`／`ki_en`，否則空白（UBS 中文「（含觸及下限價事件）」、英文「Kick-In Event and 」；Issue #279） |
 | `{ccy}` 的別名 | 樣板的 `ccy_aliases`（ISO 代碼 → 名稱用的代碼）：SG 英文名稱把 CNH 寫成 CNY（Issue #194） |
 
 樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
@@ -305,7 +305,7 @@ OOS 多家上手的舊範本寫「受託投資」（SG 投資人須知警語七�
 - **配息率**：KO 每日型第一章第 13 項直接寫年利率；KO 每期型第 13 項每期 `配息率` = 年利率 ÷ 12 四捨五入 4 位，第 16 項 `年利率相當於約y%` 的 y = 年利率。
 - 發行機構地址電話、日圓商品的轉換匯率、情境分析算式（只核對情境假設年期面額利率、情境價格表、情境第 1 期配息率）不核對。
 
-### 2.17 UBS 的差異（2026-10-15 確認，Issue #279；尚未實作）
+### 2.17 UBS 的差異（2026-10-15 確認並實作，Issue #279）
 
 細節見 [UBS 核對規則](ubs-check-rules.md) §3.2、§3.6。審查通過日期、負責人、風險等級（預設【RRn】寫法）、受託機構名稱、電話（`+886-2-5556-1313` 已在 `phone_equivalents`）與地址（= `distributor.address`，`(營業活動所在地)` 不屬於地址）、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
 

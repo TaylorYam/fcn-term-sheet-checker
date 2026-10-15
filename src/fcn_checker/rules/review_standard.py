@@ -423,7 +423,13 @@ def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], Pa
     flags: dict[str, bool] = {}
     for flag, field, test, names in (
         ("maxi", "underlyings", lambda v: len(v) >= 2, {"maxi_zh", "maxi_en", "underlying_zh", "underlying_en"}),
-        ("daily", "ko_observation", lambda v: v == "D", {"daily_zh", "daily_en"}),
+        (
+            "daily",
+            "ko_observation",
+            lambda v: v == "D",
+            {"daily_zh", "daily_en", "ko_observation_zh", "ko_observation_en"},
+        ),
+        ("ki", "ki_type", lambda v: v != "none", {"ki_zh", "ki_en"}),
         ("autocall", "autocall_schedule", lambda v: v.first_callable < v.periods, {"autocall_zh", "autocall_en"}),
     ):
         if used & names:
@@ -494,6 +500,9 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         if "maxi" in flags:
             for code in ("zh", "en"):
                 values[f"underlying_{code}"] = tpl.underlying_text(flags["maxi"], code)
+        if {"ko_observation_zh", "ko_observation_en"} & tpl.placeholders(lang):
+            for code in ("zh", "en"):
+                values[f"ko_observation_{code}"] = tpl.ko_observation_text(flags["daily"], code)
         expected = getattr(tpl, lang).format(**values)
         if lang == "zh":
             norm = (lambda s: full_brackets(squash(s))) if tpl.normalize_brackets else squash
@@ -513,6 +522,8 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式"
                 + ("、標的數" if {"underlying_zh", "underlying_en"} & tpl.placeholders(lang) else "")
                 + ("、是否會提前出場" if {"autocall_zh", "autocall_en"} & tpl.placeholders(lang) else "")
+                + ("、KO 觀察方式" if {"ko_observation_zh", "ko_observation_en"} & tpl.placeholders(lang) else "")
+                + ("、有無 KI" if {"ki_zh", "ki_en"} & tpl.placeholders(lang) else "")
                 + "組出",
             )
         )

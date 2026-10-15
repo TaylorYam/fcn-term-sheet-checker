@@ -8,7 +8,7 @@
 # 核對結果檔「回填後」一律照 [import_format]（匯入格式）重新產生，不論表上欄位怎麼排（Issue #203）。
 # 規則說明見 docs/order-formats/reference-sheet.md。
 
-version = 15
+version = 16
 effective_date = 2026-10-15
 
 [layout]
@@ -59,6 +59,7 @@ GS = "GS"  # 2026-10-15 作業人員確認（Issue #248）
 NATIXIS = "Natixis"  # 2026-10-15 作業人員確認（Issue #261）
 CA = "CA"  # 2026-10-15 確認（Issue #274）
 BBVA = "BBVA"  # 2026-10-15 作業人員確認（Issue #269）
+UBS = "UBS"  # 2026-10-15 確認（Issue #279）
 
 # 標的不看順序的上手（上手代號）：表上 UL_1～UL_5 與說明書是同一組彭博代號（數量相同、不重複）就算相符，
 # 各價格欄依代號配對後比對，VWAP 回填也寫到相同代號那一格；其他上手須依順序逐字相等。

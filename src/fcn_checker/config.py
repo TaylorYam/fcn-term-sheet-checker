@@ -16,10 +16,12 @@ from .standard_fields import AGENT_PLACES, GUARANTOR_PLACES
 from .trading_calendar import Market, TradingCalendar
 
 # 商品名稱樣板可用的佔位符：天期、幣別，以及依說明書欄位填入的 memory（記憶式）、maxi（標的數 ≥ 2）、daily（KO 每日觀察）、
-# autocall（Non-Call < 天期，BNP），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）
-NAME_FLAGS = ("memory", "maxi", "daily", "autocall")
+# autocall（Non-Call < 天期，BNP）、ki（有 KI，UBS），與 underlying（標的寫法：1 檔填 single_*、2 檔以上填 basket_*）、
+# ko_observation（KO 觀察方式：每日填 daily_*、每期填 periodic_*，UBS）
+NAME_FLAGS = ("memory", "maxi", "daily", "autocall", "ki")
 NAME_PLACEHOLDERS = frozenset(
-    {"tenor", "ccy_zh", "ccy"} | {f"{f}_{lang}" for f in (*NAME_FLAGS, "underlying") for lang in ("zh", "en")}
+    {"tenor", "ccy_zh", "ccy"}
+    | {f"{f}_{lang}" for f in (*NAME_FLAGS, "underlying", "ko_observation") for lang in ("zh", "en")}
 )
 # 發行機構全名比對時可另外忽略的寫法差異（審查標準 issuer_name_ignore）→ 結果上的說明
 ISSUER_NAME_IGNORES = {"brackets": "括號（全形／半形）", "trailing_period": "英文名結尾的句點"}
@@ -49,6 +51,10 @@ class ProductNameTemplate:
     ccy_aliases: dict[str, str] = field(
         default_factory=dict
     )  # {ccy} 的其他寫法：ISO 代碼 → 名稱用的代碼（SG：CNH → CNY）
+    periodic_zh: str = ""  # {ko_observation_*}：KO 每期觀察時填入（每日時填 daily_*；UBS）
+    periodic_en: str = ""
+    ki_zh: str = ""  # {ki_zh}／{ki_en}：有 KI（KI 型態不是「無」）時填入（UBS）
+    ki_en: str = ""
 
     def placeholders(self, lang: str) -> frozenset[str]:
         """樣板（zh／en）用到的佔位符名稱。"""
@@ -64,6 +70,10 @@ class ProductNameTemplate:
 
     def ccy_text(self, iso: str) -> str:
         return self.ccy_aliases.get(iso, iso)
+
+    def ko_observation_text(self, daily: bool, lang: str) -> str:
+        """{ko_observation_<lang>}：KO 每日觀察用 daily_*，每期觀察用 periodic_*。"""
+        return getattr(self, f"{'daily' if daily else 'periodic'}_{lang}")
 
     def underlying_text(self, basket: bool, lang: str) -> str:
         """{underlying_<lang>} 的標的寫法：2 檔以上用 basket_*，1 檔用 single_*。"""
@@ -244,6 +254,10 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
         autocall_memory_zh=n.get("autocall_memory_zh", ""),
         autocall_memory_en=n.get("autocall_memory_en", ""),
         ccy_aliases=dict(n.get("ccy_aliases", {})),
+        periodic_zh=n.get("periodic_zh", ""),
+        periodic_en=n.get("periodic_en", ""),
+        ki_zh=n.get("ki_zh", ""),
+        ki_en=n.get("ki_en", ""),
     )
     if any(not (isinstance(k, str) and isinstance(v, str) and v) for k, v in tpl.ccy_aliases.items()):
         raise IngestionError(
@@ -260,6 +274,13 @@ def _product_name(issuer: str, n: dict[str, Any]) -> ProductNameTemplate:
                 + "（可用："
                 + "、".join(f"{{{p}}}" for p in sorted(NAME_PLACEHOLDERS))
                 + "）",
+            )
+        need = [k for k in (f"daily_{lang}", f"periodic_{lang}") if not getattr(tpl, k)]
+        if f"ko_observation_{lang}" in tpl.placeholders(lang) and need:
+            raise IngestionError(
+                "config_invalid",
+                f"審查標準商品名稱樣板 product_name.{issuer}.{lang} 用了 {{ko_observation_{lang}}}，"
+                f"但沒有設定 {'、'.join(need)}（KO 每日與每期觀察的寫法）",
             )
         missing = [k for k in (f"single_{lang}", f"basket_{lang}") if not getattr(tpl, k)]
         if f"underlying_{lang}" in tpl.placeholders(lang) and missing:
