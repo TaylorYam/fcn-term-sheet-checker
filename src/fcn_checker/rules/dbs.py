@@ -121,16 +121,20 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.5）
 
 
+def _name(s: str) -> str:
+    """名稱比對：去空白、括號統一全形（商品基本資料的名稱全形／半形括號混用）。"""
+    return full_brackets(squash(s))
+
+
 def document_info(ctx: IssuerContext) -> list[CheckResult]:
     """商品基本資料名稱 = 封面；兩個商品代號相同；商品基本資料幣別（中文與 ISO 代碼）、封面幣別代碼。"""
     f = ctx.ts.f
     zh, basic = f("name_zh"), f("name_basic")
-    norm = lambda s: full_brackets(squash(s))  # noqa: E731
     out = [
         kit.doc_check(ctx, "doc.name_consistency", "name_basic", "商品基本資料商品名稱", zh, basic).compare(
             zh.value,
             basic.value,
-            ok=zh.ok and basic.ok and norm(zh.value) == norm(basic.value),
+            ok=zh.ok and basic.ok and _name(zh.value) == _name(basic.value),
             tolerance="忽略空白；全形／半形括號不計",
             fail_message="須等於封面「商品中文名稱」",
         )

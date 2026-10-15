@@ -3,7 +3,7 @@
 - 範本代號：`dbs-zh-iis`
 - 對應說明書範本：[`dbs-zh-pd`](dbs-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-15 對 4 份真實樣本（DB1-IIS～DB4-IIS，與說明書 DB1–DB4 同商品）的探勘與核對範圍決定（Issue #280）
-- 狀態：已實作（Issue #280：`parsers/dbs_iis.py`、範本專屬規則 `rules/dbs_iis.py`：每頁頁首刊印日期 `iis.print_dates`、最大利率值 `iis.monthly_coupon`）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
+- 狀態：已實作（Issue #280：`parsers/dbs_iis.py`、範本專屬規則 `rules/dbs_iis.py`：每頁頁首刊印日期 `iis.print_dates`、最大利率值 = 年利率 ÷ 12 無條件進位 `iis.monthly_coupon`）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
 
 > 真實樣本與擷取文字只放在被 Git 忽略的 `data/`。本文件的數值範例都是虛構的；樣本代號與真實商品代號的對照只存在本機（`data/tmp/dbs/sample_map.txt`）。產品條件以參考條件表（`data/orders/核對表格式..xlsx` 有 4 列 DBS）與同商品說明書為基準。
 

@@ -427,29 +427,38 @@ def _quanto(ctx: Context, rows) -> bool | None:
     return any(q != to_iso[cz.value] for q in quotes)
 
 
+# 名稱樣板旗標 → (讀的說明書欄位, 判斷（判斷不出為 None）, 用到它的佔位符, 欄位不適用時的值（None：照常轉人工覆核）)
+_NAME_FLAG_SOURCES = (
+    ("maxi", "underlyings", lambda ctx, v: len(v) >= 2, {"maxi_zh", "maxi_en", "underlying_zh", "underlying_en"}, None),
+    ("daily", "ko_observation", lambda ctx, v: v == "D", {"daily_zh", "daily_en"}, None),
+    (
+        "autocall",
+        "autocall_schedule",
+        lambda ctx, v: v.first_callable < v.periods,
+        {"autocall_zh", "autocall_en"},
+        None,
+    ),
+    ("quanto", "underlying_prices", lambda ctx, v: _quanto(ctx, v), {"quanto_zh", "quanto_en"}, None),
+    ("ki", "ki_type", lambda ctx, v: v != "none", {"ki_zh", "ki_en"}, False),
+)
+
+
 def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
     """名稱樣板的 maxi（標的數 ≥ 2；{underlying_*} 也依它選 1 檔或 2 檔以上的寫法）、daily（KO 每日觀察）、
     autocall（第一個可提前出場期早於到期，即 Non-Call < 天期）、quanto（承作幣別 ≠ 標的報價幣別）、ki（有 KI）旗標；
     只讀樣板用到的說明書欄位。不依上手分支。"""
     flags: dict[str, bool] = {}
-    for flag, field, test, names in (
-        ("maxi", "underlyings", lambda v: len(v) >= 2, {"maxi_zh", "maxi_en", "underlying_zh", "underlying_en"}),
-        ("daily", "ko_observation", lambda v: v == "D", {"daily_zh", "daily_en"}),
-        ("autocall", "autocall_schedule", lambda v: v.first_callable < v.periods, {"autocall_zh", "autocall_en"}),
-        ("quanto", "underlying_prices", lambda v: _quanto(ctx, v), {"quanto_zh", "quanto_en"}),
-        ("ki", "ki_type", lambda v: v != "none", {"ki_zh", "ki_en"}),
-    ):
+    for flag, field, test, names, not_applicable in _NAME_FLAG_SOURCES:
         if used & names:
             pf = standard_field(ctx, field)
-            if flag == "ki" and pf.status == FieldStatus.NOT_APPLICABLE:  # 無 KI 也可能交成不適用
-                flags[flag] = False
+            if not_applicable is not None and pf.status == FieldStatus.NOT_APPLICABLE:  # 例：無 KI 交成不適用
+                flags[flag] = not_applicable
                 continue
             if not pf.ok:
                 return flags, pf
-            value = test(pf.value)
+            value = test(ctx, pf.value)
             if value is None:
-                note = "標的價格旁的幣別字讀不到或不在審查標準的幣別對照，判斷不出是否為 Quanto"
-                return flags, ParsedField.invalid(field, [], note)
+                return flags, ParsedField.invalid(field, [], f"判斷不出名稱樣板的「{flag}」旗標")
             flags[flag] = value
     return flags, None
 

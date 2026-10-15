@@ -17,7 +17,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import full_brackets, squash
 from . import dbs, iis
-from .common import RawText, capture_group, derived, fee_rates
+from .common import RawText, capture_group, derived, fee_rates, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "dbs-zh-iis"
@@ -151,7 +151,8 @@ def underlyings(raw: RawText) -> ParsedField:
 
 
 def _terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
-    """收益分配事項～發行或受託不成立之處理：最大利率值與年利率、第 1～k 期、記憶式、下限觸發事件（範本規格 §4）。"""
+    """收益分配事項～發行或受託不成立之處理：最大利率值與年利率、第 1～k 期、記憶式、下限觸發事件（和商品簡介價格表的
+    下限觸發價格欄須一致；範本規格 §4）。"""
     sec = iis.section(ti, TERMS)
     if sec is None:
         note = "找不到「收益分配事項」到「發行或受託不成立之處理」段落"
@@ -159,24 +160,13 @@ def _terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
             fields[n] = ParsedField.missing(n, note)
         return
     st = TextIndex(sec)
-    rate = r"最大利率值：就每個觀察期間而言，為" + PCT + r"\(" + PCT + r"/12\)，無條件進位至小數點後第四位"
-    fields["coupon_pa_pct"] = capture_group(sec, rate, 2, "coupon_pa_pct", Decimal)
-    fields["monthly_coupon_ceiling_pct"] = capture_group(sec, rate, 1, "monthly_coupon_ceiling_pct", Decimal)
+    fields["coupon_pa_pct"] = capture_group(sec, dbs.MAX_RATE, 2, "coupon_pa_pct", Decimal)
+    fields["monthly_coupon_ceiling_pct"] = capture_group(sec, dbs.MAX_RATE, 1, "monthly_coupon_ceiling_pct", Decimal)
     fields["first_callable_period"] = dbs.full_rate_periods(
         "first_callable_period", st, r"利率：對於第1(?:~(\d{1,2}))?個觀察期間而言，利率為最大利率值"
     )
     fields["ko_memory"] = dbs.memory(st, "ko_memory")
-    am, none = list(st.finditer(dbs.KI_MATURITY)), list(st.finditer(dbs.NO_KI_MATURITY))
-    event = st.text.count(dbs.KI_EVENT)
-    if len(am) == 1 and not none and event == 1:
-        p = st.text.find(dbs.KI_EVENT)
-        fields["ki_type"] = ParsedField.present("ki_type", "AM", st.lines_for(p, p + len(dbs.KI_EVENT)))
-    elif len(none) == 1 and not am and event == 0:
-        fields["ki_type"] = ParsedField.present("ki_type", "none", st.lines_for(none[0].start(), none[0].end()))
-    else:
-        fields["ki_type"] = ParsedField.invalid(
-            "ki_type", [], "到期贖回 (a) 與下限觸發事件的寫法不一致或不在範本規格內"
-        )
+    fields["ki_type"] = dbs.ki_type(st, fields["price_table"])
 
 
 def _prices(fields: dict[str, ParsedField], lines: list[Line]) -> set[str]:
@@ -186,24 +176,8 @@ def _prices(fields: dict[str, ParsedField], lines: list[Line]) -> set[str]:
     if table.ok and uls.ok and table.value["tickers"] != uls.value:
         note = f"價格表的彭博代碼 {table.value['tickers']} 和「連結標的資產：」{uls.value} 不同"
         table = ParsedField(table.name, FieldStatus.INVALID, evidence=list(table.evidence), note=note)
-    if table.ok:
-        fields["underlying_prices"] = ParsedField(
-            "underlying_prices",
-            FieldStatus.PRESENT,
-            tuple(
-                standard_fields.PriceRow(t, dict(p), tuple(Evidence.of(ln) for ln in lns), currency=c)
-                for t, p, lns, c in zip(
-                    table.value["tickers"],
-                    table.value["rows"],
-                    table.value["row_lines"],
-                    table.value["currencies"],
-                    strict=True,
-                )
-            ),
-            list(table.evidence),
-        )
-    else:
-        fields["underlying_prices"] = derived("underlying_prices", table)
+    fields["price_table"] = table
+    fields["underlying_prices"] = dbs.price_rows(table)
     for key, col in (("strike_pct", "strike"), ("ko_pct", "ko")):
         fields[key] = derived(key, table, table.value["pcts"][col] if table.ok else None)
     if table.ok and "ki" in table.value["pcts"]:
@@ -245,7 +219,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     # 商品簡介
     put("currency_zh", rf"計價幣別：({dbs.ZH_CCY})\([A-Z]{{3}}\)；")
     denom = rf"商品面額：每單位({dbs.CCY})([\d,]+),發行價格：商品面額的" + PCT
-    fields["denomination"] = capture_group(text_lines, denom, 2, "denomination", dbs.number)
+    fields["denomination"] = capture_group(text_lines, denom, 2, "denomination", number)
     fields["issue_price_pct"] = capture_group(text_lines, denom, 3, "issue_price_pct", Decimal)
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others",

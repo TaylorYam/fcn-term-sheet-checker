@@ -52,7 +52,8 @@ MEMORY_EVENT = (
     "記憶事件：就每一連結標的而言，如果該連結標的在任一自動提前出場決定日的參考價格大於或等於其自動提前出場價格"
 )
 MEMORY_ALL = r"自動提前出場事件：若所有連結標的皆被視[為爲]記憶標的"
-MAX_RATE = r"最大利率值：就每個觀察期間而言，為" + PCT + r"[（(]即" + PCT + r"/12[）)]，無條件進位至小數點後第四位"
+# 說明書「為a%（即y%/12）」、投資人須知「為a% (y%/12)」
+MAX_RATE = r"最大利率值：就每個觀察期間而言，為" + PCT + r"[（(]即?" + PCT + r"/12[）)]，無條件進位至小數點後第四位"
 FULL_RATE = r"利率：1?\)?對於第1(?:~(\d{1,2}))?個觀察期間而言，利率為最大利率值"
 # 到期贖回（範本規格 §4.4）
 KI_EVENT = "下限觸發事件：若任一連結標的於定價日的參考價格小於其下限觸發價格，則視為發生下限觸發事件"
@@ -248,14 +249,15 @@ def table_a(ti: TextIndex) -> ParsedField:
     if a < 0 or b < 0:
         return ParsedField.missing("coupon_table", "商品年期格找不到「表A：」觀察期間表")
     text = ti.text[a + len(head) : b]
-    rows = []
-    for m in re.finditer(r"(\d{1,2})\|?" + D + D, text):
-        if int(m[1]) != len(rows) + 1:
-            break
-        rows.append({"period": int(m[1]), "end": parse_date(m[2]), "payment": parse_date(m[3])})
+    rows = [
+        {"period": int(m[1]), "end": parse_date(m[2]), "payment": parse_date(m[3])}
+        for m in re.finditer(r"(\d{1,2})\|?" + D + D, text)
+    ]
     ev = ti.lines_for(a, b)
     if not rows or any(None in r.values() for r in rows):
         return ParsedField.invalid("coupon_table", ev, "表A 的列讀不到")
+    if [r["period"] for r in rows] != list(range(1, len(rows) + 1)):
+        return ParsedField.invalid("coupon_table", ev, "表A 的觀察期間不是從 1 起連續")
     return ParsedField.present("coupon_table", {"kind": "D", "rows": rows}, ev)
 
 
@@ -289,24 +291,36 @@ def memory(ti: TextIndex, name: str) -> ParsedField:
 
 
 def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:
-    """下限觸發事件（範本規格 §4.4）：到期 (a)、下限觸發事件定義、表1 下限觸發價格欄三者須一致。"""
+    """下限觸發事件（範本規格 §4.4）：到期 (a)、下限觸發事件定義、價格表下限觸發價格欄三者須一致（說明書、投資人須知共用）。"""
     am, none = list(ti.finditer(KI_MATURITY)), list(ti.finditer(NO_KI_MATURITY))
     event = ti.text.count(KI_EVENT)
     has_col = table.ok and "ki" in table.value["columns"]
     if len(am) == 1 and not none and event == 1:
         if table.ok and not has_col:
             return ParsedField.invalid(
-                "ki_type", ti.lines_for(am[0].start(), am[0].end()), "有下限觸發事件，但表1 沒有下限觸發價格欄"
+                "ki_type", ti.lines_for(am[0].start(), am[0].end()), "有下限觸發事件，但價格表沒有下限觸發價格欄"
             )
         p = ti.text.find(KI_EVENT)
         return ParsedField.present("ki_type", "AM", ti.lines_for(p, p + len(KI_EVENT)))
     if len(none) == 1 and not am and event == 0:
         if has_col:
             return ParsedField.invalid(
-                "ki_type", ti.lines_for(none[0].start(), none[0].end()), "表1 有下限觸發價格欄，但沒有下限觸發事件"
+                "ki_type", ti.lines_for(none[0].start(), none[0].end()), "價格表有下限觸發價格欄，但沒有下限觸發事件"
             )
         return ParsedField.present("ki_type", "none", ti.lines_for(none[0].start(), none[0].end()))
     return ParsedField.invalid("ki_type", [], "到期贖回 (a) 與下限觸發事件的寫法不一致或不在範本規格內")
+
+
+def price_rows(table: ParsedField) -> ParsedField:
+    """價格表 → 標準欄位 `underlying_prices`（代碼、各價格、證據、價格旁的幣別字）；價格表有問題時沿用它的狀態。"""
+    if not table.ok:
+        return derived("underlying_prices", table)
+    v = table.value
+    rows = tuple(
+        standard_fields.PriceRow(t, dict(p), tuple(Evidence.of(ln) for ln in lns), currency=c)
+        for t, p, lns, c in zip(v["tickers"], v["rows"], v["row_lines"], v["currencies"], strict=True)
+    )
+    return ParsedField("underlying_prices", FieldStatus.PRESENT, rows, list(table.evidence))
 
 
 def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) -> ParsedField:
@@ -406,21 +420,7 @@ def _table_fields(fields: dict[str, ParsedField]) -> None:
         fields["underlyings"] = ParsedField(
             "underlyings", FieldStatus.PRESENT, list(tickers.value), list(tickers.evidence)
         )
-        fields["underlying_prices"] = ParsedField(
-            "underlying_prices",
-            FieldStatus.PRESENT,
-            tuple(
-                standard_fields.PriceRow(t, dict(p), tuple(Evidence.of(ln) for ln in lns), currency=c)
-                for t, p, lns, c in zip(
-                    table.value["tickers"],
-                    table.value["rows"],
-                    table.value["row_lines"],
-                    table.value["currencies"],
-                    strict=True,
-                )
-            ),
-            list(table.evidence),
-        )
+        fields["underlying_prices"] = price_rows(table)
     elif table.ok and tickers.ok:
         note = f"表1 的彭博代碼 {table.value['tickers']} 和連結標的資產表 {tickers.value} 不同（代碼、順序或檔數）"
         ev = list(table.evidence) + list(tickers.evidence)
