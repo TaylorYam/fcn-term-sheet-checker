@@ -1,7 +1,7 @@
 """SG 專屬規則（docs/rules/sg-check-rules.md）：配息率與平均年化報酬率、說明書內部交叉驗證、日期表結構、固定值重印。
 
 參考條件表欄位、價格推算、審查標準（含 SG 分節：保證機構與總代理人名稱、商品種類、最低申購倍數）與回填是各上手
-共用的規則；情境分析見 rules/sg_scenario.py。只有年利率要讀參考條件表（ADR 0005 的例外，見 REFERENCE_FIELDS）。
+共用的規則；情境分析見 rules/sg_scenario.py。只有年利率要讀參考條件表（ADR 0009，見 REFERENCE_FIELDS）。
 抓不到、歧義或寫法不在範本規格內一律轉人工覆核。每筆結果的項目名稱寫在規則旁；預期值來自說明書其他位置、推算或審查標準。
 """
 
@@ -16,7 +16,7 @@ from . import kit, sg_scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "SG"
-# 本上手規則可讀的參考條件表欄位（ADR 0005 的例外：配息率與平均年化報酬率依表上年利率核對，同 BARC／MS／BNP）
+# 本上手規則可讀的參考條件表欄位（ADR 0009，須在 reference_fields 宣告：配息率與平均年化報酬率依表上年利率核對，同 BARC／MS／BNP）
 REFERENCE_FIELDS = ("coupon_pa_pct",)
 NOT_COVERED = [
     {

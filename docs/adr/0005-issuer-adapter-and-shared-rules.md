@@ -1,6 +1,6 @@
 # 0005: 上手 adapter 只提供標準欄位與說明書內部規則，參考條件表與審查標準規則各上手共用
 
-- Status: Accepted
+- Status: Superseded by [0009](0009-shared-rules-defined-per-rule.md)
 - Date: 2026-10-02
 
 ## Context
