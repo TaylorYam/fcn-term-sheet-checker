@@ -147,6 +147,13 @@ def test_consistent_sg_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tmp_
     assert not rules & {"iis.page_totals", "iis.underlying_names", "iis.min_subscription", "iis.ko_observation_dates"}
 
 
+def test_bloomberg_code_wrapped_onto_two_lines_is_still_read(tmp_path):
+    """彭博代碼欄窄，4 碼以上代號換成「代號」「交易所碼」兩行（Issue #231）：標的與價格仍讀到，兩份都通過。"""
+    ts, iis = check_pair(tmp_path, Spec(iis_ticker_wrap=True))
+    assert bad(iis) == set() and iis.report.status == PASS
+    assert ts.report.status == PASS and ts.fills_sheet
+
+
 def test_guarantor_name_without_brackets_is_an_equivalent(tmp_path):
     """相關機構壹 2. 的英文名沒有括號：審查標準 guarantor_name_equivalents.sg 的等價寫法，照常通過並寫出依據。"""
     _, iis = check_pair(tmp_path)
