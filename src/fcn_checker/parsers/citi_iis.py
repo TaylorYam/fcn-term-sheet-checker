@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 from .. import standard_fields
@@ -15,7 +16,7 @@ from ..schema import DetectionResult, Evidence, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import citi, iis, money
-from .layout import TextIndex, parse_date
+from .layout import TextIndex, join_text, parse_date
 
 TEMPLATE_ID = "citi-zh-iis"
 PARSER_VERSION = "1"
@@ -116,13 +117,16 @@ def _section_text(ti: TextIndex, anchors: tuple[str, str]) -> tuple[TextIndex, l
 
 
 def _underlyings(lines: list[Line], ti: TextIndex) -> ParsedField:
-    """商品簡介「連結標的資產：」各檔的「(彭博代碼：XXX UW)」（代碼可能被換行拆開，接回原文行再找）。"""
+    """商品簡介「連結標的資產：」各檔的「(彭博代碼：XXX UW)」。
+
+    代碼可能被換行拆開，連在代號與交易所碼之間（`(彭博代碼：NVDA` / `UW)`，Issue #229）：原文行用 `join_text` 接回
+    （英數字跨行補一個空白）再找。"""
     name = "underlyings"
     a, b = ti.text.find("連結標的資產："), ti.text.find("商品年期：")
     if a < 0 or b <= a:
         return ParsedField.missing(name, "找不到商品簡介「連結標的資產」")
     region = ti.lines_for(a, b)
-    joined = "".join(ln.text.strip() for ln in region)
+    joined = join_text([replace(ln, text=ln.text.strip()) for ln in region])
     tickers = [f"{m[1]} {m[2]}" for m in TICKER.finditer(joined)]
     if not tickers:
         return ParsedField.invalid(name, region, "連結標的資產找不到「(彭博代碼：代號 交易所碼)」")

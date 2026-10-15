@@ -84,6 +84,9 @@ class Spec(ProductSpec):
     trustee_code: str | None = None  # 受託或銷售機構商品代號；None 同商品代號，"" 為 `[ ]`
     units: int = 10  # 情境假設的投資單位數
     iis_pages: int = 4  # 投資人須知頁數（不足補空白頁、多的刪掉最後幾頁）
+    iis_ticker_break: int | None = (
+        None  # 投資人須知第 n 檔（從 1 起）的彭博代碼在代號與交易所碼之間換行（OOS 實際寫法）
+    )
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -438,6 +441,21 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
         )
     lines.append(f"開始受理贖回日期：{zh_date(weekday_on_or_after(s.issue_date + dt.timedelta(days=1)))}")
     for text in lines:
+        if s.iis_ticker_break and text.startswith("連結標的資產："):  # 每檔一行，指定那檔在代號與交易所碼之間換行
+            entries = text.removeprefix("連結標的資產：").split("； ")
+            out = ["• 連結標的資產："]
+            for n, entry in enumerate(entries, 1):
+                sep = "" if n == len(entries) else "；"
+                if n == s.iis_ticker_break:
+                    code, exchange = entry.rsplit(" ", 1)
+                    out[-1] += code
+                    out.append(exchange + sep)
+                else:
+                    out[-1] += entry + sep
+                    out.append("")
+            for k, part in enumerate(x for x in out if x):
+                w.line(48 if k == 0 else 60, part)
+            continue
         d.text(48, f"• {text}", 60)
     d.section = "coupon"
     w.line(48, "2. 收益分配事項：")

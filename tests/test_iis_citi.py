@@ -102,6 +102,14 @@ def test_consistent_citi_term_sheet_and_iis_pass_and_the_term_sheet_is_filled(tm
     assert (("field.currency", "payment_currency_coupon") in checked) == (not spec.autocall or spec.ko_obs == "P")
 
 
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_ticker_wrapped_between_code_and_exchange_is_read(tmp_path, n):
+    """彭博代碼在代號與交易所碼之間換行（`(彭博代碼：XXXX` / `UW)`，Issue #229 OOS 實際寫法）：每一檔都讀得到。"""
+    ts, iis = pair(tmp_path, Spec(iis_ticker_break=n), order=(3, 1, 2))
+    assert bad(iis) == set(), bad(iis)
+    assert ts.fills_sheet
+
+
 def test_guarantor_name_in_chinese_only_is_an_equivalent(tmp_path):
     _, iis = pair(tmp_path)
     found = [r for r in iis.report.results if r.field == "guarantor_name_org"]
