@@ -109,8 +109,15 @@ def test_initial_pricing_must_match_the_table_header(tmp_path, spec, sheet):
     assert rule(r, "field.initial_pricing")[0].status == S.MISMATCH
 
 
+def test_opening_price_header_matches_the_sheet(tmp_path):
+    """表頭「期初評價日之開盤價格」= 表上「開盤價」（Issue #229）。"""
+    r = check(tmp_path, Spec(pricing_text="開盤價格"), 期初定價="開盤價")
+    assert r.status == S.PASS, problems(r)
+    assert rule(r, "field.initial_pricing")[0].status == S.PASS
+
+
 def test_unknown_initial_pricing_header_requires_review(tmp_path):
-    r = check(tmp_path, Spec(), pdf_spec=Spec(pricing_text="開盤價"))
+    r = check(tmp_path, Spec(), pdf_spec=Spec(pricing_text="平均價格"))
     assert rule(r, "field.initial_pricing")[0].status == S.REVIEW_REQUIRED
 
 

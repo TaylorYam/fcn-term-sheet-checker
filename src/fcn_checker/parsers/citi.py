@@ -74,7 +74,8 @@ HEADERS = (("initial", "期初股價"), ("strike", "執行價"), ("ki", "下限�
 ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"  # 表格價格只寫中文幣別
 PRICE_CELL = rf"({money.NUMBER})({ZH_CCY})"
 TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})\s+(?:Equity|EQUITY)\b")
-INITIAL_PRICING = {"收盤價格": "close", "VWAP": "vwap"}  # §9 表頭「期初股價(期初評價日之X)」→ 參考條件表期初定價對照值
+# §9 表頭「期初股價(期初評價日之X)」→ 參考條件表期初定價對照值（開盤價格：OOS 樣本，Issue #229）
+INITIAL_PRICING = {"收盤價格": "close", "開盤價格": "open", "VWAP": "vwap"}
 AUTOCALL_LIMIT = r"自動提前出場界限：係指相關連結標的之期初股價的" + PCT
 NO_AUTOCALL_KO_NOTE = "說明書沒有自動提前出場界限（Non-Call = 天期，不會提前出場）：KO 視為期初股價的 100%"
 ABSENT_KO = "說明書沒有自動提前出場（第 13 項沒有自動提前出場界限）"
@@ -628,7 +629,7 @@ def price_table(name: str, lines: list[Line], *, reprint: bool = False) -> Parse
     if len(found) != len(pct_cols):
         return ParsedField.invalid(name, lines[:first_row], "標的表表頭的百分比數與欄位數不符")
     pcts = dict(zip(pct_cols, found, strict=True))
-    pricing = re.search(r"期初評價日之(收盤價格|VWAP)", head)
+    pricing = re.search(r"期初評價日之(" + "|".join(INITIAL_PRICING) + ")", head)
     body = lines[first_row:]
     joined = " ".join(ln.text.strip() for ln in body)
     tickers = [f"{m[1]} {m[2]}" for m in TICKER.finditer(joined)]
