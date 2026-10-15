@@ -252,7 +252,7 @@ def _cumulative(out, rid, tag, item, s, amount) -> None:
     per = amount if amount is not None else c.amount
     expected = per * periods_
     actual = s.cumulative.value.amount
-    issues = [] if actual == expected else [f"累積總配息金額 {actual} 應為每期配息 {per} × {periods_} 期 = {expected}"]
+    issues = kit.cumulative_coupon_issues("累積總配息金額", actual, per, periods_, c.total, c.rate, Q2)
     out.append(
         kit.calc_result(rid, field, item, issues, kit.evidence(s.cumulative.lines), expected=expected, actual=actual)
     )

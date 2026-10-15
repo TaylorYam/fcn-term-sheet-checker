@@ -185,6 +185,19 @@ def shown(value: Decimal, like: Decimal) -> Decimal:
     return value.quantize(Decimal(1).scaleb(exp), ROUND_HALF_UP) if isinstance(exp, int) else value
 
 
+def cumulative_coupon_issues(
+    label: str, actual: Decimal, per: Decimal, periods: int, base: Decimal, rate: Decimal, step: Decimal
+) -> list[str]:
+    """累積配息兩種算法都接受（Issue #244；發行機構同一份說明書裡兩種都用）：四捨五入後的每期配息 `per` × 期數，
+    或本金 `base` × 月配息率 `rate`% × 期數再四捨五入到每期配息的位數 `step`。兩種都不符時錯訊列出兩個預期值。"""
+    rounded = per * periods
+    exact = (base * rate / 100 * periods).quantize(step, ROUND_HALF_UP)
+    if actual in (rounded, exact):
+        return []
+    other = "" if exact == rounded else f"，或 {base} × {rate}% × {periods} 期 = {exact}"
+    return [f"{label} {actual} 應為每期配息 {per} × {periods} 期 = {rounded}{other}"]
+
+
 def read_standard(ts: TermSheet, name: str) -> ParsedField:
     """共用規則讀說明書欄位的唯一方式：只能讀標準欄位；上手 adapter 沒交出時視為缺漏，相關規則轉人工覆核。"""
     if not is_standard(name):
