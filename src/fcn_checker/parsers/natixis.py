@@ -23,9 +23,8 @@ from .common import RawText, capture_group, derived, fee_rates, number
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
-PARSER_VERSION = (
-    "3"  # 2：第一章條號中途重編、新版受託機構標籤（Issue #270）；3：價格表改由 parsers/price_table.py 讀（Issue #287）
-)
+# 2：第一章條號中途重編、新版受託機構標籤（Issue #270）；3：價格表改由 parsers/price_table.py 讀（Issue #287）
+PARSER_VERSION = "3"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -82,7 +81,6 @@ KI_DAY = {
     "觸及事件判定期間之各配息觀察期間結束日": "P",
 }
 COUPON = r"月配息率：" + PCT + r"\(即年利率" + PCT + r"\)"
-# 價格欄（依表頭關鍵字的出現順序決定欄序；Natixis 是 KO → KI → K）
 # 第 9 項價格表（以左欄列號切列）與第 16 項情境價格表（沒有列號與代碼，以價格切列）：欄序 KO → KI → K，
 # 表頭 %「(期初進場價格之X%)」；價格不帶幣別字（右邊另有「貨幣」欄）
 PRICE_TABLE = price_table.TableSpec(
@@ -382,11 +380,11 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line]) -> None:
     fields["print_date"] = capture("print_date", ti, r"中文產品說明書刊印日期：" + D, parse_date, whole_match=True)
 
 
-# ---------------------------------------------------------------- 第 9 項連結標的表、第 16 項情境價格表
+# ---------------------------------------------------------------- 第 9 項價格表、第 16 項情境價格表
 
 
 def underlying_table(name: str, art9: list[Line]) -> ParsedField:
-    """第 9 項連結標的表：「投資組合」那一句之後到「相對權重：」之前。"""
+    """第 9 項價格表：「投資組合」那一句之後到「相對權重：」之前。"""
     ti = TextIndex(art9)
     a = ti.text.find("「投資組合」於本商品發行日")
     b = ti.text.find("相對權重：", a)
@@ -399,7 +397,7 @@ def scenario_table(name: str, lns: list[Line]) -> ParsedField:
     ti = TextIndex(lns)
     a = ti.text.find("連結標的(i)")
     b = ti.text.find("情境一", a)
-    region = lns[ti.line_at(a) : ti.line_at(b)] if 0 <= a and b >= 0 else []
+    region = lns[ti.line_at(a) : ti.line_at(b)] if 0 <= a < b else []
     return price_table.read(name, region, SCENARIO_TABLE)
 
 
@@ -415,7 +413,7 @@ def distributor_code(ti: TextIndex, pattern: str) -> ParsedField:
 
 
 def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
-    """連結標的表 → 標準欄位：標的、各標的價格；K／KO／KI % 主來源是第 14、15 項定義（表頭 % 由規則交叉驗證）。"""
+    """第 9 項價格表 → 標準欄位：標的、各標的價格；K／KO／KI % 主來源是第 14、15 項定義（表頭 % 由規則交叉驗證）。"""
     fields["underlyings"] = price_table.underlyings(table)
     fields["underlying_prices"] = price_table.price_rows(table)
     fields["strike_pct"] = fields["strike_def_pct"]
@@ -736,7 +734,7 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         [occ("issue_price_ch4", "發行價格（申購價金）", "第四章第 5 項申購價金之計算", fields["issue_price_ch4"])],
     )
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
-    currencies = (  # 金額旁的幣別字（Issue #170）：連結標的表貨幣欄、情境算式金額不列入
+    currencies = (  # 金額旁的幣別字（Issue #170）：價格表貨幣欄、情境算式金額不列入
         ("denomination_currency", "每單位商品面額幣別", "第一章第 5 項每單位商品面額"),
         ("minimum_subscription_currency", "最低申購金額幣別", "第四章第 4 項最低申購金額"),
         ("minimum_additional_currency", "累加申購金額幣別", "第四章第 4 項累加申購金額"),

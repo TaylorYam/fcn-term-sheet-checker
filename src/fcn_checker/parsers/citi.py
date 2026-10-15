@@ -68,8 +68,7 @@ COVER_LABELS = (
 VALUE_X = 230.0  # 封面兩欄表：標籤在左（x < 230）、值與 ‧ 在右
 WARNING_HEAD = "警語："
 BULLETS = "‧•·"
-# 標的表與假設價格表的欄（表頭文字 → 欄）；欄位順序以表頭出現位置為準
-# 價格表：§9 標的表與 §15 假設價格表（同一張表重印，執行價、下限價欄標「(假設)」），以左欄列號切列；
+# 價格表：§9 價格表與 §15 假設價格表（同一張表重印，執行價、下限價欄標「(假設)」），以左欄列號切列；
 # 表頭 % 寫「(期初股價的X%)」，期初股價欄寫期初定價「(期初評價日之X)」；沒有自動提前出場時沒有 KO 欄
 PRICE_TABLE = price_table.TableSpec(
     where="第 9 項價格表",
@@ -339,7 +338,7 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
         put("currency_art13", art13, rf"應以({CCY})支付下列固定配息金額")
     fields["memory_wording_ch1"] = _memory_wording(doc)
 
-    # §9 標的表
+    # §9 價格表
     art9 = article(9)
     table = price_table.read(
         "underlying_table", _table_region(art9, "連結標的資產：", "（每一連結標的下稱"), PRICE_TABLE
@@ -572,7 +571,7 @@ def _memory_wording(doc: Document) -> ParsedField:
     return ParsedField.present("memory_wording_ch1", len(hits), hits or ti.lines[:1])  # 沒有時證據為章名
 
 
-# ---------------------------------------------------------------- 標的表
+# ---------------------------------------------------------------- 價格表
 
 
 def _table_region(lines: list[Line], start: str, end: str | None) -> list[Line]:
@@ -594,7 +593,7 @@ def _table_region(lines: list[Line], start: str, end: str | None) -> list[Line]:
 
 
 def _prices(fields: dict[str, ParsedField], table: ParsedField, has_autocall: bool) -> None:
-    """§9 標的表 → 標準欄位 `underlying_prices`（列名「第 n 檔」）；無自動提前出場時 KO 價 = 期初股價（KO 100%）。"""
+    """§9 價格表 → 標準欄位 `underlying_prices`（列名「第 n 檔」）；無自動提前出場時 KO 價 = 期初股價（KO 100%）。"""
     names = [f"第 {i} 檔" for i in range(1, len(table.value.rows) + 1)] if table.ok else None
     rows = price_table.price_rows(table, names=names)
     if rows.ok and not has_autocall:
@@ -603,12 +602,12 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, has_autocall: bo
 
 
 def initial_pricing(table: ParsedField) -> ParsedField:
-    """標的表表頭「期初股價(期初評價日之X)」的 X → 期初定價（收盤價格／開盤價格／VWAP）。"""
+    """價格表表頭「期初股價(期初評價日之X)」的 X → 期初定價（收盤價格／開盤價格／VWAP）。"""
     if not table.ok:
         return derived("initial_pricing", table)
     m = re.search(r"期初評價日之(" + "|".join(INITIAL_PRICING) + ")", table.value.heads["initial"])
     if m is None:
-        note = "標的表表頭「期初股價(期初評價日之…)」寫法未知"
+        note = "價格表表頭「期初股價(期初評價日之…)」寫法未知"
         return ParsedField("initial_pricing", FieldStatus.INVALID, evidence=list(table.evidence), note=note)
     return ParsedField("initial_pricing", FieldStatus.PRESENT, INITIAL_PRICING[m[1]], list(table.evidence))
 

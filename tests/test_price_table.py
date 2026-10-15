@@ -340,6 +340,44 @@ def test_a_name_starting_above_the_first_row_anchor_belongs_to_that_row():
     assert table.value.names == ["甲公司第一行與第二行"]
 
 
+def test_a_whole_value_below_a_price_is_another_value_not_its_last_digits():
+    """價格下面另有一個數字（`80.0000` / `3`，例：註腳或下一頁的文字）：不接成 `80.00003`，個數不符轉人工覆核。
+    小數不足 4 位、換行接下來的後幾位（`80.00` / `00`）才接回。"""
+    plain = TableSpec(**{**SPEC.__dict__, "anchor": "number"})
+    ok_row = row(1, 150, 1, "甲公司", "AAA UW", ROW1, ccy="")
+    stray = centered(1, X["strike"], 163, "3")
+    assert bad([*header(), *ok_row, stray], plain) == "測試價格表第 1 列有 5 個價格，與 4 欄不符"
+    wrapped = [ln for ln in ok_row if ln.text != "80.0000"]
+    wrapped += [centered(1, X["strike"], 150, "80.00"), centered(1, X["strike"], 160, "00")]
+    table = read("t", [*header(), *wrapped], plain)
+    assert table.ok, table.note
+    assert table.value.prices[0]["strike"] == Decimal("80.0000")
+
+
+def test_hong_kong_codes_are_not_taken_for_row_numbers():
+    """港股代碼的代號是數字（`5 HK`、`27 HK`）：仍是代碼列錨點，不當成列號去掉。"""
+    spec = TableSpec(**{**SPEC.__dict__, "anchor": "ticker"})
+    lines = [*header(), *row(1, 150, None, "甲公司", "5 HK", ROW1), *row(1, 170, None, "乙公司", "27 HK", ROW2)]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.tickers == ["5 HK", "27 HK"]
+
+
+def test_first_line_of_a_taller_header_cell_above_the_first_header_row_is_kept():
+    """表頭格垂直置中、較高那一格的第一行比其他格都高、自成一列（`下限價` / `(期初價格之` / `60.00%)`）：仍屬於表頭。"""
+    lines = [ln for ln in header() if not (ln.xc == X["ki"])]
+    lines += [
+        centered(1, X["ki"], 88, "下限價"),
+        centered(1, X["ki"], 100, "(期初價格之"),
+        centered(1, X["ki"], 112, "60.00%)"),
+    ]
+    lines += row(1, 150, 1, "甲公司", "AAA UW", ROW1)
+    table = read("t", lines, SPEC)
+    assert table.ok, table.note
+    assert table.value.columns == ("initial", "strike", "ko", "ki")
+    assert table.value.pcts["ki"] == Decimal("60.00")
+
+
 # ---------------------------------------------------------------- 錯訊句型
 
 

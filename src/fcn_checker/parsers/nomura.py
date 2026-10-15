@@ -66,8 +66,8 @@ FEE_ITEMS = (
     "其他費用",
 )  # 費用表各列（左欄開頭）
 FEE_RATE = r"(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)"
-# 第 7 項標的表與第 14 項百分比表的欄（表頭文字 → 欄）；欄位順序以表頭出現位置為準
-HEADERS = (("initial", "期初價格"), ("strike", "執行價"), ("ko", "自動提前出場價"), ("ki", "下限觸發價"))  # 百分比表
+# 第 14 項百分比表的欄（表頭文字 → 欄）；欄位順序以表頭出現位置為準
+HEADERS = (("initial", "期初價格"), ("strike", "執行價"), ("ko", "自動提前出場價"), ("ki", "下限觸發價"))
 # 第 7 項價格表：每檔一列、以左邊界的列號切列（`1`、`2 KAWASAKI`），表頭 %「(期初價格之X% )」
 PRICE_TABLE = price_table.TableSpec(
     where="第 7 項價格表",
@@ -381,7 +381,7 @@ def _article7(fields: dict[str, ParsedField], art7: list[Line], put: Callable) -
     fields["coupon_pa_pct"] = standard_fields.absent(
         "coupon_pa_pct", "年利率（Nomura 改核對每期配息率 × 12 與情境年化報酬率）"
     )
-    fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價方式（標的表表頭只寫「期初價格」）")
+    fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價方式（價格表表頭只寫「期初價格」）")
     fields["ko_wording"] = _ko_wording(t7, art7)
     fields["ko_memory"], fields["memory_style"] = memory_terms(t7, art7)
     fields["ki_type"] = ki_type(t7, art7)
@@ -474,11 +474,11 @@ def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項") -> ParsedF
     return ParsedField.present(name, kind, ti.lines_for(days.start(), m.end()))
 
 
-# ---------------------------------------------------------------- 第 7 項標的表
+# ---------------------------------------------------------------- 第 7 項價格表
 
 
 def _table_region(art7: list[Line]) -> list[Line]:
-    """標的表：表頭「連結標的」「彭博代碼」那一行起到第 7 項結束。"""
+    """價格表：表頭「連結標的」「彭博代碼」那一行起到第 7 項結束。"""
     for i in range(len(art7) - 1):
         if squash(art7[i].text) == "連結標的" and squash(art7[i + 1].text).startswith("彭博代碼"):
             return art7[i:]
@@ -857,7 +857,7 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
             ),
         ],
     )
-    currencies = (  # 金額旁的幣別字（Issue #170）：標的表價格、情境算式金額不列入
+    currencies = (  # 金額旁的幣別字（Issue #170）：價格表價格、情境算式金額不列入
         ("minimum_investment_currency", "最低投資金額幣別", "第一章第 7 項最低投資金額"),
         ("denomination_currency", "每單位商品面額幣別", "第一章第 7 項每單位商品面額"),
         ("scenario_denomination_currency", "情境設定參數面額幣別", "第一章第 14 項設定參數每單位商品面額"),

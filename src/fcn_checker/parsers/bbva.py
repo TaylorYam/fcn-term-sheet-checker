@@ -53,7 +53,6 @@ PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
 ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"
 TICKER = re.compile(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})\s+Equity(?![A-Za-z])")
-# 價格表欄（依表頭關鍵字的出現順序決定欄序；BBVA 是 KO → K → KI）
 # 價格表（第 14 項、第 16 項情境）：以彭博代碼切列，欄序 KO → K → KI，表頭 %「（期初價格的X%）」，價格後接幣別字
 PRICE_TABLE = price_table.TableSpec(
     where="第 14 項價格表",

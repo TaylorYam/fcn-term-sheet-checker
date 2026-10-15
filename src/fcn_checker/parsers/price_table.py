@@ -7,14 +7,14 @@ y 座標、跨頁、換行、擠格都在這裡處理（Issue #287）。
 1. 相鄰幾格擷取成同一行時，先依字座標切回各欄（`split_at_columns`）。
 2. 找列錨點（`TableSpec.anchor`）：左欄列號（`number`）、彭博代碼（`ticker`，代號與交易所碼換成兩行時取代號那一行）
    或執行價格欄的價格（`price`）。
-3. 第 1 列錨點以上是表頭；表頭的格是同一欄上下相接的行（可跨到下一頁；橫跨兩格以上的說明文字不算）。表頭從有
-   關鍵字的格的上緣起，更上面的文字不算；格內垂直置中、比列錨點高的那幾行（例：代碼拆三行、中間一行和列號齊平）
-   也不算表頭。
-4. 其餘每行歸到同一頁 y 中心最近的列錨點；價格欄裡換行的值（`23,425.0000` / `日圓`）跟著第一行的列。所在頁沒有
-   列錨點時，只有緊接最後一列的下一頁算最後一列溢過來的部分，隔更遠就讀不出（轉人工覆核，不悄悄丟掉或接上）。
-   表頭同樣只接到緊接的下一頁。
-5. 每行依 x 歸到表頭的欄；同一格的行由上到下接起來（數字或幣別字換行時接回），同一行內以空白分開的是不同的值。
-   一列的價格依欄序排成一串，個數須等於價格欄數（相鄰幾格擠成一行、切不開時仍依序對到各欄）。
+3. 第 1 列錨點以上是表頭；表頭的格是同一欄上下相接的行（可跨到下一頁；橫跨兩格以上的說明文字不算；只有表頭
+   百分比的那一格歸到正上方的欄名）。表頭從第一個兩格並排的列、有關鍵字的格的上緣起，更上面的文字不算；第 1 列
+   那一頁的表頭已齊全時不往上一頁找。從表頭最後一行之下才開始的格（例：代碼拆三行、中間一行和列號齊平）屬於列。
+4. 其餘每行歸到同一頁 y 中心最近的列錨點；價格欄裡換行的值（`23,425.0000` / `日圓`）跟著第一行的列；最後一列
+   下方、和該列不相接的表後說明不算進表。所在頁沒有列錨點時，只有緊接最後一列的下一頁算最後一列溢過來的部分，
+   隔更遠就讀不出（轉人工覆核，不悄悄丟掉或接上）。表頭同樣只接到緊接的下一頁。
+5. 每行依空白切成詞、逐詞依 x 歸到表頭的欄；同一格裡換行接下來的部分（數字或幣別字）接回，其他上下或並排的都是
+   不同的值。一列的價格依欄序排成一串，個數須等於價格欄數（相鄰幾格擠成一行、切不開時仍依序對到各欄）。
 
 錯訊一律稱「價格表」、句型固定；表在文件的位置（`TableSpec.where`）與表頭百分比的寫法（`TableSpec.pct_label`）由上手交出。
 代碼從哪裡來、百分比從表頭或定義句讀、沒有 KO 欄時 KO 價等於期初價格、列名、期初定價、`PriceRow.currency` 都留在各上手。
@@ -148,9 +148,8 @@ def read(name: str, lines: Sequence[Line], spec: TableSpec) -> ParsedField:
     """`lines` 為這張表所在的範圍（表的位置由上手決定）；讀不出時錯訊寫出原因與那幾行。"""
     if not lines:
         return ParsedField.missing(name, f"找不到{spec.where}")
-    source = list(lines)  # 切開的每一段記著來自哪一行（id），讀完之前原來的行都要留著
-    origin: dict[int, int] = {}
-    pieces = split_at_columns(source, origin=origin)
+    origin: dict[int, int] = {}  # 每一段（id）→ 來自 `lines` 的第幾行
+    pieces = split_at_columns(list(lines), origin=origin)
     try:
         table = _read(pieces, spec, origin)
     except _Unreadable as e:
@@ -269,7 +268,7 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
     codes = [
         ln
         for ln in ordered
-        if TICKER_START.match(ROW_NUMBER.sub("", ln.text.strip()))  # 列號和代碼可能擠在同一行（`3 ASML UW Equity`）
+        if _ticker_start(ln.text.strip())
         or (  # 代號與交易所碼換成兩行（`AVGO` / `UW`）：代號那一行是列錨點
             SYMBOL.fullmatch(ln.text.strip())
             and any(EXCHANGE.fullmatch(b.text.strip()) and _adjacent(ln, b) for b in lines)
@@ -281,17 +280,26 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
     return [ln for ln in codes if _overlap(ln, left) > 0]
 
 
+def _ticker_start(text: str) -> bool:
+    """這一行以彭博代碼開頭；列號和代碼可能擠在同一行（`3 ASML UW Equity`），但 `5 HK` 本身就是代碼。"""
+    if TICKER_START.match(text):
+        return True
+    m = ROW_NUMBER.match(text)
+    return m is not None and TICKER_START.match(text[m.end() :].lstrip()) is not None
+
+
 def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, int]) -> tuple[list[Line], list[Line]]:
-    """第 1 列錨點的上緣以上是表頭，以下是列。表頭從有關鍵字的那幾格的上緣起，更上面的文字（範圍裡表前的說明、
-    上一頁頁底的註腳）不算；第 1 列那一頁的表頭已經有全部必要的關鍵字時，不往上一頁找。格內垂直置中、比列錨點高的
-    行（沒有表頭關鍵字、從表頭最後一行之下才開始、緊接著下面的列）仍屬於列。"""
+    """第 1 列錨點的上緣以上是表頭，以下是列。第 1 列那一頁的表頭已經有全部必要的關鍵字時，不往上一頁找；表頭從
+    第一個兩格並排的列（`_from_first_row`）、也是有關鍵字的那幾格的上緣起，更上面的文字（範圍裡表前的說明、上一頁
+    頁底的註腳）不算。從表頭最後一行之下才開始、沒有表頭關鍵字的格（格內垂直置中、比列錨點高的行，例：代碼拆三行）
+    屬於列。"""
     top = (first.page, first.y0)
     above = [ln for ln in lines if (ln.page, _yc(ln)) < top]
     below = [ln for ln in lines if (ln.page, _yc(ln)) >= top]
     same_page = [ln for ln in above if ln.page == first.page]
     if same_page and _complete_header(_cells(same_page), spec):
         above = same_page
-    above = _from_first_row(above, origin)
+    above = _from_first_row(above, origin, spec)
     cells = _cells(above)
     keyed = [c for c in cells if _has_keyword(c, spec)]
     if not keyed:
@@ -363,9 +371,9 @@ def _text(cell: Sequence[Line]) -> str:
     return "".join(squash(ln.text) for ln in cell)
 
 
-def _from_first_row(lines: list[Line], origin: dict[int, int]) -> list[Line]:
+def _from_first_row(lines: list[Line], origin: dict[int, int], spec: TableSpec) -> list[Line]:
     """表頭從第一個「至少兩格並排」的列開始（上下重疊的行算同一列）；更上面單獨成行的文字（表前的說明、上一頁的
-    註腳）不算表頭。"""
+    註腳）不算表頭。例外：緊接在上面、以欄名開頭的行（格垂直置中時較高那一格的第一行，例：`下限價` / `(期初…`）。"""
     ordered = sorted(lines, key=_page_key)
     rows: list[list[Line]] = []
     for ln in ordered:
@@ -374,11 +382,21 @@ def _from_first_row(lines: list[Line], origin: dict[int, int]) -> list[Line]:
             row.append(ln)
         else:
             rows.append([ln])
-    first = next((r for r in rows if len({origin.get(id(x), id(x)) for x in r}) >= 2), None)  # 同一行切開的幾段只算一格
+    first = next((r for r in rows if len({origin[id(x)] for x in r}) >= 2), None)  # 同一行切開的幾段只算一格
     if first is None:
         return lines
     top = min((x.page, x.y0) for x in first)
-    return [ln for ln in lines if (ln.page, _yc(ln)) >= top]
+    kept = [ln for ln in lines if (ln.page, _yc(ln)) >= top]
+    for ln in sorted((x for x in lines if (x.page, _yc(x)) < top), key=_page_key, reverse=True):
+        if _starts_keyword(ln, spec) and any(_adjacent(ln, x) and not _spans(ln, x, lines) for x in kept):
+            kept.append(ln)
+    return kept
+
+
+def _starts_keyword(ln: Line, spec: TableSpec) -> bool:
+    """這一行含表頭關鍵字，或是關鍵字的開頭（欄名拆行：`自動提前` / `出場價`）。"""
+    t = squash(ln.text)
+    return len(t) >= 2 and any(w in t or w.startswith(t) for w in _words(spec))
 
 
 def _complete_header(cells: list[list[Line]], spec: TableSpec) -> bool:
@@ -537,15 +555,17 @@ def _last_row(lines: list[Line], anchor: Line) -> list[Line]:
 
 def _continues(upper: str, lower: str) -> bool:
     """`lower` 是 `upper` 那一格換下來的部分：接起來剛好一個值，而且是幣別字（`日圓`）、數字前的幣別字那一格的
-    數字（`美元` / `123.4567`）或小數的後幾位（`19,740.000` / `0日圓`、`123.456` / `7`）。兩個完整的整數不接。"""
+    數字（`美元` / `123.4567`）或小數的後幾位（`19,740.000` / `0日圓`、`123.45` / `67`，接起來最多 4 位小數）。
+    兩個完整的值（整數、4 位小數的價格）不接。"""
     if COMPLETE.fullmatch(upper) or not VALUE.fullmatch(upper + lower):
         return False
     digits = re.compile(r"\d")
-    return (
-        not digits.search(lower)
-        or not digits.search(upper)
-        or ("." in upper and upper[-1].isdigit() and not re.search(r"[.,]", lower))
-    )
+    if not digits.search(lower) or not digits.search(upper):
+        return True
+    # 小數的後幾位：上一行小數不足 4 位、接起來不超過 4 位（`80.0000` 下面的 `3` 是另一個值）
+    m = re.search(r"\.(\d*)$", upper)
+    tail = re.match(r"\d+", lower)
+    return m is not None and tail is not None and len(m[1]) < 4 and len(m[1]) + len(tail[0]) <= 4 and "." not in lower
 
 
 def _column_of(ln: Line, cols: dict[str, _Col], others: list[list[Line]]) -> str | None:
@@ -569,7 +589,7 @@ def _row(
     spec: TableSpec,
 ) -> TableRow:
     by_col: dict[str | None, list[Line]] = {}
-    for ln in (w for x in lns for w in _words_of(x)):
+    for ln in (w for x in lns for w in _split_words(x)):
         by_col.setdefault(_column_of(ln, cols, others), []).append(ln)
     ordered = sorted(lns, key=_reading)
     keys = [c for c in order if c != "code"]
@@ -600,7 +620,7 @@ def _row(
     )
 
 
-def _words_of(ln: Line) -> list[Line]:
+def _split_words(ln: Line) -> list[Line]:
     """一行依空白切成詞（有字座標時）：擠成一行、切欄時找不到對齊左緣的幾格（`340.74 美元 234.5995 美`），
     每個詞仍各自歸到所在的欄。"""
     spans = ln.aligned_char_spans
@@ -614,12 +634,19 @@ def _words_of(ln: Line) -> list[Line]:
 
 
 def _values(cell: list[Line]) -> list[tuple[Decimal, str | None]]:
-    """一格的值（價格與旁邊的幣別字）：上下兩行接起來（換行的數字或幣別字接回）；同一行內以空白分開的、左右並排
-    的兩行（例：價格旁的上標註腳）是不同的值。"""
-    text, prev = "", None
+    """一格的值（價格與旁邊的幣別字）：下一行是換行接下來的部分（`_continues`）才接回；同一行內以空白分開的、左右
+    並排的兩行（例：價格旁的上標註腳）、上下兩個完整的值都是不同的值（個數不符時轉人工覆核，不接成錯的數字）。"""
+    text, piece, prev = "", "", None
     for ln in sorted(cell, key=_reading):
+        t = ln.text.strip()
         side_by_side = prev is not None and prev.page == ln.page and abs(_yc(prev) - _yc(ln)) < (ln.y1 - ln.y0) / 2
-        text += (" " if side_by_side else "") + ln.text.strip()
+        if prev is None or side_by_side:
+            sep, piece = (" " if side_by_side else ""), piece + squash(t)
+        elif _continues(piece, squash(t)):
+            sep, piece = "", piece + squash(t)
+        else:
+            sep, piece = " ", squash(t)
+        text += sep + t
         prev = ln
     if re.match(CURRENCY, text):
         return [(dec(m[2]), m[1]) for m in PREFIXED.finditer(text)]
@@ -630,7 +657,7 @@ def split_at_columns(lines: list[Line], tol: float = ALIGN, origin: dict[int, in
     """一行橫跨好幾欄（PDF 把相鄰幾格擷取成同一行）時切回各欄。欄的左緣取這些行中至少兩行共有的 x0；空白之後的字
     也可以對齊只有一行的 x0（例：欄內只有一行表頭續行）。行內某個字的左緣落在欄的左緣上、且和前一個字之間有空白或
     間隙時從那裡切開；字和前一個字相接（數字中間）或是價格後面的幣別字時不切。沒有字座標（`Line.aligned_char_spans`）
-    的行不動。"""
+    的行不動。`origin` 有給時記下每一段（`id`）來自 `lines` 的第幾行。"""
     starts = sorted(ln.x0 for ln in lines)
     shared = [
         x
@@ -651,11 +678,13 @@ def split_at_columns(lines: list[Line], tol: float = ALIGN, origin: dict[int, in
         return any(abs(spans[i][0] - e) <= tol for e in edges)
 
     out: list[Line] = []
-    for ln in lines:
+    for k, ln in enumerate(lines):
         spans = ln.aligned_char_spans
         cuts = [i for i in range(1, len(spans)) if cut(ln, spans, i)]
         if not cuts:
             out.append(ln)
+            if origin is not None:
+                origin[id(ln)] = k
             continue
         for a, b in zip([0, *cuts], [*cuts, len(spans)], strict=True):
             keep = [i for i in range(a, b) if not ln.text[i].isspace()]
@@ -664,5 +693,5 @@ def split_at_columns(lines: list[Line], tol: float = ALIGN, origin: dict[int, in
                 piece = replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=ln.text[i:j], char_spans=spans[i:j])
                 out.append(piece)
                 if origin is not None:
-                    origin[id(piece)] = id(ln)
+                    origin[id(piece)] = k
     return out
