@@ -117,9 +117,11 @@ def _prices(ctx: Context) -> list[CheckResult]:
     vwap = reference.is_vwap(ctx)
     ts_rows, why = _term_sheet_field(ctx, "underlying_prices", "價格表") if vwap else (None, None)
     order = ctx.order
+    slots = reference.sheet_slots(ctx, len(rows.value))  # 標的不看順序的上手依代號對到表上那一檔（Citi、JPM）
     out = []
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"
+        slot = slots[i - 1] if i <= len(slots) else i
         ev = list(row.evidence)
         # 和參考條件表比的價格欄：(結果身分, 表上值（4 位）, 投資人須知值)，整檔一起判斷是否疑似分割調整
         pending: list[tuple[Check, Decimal, Decimal]] = []
@@ -127,9 +129,9 @@ def _prices(ctx: Context) -> list[CheckResult]:
             doc_v = row.prices.get(col)
             if doc_v is None:  # 價格表沒有這一欄（例：無 KI）
                 continue
-            field, name = f"UL_{i} {zh}", price_item(i, col)
+            field, name = f"UL_{slot} {zh}", price_item(slot, col)
             if not vwap:
-                ov = order.price(i, col)
+                ov = order.price(slot, col)
                 if ov is None or ov.value is None or to_decimal(ov.value) is None:
                     reason = "order_missing" if ov is None or ov.value is None else "order_invalid"
                     message = (

@@ -3,7 +3,7 @@
 - 文件側：[JPM 範本規格](../templates/jpm-zh-product-description.md)；投資人須知見 [JPM 投資人須知範本規格](../templates/jpm-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [JPM 下單資料格式](../order-formats/jpm-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.10（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；待實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額）；§3.4 `derive.prices`（共用）、`doc.scenario_table`（假設價格表、假設本金）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi 核對規則](citi-check-rules.md)不同或 JPM 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -160,7 +160,7 @@
 | 「受託投資/受託買賣」2 次（說明書）／1 次（投資人須知） | 5 份 | 加入允許片語後允許 |
 | 投資人須知 KO 評價日寫「評價日(t)」、說明書寫「觀察期間終止日(t)」 | JP2、JP4 | 指同一天；只核對 D／P 型與 k |
 
-其餘全部成立：參考條件表欄位（商品代號兩處、交易日、最終比價日、到期日、幣別兩處、面額、天期、年利率、K／KI／KO %、KO(Freq)、KO(memo)（單一標的 N）、KI(Freq)、Non-Call、各標的代號與價格（依代號配對後））、價格推算（含非整數 K %）、第 15 項假設價格表 = 第 9 項、假設本金 = 面額、日期表結構（列數、末列、遞增）、名稱一致與名稱樣板、受託機構商品代號、固定警語 3 次（JPM 版本）、RR4、刊印日期與開始受理申購日期 = 交易日、審查通過日期依交易日、費率、最低申購／加購／贖回 = 面額、申購價金與發行價格 100%、三個機構名稱、受託機構名稱與地址、負責人。投資人須知 5 份：頁數與頁首總頁數、代號、ISIN、名稱、商品種類、幣別、標的代號與價格、年期、各日期、年利率、K／KI／KO % 與 KI 型態、KO 觀察方式與 Non-Call、記憶式、刊印日期、費率全部和說明書一致。
+其餘全部成立：參考條件表欄位（商品代號兩處、交易日、最終比價日、到期日、幣別兩處、面額、天期、年利率、K／KI／KO %、KO(Freq)、KO(memo)（單一標的 N）、KI(Freq)、Non-Call、各標的代號與價格（依代號配對後））、價格推算（含非整數 K %）、第 15 項假設價格表 = 第 9 項、假設本金 = 面額、日期表結構（列數、末列、遞增）、名稱一致與名稱樣板、受託機構商品代號、固定警語 3 次（JPM 版本）、RR4、刊印日期與開始受理申購日期 = 交易日、審查通過日期依交易日、費率、最低申購／加購／贖回 = 面額、申購價金與發行價格 100%、三個機構名稱、受託機構名稱與地址、負責人。投資人須知 5 份：頁數與頁碼總頁數、代號、ISIN、名稱、商品種類、幣別、標的代號與價格、年期、各日期、年利率、K／KI／KO % 與 KI 型態、KO 觀察方式與 Non-Call、記憶式、刊印日期、費率全部和說明書一致。
 
 ## 6. 樣本缺口
 
@@ -174,10 +174,10 @@
 | 內容 | 說明 |
 |---|---|
 | 說明書 | 上手登記（`issuers.py`）；JPM `LayoutSpec`（羅馬數字＋句點、五部分、`III.` 後無空白、26 條、條號與標題分行、註腳上標數字）；範本辨識；`read` 交出全部標準欄位（`issuer_name_ch1`、`initial_pricing`、`minimum_issue_size`、`distributor_phone_ch4` 交 `absent`；`subscription_dates` 1 筆）；§3.3–§3.5、§3.7 |
-| 投資人須知 | `parsers/jpm_iis.py`、`IisTemplate`（頁首 `N/4` 的 `page_totals`）、範本專屬規則（如需要：KO 型態與 k = 說明書；開始受理贖回日期不核對）；[投資人須知核對規則](iis-check-rules.md) JPM 欄 |
+| 投資人須知 | `parsers/jpm_iis.py`、`IisTemplate`（頁碼 `N/4` 的 `page_totals`）、範本專屬規則 `rules/jpm_iis.py`（D 型自動提前出場配息金額的年利率 = 收益分配事項的年利率，`iis.coupon_pa_mentions`）；KO 型態與 k 由共用規則和參考條件表比（與說明書一致）；開始受理贖回日期不核對；[投資人須知核對規則](iis-check-rules.md) JPM 欄 |
 | 共用設定 | 審查標準 JPM 分節（固定警語、`risk.level_formats.jpm`、名稱樣板、發行機構、保證機構、總代理人、商品種類、`iis.fixed_warning_occurrences.jpm`）、允許片語「受託投資/受託買賣」；`config/reference_sheet.toml` 的 `[issuer_values] JPM`、`any_order_issuers` 加 `JPM` |
 
-要有合成 PDF 測試（D-4／D-3／P、記憶式／非記憶式／單一標的、KI 無／AM／D、JPY、AUD、VWAP、標的順序不同、Non-Call = 天期的 P 型、頁首 `N/4`）、本機 5 份真實樣本測試（`tests/test_real_jpm.py`，結果與 §5 一致），以及 BARC、HSBC、MS、BNP、SG、Citi 樣本的負面測試；新增允許片語後，既有上手的合成與本機真實樣本測試結果不變。
+要有合成 PDF 測試（D-4／D-3／P、記憶式／非記憶式／單一標的、KI 無／AM／D、JPY、AUD、VWAP、標的順序不同、Non-Call = 天期的 P 型、頁碼 `N/4`）、本機 5 份真實樣本測試（`tests/test_real_jpm.py`，結果與 §5 一致），以及 BARC、HSBC、MS、BNP、SG、Citi 樣本的負面測試；新增允許片語後，既有上手的合成與本機真實樣本測試結果不變。
 
 ## 8. 決策紀錄
 

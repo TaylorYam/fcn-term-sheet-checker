@@ -42,6 +42,7 @@ IIS_FIELDS: dict[str, str] = {
     "product_type": "str：商品種類",
     "redemption_start": "date：開始受理贖回日期",
     "memory_wording": "int：商品事項段「記憶式」出現的次數（Citi：非記憶式商品不得出現）",
+    "coupon_pa_mentions": "tuple[Occurrence, ...]：年利率主來源以外的出處（JPM D 型自動提前出場配息金額；每處 = 主來源）",
 }
 
 
