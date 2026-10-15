@@ -244,6 +244,140 @@ def test_header_more_than_one_page_before_the_first_row_is_not_read():
     assert table.note == "測試價格表跨頁時讀不到該頁的列"
 
 
+PRICE_SPEC = TableSpec(**{**SPEC.__dict__, "anchor": "price", "code": None})
+
+
+def test_two_whole_numbers_stacked_in_a_narrow_column_are_not_joined():
+    """窄欄裡上下兩列的整數期初價格（`3244` / `6938`，列距小）各自一列，不當成換行接成一個數字。"""
+    lines = [*header(code=False)]
+    for y, name, initial in ((150, "甲", "3244"), (163, "乙", "6938")):
+        lines += row(1, y, None, name, None, (initial, *ROW1[1:]), ccy="")
+    table = read("t", lines, PRICE_SPEC)
+    assert table.ok, table.note
+    assert [p["initial"] for p in table.value.prices] == [Decimal(3244), Decimal(6938)]
+
+
+def test_text_before_the_header_is_not_part_of_it():
+    """表前的說明句（含「彭博代碼為…」）緊接在表頭上面：不算表頭，不會變成第二個代碼欄。"""
+    intro = Line(1, 40, 88.5, 560, 99.5, "連結標的資產：甲公司，彭博代碼為AAA UW；乙公司，彭博代碼為BBB UN。")
+    lines = [intro, *header(), *row(1, 150, 1, "甲公司", "AAA UW", ROW1)]
+    table = read("t", lines, SPEC)
+    assert table.ok, table.note
+    assert intro not in table.value.header_lines
+
+
+def test_header_complete_on_the_first_row_page_ignores_the_page_before():
+    """第 1 列那一頁的表頭已經齊全：上一頁頁底的文字不接進表頭。"""
+    tail = centered(1, X["code"], 780, "說明文字")
+    lines = [tail, *header(page=2, y=40), *row(2, 90, 1, "甲公司", "AAA UW", ROW1)]
+    table = read("t", lines, SPEC)
+    assert table.ok, table.note
+    assert table.value.heads["code"] == "彭博代碼"
+
+
+def test_header_percentage_set_apart_from_the_column_name_still_belongs_to_it():
+    """欄名一行、「(期初價格之X%)」隔一段距離在下一行（DBS）：依 x 位置歸到正上方的欄名。"""
+    names = [(X["name"], "連結標的"), (X["code"], "彭博代碼"), (X["initial"], "期初價格")]
+    names += [(X["strike"], "執行價"), (X["ko"], "自動提前出場價")]
+    lines = [centered(1, x, 100, t) for x, t in names]
+    lines += [centered(1, X["strike"], 120, "(期初價格之80.00%)"), centered(1, X["ko"], 120, "(期初價格之100.00%)")]
+    lines += row(1, 150, 1, "甲公司", "AAA UW", ROW1[:3])
+    table = read("t", lines, SPEC)
+    assert table.ok, table.note
+    assert table.value.pcts == {"strike": Decimal("80.00"), "ko": Decimal("100.00")}
+
+
+def test_text_after_the_last_row_is_not_part_of_the_table():
+    """最後一列下方隔一段距離的說明文字（同一頁）不算進表，不會變成多出來的價格。"""
+    note = Line(1, 40, 190, 560, 201, "上述價格將四捨五入至小數點後第4位，共 2 檔")
+    lines = [
+        *header(code=False),
+        *row(1, 150, None, "甲公司", None, ROW1),
+        *row(1, 170, None, "乙公司", None, ROW2),
+        note,
+    ]
+    table = read("t", lines, PRICE_SPEC)
+    assert table.ok, table.note
+    assert note not in table.value.rows[-1].lines
+
+
+def test_row_number_and_ticker_on_one_line_still_anchor_the_row():
+    """列號和代碼擷取成同一行（`2 BBB UN`）：仍是代碼列錨點。"""
+    spec = TableSpec(**{**SPEC.__dict__, "anchor": "ticker"})
+    second = row(1, 170, None, "乙公司", None, ROW2)
+    squeezed = cell(1, 170, (X["n"] - 3, "2 "), (X["code"] - 18, "BBB UN"))
+    lines = [*header(), *row(1, 150, 1, "甲公司", "AAA UW", ROW1), *second, squeezed]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.tickers == ["AAA UW", "BBB UN"]
+
+
+def test_header_cells_of_neighbouring_columns_that_only_touch_stay_apart():
+    """相鄰兩欄的表頭格只碰到邊（重疊不到 1pt，UBS）：不併成同一格。"""
+    lines = [
+        centered(1, X["initial"], 106, "期初價格"),
+        Line(1, 300, 106, 441.3, 117, "執行價(期初價格之80.00%)"),
+        Line(1, 440.6, 98, 565, 109, "自動提前出場價 (期初價格之"),
+        centered(1, 503, 115, "100.00%)"),
+        *row(1, 150, None, "甲公司", None, ("100.0000", "80.0000")),
+        centered(1, 503, 150, "100.0000 美元"),
+    ]
+    table = read("t", lines, PRICE_SPEC)
+    assert table.ok, table.note
+    assert table.value.pcts == {"strike": Decimal("80.00"), "ko": Decimal("100.00")}
+
+
+def test_a_name_starting_above_the_first_row_anchor_belongs_to_that_row():
+    """第 1 檔名稱拆兩行、上面那一行比價格高（UBS）：在表頭最後一行之下，仍屬於第 1 列。"""
+    lines = [
+        *header(code=False),
+        centered(1, X["name"], 140, "甲公司第一"),
+        centered(1, X["name"], 158, "行與第二行"),
+        *[ln for ln in row(1, 149, None, "x", None, ROW1) if ln.text != "x"],
+    ]
+    table = read("t", lines, PRICE_SPEC)
+    assert table.ok, table.note
+    assert table.value.names == ["甲公司第一行與第二行"]
+
+
+def test_a_whole_value_below_a_price_is_another_value_not_its_last_digits():
+    """價格下面另有一個數字（`80.0000` / `3`，例：註腳或下一頁的文字）：不接成 `80.00003`，個數不符轉人工覆核。
+    小數不足 4 位、換行接下來的後幾位（`80.00` / `00`）才接回。"""
+    plain = TableSpec(**{**SPEC.__dict__, "anchor": "number"})
+    ok_row = row(1, 150, 1, "甲公司", "AAA UW", ROW1, ccy="")
+    stray = centered(1, X["strike"], 163, "3")
+    assert bad([*header(), *ok_row, stray], plain) == "測試價格表第 1 列有 5 個價格，與 4 欄不符"
+    wrapped = [ln for ln in ok_row if ln.text != "80.0000"]
+    wrapped += [centered(1, X["strike"], 150, "80.00"), centered(1, X["strike"], 160, "00")]
+    table = read("t", [*header(), *wrapped], plain)
+    assert table.ok, table.note
+    assert table.value.prices[0]["strike"] == Decimal("80.0000")
+
+
+def test_hong_kong_codes_are_not_taken_for_row_numbers():
+    """港股代碼的代號是數字（`5 HK`、`27 HK`）：仍是代碼列錨點，不當成列號去掉。"""
+    spec = TableSpec(**{**SPEC.__dict__, "anchor": "ticker"})
+    lines = [*header(), *row(1, 150, None, "甲公司", "5 HK", ROW1), *row(1, 170, None, "乙公司", "27 HK", ROW2)]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.tickers == ["5 HK", "27 HK"]
+
+
+def test_first_line_of_a_taller_header_cell_above_the_first_header_row_is_kept():
+    """表頭格垂直置中、較高那一格的第一行比其他格都高、自成一列（`下限價` / `(期初價格之` / `60.00%)`）：仍屬於表頭。"""
+    lines = [ln for ln in header() if not (ln.xc == X["ki"])]
+    lines += [
+        centered(1, X["ki"], 88, "下限價"),
+        centered(1, X["ki"], 100, "(期初價格之"),
+        centered(1, X["ki"], 112, "60.00%)"),
+    ]
+    lines += row(1, 150, 1, "甲公司", "AAA UW", ROW1)
+    table = read("t", lines, SPEC)
+    assert table.ok, table.note
+    assert table.value.columns == ("initial", "strike", "ko", "ki")
+    assert table.value.pcts["ki"] == Decimal("60.00")
+
+
 # ---------------------------------------------------------------- 錯訊句型
 
 
