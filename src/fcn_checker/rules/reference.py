@@ -256,7 +256,7 @@ def _sheet_tickers(ctx: Context) -> list[Any]:
 def sheet_slots(ctx: Context, rows: int) -> list[int]:
     """說明書第 i 檔（順序同標準欄位 `underlyings`，共 `rows` 檔）對到表上第幾檔 UL_n（從 1 起）。
 
-    標的不看順序的上手（參考條件表格式 `underlyings.any_order_issuers`，Citi）且表上與說明書是同一組代號
+    標的不看順序的上手（參考條件表格式 `underlyings.any_order_issuers`，Citi、JPM）且表上與文件是同一組代號
     （數量相同、不重複）時依代號配對，保留表上原本的欄位位置；其他情況（含讀不到代號）一律依順序。
     """
     identity = list(range(1, rows + 1))

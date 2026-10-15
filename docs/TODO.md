@@ -58,7 +58,7 @@
   - [x] SG 說明書實作（Issue #194）：parser 含兩種版面、`issuers.py` 登記、審查標準 SG 分節（警語與 `[RRn]` 變體、`autocall_memory_zh`、保證機構與總代理人名稱、最低申購依幣別倍數、受託機構簡稱與地址等價寫法）。
   - [x] SG 投資人須知（Issue #213）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；警語七「受託投資」照現行規則判錯，所以現有 6 份樣本都不通過；[範本規格](templates/sg-zh-iis.md)、[核對規則](rules/iis-check-rules.md) §3 SG 欄）。本機真實樣本測試用含 SG 列的 `data/核對表格式..xlsx`，核對結果與回填都已斷言。
   - [x] Citi 說明書與投資人須知（Issue #220）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；Citi 版本固定警語、兩個「受託投資」允許片語、標的依代號配對、期初定價欄核對、非記憶式不得寫「記憶式」；[說明書範本規格](templates/citi-zh-product-description.md)、[投資人須知範本規格](templates/citi-zh-iis.md)、[核對規則](rules/citi-check-rules.md)）；本機 8 組樣本中說明書與投資人須知都通過的 5 組回填。
-  - [ ] JPM 說明書與投資人須知（Issue #233）：探勘與規格完成（作業人員決定不畫螢光、逐項決定；JPM 版本固定警語、「受託投資/受託買賣」允許片語、標的依代號配對、期初定價欄不核對；[說明書範本規格](templates/jpm-zh-product-description.md)、[投資人須知範本規格](templates/jpm-zh-iis.md)、[核對規則](rules/jpm-check-rules.md)）；待實作。
+  - [x] JPM 說明書與投資人須知（Issue #233）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；JPM 版本固定警語、「受託投資/受託買賣」允許片語、標的依代號配對、期初定價欄不核對；[說明書範本規格](templates/jpm-zh-product-description.md)、[投資人須知範本規格](templates/jpm-zh-iis.md)、[核對規則](rules/jpm-check-rules.md)）；本機 5 組樣本說明書與投資人須知全部通過並回填。
   - [x] Nomura 說明書與投資人須知（Issue #239）：探勘、規格與實作完成（作業人員決定不畫螢光、逐項決定；每月配息率 × 12 = 年利率、固定警語 SG 版本說明書 2 次（新增上手別次數設定）、投資人須知沒有刊印日期、審查日期清單加 2025-06-24；[說明書範本規格](templates/nomura-zh-product-description.md)、[投資人須知範本規格](templates/nomura-zh-iis.md)、[核對規則](rules/nomura-check-rules.md)）；本機 8 組樣本中 7 組通過並回填，1 組因參考條件表到期日填錯判不一致。
   - [ ] UBS：樣本與參考條件表列已就位（2026-10-13），尚未探勘。
   - [x] 上手編號對照補齊尚無範本的 11 家（Issue #149）：未支援上手的錯訊寫出上手代號。

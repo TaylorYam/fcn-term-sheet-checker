@@ -13,10 +13,11 @@ from dataclasses import dataclass
 
 from .investor_sheet import IisSheet
 from .parsers import barc as barc_parser
-from .parsers import barc_iis, bnp_iis, citi_iis, hsbc_iis, ms_iis, nomura_iis, sg_iis
+from .parsers import barc_iis, bnp_iis, citi_iis, hsbc_iis, jpm_iis, ms_iis, nomura_iis, sg_iis
 from .parsers import bnp as bnp_parser
 from .parsers import citi as citi_parser
 from .parsers import hsbc as hsbc_parser
+from .parsers import jpm as jpm_parser
 from .parsers import ms as ms_parser
 from .parsers import nomura as nomura_parser
 from .parsers import sg as sg_parser
@@ -25,6 +26,8 @@ from .rules import bnp as bnp_rules
 from .rules import citi as citi_rules
 from .rules import citi_iis as citi_iis_rules
 from .rules import hsbc as hsbc_rules
+from .rules import jpm as jpm_rules
+from .rules import jpm_iis as jpm_iis_rules
 from .rules import ms as ms_rules
 from .rules import ms_iis as ms_iis_rules
 from .rules import nomura as nomura_rules
@@ -77,7 +80,7 @@ class Issuer:
 
 _IIS_SAMPLES = {
     "rule_id": "iis.template_variants",
-    "description": "投資人須知依各 6～8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表；MS 只支援其中新版 6 份）："
+    "description": "投資人須知依各 5～8 份樣本建立（docs/templates/*-zh-iis.md 樣本總表；MS 只支援其中新版 6 份）："
     "其他型態的寫法未驗證，範本以外的欄位或寫法會轉人工覆核",
 }
 
@@ -203,6 +206,27 @@ CITI = Issuer(
     ),
 )
 
+JPM = Issuer(
+    code=jpm_rules.ISSUER,
+    template_id=jpm_parser.TEMPLATE_ID,
+    label="JPM 中文產品說明書",
+    parser_version=jpm_parser.PARSER_VERSION,
+    not_covered=tuple(jpm_rules.NOT_COVERED),
+    detect=jpm_parser.detect,
+    read=jpm_parser.read,
+    rules=jpm_rules.run_all,
+    reference_fields=jpm_rules.REFERENCE_FIELDS,
+    iis=IisTemplate(
+        template_id=jpm_iis.TEMPLATE_ID,
+        label="JPM 中文投資人須知",
+        parser_version=jpm_iis.PARSER_VERSION,
+        detect=jpm_iis.detect,
+        read=jpm_iis.read,
+        not_covered=(_IIS_SAMPLES,),
+        rules=jpm_iis_rules.run_all,
+    ),
+)
+
 NOMURA = Issuer(
     code=nomura_rules.ISSUER,
     template_id=nomura_parser.TEMPLATE_ID,
@@ -224,7 +248,7 @@ NOMURA = Issuer(
     ),
 )
 
-REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, NOMURA)
+REGISTRY: tuple[Issuer, ...] = (BARC, HSBC, MS, BNP, SG, CITI, JPM, NOMURA)
 
 
 def by_code(code: str, registry: Sequence[Issuer] = REGISTRY) -> Issuer | None:

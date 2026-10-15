@@ -333,7 +333,9 @@ def _cumulative(c: _Case, item: Item, amount: Decimal | None) -> CheckResult:
     per = amount if amount is not None else calc.amount
     expected = per * periods
     actual = s.cumulative.value.amount
-    issues = [] if actual == expected else [f"累積總月配息金額 {actual} 應為每期配息 {per} × {periods} 期 = {expected}"]
+    issues = kit.cumulative_coupon_issues(
+        "累積總月配息金額", actual, per, periods, calc.denomination, calc.rate, _q(calc.decimals)
+    )
     return kit.calc_result(
         c.rid, c.field("cumulative"), item, issues, kit.evidence(s.cumulative.lines), expected=expected, actual=actual
     )

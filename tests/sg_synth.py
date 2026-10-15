@@ -82,6 +82,7 @@ class Spec(ProductSpec):
     iis_pages: int = 4  # 投資人須知頁數（不足補空白頁、多的刪掉最後幾頁）
     iis_strike_pct: bool = True  # 投資人須知標的表「執行價」表頭寫出 %（舊版面 SG6 沒寫）
     iis_ticker_wrap: bool = False  # 投資人須知標的表彭博代碼換成兩行（代號／交易所碼，4 碼以上代號的真實樣本）
+    cumulative: str = "rounded"  # 累積配息：rounded 每期四捨五入後 × 期數；exact 總投資金額 × 配息率 × 期數再四捨五入
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -290,6 +291,8 @@ def _scenarios(d: _Doc, s: Spec) -> None:
         if s.legacy:
             span = span.replace("個配息金額", " 個配息金額")
         cum = a * periods
+        if s.cumulative == "exact":
+            cum = (s.total * s.monthly / 100 * periods).quantize(Q2, ROUND_HALF_UP)
         if autocall:
             when = (
                 f"第{k}個評價日"

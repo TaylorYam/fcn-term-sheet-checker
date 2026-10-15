@@ -39,8 +39,9 @@ def test_other_issuers_are_unsupported(reports):
     others = [
         i
         for i in reports.values()
-        if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037", "159", "156"))
-    ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py、SG 見 test_real_sg.py、Citi 見 test_real_citi.py、Nomura 見 test_real_nomura.py
+        if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037", "159", "076", "156"))
+    ]  # MS 見 test_real_ms.py、BNP 見 test_real_bnp.py、SG 見 test_real_sg.py、Citi 見 test_real_citi.py、JPM 見 test_real_jpm.py、
+    # Nomura 見 test_real_nomura.py
     assert others, "本機應有其他上手的負面樣本"
     assert all(i.unsupported and i.report.status == CheckStatus.REVIEW_REQUIRED for i in others)
 

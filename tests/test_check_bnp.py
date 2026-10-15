@@ -534,3 +534,32 @@ def test_share_counts_with_thousands_separators_are_read(tmp_path):
     calcs = rule(r, "doc.scenario_calculations")
     assert calcs and {x.status for x in calcs} == {S.PASS}, problems(r)
     assert {x.field for x in calcs} >= {"情境三_shares", "情境四_shares", "情境三_return", "情境四_return"}
+
+
+def _cumulatives(spec: Spec, periods: int) -> tuple[Decimal, Decimal]:
+    """（四捨五入後每期配息 × 期數, 面額 × 月配息率 × 期數再四捨五入）。"""
+    step = Decimal(1).scaleb(-spec.decimals)
+    return spec.coupon * periods, (spec.denom * spec.monthly / 100 * periods).quantize(step)
+
+
+def test_cumulative_coupon_rounded_after_multiplying_passes(tmp_path):
+    """累積配息寫「面額 × 月配息率 × 期數再四捨五入」（Issue #244；日圓每期 8,333、2 期寫 16,667 而非 16,666）：通過。"""
+    spec = Spec(currency_zh="日圓", cumulative="exact")
+    rounded, exact = _cumulatives(spec, spec.first_callable)
+    assert rounded != exact, "合成條件要讓兩種算法不同"
+    r = check(tmp_path, spec)
+    assert r.status == S.PASS, problems(r)
+
+
+def test_cumulative_coupon_matching_neither_method_lists_both(tmp_path):
+    spec = Spec(currency_zh="日圓")
+    rounded, exact = _cumulatives(spec, spec.first_callable)
+    edit = Edit(
+        f"累積總月配息金額 = {spec.money(rounded)} 日圓",
+        f"累積總月配息金額 = {spec.money(rounded + 2)} 日圓",
+        "ts.scen.一",
+    )
+    r = check(tmp_path, spec, edits=[edit])
+    [res] = rule(r, "doc.scenario_calculations", "情境一_cumulative")
+    assert res.status == S.MISMATCH
+    assert f"= {rounded}，或 " in res.message and res.message.endswith(f"= {exact}")

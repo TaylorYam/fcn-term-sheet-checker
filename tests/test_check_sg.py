@@ -493,3 +493,14 @@ def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, se
     assert ("field.currency", field, S.MISMATCH) in problems(r), problems(r)
     [x] = rule(r, "field.currency", field)
     assert x.expected == "USD" and x.document_evidence
+
+
+def test_cumulative_coupon_rounded_after_multiplying_passes(tmp_path):
+    """累積配息寫「總投資金額 × 配息率 × 期數再四捨五入」（Issue #244）：通過。面額與年利率選成兩種算法會差幾分錢。"""
+    spec = Spec(denomination=10050, annual=Decimal("13.21"), cumulative="exact")
+    rounded = spec.coupon * spec.tenor
+    exact = (spec.total * spec.monthly / 100 * spec.tenor).quantize(Decimal("0.01"))
+    assert rounded != exact, "合成條件要讓兩種算法不同"
+    r = check(tmp_path, spec)
+    calcs = [x for x in rule(r, "doc.scenario_calculations") if x.field.endswith("_cumulative")]
+    assert calcs and {x.status for x in calcs} == {S.PASS}, problems(r)

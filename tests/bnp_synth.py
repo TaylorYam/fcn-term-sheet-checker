@@ -70,6 +70,7 @@ class Spec(ProductSpec):
     iis_pages: int = 4  # 投資人須知頁數（多的頁只有頁首）
     iis_page_total: int | None = None  # 投資人須知頁首「共M頁」的 M；None 同實際頁數
     blank_pages: int = 0  # 文末沒有文字層的附件頁數（真實樣本的附件是圖）
+    cumulative: str = "rounded"  # 累積配息：rounded 每期四捨五入後 × 期數；exact 面額 × 月配息率 × 期數再四捨五入
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -258,6 +259,8 @@ def _scenarios(d: _Doc, s: Spec) -> None:
         periods = k if kind == "autocall" else n
         span = f"第{periods} 個月" if periods == 1 else f"第1~{periods} 個月"
         cum = a * periods
+        if s.cumulative == "exact":
+            cum = (s.denom * s.monthly / 100 * periods).quantize(Decimal(1).scaleb(-s.decimals), ROUND_HALF_UP)
         if kind == "autocall":
             j = f"第1(j={n})個" if k == n else "第1 個"
             d.text(
