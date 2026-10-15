@@ -2,8 +2,8 @@
 
 參考條件表用公司原始待建檔格式、有 BNP 列的 `核對表格式..xlsx`（`real_data.CHECK_FORMAT`，回填欄位空白）。
 斷言與探勘結論一致（docs/rules/bnp-check-rules.md §5）：6 組說明書＋投資人須知都辨識為 BNP、都有參考條件表列；
-只有一組有差異（一檔標的的價格欄疑似分割調整，說明書與投資人須知都轉人工覆核；同一份說明書情境一累積配息與每期配息
-× 期數不符），這組不回填；其餘 5 組兩份都通過才回填，回填值與說明書一致。
+只有一組有差異（一檔標的的價格欄疑似分割調整，說明書與投資人須知都轉人工覆核；同一份說明書情境一累積配息是
+「面額 × 月配息率 × 期數再四捨五入」，#244 起通過），這組不回填；其餘 5 組兩份都通過才回填，回填值與說明書一致。
 投資人須知（docs/templates/bnp-zh-iis.md）每個範本欄位都讀得到，和同商品說明書讀出的值一致。
 """
 
@@ -74,14 +74,11 @@ def test_samples_only_differ_where_the_exploration_said(items):
                 "field.underlying_prices",
                 "split_suspected",
             ): 3,  # 一檔標的的進場價、執行價、KO 價都是說明書的同一比例（分割調整）
-            (
-                "doc.scenario_calculations",
-                "value_mismatch",
-            ): 1,  # 同一份情境一累積總月配息金額 ≠ 每期配息 × 期數（文件錯誤）
+            # 同一份情境一累積總月配息金額 ≠ 每期配息 × 期數，但 = 面額 × 月配息率 × 期數再四捨五入：通過（#244）
         }
     )
     passed = [i for i in term_sheets if i.report.status == S.PASS]
-    assert len(passed) == 5  # 只有 1 份（分割調整＋累積配息）不是全部通過
+    assert len(passed) == 5  # 只有 1 份（分割調整）不是全部通過
     # 封面與第二章的受託機構電話、地址都是審查標準的等價寫法
     for field in ("distributor_phone_cover", "distributor_address_cover", "distributor_address_ch2"):
         found = [r for i in term_sheets for r in i.report.results if r.field == field]
