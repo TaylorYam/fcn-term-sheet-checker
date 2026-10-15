@@ -143,7 +143,9 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
     fields["strike_pct"] = iis.capture("strike_pct", st, natixis.STRIKE_DEF, Decimal)
     # KO 價格定義：「期初進場價格之Y%」→ ko_pct = Y；寫成「…所列之期初進場價格」（沒有 %）是參照說明書第一章第 14 項，
     # 不交出 ko_pct、不核對 KO %（2026-10-15 確認，Issue #272）
-    found = list(st.finditer(r"自動提前到期贖回價格為(.{0,40}?期初進場價格(?:之\d+(?:\.\d+)?%)?)"))
+    found = list(
+        st.finditer(r"自動提前到期贖回價格為(.{0,40}?期初進場價格(?:之\d+(?:\.\d+)?%)?)")
+    )  # 值的兩種寫法見 KO_DEF_PCT／KO_DEF_INITIAL
     if len(found) != 1:
         fields["ko_definition"] = ParsedField.missing(
             "ko_definition", "找不到或有多處「自動提前到期贖回價格為…期初進場價格」"

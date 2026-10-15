@@ -47,6 +47,7 @@ def test_ko_definition_without_a_percentage_refers_to_the_term_sheet(tmp_path, k
 
 
 def test_other_ko_definition_wording_is_a_mismatch(tmp_path):
+    """KO 定義不是「之Y%」也不是參照說明書第 14 項的寫法：判不一致（Issue #272）。"""
     edit = Edit(
         "自動提前到期贖回價格為期初進場價格之105.00%。", "自動提前到期贖回價格為某處所列之期初進場價格。", "iis.coupon"
     )
