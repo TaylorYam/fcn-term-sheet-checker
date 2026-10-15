@@ -11,6 +11,7 @@ import pytest
 
 import bnp_synth
 import citi_synth
+import jpm_synth
 import ms_synth
 import sg_synth
 import synth
@@ -120,6 +121,11 @@ def test_fixed_warning_appears_once(tmp_path):
         ),
         (
             Spec(),
+            Edit("發行日之次一營業日起", "發行日之第二個營業日起", "iis.summary"),
+            {("iis.redemption_start", "redemption_start_text", MISMATCH)},
+        ),
+        (
+            Spec(),
             Edit("到期日之前第五個營業日", "到期日之前第三個營業日", "iis.summary"),
             {("iis.redemption_start", "redemption_later_text", MISMATCH)},
         ),
@@ -153,6 +159,7 @@ def test_fixed_warning_appears_once(tmp_path):
         "每期配息率",
         "D 型 KO 起日",
         "標的英文名稱",
+        "開始受理贖回日期",
         "後續受理贖回日期",
         "KO 觀察方式寫法",
         "KI 寫法",
@@ -165,6 +172,12 @@ def test_iis_rules_find_the_wrong_value(tmp_path, spec, edit, expected):
     ts, iis = pair(tmp_path, spec, edits=[edit])
     assert ts.report.status == PASS, bad(ts)  # 只改投資人須知
     assert bad(iis) == expected
+
+
+def test_annual_rate_is_checked_against_the_sheet(tmp_path):
+    """表上年利率和每期配息率 × 12 不同：投資人須知判不一致（每期配息率仍 = 說明書）。"""
+    _, iis = pair(tmp_path, Spec(), **{"Coupon p.a. (%)": 10.5})
+    assert bad(iis) == {("iis.coupon_pa", "coupon_per_period_pct", MISMATCH)}
 
 
 def test_page_count_is_checked(tmp_path):
@@ -181,8 +194,9 @@ def test_page_count_is_checked(tmp_path):
         lambda p: bnp_synth.build_iis_pdf(p, bnp_synth.Spec()),
         lambda p: sg_synth.build_iis_pdf(p, sg_synth.Spec()),
         lambda p: citi_synth.build_iis_pdf(p, citi_synth.Spec()),
+        lambda p: jpm_synth.build_iis_pdf(p, jpm_synth.Spec()),
     ],
-    ids=["BARC", "MS", "BNP", "SG", "Citi"],
+    ids=["BARC", "MS", "BNP", "SG", "Citi", "JPM"],
 )
 def test_other_issuers_iis_are_not_nomura(tmp_path, build):
     spec = Spec()

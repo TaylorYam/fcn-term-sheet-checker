@@ -17,7 +17,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money
+from . import iis, money
 from .common import Hit, Mention, dec, derived, hits, number, one
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
@@ -44,7 +44,7 @@ ISSUER_EN = "Nomura International Funding Pte. Ltd."
 NAME_EN_MARKS = ("Autocall Fixed Coupon Notes", f"issued by {ISSUER_EN}")
 NAME_EN_ISSUER = f" issued by {ISSUER_EN}"  # 封面英文名稱有、第一章第 1 項沒有（發行機構寫在最前面）
 ARTICLES = 21  # 第一章條數
-PAGE_MARK = re.compile(r"^\d+\s*/\s*\d+$")
+PAGE_MARK = re.compile(r"^" + iis.PAGE_SLASH + r"$")  # 每頁頁首「N/M」（投資人須知同寫法）
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
@@ -210,9 +210,12 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
     cover = doc.before_chapter1()
     items = cover_items(cover)
     head = [squash(x.text) for x in cover[:2]]
-    zh = squash(_item(items, "商品代號/商品中文名稱").value) if _item(items, "商品代號/商品中文名稱") else ""
-    en = squash(_item(items, "商品英文名稱").value) if _item(items, "商品英文名稱") else ""
-    issuer = squash(_item(items, "發行機構之名稱及地址").value) if _item(items, "發行機構之名稱及地址") else ""
+
+    def value(label: str) -> str:
+        item = _item(items, label)
+        return squash(item.value) if item else ""
+
+    zh, en, issuer = value("商品代號/商品中文名稱"), value("商品英文名稱"), value("發行機構之名稱及地址")
     arts = doc.articles(1)
     failed = []
     for test, message in (
@@ -520,12 +523,13 @@ def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項") -> ParsedF
         return ParsedField.present(name, "none", lns[:1])
     if event is None or days is None:
         return ParsedField.invalid(name, lns, f"{where}下限觸發事件與下限觸發決定日要同時出現")
-    body = text[days.end() :]
-    kind = next((v for k, v in KI_DAYS.items() if re.match(k, body)), None)
-    ev = ti.lines_for(days.start(), days.end() + 30)
-    if kind is None:
-        return ParsedField.invalid(name, ev, f"{where}下限觸發決定日的寫法不在範本規格內")
-    return ParsedField.present(name, kind, ev)
+    found = next(((m, v) for k, v in KI_DAYS.items() if (m := re.compile(k).match(text, days.end()))), None)
+    if found is None:
+        return ParsedField.invalid(
+            name, ti.lines_for(days.start(), days.end()), f"{where}下限觸發決定日的寫法不在範本規格內"
+        )
+    m, kind = found
+    return ParsedField.present(name, kind, ti.lines_for(days.start(), m.end()))
 
 
 # ---------------------------------------------------------------- 第 7 項標的表

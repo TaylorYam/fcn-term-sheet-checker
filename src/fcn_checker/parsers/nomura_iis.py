@@ -20,7 +20,6 @@ from .layout import TextIndex, parse_date
 TEMPLATE_ID = "nomura-zh-iis"
 PARSER_VERSION = "1"
 TITLE = "中文投資人須知"
-PAGE_MARK = re.compile(r"^\d+\s*/\s*\d+$")
 SECTIONS = (
     "本商品之投資風險警語",
     "第一相關機構",
@@ -40,7 +39,6 @@ ISSUER = squash(nomura.ISSUER_EN)
 LABELS = re.compile(
     r"「(自動提前出場事件|記憶事件|自動提前出場決定日|自動提前出場日|配息日|下限觸發事件|下限觸發決定日)」："
 )
-KO_DAILY = r"自動提前出場決定日：自" + nomura.D + r"起（含）至最終評價日止（含）之各預定交易日。"
 KO_PERIODIC = r"自動提前出場決定日：各自動提前出場決定日詳見中文產品說明書第11項\(6\)「自動提前出場決定日」之表格所示。"
 PROVIDED = frozenset(
     {
@@ -74,7 +72,7 @@ PROVIDED = frozenset(
 
 def body(lines: Sequence[Line]) -> list[Line]:
     """頁碼「N/4」以外的行（頁碼另由 `iis.page_totals` 讀）。"""
-    return [ln for ln in lines if not PAGE_MARK.match(ln.text.strip())]
+    return [ln for ln in lines if not nomura.PAGE_MARK.match(ln.text.strip())]
 
 
 def _cover(text_lines: list[Line]) -> tuple[nomura.RawText, re.Match[str] | None]:
@@ -131,7 +129,7 @@ def _coupon_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
     )
     # 標籤的「」移到前面補位（`□□標籤：`，長度不變、證據位置不變）後就是說明書第 7 項的句型
     sec_ti.text = LABELS.sub(lambda m: "□□" + m[1] + "：", sec_ti.text)
-    daily = list(sec_ti.finditer(KO_DAILY))
+    daily = list(sec_ti.finditer(nomura.KO_DAILY))  # 同說明書第 7 項；每期觀察寫法不同（參照說明書）
     periodic = list(sec_ti.finditer(KO_PERIODIC))
     if len(daily) + len(periodic) != 1:
         note = "「自動提前出場決定日」的寫法缺漏、重複或不在範本規格內"

@@ -25,10 +25,10 @@ from ..standard_fields import TermSheet
 from ..text import full_brackets, squash
 from . import reference
 from .kit import (
-    Q2,
     Q4,
     Check,
     Context,
+    annual_of_period,
     cmp_pct,
     order_review,
     order_value,
@@ -223,7 +223,7 @@ def _coupon_per_period(ctx: Context) -> CheckResult:
     check = Check(rid, key, item, ctx.document, ov=(ov,)).needs(pf)
     if (problem := check.blocked) is not None:
         return problem
-    derived = (pf.value * 12).quantize(Q2, ROUND_HALF_UP)
+    derived = annual_of_period(pf.value)
     return check.compare(
         annual,
         derived,

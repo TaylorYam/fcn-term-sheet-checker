@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 import re
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
+from ..parsers.nomura import ISSUER_EN
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
@@ -50,14 +51,8 @@ NOT_COVERED = [
         "Nomura International Funding Pte. Ltd. 以外的發行主體；範本以外的寫法會轉人工覆核",
     },
 ]
-ANNUAL_Q = kit.Q2  # 年利率 = 每期配息率 × 12，四捨五入到 2 位（核對規則 §3.3）
 MEMORY_ZH, MEMORY_EN = "(記憶式自動提前出場)", "with Memory Knock-Out"
-ISSUER_EN = "Nomura International Funding Pte. Ltd."
 ISSUED_BY = f"issued by {ISSUER_EN}"
-
-
-def annual_of(period: Decimal) -> Decimal:
-    return (period * 12).quantize(ANNUAL_Q, ROUND_HALF_UP)
 
 
 # ---------------------------------------------------------------- 年利率（核對規則 §3.3，讀參考條件表）
@@ -89,7 +84,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
                 )
             )
         else:
-            derived = annual_of(period.value)
+            derived = kit.annual_of_period(period.value)
             out.append(
                 check.compare(
                     annual,
@@ -374,7 +369,7 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
     check = Check("doc.redemption_pct", "maturity_redemption_pct", Item.expected("第 7 項到期贖回金額"), ctx.document)
     expected = [Decimal(100)] * (1 if ki == "none" else 2)
     return [
-        check.needs(pf).compare(
+        check.needs(pf, ctx.ts.f("ki_type")).compare(
             expected,
             pf.value,
             ok=pf.ok and ki is not None and len(pf.value) == len(expected) and all(v == 100 for v in pf.value),

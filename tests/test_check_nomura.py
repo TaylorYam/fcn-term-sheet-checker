@@ -10,6 +10,7 @@ import pytest
 import bnp_synth
 import citi_synth
 import hsbc_synth
+import jpm_synth
 import ms_synth
 import sg_synth
 import synth
@@ -129,6 +130,9 @@ def test_non_monthly_coupon_needs_review(tmp_path):
         (Edit(f"(ISIN No. {ISIN})", "(ISIN No. XS1999900002)", "ts.art1"), "doc.isin_consistency"),
         (Edit("TDCC No. 156199990001", "TDCC No. 156199990002", "ts.cover"), "doc.product_code"),
         (Edit("計價幣別：美元(USD)", "計價幣別：美元(JPY)", "ts.art5"), "doc.currency_consistency"),
+        (Edit("◎ 計價幣別：美元(USD)", "◎ 計價幣別：美元(JPY)", "ts.cover"), "doc.currency_consistency"),
+        (Edit(f"(ISIN No. {ISIN} / TDCC No.", "(ISIN No. XS1999900002 / TDCC No.", "ts.cover"), "doc.isin_consistency"),
+        (Edit("6個月", "7個月", "ts.art14.table"), "doc.coupon_periods"),
         (Edit("彭博代碼：ZNB UW Equity", "彭博代碼：ZNX UW Equity", "ts.art9"), "doc.underlying_tickers"),
         (Edit("每單位商品面額x 100.00%", "每單位商品面額x 99.00%", "ts.art7"), "doc.redemption_pct"),
     ],
@@ -189,6 +193,29 @@ def test_ki_periodic_dates_must_equal_the_ko_dates(tmp_path):
 def test_ki_clause_count_must_match_the_ki_terms(tmp_path):
     r = check(tmp_path, Spec(ki="AM"), edits=[Edit("(3) 如於最終評價日", "(3) 如於期末評價日", "ts.art7")])
     assert rule(r, "doc.ki_consistency", "maturity_cases")[0].status == S.REVIEW_REQUIRED
+
+
+def test_single_or_basket_wording_must_match_the_table(tmp_path):
+    """第 7 項自動提前出場事件寫成單一標的句型、標的表卻有 2 檔：轉人工覆核。"""
+    single = "連結標的之收盤價高於或等於自動提前出場價時"
+    edit = Edit("所有連結標的之收盤價均高於或等於其個別自動提前出場價時", single, "ts.art7")
+    r = check(tmp_path, Spec(memory=False, count=2), edits=[edit])
+    assert rule(r, "doc.underlying_count", "memory_style")[0].status == S.REVIEW_REQUIRED
+
+
+def test_ki_clause_without_a_ki_column_needs_review(tmp_path):
+    """第 7 項有下限觸發事件條款、標的表卻沒有下限觸發價欄：轉人工覆核。"""
+    clause = "下限觸發事件：若任一連結標的於下限觸發決定日之收盤價小於其下限觸發價格，則視為發生下限觸發事件。下限觸發決定日：最終評價日。"
+    r = check(tmp_path, Spec(), edits=[Edit("股票交割股數：", clause + "股票交割股數：", "ts.art7")])
+    assert rule(r, "doc.ki_consistency", "underlying_table")[0].status == S.REVIEW_REQUIRED
+
+
+def test_unreadable_ki_type_sends_the_redemption_check_to_review(tmp_path):
+    """KI 型態讀不到時，到期贖回款數的預期也不確定：轉人工覆核而不是判不一致。"""
+    r = check(
+        tmp_path, Spec(ki="AM"), edits=[Edit("下限觸發決定日：最終評價日", "下限觸發決定日：每月最後交易日", "ts.art7")]
+    )
+    assert rule(r, "doc.redemption_pct")[0].status == S.REVIEW_REQUIRED
 
 
 def test_article_8_count_must_match_the_table(tmp_path):
@@ -281,8 +308,9 @@ def test_other_issuers_keep_three_fixed_warnings(tmp_path):
         lambda p: bnp_synth.build_pdf(p, bnp_synth.Spec()),
         lambda p: sg_synth.build_pdf(p, sg_synth.Spec()),
         lambda p: citi_synth.build_pdf(p, citi_synth.Spec()),
+        lambda p: jpm_synth.build_pdf(p, jpm_synth.Spec()),
     ],
-    ids=["BARC", "HSBC", "MS", "BNP", "SG", "Citi"],
+    ids=["BARC", "HSBC", "MS", "BNP", "SG", "Citi", "JPM"],
 )
 def test_other_issuers_are_not_nomura(tmp_path, build):
     pdf = build(tmp_path / "156199990001_TS.pdf")
