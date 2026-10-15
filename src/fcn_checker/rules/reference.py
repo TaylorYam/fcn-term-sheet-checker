@@ -443,9 +443,8 @@ def initial_pricing(ctx: Context) -> CheckResult:
         check = _column(ctx, rid, key, name, ov, ov.value).needs(doc)
         if (blocked := check.blocked) is not None:
             return blocked
-        labels = {v: k for k, v in ctx.fmt.initial_pricing_values.items()}
         return check.compare(
-            ov.value, labels.get(doc.value, doc.value), ok=mapped == doc.value, message=_pricing_message(mapped)
+            ov.value, _pricing_label(ctx, doc.value), ok=mapped == doc.value, message=_pricing_message(mapped)
         )
     return _column(ctx, rid, key, name, ov).result(S.PASS, expected=ov.value, message=_pricing_message(mapped))
 
@@ -454,15 +453,19 @@ def _blank_pricing(ctx: Context, rid: str, key: str, name: str, ov: OrderValue, 
     """表上期初定價空白：說明書沒寫（`absent`）時通過、價格照常比對；寫明時依說明書，讀不到或寫法未知轉人工覆核。"""
     check = _column(ctx, rid, key, name, ov)
     if doc is None:
-        return check.result(S.PASS, message=f"表上未填期初定價，{_pricing_message('')}")
+        return check.result(S.PASS, message="表上未填期初定價，各標的價格與說明書比對")
     check = check.needs(doc)
     if (blocked := check.blocked) is not None:
         return blocked
-    labels = {v: k for k, v in ctx.fmt.initial_pricing_values.items()}
-    shown = labels.get(doc.value, doc.value)
+    shown = _pricing_label(ctx, doc.value)
     return check.result(
         S.PASS, actual=shown, message=f"表上未填期初定價，依{ctx.document}（{shown}）；{_pricing_message(doc.value)}"
     )
+
+
+def _pricing_label(ctx: Context, mapped: str) -> str:
+    """期初定價對照值（open／close／vwap）在參考條件表上的寫法；沒有對照時原樣顯示。"""
+    return next((k for k, v in ctx.fmt.initial_pricing_values.items() if v == mapped), mapped)
 
 
 def _pricing_message(mapped: str) -> str:

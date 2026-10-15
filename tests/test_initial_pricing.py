@@ -86,7 +86,7 @@ def test_blank_pricing_passes_compares_the_sheet_prices_and_fills_the_sheet(tmp_
     item, receipt, spec = run(tmp_path, 期初定價=None)
     assert item.report.status.value == "PASS", [r for r in item.report.results if r.status.is_problem]
     [pricing] = [r for r in item.report.results if r.rule_id == "field.initial_pricing"]
-    assert "表上未填期初定價" in pricing.message, pricing.message
+    assert pricing.message == "表上未填期初定價，各標的價格與說明書比對", pricing.message
     assert receipt.filled(item)
     assert not [d for d in item.report.backfill if d.column.startswith("UL_")], "價格欄不是回填欄位"
 

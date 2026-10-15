@@ -135,8 +135,9 @@ def test_blank_sheet_pricing_follows_a_vwap_header_and_fills_the_prices(tmp_path
     assert cells["UL_2_進場價"].action == BackfillAction.OVERWRITE
 
 
-def test_blank_sheet_pricing_with_a_closing_price_header_compares_the_prices(tmp_path):
-    r = check(tmp_path, Spec(), 期初定價=None, UL_1_進場價=1.0)
+@pytest.mark.parametrize("header", ["收盤價格", "開盤價格"])
+def test_blank_sheet_pricing_with_a_closing_or_opening_price_header_compares_the_prices(tmp_path, header):
+    r = check(tmp_path, Spec(pricing_text=header), 期初定價=None, UL_1_進場價=1.0)
     assert problems(r) == [("field.underlying_prices", "ZCA UW 進場價", S.MISMATCH)]
     assert rule(r, "field.initial_pricing")[0].status == S.PASS
 
