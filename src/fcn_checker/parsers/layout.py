@@ -196,10 +196,14 @@ class Document:
             if m and ln.x0 < self.spec.article_max_x and int(m.group(1)) == expect:
                 marks.append((expect, i))
                 expect += 1
+        return self._article_spans(marks, sp.end)
+
+    def _article_spans(self, marks: list[tuple[int, int]], end: int) -> dict[int, Span]:
+        """(條號, 標號所在行) → 條號 → Span（到下一條或 `end` 為止）。"""
         out: dict[int, Span] = {}
         for k, (n, i) in enumerate(marks):
-            end = marks[k + 1][1] if k + 1 < len(marks) else sp.end
-            out[n] = Span(i, end, self._title_after(i, end))
+            stop = marks[k + 1][1] if k + 1 < len(marks) else end
+            out[n] = Span(i, stop, self._title_after(i, stop))
         return out
 
     def _title_after(self, i: int, end: int) -> str:

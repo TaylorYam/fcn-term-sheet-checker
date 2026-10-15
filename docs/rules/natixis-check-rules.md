@@ -189,7 +189,7 @@
 | 內容 | 說明 |
 |---|---|
 | 說明書 | 上手登記（`issuers.py`）；Natixis `LayoutSpec`（`第一章、` 章名五章；頁底英文名稱兩行、`第N頁/共計M頁`、分類標記排除；NX8 左上角單獨數字略過）；範本辨識；`read` 交出全部標準欄位（`initial_pricing`、`distributor_phone_ch4` 交 `absent`；`subscription_dates` 2 筆；`min_amounts` 4 筆；`issue_price_others` 1 筆；KO D／P、KI AM／D／P／無）；§3.3–§3.8 |
-| 投資人須知 | `parsers/natixis_iis.py`、`IisTemplate`（頁底 `第N頁/共M頁` 的 `page_totals`；刊印日期在第 1 行標題同一行）；投資人須知的 KO % 定義讀不到 % 要能判不一致（不是讀不到就轉人工）；[投資人須知核對規則](iis-check-rules.md) Natixis 欄 |
+| 投資人須知 | `parsers/natixis_iis.py`、`IisTemplate`（頁底 `第N頁/共M頁` 的 `page_totals`；刊印日期在第 1 行標題同一行）；投資人須知的 KO 定義沒寫 % 讀成 KO 100%（Issue #270；原本判不一致），其他寫法判不一致（不是讀不到就轉人工）；[投資人須知核對規則](iis-check-rules.md) Natixis 欄 |
 | 共用設定 | 審查標準 Natixis 分節（`fixed_warning_by_issuer.natixis`、`level_formats.natixis`、`product_name.natixis`、`issuer_name.natixis`、`product_type.natixis`、`iis.fixed_warning_occurrences.natixis = 2`）；`distributor.approval_dates` 加 2024-03-20；`config/reference_sheet.toml` 的 `[issuer_values] NATIXIS = "Natixis"` |
 
 要有合成 PDF 測試（KO D 記憶式／非記憶式、KO P（含 Non-Call = 天期、觀察日表 1 列）、KI 無／AM／D／P、單一／多標的、JPY 整數期初價格、AUD、VWAP、新舊兩版標籤、頁底英文名稱兩行、連結標的表數字拆行、欄序 KO → KI → K、投資人須知 5 頁、投資人須知 KO 定義少 %）、本機 8 份真實樣本測試（`tests/test_real_natixis.py`，結果與 §5 一致：NX6 投資人須知頁數、NX7 投資人須知 KO 定義判不一致，該兩組不回填；NX8 沒有參考條件表列；其餘有表上列的組別通過並回填），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM、Nomura、GS 樣本的負面測試；既有上手的合成與本機真實樣本測試結果須不變（`approval_dates` 加 2024-03-20 造成的改變要逐份列出）。
@@ -211,7 +211,7 @@
 | 連結標的表表頭 KO／KI／K % = 定義 | `doc.table_header_pct` |
 | 情境價格表逐格與表頭 % = 連結標的表；情境假設 a. 面額 = 每單位商品面額 | `doc.scenario_table` |
 | 日期表（D：開始日 = 發行日、連續、末列 = 最終評價日／到期日；P：配息日遞增、觀察日表末列 = 最終評價日／到期日） | `schedule.coupon_dates` |
-| 投資人須知 KO 定義沒寫 %（判不一致） | `iis.ko_definition`（範本專屬規則） |
+| 投資人須知 KO 定義寫法（`之Y%` 或沒寫 %；沒寫 % 讀成 KO 100%，由 `field.ko_pct` 和表上比，Issue #270） | `iis.ko_definition`（範本專屬規則） |
 
 KO 型態與日期表種類不一致、P 型觀察日表的自動提前到期日不在配息日表或期別不連續時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。連結標的表依座標讀：表頭各行依 x 中心分欄（欄序依關鍵字順序），每檔以左欄列號切列，數字依座標由左到右接起，拆行的數字接回；情境價格表以右側貨幣欄切列。費用表沿用 GS 的座標讀法（`gs.fee_rates`）。
 
@@ -235,4 +235,5 @@ KO 型態與日期表種類不一致、P 型觀察日表的自動提前到期日
 | 2026-10-15 | 「皆曾經高於或等於」= 記憶式；`UL_n_Memo` 不核對 |
 | 2026-10-15 | 發行主體只有法國外貿銀行；參考條件表 `發行機構` 欄 Natixis 寫 `Natixis` |
 | 2026-10-15 | 投資人須知核對範圍如 §3.9；標的名稱、受理贖回日、營業日不核對 |
+| 2026-10-15 | OOS 第一批（Issue #270）：第一章條號中途重新從 1 編起時依先後當第 1～26 條照常核對、不報錯；投資人須知 KO 定義沒寫 % 讀成 KO 100%（KO 100% 通過、其他判不一致） |
 | 2026-10-15 | 實作時發現：NX2、NX8「受託機構商品代號為」空白 → 轉人工覆核；Citi CT1 寫的 2024-08-28 也是受託機構真實的審查日期，補進 `approval_dates`；Non-Call = 天期時情境一在最後一期提前到期（規格更正） |

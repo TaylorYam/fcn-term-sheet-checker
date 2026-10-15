@@ -21,7 +21,7 @@ from fcn_checker.schema import CheckStatus as S
 from harness import check_all
 from harness import field_problems as problems
 from harness import results as rule
-from natixis_synth import ADDRESS, DIST, PRODUCT_TYPE, WARNING, Spec, build_pdf, check, check_item, row
+from natixis_synth import ADDRESS, DIST, PRODUCT_TYPE, WARNING, Spec, article_title, build_pdf, check, check_item, row
 from pdf_writer import Edit
 from reference_synth import build_reference_sheet, reference_row
 
@@ -36,6 +36,14 @@ VARIANTS = {
         currency_zh="澳幣", tenor=12, first_callable=3, pricing="vwap", split_numbers=True
     ),
 }
+
+
+def _renumbered_from(start: int, stop: int = 27) -> list[Edit]:
+    """第一章第 start 條起條號重新從 1 編起（Word 自動編號跑掉，Issue #270）。"""
+    edits = []
+    for n in range(start, stop):
+        edits.append(Edit(f"{n}. {article_title(n)}", f"{n - start + 1}. {article_title(n)}", f"ts.art{n}"))
+    return edits
 
 
 @pytest.mark.parametrize("spec", VARIANTS.values(), ids=VARIANTS.keys())
@@ -249,3 +257,26 @@ def test_other_issuers_are_not_natixis(tmp_path, build):
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(Spec())])
     for item in check_all(sheet, [pdf]).items:
         assert item.report.template not in (NATIXIS.template_id, NATIXIS.iis.template_id)
+
+
+@pytest.mark.parametrize("start", [9, 13, 25])
+def test_chapter_one_numbering_restarting_from_one_is_read_in_order(tmp_path, start):
+    """第一章條號中途重新從 1 編起（例：第 12 條後接「1. 配息資料」…「14.」；共 26 條）：依先後當成第 1～26 條照常核對，
+    不另報條號錯誤（2026-10-15 確認，Issue #270）。"""
+    item = check_item(tmp_path, edits=_renumbered_from(start))
+    assert item.report.template == NATIXIS.template_id
+    assert item.report.status == S.PASS, problems(item.report)
+    assert item.fills_sheet
+
+
+def test_numbering_restarting_with_articles_missing_is_still_not_natixis(tmp_path):
+    """重編後合計不是 26 條（第 26 條不見）：仍認不出範本。"""
+    edits = [*_renumbered_from(13), Edit("14. 第26項說明（不核對）", "", "ts.art26")]
+    item = check_item(tmp_path, edits=edits)
+    assert item.report.template != NATIXIS.template_id
+
+
+def test_only_one_restart_is_accepted(tmp_path):
+    """重編只容許一次（Issue #270）：第 13 條起從 1 重編、第 20 條起又從 1 重編 → 不當成 26 條，仍認不出範本。"""
+    item = check_item(tmp_path, edits=[*_renumbered_from(13, 20), *_renumbered_from(20)])
+    assert item.report.template != NATIXIS.template_id
