@@ -303,7 +303,7 @@ def _scenarios(d: _Doc, s: Spec) -> None:
         else:
             d.text(80, "股數計算 = (每單位面額 × 匯率) ÷ 表現最差連結標的之執行價格")
             d.text(80, f"= ({s.denom:,} {unit} × {s.fx}) ÷ {_price_cell(strike)} {uccy}")
-        d.text(80, f"={shares} (四捨五入至小數點以下第四位)無條件捨去至整數位 = {whole} 股")
+        d.text(80, f"={shares:,} (四捨五入至小數點以下第四位)無條件捨去至整數位 = {whole:,} 股")  # 破千有千分位逗號
         if s.fx is None:
             d.text(80, f"剩餘金額 = {close} {uccy} × {frac}")
         else:
@@ -313,7 +313,7 @@ def _scenarios(d: _Doc, s: Spec) -> None:
         fx_div = " ÷ 匯率" if s.fx is not None else ""
         d.text(
             80,
-            f"總報酬率 = [({whole} 股 × {s.underlyings[worst_idx].name}收盤價格{close} {uccy}{fx_div} + 現金交割{s.money(remainder)} {unit}"
+            f"總報酬率 = [({whole:,} 股 × {s.underlyings[worst_idx].name}收盤價格{close} {uccy}{fx_div} + 現金交割{s.money(remainder)} {unit}"
             f" + 累積總月配息金額{s.money(cum)} {unit}) ÷ 總投資金額{s.denom:,} {unit}] - 1 = {r}% (年化報酬率：-50.000%)",
         )
 

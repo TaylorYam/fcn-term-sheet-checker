@@ -526,3 +526,11 @@ def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, se
     assert (("field.currency", field, S.MISMATCH)) in problems(r), problems(r)
     [x] = rule(r, "field.currency", field)
     assert x.expected == "USD" and x.document_evidence
+
+
+def test_share_counts_with_thousands_separators_are_read(tmp_path):
+    """大面額商品的股數破千，算式寫「=6,250.0000 … = 6,250 股」「(6,250 股 × …」（Issue #240）：照常驗算。"""
+    r = check(tmp_path, Spec(denomination=500000, ki="AM"))
+    calcs = rule(r, "doc.scenario_calculations")
+    assert calcs and {x.status for x in calcs} == {S.PASS}, problems(r)
+    assert {x.field for x in calcs} >= {"情境三_shares", "情境四_shares", "情境三_return", "情境四_return"}
