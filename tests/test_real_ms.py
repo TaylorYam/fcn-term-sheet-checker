@@ -48,8 +48,9 @@ def test_new_samples_only_differ_where_the_exploration_said(items):
     assert bad == Counter(
         {
             ("doc.trustee_product_code", "value_mismatch"): 3,  # 受託機構商品代號空白（文件錯誤）
-            # 2025 年交易的 5 份沿用 2025 年的舊審查通過日期：4 份交易日早於清單最早的日期、1 份不一致（只以 2026 年後為準）
-            ("standard.approval_date", "approval_date_not_configured"): 4,
+            # 2025 年交易的 5 份沿用 2025 年的舊審查通過日期：3 份交易日早於清單最早的日期、1 份不一致（只以 2026 年後為準）；
+            # 另 1 份寫 2025-06-24，Issue #239 加入這個審查日期後依交易日通過
+            ("standard.approval_date", "approval_date_not_configured"): 3,
             ("standard.approval_date", "value_mismatch"): 1,
             ("batch.pairing", "reference_row_missing"): 1,  # 參考條件表沒有這一列
             # Non-Call = 天期的 1 份表上 KO(%) 填 150、4 檔 KO 價都是進場價的 1.5 倍：KO 視為 100%、KO 價 = 期初價格（Issue #202）

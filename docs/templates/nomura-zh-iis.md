@@ -3,7 +3,7 @@
 - 範本代號：`nomura-zh-iis`
 - 對應說明書範本：[`nomura-zh-pd`](nomura-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-15 對 8 份真實樣本（NR1-IIS～NR8-IIS，與說明書 NR1–NR8 同商品）的探勘與核對範圍決定（Issue #239）
-- 狀態：規格（待實作，Issue #239）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
+- 狀態：已實作（Issue #239：`parsers/nomura_iis.py`、範本專屬規則 `rules/nomura_iis.py`）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
 
 > 真實樣本與擷取文字只放在被 Git 忽略的 `data/`。本文件的數值範例都是虛構的；樣本代號與真實商品代號的對照只存在本機（`data/tmp/nomura/sample_map.txt`）。產品條件以參考條件表（`data/orders/核對表格式..xlsx` 有 8 列 Nomura）與同商品說明書為基準。
 

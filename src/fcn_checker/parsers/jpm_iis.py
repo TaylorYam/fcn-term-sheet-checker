@@ -76,16 +76,8 @@ PROVIDED = frozenset(
 
 
 def body(lines: Sequence[Line]) -> list[Line]:
-    """頁碼「N/4」以外的行（頁碼另由 `page_totals` 讀）。"""
+    """頁碼「N/4」以外的行（頁碼另由 `iis.page_totals` 的「N/M」讀法讀）。"""
     return [ln for ln in lines if not jpm.PAGE_MARK.match(ln.text.strip())]
-
-
-def page_totals(lines: Sequence[Line]) -> ParsedField:
-    """每頁頁碼「N/M」的 M（共用讀法只認「第 N 頁，共 M 頁」）。"""
-    hits = [(int(m[2]), ln) for ln in lines if (m := jpm.PAGE_MARK.match(ln.text.strip()))]
-    if not hits:
-        return ParsedField.missing("page_totals", "找不到頁碼「N/M」")
-    return ParsedField.present("page_totals", tuple(m for m, _ in hits), [ln for _, ln in hits])
 
 
 def detect(lines: Sequence[Line]) -> DetectionResult:
@@ -147,7 +139,7 @@ def _ko_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
 def read(lines: Sequence[Line]) -> iis.IisSheet:
     text_lines = body(lines)
     ti = TextIndex(text_lines)
-    fields: dict[str, ParsedField] = {"page_totals": page_totals(lines)}
+    fields: dict[str, ParsedField] = {"page_totals": iis.page_totals(lines, iis.PAGE_SLASH, "N/M")}
 
     def put(name, pattern, convert=lambda x: x):
         fields[name] = iis.capture(name, ti, pattern, convert)

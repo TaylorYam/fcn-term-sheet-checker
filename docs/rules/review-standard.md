@@ -29,6 +29,7 @@
 | `risk.level` | RR4 | 全文所有【RRn】（寫法不同的上手見 `risk.level_formats`） | 全部等於設定值 |
 | `risk.level_formats.<上手>` | MS：`風險程度等級為{level}`、`風險程度為{level}`、`歸類為{level}` | 全文 | 該上手的風險等級寫法（`{level}` 為 RRn）；沒列出的上手為【RRn】 |
 | `risk.fixed_warning` | 固定風險警語全文（我方提供給上手） | 全文 | 忽略空白與換行後逐字相等，且出現次數 = `fixed_warning_occurrences`（BARC 為 3 次：封面警語 1、第一章 §2、第三章投資風險警語） |
+| `risk.fixed_warning_occurrences_by_issuer.<上手>` | Nomura 2（封面(一)、第三章 6.(1)；2026-10-15，Issue #239） | 說明書全文 | 該上手說明書的固定警語次數；沒列出的上手用 `fixed_warning_occurrences`（3） |
 | `risk.fixed_warning_by_issuer.<上手>` | 依上手不同的固定警語版本（`hsbc`、`ms`） | 同上 | 有該上手版本時改用該版本比對；沒有時用 `risk.fixed_warning` |
 | `risk.fixed_warning_openings.<上手>` | MS：`本商品風險程度為RR4。` | 同上 | 開頭句（到第一個「。」）的其他允許寫法；只換開頭句、其餘逐字相同的版本也算一次 |
 | `wording.forbidden` ／ `allowed_phrases` | 禁用「受託投資」；允許「受託投資或受託買賣」「受託投資、受託買賣或為投資型保單」（HSBC）、「受託投資、受託買賣之投資標的」「受託投資或銷售本商品」（Citi，2026-10-14 確認，Issue #220） | 全文 | 片語以外出現「受託投資」即為錯誤（SOP：須改為「受託買賣」） |
@@ -42,7 +43,7 @@
 | `currency` | 美元→USD、日幣／日圓→JPY、人民幣／境外人民幣→CNH、港幣／港元→HKD、澳幣→AUD、歐元→EUR、英鎊→GBP、南非幣→ZAR（樣本看過的寫法，加上使用者同意的同義寫法）。表裡沒有的寫法（例：澳元、南非蘭特）未確認前不放：封面幣別轉人工覆核一次，其他出處寫同一個字時不重複報（2026-10-10 使用者決定；AUD、EUR、GBP、ZAR 有樣本後於 2026-10-13 加入，Issue #185） | 封面計價幣別；金額旁的幣別字（§2.4 `field.currency` 其他出處） | 不在表內的幣別轉人工覆核；金額旁的幣別字 parser 認得的寫法在 `src/fcn_checker/parsers/money.py`，新幣別兩邊都要加 |
 | `denomination` | USD／AUD／EUR／GBP 10,000；JPY 1,000,000；CNH／HKD／ZAR 100,000（2026-10-10 使用者提供的承作幣別表） | §6 商品面額 | 等於該幣別預設值；不等於時**轉人工審查**（客戶可要求不同面額，不直接判錯） |
 | `iis.pages` | 4 | 投資人須知（Issue #124） | 頁數剛好等於設定值（比外規「不超過 5 頁」嚴格） |
-| `iis.fixed_warning_occurrences.<上手>` | BARC 1、HSBC 2、MS 1（警語 1)，2026-10-09，Issue #137）、BNP 2（警語 1 與商品簡介「商品風險程度」，2026-10-14，Issue #197）、SG 1（警語一，2026-10-14，Issue #213）、Citi 1（警語 1.，2026-10-14，Issue #220） | 投資人須知全文 | 固定警語（依上手版本）出現次數；沒列出的上手轉人工覆核 |
+| `iis.fixed_warning_occurrences.<上手>` | BARC 1、HSBC 2、MS 1（警語 1)，2026-10-09，Issue #137）、BNP 2（警語 1 與商品簡介「商品風險程度」，2026-10-14，Issue #197）、SG 1（警語一，2026-10-14，Issue #213）、Citi 1（警語 1.，2026-10-14，Issue #220）、Nomura 1（警語(一)，2026-10-15，Issue #239） | 投資人須知全文 | 固定警語（依上手版本）出現次數；沒列出的上手轉人工覆核 |
 
 ### 2.1 商品名稱樣板（BARC，依最新 5 份說明書）
 
@@ -192,12 +193,12 @@
 - **年利率**：說明書只寫 `每單位面額 x Y% x 1/12`，沒有月配息率，不做月配息率推算。
 - 發行機構／保證機構／總代理人地址電話、情境分析算式不核對。
 
-### 2.11 Nomura 的差異（2026-10-15 確認，Issue #239；待實作）
+### 2.11 Nomura 的差異（2026-10-15 確認並實作，Issue #239）
 
 細節見 [Nomura 核對規則](nomura-check-rules.md) §3.2、§3.6。負責人、受託機構名稱、電話（`+886 2 5556 1313` 已在 `phone_equivalents`）與地址（`台北市民生東路三段158號6樓` 已在 `address_equivalents`）、費率、發行價格、面額預設值、刊印日期規則與 BARC 相同。不同的有：
 
-- **審查通過日期**（`distributor.approval_dates`，所有上手生效）：加入 **2025-06-24**（2026-10-15 作業人員確認是受託機構真實的歷次審查日期；Nomura 2025 年的兩份樣本寫這一天）。比現有最早一筆早，PANEL 只能加較晚的日期，所以實作時直接改設定檔。交易日早於 2025-12-18 的既有上手樣本會從「轉人工覆核（`approval_date_not_configured`）」改成和 2025-06-24 比。
-- **固定警語**（`risk.fixed_warning_by_issuer.nomura`，2026-10-15 確認視為正確）：= SG 版本（無【】、有「*」、結尾有句號）。說明書只出現 **2 次**（封面(一)、第三章 6.(1)；第一章第 2 項只寫等級）——現行 `risk.fixed_warning_occurrences = 3` 是所有上手共用，**需要新增上手別的說明書次數設定**（沒列出的上手沿用 3）；投資人須知 1 次（`iis.fixed_warning_occurrences.nomura = 1`）。
+- **審查通過日期**（`distributor.approval_dates`，所有上手生效）：加入 **2025-06-24**（2026-10-15 作業人員確認是受託機構真實的歷次審查日期；Nomura 2025 年的兩份樣本寫這一天）。比現有最早一筆早，PANEL 只能加較晚的日期，所以直接改設定檔。交易日早於 2025-12-18 的既有上手樣本從「轉人工覆核（`approval_date_not_configured`）」改成和 2025-06-24 比：本機其他上手樣本只有 2 份結果改變（SG、MS 各 1 份 2025 年下半年交易、寫 2025-06-24 的說明書，由轉人工覆核改為通過），其餘不變。
+- **固定警語**（`risk.fixed_warning_by_issuer.nomura`，2026-10-15 確認視為正確）：= SG 版本（無【】、有「*」、結尾有句號）。說明書只出現 **2 次**（封面(一)、第三章 6.(1)；第一章第 2 項只寫等級）——新增上手別的說明書次數設定 `risk.fixed_warning_occurrences_by_issuer.nomura = 2`（沒列出的上手沿用 `fixed_warning_occurrences = 3`）；投資人須知 1 次（`iis.fixed_warning_occurrences.nomura = 1`）。
 - **風險等級寫法**（`risk.level_formats.nomura`）：沒有【】，寫在 `風險程度等級為`、`歸類為` 之後；另有 `商品風險程度：RR4`（說明書第一章第 2 項）、`本商品風險程度：RR4`（投資人須知第二 3.）。
 - **商品名稱樣板**（`product_name.nomura`）：中文 `Nomura International Funding Pte. Ltd.發行{天期}個月{幣別中文}計價固定配息({記憶式}自動提前出場){標的}結構型商品(無擔保)`（`memory_zh = "記憶式"`；`single_zh = "股票連結"`、`basket_zh = "連結一籃子股票"`）；英文 `{天期}-Month {幣別代碼} Autocall Fixed Coupon Notes {記憶式}linked to {標的} issued by Nomura International Funding Pte. Ltd. (unsecured)`（`memory_en = "with Memory Knock-Out "`；`single_en = "a Single Stock"`、`basket_en = "a basket of stocks"`）。不分 KI、Non-Call；英文忽略空白比對（`ignore_whitespace_en`）。封面名稱後的 `(ISIN No. … / TDCC…)` 不屬於名稱。
 - **發行機構全名**（`issuer_name.nomura`）：`Nomura International Funding Pte. Ltd.`（只有英文名）；封面、第二章 1.(1) 兩處相同；第一章沒有出處。Nomura 目前只有這一個發行主體（2026-10-15 確認）。

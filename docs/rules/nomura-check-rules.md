@@ -3,7 +3,7 @@
 - 文件側：[Nomura 範本規格](../templates/nomura-zh-product-description.md)；投資人須知見 [Nomura 投資人須知範本規格](../templates/nomura-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 Nomura 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [Nomura 下單資料格式](../order-formats/nomura-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.11（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #239）；待實作
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #239）；已實作（`parsers/nomura.py`、`rules/nomura.py`，投資人須知見[投資人須知核對規則](iis-check-rules.md)）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM 核對規則](jpm-check-rules.md)不同或 Nomura 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -105,7 +105,7 @@
 
 **固定風險警語**：與現有 **SG 版本**（`risk.fixed_warning_by_issuer.sg`：沒有【】、有「*」、結尾有句號）逐字相同（8 份封面(一)、第三章 6.(1)、投資人須知(一)；忽略空白）。實作時 `fixed_warning_by_issuer.nomura` 設成同一段文字（2026-10-15 確認視為正確）。
 
-- **說明書次數 2**（封面(一)、第三章 6.(1)；第一章第 2 項只寫 `商品風險程度：RR4`）。現行說明書次數 `risk.fixed_warning_occurrences = 3` 是所有上手共用，**需要新增上手別的說明書次數設定**（例：`risk.fixed_warning_occurrences_by_issuer.nomura = 2`，沒列出的上手沿用 3；比照投資人須知的 `iis.fixed_warning_occurrences`）。投資人須知 1 次（`iis.fixed_warning_occurrences.nomura = 1`）。
+- **說明書次數 2**（封面(一)、第三章 6.(1)；第一章第 2 項只寫 `商品風險程度：RR4`）：上手別的說明書次數設定 `risk.fixed_warning_occurrences_by_issuer.nomura = 2`（沒列出的上手沿用 `risk.fixed_warning_occurrences = 3`；比照投資人須知的 `iis.fixed_warning_occurrences`）。投資人須知 1 次（`iis.fixed_warning_occurrences.nomura = 1`）。
 - 風險等級無括號：`risk.level_formats.nomura = ["風險程度等級為{level}", "歸類為{level}", "風險程度：{level}"]`——第三個寫法涵蓋說明書第一章第 2 項 `商品風險程度：RR4` 與投資人須知第二 3. `本商品風險程度：RR4`（實作時確認不會重複計到其他寫法）。
 
 **商品名稱樣板**（`product_name.nomura`，8 份全部符合；2026-10-15 確認視為正確）：
@@ -190,6 +190,26 @@
 | 共用設定 | 審查標準 Nomura 分節（`fixed_warning_by_issuer.nomura`、**新增**上手別說明書固定警語次數、`risk.level_formats.nomura`、名稱樣板、發行機構、保證機構、總代理人、商品種類、`minimum_issue_size.nomura`、`iis.fixed_warning_occurrences.nomura`）、`approval_dates` 加 2025-06-24；`config/reference_sheet.toml` 的 `[issuer_values] NOMURA` |
 
 要有合成 PDF 測試（D／P、記憶式／非記憶式／單一標的、KI 無／AM／D／P、Non-Call = 天期的 P 型、日期表 KO 價欄、JPY、AUD、VWAP、NR1 式多空白、頁首 `N/4`、投資人須知沒有刊印日期）、本機 8 份真實樣本測試（`tests/test_real_nomura.py`，結果與 §5 一致：NR6 說明書與投資人須知因到期日不一致不通過，其餘 7 組通過並回填），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM 樣本的負面測試；新增 `approval_dates` 與上手別次數設定後，既有上手的合成與本機真實樣本測試結果須逐份比較，變化只能來自 2025-06-24（交易日早於 2025-12-18 的樣本）。
+
+### 7.1 實作對照（Issue #239）
+
+年利率採第一案：parser 的 `coupon_pa_pct` 交 `absent`（參考條件表欄位規則 `field.coupon_pa_pct` 為不適用），`rules/nomura.py` 宣告 `REFERENCE_FIELDS = ("coupon_pa_pct",)`。
+
+| 規則 | rule_id |
+|---|---|
+| 每期配息率 × 12（2 位）= 年利率；日期表列數 ≠ 天期轉人工覆核（`coupon_frequency_unknown`） | `derive.coupon_pa` |
+| 情境一、二年化報酬率 = 年利率 | `derive.annualized_return`（共用 `kit.annualized_return`） |
+| 第 14 項設定參數、第 15 項(1) 每期配息率 = 第 7 項 | `doc.coupon_mentions` |
+| 英文名稱後 TDCC No.；ISIN 三處；名稱（封面 = 第一章第 1 項）；幣別中文與 ISO 代碼 | `doc.product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.currency_consistency` |
+| 期數（日期表、名稱月數、第 14 項年期） | `doc.coupon_periods` |
+| 記憶式句型 ⇔ 名稱；日期表自動提前出場價欄 = 表頭 KO % | `doc.ko_memory`、`doc.date_table_ko` |
+| 標的數（第 7 項句型、第 8 項檔數）；第 9 項彭博代碼 | `doc.underlying_count`、`doc.underlying_tickers` |
+| KI 條款 ⇔ 標的表下限觸發價欄 ⇔ 到期贖回款數；KI P 決定日表 = 自動提前出場決定日 | `doc.ki_consistency` |
+| 到期贖回 100% | `doc.redemption_pct` |
+| 第 14 項設定參數面額；百分比表 = 標的表表頭 | `doc.scenario_params`、`doc.scenario_table` |
+| 日期表末列、遞增、早於配息日；P 型「不適用」期別 | `schedule.coupon_dates`、`schedule.autocall_dates` |
+
+第 7 項 KO 寫法與日期表排法的一致、D 型 KO 起日對到日期表期別由 parser 判定：不一致時 KO 觀察方式、Non-Call 與比價日轉人工覆核。標的表與費用表依座標讀（表頭與費率欄分欄後由上到下接起來），不依擷取順序。
 
 ## 8. 決策紀錄
 
