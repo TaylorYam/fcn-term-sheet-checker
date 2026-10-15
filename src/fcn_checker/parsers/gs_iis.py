@@ -18,9 +18,8 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import gs, iis
-from .common import derived, number
+from .common import RawText, derived, number
 from .layout import TextIndex, parse_date
-from .nomura import RawText
 
 TEMPLATE_ID = "gs-zh-iis"
 PARSER_VERSION = "1"
@@ -63,7 +62,7 @@ PROVIDED = frozenset(
         "final_valuation_date",
         "maturity_date",
         "coupon_pa_pct",
-        "monthly_coupon_pct",
+        "monthly_coupons",
         "ko_observation",
         "first_callable_period",
         "ko_memory",
@@ -192,11 +191,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (i for i, ln in enumerate(text_lines) if a is not None and i > a and squash(ln.text).startswith("(11)")), None
     )
     table = gs.price_table("underlying_table", text_lines[a + 1 : b] if a is not None and b is not None else [])
-    fields["underlyings"] = (
-        ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-        if table.ok
-        else derived("underlyings", table)
-    )
+    fields["underlyings"] = gs.underlyings_field(table)
     fields["underlying_prices"] = gs.price_rows(table)
     for col, key in (("strike", "strike_pct"), ("ko", "ko_pct"), ("ki", "ki_pct")):
         fields[key] = (
@@ -212,10 +207,11 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("final_valuation_date", r"\(14\)評價日[:：]" + gs.D, parse_date)
     put("maturity_date", r"\(15\)到期日[:：]評價日後的第\d+個營業日，現預定為" + gs.D, parse_date)
     # 二. 2. 收益分配事項
-    coupon = r"「配息率」就每個觀察期間而言，指年利率" + gs.PCT + r"/12（約為" + gs.PCT + r"）"
-    put("coupon_pa_pct", coupon, Decimal)
-    put(
-        "monthly_coupon_pct", r"「配息率」就每個觀察期間而言，指年利率\d+(?:\.\d+)?%/12（約為" + gs.PCT + r"）", Decimal
+    put("coupon_pa_pct", gs.COUPON, Decimal)
+    # 每月配息率 = 年利率 ÷ 12 四捨五入到 4 位（共用規則 iis.monthly_coupon 的「每一處」寫法，同 MS；範本規格 §4.5）
+    monthly = r"「配息率」就每個觀察期間而言，指年利率\d+(?:\.\d+)?%/12（約為" + gs.PCT + r"）"
+    fields["monthly_coupons"] = iis.occurrences(
+        "monthly_coupons", ti, (("monthly_coupon_iis", "每月配息率", "二. 2. 收益分配事項", monthly),), Decimal
     )
     _redeem_terms(ti, fields)
     provided = set(PROVIDED)

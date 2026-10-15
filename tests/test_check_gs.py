@@ -176,6 +176,32 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
 
 
+def test_schedule_rows_must_equal_the_tenor(tmp_path):
+    """年期寫 7 個月、觀察時程表 6 列：期數不符。"""
+    r = check(tmp_path, edits=[Edit("則為6個月", "則為7個月", "ts.art13")])
+    assert rule(r, "doc.coupon_periods", "date_table")[0].status == S.MISMATCH
+
+
+def test_single_wording_with_a_basket_table_needs_review(tmp_path):
+    """第 16 項寫成單一標的句型、價格表卻有 3 檔：轉人工覆核。"""
+    memory = "如於任一提前出場觀察日，各連結標的(i)至少發生過一次記憶提前出場事件(i)，則視為已發生「自動提前出場事件」"
+    single = "如於一提前出場觀察日之參考價格等於或高於提前出場價格，則視為已發生「自動提前出場事件」"
+    r = check(tmp_path, edits=[Edit(memory, single, "ts.art16")])
+    assert rule(r, "doc.underlying_count", "memory_style")[0].status == S.REVIEW_REQUIRED
+
+
+def test_indexed_table_header_with_one_underlying_needs_review(tmp_path):
+    """單一標的的價格表表頭寫了多標的的「(i)」：轉人工覆核。"""
+    spec = VARIANTS["單一標的、無 KI、Non-Call 2、開盤價"]
+    r = check(tmp_path, spec, edits=[Edit("彭博代", "彭博代(i)", "ts.art15.table")])
+    assert rule(r, "doc.underlying_count", "price_table_header")[0].status == S.REVIEW_REQUIRED
+
+
+def test_scenario_units_must_equal_the_minimum_subscription_units(tmp_path):
+    r = check(tmp_path, edits=[Edit("最低申購單位數（5單位）", "最低申購單位數（1單位）", "ts.art17")])
+    assert rule(r, "doc.scenario_table")[0].status == S.MISMATCH
+
+
 def test_sheet_non_call_is_compared_with_article_16(tmp_path):
     r = check(tmp_path, Spec(), **{"Non-Call(月)": 2})
     assert rule(r, "field.first_callable_period")[0].status == S.MISMATCH

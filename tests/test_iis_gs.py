@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 
@@ -58,6 +59,13 @@ def test_supported_types_pass(tmp_path, spec):
 def test_items_are_checked(tmp_path, edit, broken):
     r = check_iis(tmp_path, edits=[edit]).report
     assert broken in {rid for rid, _, _ in problems(r)}, problems(r)
+
+
+def test_monthly_coupon_is_rounded_half_up_to_four_places(tmp_path):
+    """年利率 8% ÷ 12 = 0.66666…：須寫 0.6667（half-up 4 位），去尾的 0.6666 判不一致。"""
+    edit = Edit("（約為0.6667%）", "（約為0.6666%）", "iis.coupon")
+    r = check_iis(tmp_path, Spec(annual=Decimal("8.00")), edits=[edit]).report
+    assert rule(r, "iis.monthly_coupon")[0].status == S.MISMATCH
 
 
 def test_ki_type_is_read_from_the_redemption_terms(tmp_path):

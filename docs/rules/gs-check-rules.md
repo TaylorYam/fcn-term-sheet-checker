@@ -125,7 +125,7 @@
 - 第四章 4. `最低申購為N單位且其後增加單位應為一單位之倍數。每一單位為X幣別。`：parser 交出最低申購 = N × X、最低加購 = 1 × X（`每一單位` 的金額 X 也列入 `currency_others`）。
 - 第四章 8.(2) `每筆交易之最低贖回單位數為1單位，後續為一單位之倍數`：最低贖回、增加贖回單位 = 單位數 × 面額。
 - 審查標準 `min_amount_multiples.gs`：`minimum_subscription = { USD = 5, JPY = 1, CNH = 1 }`（其他幣別沒有樣本 → 轉人工覆核，同 SG 依幣別的寫法）、`minimum_additional = 1`、`minimum_redemption = 1`、`redemption_increment = 1`。
-- 交叉驗證（不另出結果）：第 17 項 `最低申購單位數（N單位）` 的 N = 第四章 4. 的 N。
+- 交叉驗證：第 17 項 `最低申購單位數（N單位）` 的 N = 第四章 4. 的 N（併入 `doc.scenario_table` 的結果，不另出一筆）。
 
 ### 3.9 核對範圍決定（2026-10-15，Issue #248）
 
@@ -202,9 +202,9 @@
 | 第 15 項(2) 首 k 個、情境 1 第 k 個觀察期間 = 第 16 項 k | `doc.autocall_terms` |
 | 商品代號四處；ISIN 三處；第一章第 1 項中文名稱；第一章第 3 項發行機構全名 = 第 1 頁第 7 項；第一章第 5 項幣別與 ISO 代碼（CNY 視為 CNH） | `doc.product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.issuer_name`、`doc.currency_consistency` |
 | 期數（觀察時程表列數、中英文名稱月數） | `doc.coupon_periods` |
-| 記憶式句型 ⇔ 名稱；單一／多標的句型 ⇔ 價格表檔數；第 10 項代碼 = 價格表 | `doc.ko_memory`、`doc.underlying_count`、`doc.underlying_tickers` |
+| 記憶式句型 ⇔ 名稱；單一／多標的寫法（第 16 項句型、價格表表頭有無「(i)」）⇔ 價格表檔數；第 10 項代碼集合與檔數 = 價格表（不看順序） | `doc.ko_memory`、`doc.underlying_count`、`doc.underlying_tickers` |
 | KI 寫法 ⇔ 價格表下限觸發價格欄 ⇔「下限觸發價格」定義 | `doc.ki_consistency` |
-| 價格表表頭 K／KI % = 定義；情境 4 第 1 檔價格與 K % | `doc.table_header_pct`、`doc.scenario_table` |
+| 價格表表頭 K／KI % = 定義；情境 4 第 1 檔價格與 K %、情境假設最低申購單位數 = 第四章 4. | `doc.table_header_pct`、`doc.scenario_table` |
 | 觀察時程表末列、連續、結束日早於付息日 | `schedule.coupon_dates` |
 
 第一章第 3 項寫發行機構全名：共用 `standard.issuer_name` 的 `issuer_name_ch1` 是「只寫中文的出處」，parser 交中文部分給共用規則，全名另由 `doc.issuer_name` 和第 1 頁比（實作時決定）。價格表依座標分欄讀（表頭與數字欄由左到右、每欄由上到下接起來；列以左欄列號切），費用表費率欄取「費率（百分比）」到「收取時點」之間、一列剛好一個 X%~Y%。投資人須知的 CJK 相容字在 `parsers/gs_iis.py` 讀之前轉換；合成文件畫不出相容字，這一點只由本機真實樣本測試（`tests/test_real_gs.py`）涵蓋。

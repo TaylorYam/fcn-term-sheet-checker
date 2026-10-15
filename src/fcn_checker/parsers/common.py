@@ -1,17 +1,20 @@
-"""各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%。
+"""各上手說明書 parser 共用的小工具：數字、推得欄位、文件上的一組值（含原文行）、月配息率出處、沒有 KO 價時的 KO 100%，
+以及保留空白的原文合併文字 `RawText`、表格依座標分欄 `by_column`、同一句另一組的 `capture_group`（Nomura、GS）。
 
 MS 與 BNP（之後的上手同樣）的 `read` 與情境分析解析都用這裡的版本，不各自複製一份（Issue #196）。
 """
 
 from __future__ import annotations
 
+import bisect
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Generic, NamedTuple, TypeVar
 
 from ..schema import Evidence, FieldStatus, Line, ParsedField
+from ..text import squash
 from .layout import TextIndex
 
 NUM = r"([\d,]+(?:\.\d+)?)"  # 數字（可有千分位與小數）
@@ -97,3 +100,75 @@ class Mention:
     def of_optional_hit(cls, where: str, hit: Hit | None, pick: Callable, fallback) -> Mention:
         """`hit` 找不到時為讀不到（證據為 `fallback` 行）；找到時值為 `pick(hit.value)`。"""
         return cls.missing(where, fallback) if hit is None else cls.of_hit(where, pick(hit.value), hit)
+
+
+# ---------------------------------------------------------------- 原文合併文字與表格分欄（Nomura、GS）
+
+
+class RawText:
+    """多行原文合併（同 `layout.join_text`：英數字跨行補一個空白），並可由字元位置找回原始行（作為證據）。
+
+    名稱、地址、電話等要保留空白的值在這裡讀；數字、日期與句型在去空白的 `TextIndex` 上讀。
+    """
+
+    def __init__(self, lines: Sequence[Line]):
+        self.lines = list(lines)
+        out, self._starts = "", []
+        for ln in self.lines:
+            t = ln.text.strip()
+            if out and t and re.search(r"[A-Za-z0-9.,)]$", out) and re.match(r"[A-Za-z0-9(]", t):
+                out += " "
+            self._starts.append(len(out))
+            out += t
+        self.text = out
+
+    def lines_for(self, start: int, end: int) -> list[Line]:
+        if not self.lines:
+            return []
+        i = max(0, bisect.bisect_right(self._starts, start) - 1)
+        j = max(i, bisect.bisect_right(self._starts, max(start, end - 1)) - 1)
+        return self.lines[i : j + 1]
+
+    def capture(self, name: str, pattern: str, convert: Callable = lambda x: x.strip(), group: int = 1) -> ParsedField:
+        """`pattern` 第 `group` 組的每一處（證據為整個比對所在的行）；不同值 → 歧義，沒有 → 缺漏，轉不成值 → 不合法。"""
+        found = []
+        for m in re.finditer(pattern, self.text, re.S):
+            lns = self.lines_for(m.start(), m.end())
+            try:
+                value = convert(m[group])
+            except (ValueError, TypeError, InvalidOperation):
+                value = None
+            if value is None:
+                return ParsedField.invalid(name, lns, f"「{m[group]}」無法辨識")
+            found.append((value, lns))
+        return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
+
+
+def by_column(lines: list[Line], gap: float = 20) -> list[Line]:
+    """表格的行依 x 座標分欄（相鄰兩行 x 相差超過 `gap` 為不同欄），由左到右、每欄由上到下。
+
+    一格拆成多行時，擷取順序可能逐欄也可能逐列；分欄後的順序固定（`執行價 (期初價格之X% )`、`ABC` / `UW Equity` 會接在一起）。"""
+    columns: list[list[Line]] = []
+    for ln in sorted(lines, key=lambda x: x.x0):
+        if columns and ln.x0 - columns[-1][-1].x0 <= gap:
+            columns[-1].append(ln)
+        else:
+            columns.append([ln])
+    return [ln for col in columns for ln in sorted(col, key=lambda x: (x.page, x.y0))]
+
+
+def column_text(lines: list[Line]) -> str:
+    """`by_column` 順序接起來、去空白（表頭）。"""
+    return "".join(squash(ln.text) for ln in by_column(lines))
+
+
+def capture_group(lns: list[Line], pattern: str, group: int, name: str, convert: Callable = lambda x: x) -> ParsedField:
+    """同一句的另一組（例：最低加價申購金額接在最低申購金額後面）。"""
+    ti = TextIndex(lns)
+    found = []
+    for m in ti.finditer(pattern):
+        try:
+            found.append((convert(m[group]), ti.lines_for(m.start(), m.end())))
+        except (ValueError, TypeError, InvalidOperation):
+            return ParsedField.invalid(name, ti.lines_for(m.start(), m.end()), f"「{m[group]}」無法辨識")
+    return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")

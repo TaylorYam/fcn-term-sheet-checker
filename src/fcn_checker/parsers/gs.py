@@ -3,7 +3,7 @@
 沒有獨立封面：第 1 頁「中文產品說明書」「受託機構商品代號為…」後是編號項目 1.～13.，第 2 頁末是刊印日期。章名
 「第一章:商品基本資料」～「第六章:定義」（半形冒號、六章，在左邊界）；每頁右上角另有重複的章名頁首、頁底置中
 「第- N -頁，共M頁」，兩者都不算內文。條號「N.」與標題同一行（x≈72），子項「(n)」縮排。數字、日期與句型在去空白的
-全文索引上讀；名稱、地址等要保留空白的值在原文合併文字（`nomura.RawText`）上讀。
+全文索引上讀；名稱、地址等要保留空白的值在原文合併文字（`common.RawText`）上讀。
 """
 
 from __future__ import annotations
@@ -11,16 +11,15 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
-from .common import Mention, dec, derived, number
+from .common import Mention, RawText, by_column, capture_group, dec, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
-from .nomura import RawText, by_column
 
 TEMPLATE_ID = "gs-zh-pd"
 PARSER_VERSION = "1"
@@ -89,6 +88,8 @@ REFERENCE_CLOSE = (
     rf"「參考價格{OPT_I}」(?:就各連結標的\(i\)而言，)?指經(?:相關)?參考交易所官方決定及公布之(?:該)?連結標的收盤價格"
 )
 PRICE_HEADS = (("strike", "執行價格"), ("ko", "提前出場價格"), ("ki", "下限觸發價格"))
+# 第 14 項（投資人須知二. 2.）配息率：第 1 組年利率、第 2 組每月配息率
+COUPON = r"「配息率」就每個觀察期間而言，指年利率" + PCT + r"/12（約為" + PCT + r"）"
 
 
 def _is_noise(ln: Line) -> bool:
@@ -198,7 +199,7 @@ def read(lines: Sequence[Line]) -> GsTermSheet:
     put("currency_art5_iso", article(5), rf"5\.計價幣別[:：]{ZH_CCY}（([A-Z]{{3}})）")
     denom = rf"6\.每單位面額[:：]([\d,]+)({CCY})"
     put("denomination", article(6), denom, number)
-    fields["denomination_currency"] = _group(article(6), denom, 2, "denomination_currency")
+    fields["denomination_currency"] = capture_group(article(6), denom, 2, "denomination_currency")
     fields["art10_tickers"] = _tickers(article(10))
 
     art13 = article(13)
@@ -210,9 +211,8 @@ def read(lines: Sequence[Line]) -> GsTermSheet:
     fields["date_table"] = date_table(art13)
 
     art14 = article(14)
-    coupon = r"「配息率」就每個觀察期間而言，指年利率" + PCT + r"/12（約為" + PCT + r"）"
-    put("coupon_pa_pct", art14, coupon, Decimal)
-    fields["monthly_coupon_pct"] = _group(art14, coupon, 2, "monthly_coupon_pct", Decimal)
+    put("coupon_pa_pct", art14, COUPON, Decimal)
+    fields["monthly_coupon_pct"] = capture_group(art14, COUPON, 2, "monthly_coupon_pct", Decimal)
 
     _article15(fields, article(15))
     _article16(fields, article(16))
@@ -229,26 +229,14 @@ def read(lines: Sequence[Line]) -> GsTermSheet:
     return GsTermSheet(fields, TextIndex(doc.lines), doc, mentions)
 
 
-def _group(lns: list[Line], pattern: str, group: int, name: str, convert: Callable = lambda x: x) -> ParsedField:
-    """同一句的另一組（例：每月配息率接在年利率後面）。"""
-    ti = TextIndex(lns)
-    found = []
-    for m in ti.finditer(pattern):
-        try:
-            found.append((convert(m[group]), ti.lines_for(m.start(), m.end())))
-        except (ValueError, TypeError, InvalidOperation):
-            return ParsedField.invalid(name, ti.lines_for(m.start(), m.end()), f"「{m[group]}」無法辨識")
-    return ParsedField.from_hits(name, found, missing_note="找不到欄位標籤或已知寫法")
-
-
 def _cover(fields: dict[str, ParsedField], cover: list[Line]) -> None:
     """第 1 頁：受託機構商品代號、項目 1.～13.、第 2 頁末刊印日期。"""
     ti = TextIndex(cover)
     fields["product_code"] = capture("product_code", ti, r"^中文產品說明書受託機構商品代號為(\d{12})", whole_match=True)
     zh = r"1\.商品中文名稱[:：](.+?)（TDCC商品代號為(\d{12})，ISIN[:：]([A-Z]{2}[A-Z0-9]{10})\)"
     fields["name_zh"] = capture("name_zh", ti, zh, whole_match=True)
-    fields["product_code_zh"] = _group(cover, zh, 2, "product_code_zh")
-    fields["isin"] = _group(cover, zh, 3, "isin")
+    fields["product_code_zh"] = capture_group(cover, zh, 2, "product_code_zh")
+    fields["isin"] = capture_group(cover, zh, 3, "isin")
     raw = RawText(cover)
     en = r"2\.\s*商品英文名稱\s*[:：]\s*(.+?)\s*\(TDCC Product Code:\s*(\d{12})\s*，\s*ISIN:\s*([A-Z]{2}[A-Z0-9]{10})\s*\)"
     fields["name_en"] = raw.capture("name_en", en)
@@ -348,16 +336,12 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
     m = r"\(2\)最低保證收益率[:：]首(\d*)個觀察期間年利率" + PCT
     put_k = capture("minimum_return_periods", ti, m, lambda x: int(x) if x else 1, whole_match=True)
     fields["minimum_return_periods"] = put_k
-    fields["minimum_return_pct"] = _group(art15, m, 2, "minimum_return_pct", Decimal)
+    fields["minimum_return_pct"] = capture_group(art15, m, 2, "minimum_return_pct", Decimal)
 
 
 def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
     """價格表 → 標準欄位：標的、各標的價格、K／KO／KI %（K、KI 主來源是定義，表頭 % 由規則交叉驗證；KO 只在表頭）。"""
-    fields["underlyings"] = (
-        ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-        if table.ok
-        else derived("underlyings", table)
-    )
+    fields["underlyings"] = underlyings_field(table)
     fields["underlying_prices"] = price_rows(table)
     fields["strike_pct"] = fields["strike_def_pct"]
     ki_t = fields["ki_type"]
@@ -375,6 +359,13 @@ def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
         )
     else:
         fields["ko_pct"] = derived("ko_pct", table)
+
+
+def underlyings_field(table: ParsedField) -> ParsedField:
+    """價格表 → 標準欄位 `underlyings`（彭博代號，依表上順序）。"""
+    if not table.ok:
+        return derived("underlyings", table)
+    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
 
 
 def price_rows(table: ParsedField) -> ParsedField:
@@ -438,9 +429,9 @@ def initial_pricing(ti: TextIndex, lns: list[Line]) -> ParsedField:
 def price_table(name: str, lines: list[Line]) -> ParsedField:
     """連結標的價格表：表頭決定 K／KO／KI %（`(初始參考價格(i)之X%)`），每檔一列（以左欄列號切列）。
 
-    表頭與各格依座標分欄（`nomura.by_column`）後接起來：一格可能拆成多行（`12,345.000` / `0`、`13.6800美` / `元`），
+    表頭與各格依座標分欄（`common.by_column`）後接起來：一格可能拆成多行（`12,345.000` / `0`、`13.6800美` / `元`），
     相鄰兩格也可能擷取成同一行。價格取彭博代碼之後的 4 位小數數字（投資人須知後面接幣別字）。
-    值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines", "header_lines"}。
+    值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines", "header_lines", "indexed"}。
     """
     if not lines:
         return ParsedField.missing(name, "找不到連結標的價格表")
@@ -493,6 +484,7 @@ def price_table(name: str, lines: list[Line]) -> ParsedField:
         "rows": rows,
         "row_lines": rows_lines,
         "header_lines": header,
+        "indexed": "(i)" in head,  # 表頭寫「(i)」＝多標的寫法
     }
     return ParsedField.present(name, value, lines)
 
@@ -566,6 +558,7 @@ def _article17(fields: dict[str, ParsedField], art17: list[Line]) -> ParsedField
     """情境假設配息率、情境 1 的期別、情境 4 第 1 檔的初始參考價格／執行價格／K %（範本規格 §4.9）；回傳情境假設配息率。"""
     ti = TextIndex(art17)
     coupon = capture("scenario_coupon_pct", ti, r"\(2\)配息率[:：]年利率" + PCT, Decimal, whole_match=True)
+    fields["scenario_units"] = capture("scenario_units", ti, r"×最低申購單位數（(\d+)單位）", int, whole_match=True)
     fields["scenario_first_period"] = capture(
         "scenario_first_period",
         ti,
@@ -620,11 +613,11 @@ def _chapter4(fields: dict[str, ParsedField], doc: Document, put: Callable) -> N
     fields.update(fee_rates(art(2)))
     subscribe = rf"最低申購為(\d+)單位且其後增加單位應為一單位之倍數。每一單位為([\d,]+)({CCY})。"
     put("minimum_subscription_units", art(4), subscribe, int)
-    fields["unit_amount"] = _group(art(4), subscribe, 2, "unit_amount", number)
-    fields["unit_amount_currency"] = _group(art(4), subscribe, 3, "unit_amount_currency")
+    fields["unit_amount"] = capture_group(art(4), subscribe, 2, "unit_amount", number)
+    fields["unit_amount_currency"] = capture_group(art(4), subscribe, 3, "unit_amount_currency")
     price = rf"申購價金之計算[:：]申購單位數×每單位面額（([\d,]+)({CCY})）×" + PCT
-    fields["issue_price_pct"] = _group(art(5), price, 3, "issue_price_pct", Decimal)
-    fields["subscription_price_currency"] = _group(art(5), price, 2, "subscription_price_currency")
+    fields["issue_price_pct"] = capture_group(art(5), price, 3, "issue_price_pct", Decimal)
+    fields["subscription_price_currency"] = capture_group(art(5), price, 2, "subscription_price_currency")
     put("minimum_redemption_units", art(8), r"每筆交易之最低贖回單位數為(\d+)單位，後續為一單位之倍數", int)
 
 
@@ -755,8 +748,3 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]
     )
-
-
-def monthly_of(annual: Decimal) -> Decimal:
-    """每月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（範本規格 §4.6）。"""
-    return (annual / 12).quantize(Decimal("0.0001"), ROUND_HALF_UP)

@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import re
+from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.gs import monthly_of
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
@@ -49,6 +49,11 @@ NOT_COVERED = [
     },
 ]
 MEMORY_ZH, MEMORY_EN = "記憶式", "Memory"
+
+
+def monthly_of(annual: Decimal) -> Decimal:
+    """每月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（範本規格 §4.6）。"""
+    return (annual / 12).quantize(kit.Q4, ROUND_HALF_UP)
 
 
 # ---------------------------------------------------------------- 配息率（核對規則 §3.3）
@@ -161,20 +166,21 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
             return ParsedField.invalid("name_months", [], f"{what}找不到月數")
         return ParsedField("name_months", pf.status, int(m[1]) if m else None, pf.evidence, note=pf.note)
 
+    zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)Months", "商品英文名稱")
     return [
         kit.doc_check(ctx, rid, "date_table", "第 13 項觀察時程表期數", tenor, table).compare(
             tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="觀察時程表列數須等於天期"
         ),
-        kit.doc_check(
-            ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, months(zh, r"(\d+)個月", "商品中文名稱")
-        ).compare(tenor.value, months(zh, r"(\d+)個月", "商品中文名稱").value),
-        kit.doc_check(
-            ctx, rid, "name_months_en", "商品英文名稱月數", tenor, months(en, r"(\d+)Months", "商品英文名稱")
-        ).compare(tenor.value, months(en, r"(\d+)Months", "商品英文名稱").value),
+        kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
+            tenor.value, zh_months.value
+        ),
+        kit.doc_check(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(
+            tenor.value, en_months.value
+        ),
     ]
 
 
-def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
+def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
     """記憶式句型 ⇔ 名稱「記憶式」／「Memory」；第 15 項(2) 最低保證收益率「首 k 個」、情境 1「第 k 個觀察期間結束日」= 第 16 項 k。"""
     f = ctx.ts.f
     mem, k = f("ko_memory"), f("first_callable_period")
@@ -208,13 +214,24 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def underlying_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """第 10 項標的表代碼依序 = 第 15 項價格表；單一標的句型 ⇔ 價格表 1 檔。"""
+    """第 10 項標的表代碼集合與檔數 = 第 15 項價格表；單一／多標的寫法（第 16 項句型、價格表表頭有無「(i)」）⇔ 價格表檔數。"""
     f = ctx.ts.f
-    uls, art10, style = f("underlyings"), f("art10_tickers"), f("memory_style")
+    uls, art10, style, table = f("underlyings"), f("art10_tickers"), f("memory_style"), f("underlying_table")
     shape = {True: "多標的", False: "單一標的"}
     return [
         kit.doc_check(ctx, "doc.underlying_tickers", "art10_tickers", "第 10 項標的彭博代碼", uls, art10).compare(
-            uls.value, art10.value, fail_message="第 10 項各檔彭博代碼須依序等於第 15 項價格表"
+            uls.value,
+            art10.value,
+            ok=uls.ok and art10.ok and sorted(uls.value) == sorted(art10.value),
+            tolerance="代碼集合與檔數相同即可，不看順序",
+            fail_message="第 10 項各檔彭博代碼須與第 15 項價格表相同（集合與檔數）",
+        ),
+        kit.doc_check(ctx, "doc.underlying_count", "price_table_header", "價格表表頭「(i)」", uls, table).compare(
+            shape.get(len(uls.value) > 1) if uls.ok else None,
+            shape.get(table.value["indexed"]) if table.ok else None,
+            fail=S.REVIEW_REQUIRED,
+            reason="document_inconsistent",
+            fail_message="價格表表頭有無「(i)」（多標的寫法）須與價格表檔數一致",
         ),
         kit.doc_check(ctx, "doc.underlying_count", "memory_style", "第 16 項單一／多標的句型", uls, style).compare(
             shape.get(len(uls.value) > 1) if uls.ok else None,
@@ -283,6 +300,10 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         ]
         if scen.value["strike_pct"] != strike.value:
             issues.append(f"執行價格的 % {scen.value['strike_pct']} 不等於 K % {strike.value}")
+        units, ch4 = f("scenario_units"), f("minimum_subscription_units")  # 情境假設的最低申購單位數 = 第四章 4.
+        if not (units.ok and ch4.ok) or units.value != ch4.value:
+            shown = units.value if units.ok else "讀不到"
+            issues.append(f"情境假設最低申購單位數 {shown} 不等於第四章第 4 項 {ch4.value if ch4.ok else '讀不到'}")
         out.append(
             check.compare(
                 None,
@@ -328,7 +349,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *coupon(ctx),
         *document_info(ctx),
         *periods(ctx),
-        *ko_terms(ctx),
+        *autocall_terms(ctx),
         *underlying_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
