@@ -264,3 +264,11 @@ def test_other_issuers_are_not_ca(tmp_path, build):
 def test_chapter_seven_title_is_required(tmp_path):
     item = check_item(tmp_path, edits=[Edit("第七章、股權連結商品的額外條款及條件", "第七章、其他", "ts.ch七")])
     assert item.report.template != CA.template_id
+
+
+def test_initial_price_wrapped_onto_two_lines_stays_in_its_row(tmp_path):
+    """價格表第 1 檔期初訂價的幣別字換到下一行（`1,029.2100 美` / `元`，Issue #278）：第 9 項 (2) 兩行垂直置中、
+    第 16 項情境表數字高一行；第一行都比同列其他價格高，仍歸到同一列，價格照常讀到並通過。"""
+    item = check_item(tmp_path, Spec(wrap_initial=True))
+    assert item.report.status == S.PASS, problems(item.report)
+    assert item.fills_sheet

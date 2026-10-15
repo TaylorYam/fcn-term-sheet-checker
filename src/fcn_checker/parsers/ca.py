@@ -394,16 +394,42 @@ def price_table(name: str, lns: list[Line], start_marker: str, end_marker: str) 
             name, header, "價格表表頭不是「連結標的、期初訂價、執行價、(下限價、)自動提前出場價」"
         )
     columns = [c for _, c in sorted(found)]
+    # 幣別字換到下一行（`1,029.2100 美` / `元`，Issue #278）：接回那格價格，這格的上下範圍算到幣別字那一行
+    bottom = {id(x): x.y1 for x in prices}
+    owner: dict[int, Line] = {}  # 幣別字那一行 → 它所屬的價格
+    for ln in lines:
+        above = [
+            x
+            for x in prices
+            if x.page == ln.page
+            and x.x0 <= ln.xc <= x.x1
+            and 0 < ln.y0 - x.y0 < 2.5 * (x.y1 - x.y0)
+            and not re.search(ZH_CCY + "$", squash(x.text))
+            and re.search(ZH_CCY + "$", squash(x.text + ln.text))
+        ]
+        if len(above) == 1 and ln not in prices:
+            bottom[id(above[0])] = ln.y1
+            owner[id(ln)] = above[0]
+    # 同一頁、上下範圍有重疊的價格是同一列（換行的那格可能置中、也可能比同列其他格高一行）
     groups: list[list[Line]] = []
     for ln in sorted(prices, key=lambda x: (x.page, x.y0, x.x0)):
-        if groups and groups[-1][0].page == ln.page and abs(groups[-1][0].y0 - ln.y0) < 3:
-            groups[-1].append(ln)
+        g = groups[-1] if groups else None
+        if (
+            g
+            and g[0].page == ln.page
+            and ln.y0 < max(bottom[id(x)] for x in g) - 1
+            and bottom[id(ln)] > min(x.y0 for x in g) + 1
+        ):
+            g.append(ln)
         else:
             groups.append([ln])
-    # 價格以外的行（名稱、列號、拆到下一行的幣別字）分給同一頁 y 中心最近的那一列
+    # 價格以外的行（名稱、列號）分給同一頁 y 中心最近的那一列；換行的幣別字跟著它的價格
     extra: list[list[Line]] = [[] for _ in groups]
     for ln in lines:
         if ln in header or ln in prices:
+            continue
+        if id(ln) in owner:
+            extra[next(k for k, g in enumerate(groups) if owner[id(ln)] in g)].append(ln)
             continue
         same = [k for k, g in enumerate(groups) if g[0].page == ln.page]
         if same:
