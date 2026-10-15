@@ -417,20 +417,40 @@ def _issue_price_at(ctx: Context, rid: str, field: str, pf: ParsedField, name: s
     )
 
 
+def _quanto(ctx: Context, rows) -> bool | None:
+    """承作幣別和任一檔標的報價幣別（價格旁的幣別字）不同；讀不到幣別字或對照不到 ISO 代碼時為 None。"""
+    cz = standard_field(ctx, "currency_zh")
+    to_iso = ctx.std.currency_zh_to_iso
+    quotes = [to_iso.get(r.currency) if r.currency else None for r in rows]
+    if not cz.ok or to_iso.get(cz.value) is None or None in quotes:
+        return None
+    return any(q != to_iso[cz.value] for q in quotes)
+
+
 def _name_flags(ctx: Context, used: frozenset[str]) -> tuple[dict[str, bool], ParsedField | None]:
     """名稱樣板的 maxi（標的數 ≥ 2；{underlying_*} 也依它選 1 檔或 2 檔以上的寫法）、daily（KO 每日觀察）、
-    autocall（第一個可提前出場期早於到期，即 Non-Call < 天期）旗標；只讀樣板用到的說明書欄位。不依上手分支。"""
+    autocall（第一個可提前出場期早於到期，即 Non-Call < 天期）、quanto（承作幣別 ≠ 標的報價幣別）、ki（有 KI）旗標；
+    只讀樣板用到的說明書欄位。不依上手分支。"""
     flags: dict[str, bool] = {}
     for flag, field, test, names in (
         ("maxi", "underlyings", lambda v: len(v) >= 2, {"maxi_zh", "maxi_en", "underlying_zh", "underlying_en"}),
         ("daily", "ko_observation", lambda v: v == "D", {"daily_zh", "daily_en"}),
         ("autocall", "autocall_schedule", lambda v: v.first_callable < v.periods, {"autocall_zh", "autocall_en"}),
+        ("quanto", "underlying_prices", lambda v: _quanto(ctx, v), {"quanto_zh", "quanto_en"}),
+        ("ki", "ki_type", lambda v: v != "none", {"ki_zh", "ki_en"}),
     ):
         if used & names:
             pf = standard_field(ctx, field)
+            if flag == "ki" and pf.status == FieldStatus.NOT_APPLICABLE:  # 無 KI 也可能交成不適用
+                flags[flag] = False
+                continue
             if not pf.ok:
                 return flags, pf
-            flags[flag] = test(pf.value)
+            value = test(pf.value)
+            if value is None:
+                note = "標的價格旁的幣別字讀不到或不在審查標準的幣別對照，判斷不出是否為 Quanto"
+                return flags, ParsedField.invalid(field, [], note)
+            flags[flag] = value
     return flags, None
 
 
@@ -483,6 +503,16 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         if bad is not None:
             out.append(check.review(bad))
             continue
+        if tpl.single_unsupported and flags.get("maxi") is False:
+            out.append(
+                check.result(
+                    S.REVIEW_REQUIRED,
+                    actual=pf.value,
+                    reason="variant_not_covered",
+                    message="單一標的沒有樣本，名稱寫法未知，請人工確認",
+                )
+            )
+            continue
         flags["memory"] = bool(mem.value)
         values = {"tenor": tenor.value, "ccy_zh": cz.value, "ccy": tpl.ccy_text(iso)}
         for flag in NAME_FLAGS:
@@ -513,6 +543,8 @@ def _product_name(ctx: Context) -> list[CheckResult]:
                 message="依審查標準名稱樣板與說明書天期、幣別、是否記憶式"
                 + ("、標的數" if {"underlying_zh", "underlying_en"} & tpl.placeholders(lang) else "")
                 + ("、是否會提前出場" if {"autocall_zh", "autocall_en"} & tpl.placeholders(lang) else "")
+                + ("、是否為 Quanto" if {"quanto_zh", "quanto_en"} & tpl.placeholders(lang) else "")
+                + ("、有無 KI" if {"ki_zh", "ki_en"} & tpl.placeholders(lang) else "")
                 + "組出",
             )
         )

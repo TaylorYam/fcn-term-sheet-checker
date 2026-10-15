@@ -3,7 +3,7 @@
 - 文件側：[DBS 範本規格](../templates/dbs-zh-product-description.md)；投資人須知見 [DBS 投資人須知範本規格](../templates/dbs-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 DBS 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [DBS 下單資料格式](../order-formats/dbs-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.18（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #280）；尚未實作（`parsers/dbs.py`、`rules/dbs.py`、`parsers/dbs_iis.py`、`rules/dbs_iis.py`）
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #280）；已實作（`parsers/dbs.py`、`rules/dbs.py`、`parsers/dbs_iis.py`、`rules/dbs_iis.py`）
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi](citi-check-rules.md)、[JPM](jpm-check-rules.md)、[Nomura](nomura-check-rules.md)、[GS](gs-check-rules.md)、[Natixis](natixis-check-rules.md)、[CA](ca-check-rules.md)、[BBVA 核對規則](bbva-check-rules.md)不同或 DBS 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）沿用 BARC
 
 ## 1. 範圍
@@ -109,13 +109,13 @@
 
 **商品名稱樣板**（`product_name.dbs`，4 份全部符合；2026-10-15 確認）：
 
-- 中文：`星展銀行{tenor}個月期{ccy_zh}計價{quanto_zh}固定利率記憶型每日觀察自動提前出場{ki_zh}一籃子中表現最差股權連結結構型商品(無擔保及無保證機構)(不保本)`。
-- 英文：`DBS Bank Ltd {tenor}-Month {ccy} {quanto_en}Fixed Coupon Memory Daily Knock-Out {ki_en}Worst of Basket Equity Linked Notes (unsecured and non-guaranteed) (non-principal protected)`。
+- 中文：`星展銀行{tenor}個月期{ccy_zh}計價{quanto_zh}固定利率記憶型每日觀察自動提前出場{ki_zh}{underlying_zh}股權連結結構型商品(無擔保及無保證機構)(不保本)`（`basket_zh = "一籃子中表現最差"`）。
+- 英文：`DBS Bank Ltd {tenor}-Month {ccy} {quanto_en}Fixed Coupon Memory Daily Knock-Out {ki_en}{underlying_en}Equity Linked Notes (unsecured and non-guaranteed) (non-principal protected)`（`basket_en = "Worst of Basket "`）。
 - `quanto_zh = "Quanto"`、`quanto_en = "Quanto "`：**計價幣別 ≠ 標的報價幣別**時填入（表1 價格幣別字和承作幣別不同；DB1、DB4）。
 - `ki_zh = "及定價日觸發(歐式)"`、`ki_en = "European Knock-In "`：有 KI（AM）時填入（DB2、DB4）。
-- `{quanto_*}`、`{ki_*}` 是**新的佔位符**，實作時加進共用名稱規則（其他上手沒有設定就不填，結果不變）。`memory_zh`／`memory_en` 設空字串（只支援記憶式，固定文字已寫在樣板）。
+- `{quanto_*}`、`{ki_*}` 是共用名稱規則新加的佔位符（[審查標準](review-standard.md) §2.3；其他上手沒有設定就不填，結果不變）；Quanto 依說明書表1 價格旁的幣別字（`PriceRow.currency`）和承作幣別比。`memory_zh`／`memory_en` 設空字串（只支援記憶式，固定文字已寫在樣板）。
 - 名稱截到 `(下稱「本商品」)` 之前；中文、英文都忽略空白（`ignore_whitespace_en = true`）、括號統一（`normalize_brackets = true`）。
-- **單一標的**（沒有樣本，「一籃子中表現最差」的寫法未知）：名稱轉人工覆核（DBS 專屬：標的數 1 時不套樣板，2026-10-15 確認）。
+- **單一標的**（沒有樣本，「一籃子中表現最差」的寫法未知）：名稱轉人工覆核（樣板 `single_unsupported = true`，共用名稱規則在標的 1 檔時不套樣板、`variant_not_covered`；2026-10-15 確認）。
 
 **發行機構名稱**（`issuer_name.dbs`）：`新加坡商星展銀行股份有限公司(DBS Bank Ltd)`；封面、相關機構事業概況 1.(1)、投資人須知相關機構 1. 都相同。2026-10-15 確認 DBS 只有這一個發行主體；其他寫法判不一致或轉人工覆核。
 
@@ -203,7 +203,7 @@
 |---|---|
 | 說明書 | 上手登記（`issuers.py`）；DBS `LayoutSpec`（**沒有章號**：段落標題整行比對；商品基本資料兩欄表依 x 座標分標籤與值；頁底 `N / M頁` 排除）；範本辨識；`read` 交出全部標準欄位（`initial_pricing`、`issuer_name_ch1`、`distributor_phone_ch4` 交 `absent`；`subscription_dates` 1 筆；`min_amounts` 4 筆；`issue_price_others` 0 筆；KO D、KI AM／無）；§3.3–§3.8 |
 | 投資人須知 | `parsers/dbs_iis.py`、`IisTemplate`（頁底 `第N 頁/共M 頁` 的 `page_totals`；每頁頁首刊印日期；價格表表頭跨頁、費用表列跨頁）；範本專屬規則 `rules/dbs_iis.py`（頁首刊印日期 4 處相同且 = 說明書）；[投資人須知核對規則](iis-check-rules.md) DBS 欄 |
-| 共用設定 | 審查標準 DBS 分節（`fixed_warning_by_issuer.dbs`、`fixed_warning_occurrences_by_issuer.dbs = 2`、`level_formats.dbs`、`product_name.dbs`、`issuer_name.dbs`、`product_type.dbs`、`min_amount_multiples.dbs`、`iis.fixed_warning_occurrences.dbs = 1`）；`distributor.name_equivalents`、`phone_equivalents` 各加一種寫法；共用名稱規則加 `{quanto_*}`、`{ki_*}` 佔位符；共用月配息率規則支援無條件進位；`config/reference_sheet.toml` 的 `[issuer_values] DBS = "DBS"`；`config/issuer_prefixes.toml` 把 `078` 移到「已有範本」 |
+| 共用設定 | 審查標準 DBS 分節（`fixed_warning_by_issuer.dbs`、`fixed_warning_occurrences_by_issuer.dbs = 2`、`level_formats.dbs`、`product_name.dbs`、`issuer_name.dbs`、`product_type.dbs`、`min_amount_multiples.dbs`、`iis.fixed_warning_occurrences.dbs = 1`）；`distributor.name_equivalents`、`phone_equivalents` 各加一種寫法；共用名稱規則加 `{quanto_*}`、`{ki_*}` 佔位符與 `single_unsupported`；`config/reference_sheet.toml` 的 `[issuer_values] DBS = "DBS"`；`config/issuer_prefixes.toml` 把 `078` 移到「已有範本」 |
 
 要有合成 PDF 測試（KO D 記憶式 × KI AM／無、Non-Call 1 與 2、USD 與 Quanto（AUD、JPY）、3 檔與 4 檔、非整數 K %、最大利率值無條件進位 ≠ 四捨五入、表1 表頭 % 同行／另起一行、情境表全形表頭、投資人須知價格表表頭跨頁、費用表列跨頁、每頁頁首刊印日期、單一標的名稱轉人工覆核）、本機 4 份真實樣本測試（`tests/test_real_dbs.py`，結果與 §5 一致：4 組都通過並回填），以及 BARC、HSBC、MS、BNP、SG、Citi、JPM、Nomura、GS、Natixis、CA、BBVA（及 UBS）樣本的負面測試；既有上手的合成與本機真實樣本測試結果須不變（受託機構等價寫法與名稱佔位符新增造成的改變要逐份列出，預期沒有）。
 
@@ -220,7 +220,7 @@
 | 封面兩個商品代號相同 | `doc.product_code_consistency` |
 | 商品基本資料中文幣別、ISO 代碼；封面幣別 ISO 代碼 | `doc.currency_consistency` |
 | 期數（表A 列數、中英文名稱月數、情境基本假設天期；不同判不一致） | `doc.coupon_periods` |
-| 單一標的的名稱轉人工覆核 | `doc.single_underlying_name` |
+| 單一標的的名稱轉人工覆核 | `standard.product_name`（共用，`single_unsupported`） |
 | KO 型態、記憶式寫法不在範本規格內：parser 交出不合法（`field.ko_observation`、`field.ko_memory` 轉人工覆核） | （parser） |
 | 到期 `(a)`、下限觸發事件定義、表1 下限觸發價格欄、名稱 KI 段不一致：parser 交出不合法（`field.ki_type` 轉人工覆核） | （parser） |
 | 表1 與標的表代碼、順序、列數不同：parser 交出不合法（`field.underlyings` 與價格欄轉人工覆核） | （parser） |
@@ -228,6 +228,7 @@
 | 表A（列數、期別、遞增、結束日 < 支付日、末列 = 定價日／到期日） | `schedule.coupon_dates` |
 | 最低申購單位數 × 面額 ≠ `即` 後金額：parser 交出不合法（`field.min_amounts` 轉人工覆核） | （parser） |
 | 投資人須知每頁頁首刊印日期相同且 = 說明書 | `iis.print_dates`（DBS 範本專屬） |
+| 投資人須知最大利率值 = 說明書最大利率值 | `iis.monthly_coupon`（DBS 範本專屬） |
 
 價格表依座標讀：表頭各行依 x 中心分欄（欄序依關鍵字順序），以價格行的 y 切列；情境表幣別字與數字分兩行接回。費用表沿用共用 `common.fee_rates`（投資人須知跨頁列要先把兩頁的同一列接回）。
 
@@ -254,3 +255,4 @@
 | 2026-10-15 | 比價日：`比價日_{Non-Call}` = 表A 第 Non-Call 期觀察期間結束日、`比價日_{天期}` = 定價日 |
 | 2026-10-15 | 發行主體只有 DBS Bank Ltd；參考條件表 `發行機構` 欄 DBS 寫 `DBS` |
 | 2026-10-15 | DBS 沒有任何單一標的樣本；先用 4 份實作，未涵蓋型態標「依規則推得、待樣本驗證」 |
+| 2026-10-15 | 實作時決定：最大利率值的無條件進位寫在 DBS 專屬規則（`derive.monthly_coupon`），投資人須知的最大利率值和同商品說明書比（範本專屬規則 `iis.monthly_coupon`，說明書那份已和年利率比過）；單一標的名稱轉人工覆核用共用名稱規則的 `single_unsupported`（不另設 DBS 規則）；說明書費用表分銷費用子列佔「費率」欄時改讀右邊一欄（投資人須知是一般版面，沿用共用 `fee_rates`）；投資人須知範本辨識只看發行機構以「新加坡商星展銀行」開頭（全名交給審查標準核對，名稱錯時不會連辨識都失敗）；合成字型畫不出「‧」以外的「•」與異體字「爲」，parser 兩種寫法都收 |
