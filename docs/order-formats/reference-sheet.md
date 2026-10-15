@@ -64,7 +64,7 @@
 | KI(Freq) | `ki_type` | `-` 無 KI、`AM` 到期觀察、`D` 每日觀察、`P` 每期觀察（每個配息週期終止日，含期末定價日；2026-10-08 新增，目前只有 MS 範本會判成 `P`） |
 | 天期(月) | `tenor_months` | 核對 |
 | Non-Call(月) | `first_callable_period` | 第一個可以提前出場的期別，最小為 1；填 0 會判定為不一致 |
-| UL_1～UL_5 | `underlying_n` | 彭博代號（不含 ` Equity`），依順序比對，數量也要相同；沒有的標的填 `-`。**Citi 例外**：依代號配對、不看順序，價格欄與回填也依代號（2026-10-14 確認，Issue #220；設定檔 `[underlyings] any_order_issuers`，見 [Citi 下單資料格式](citi-fcn-reference.md) §3）；**JPM 同 Citi**（2026-10-15 確認，Issue #233：JPM 說明書依英文公司名稱字母順序排列標的，見 [JPM 下單資料格式](jpm-fcn-reference.md) §3）；**GS 同 Citi**（2026-10-15 確認，Issue #248：GS 說明書依彭博代碼排序標的，見 [GS 下單資料格式](gs-fcn-reference.md) §3） |
+| UL_1～UL_5 | `underlying_n` | 彭博代號（不含 ` Equity`），依順序比對，數量也要相同；沒有的標的填 `-`。**Citi 例外**：依代號配對、不看順序，價格欄與回填也依代號（2026-10-14 確認，Issue #220；設定檔 `[underlyings] any_order_issuers`，見 [Citi 下單資料格式](citi-fcn-reference.md) §3）；**JPM 同 Citi**（2026-10-15 確認，Issue #233：JPM 說明書依英文公司名稱字母順序排列標的，見 [JPM 下單資料格式](jpm-fcn-reference.md) §3）；**GS 同 Citi**（2026-10-15 確認，Issue #248：GS 說明書依彭博代碼排序標的，見 [GS 下單資料格式](gs-fcn-reference.md) §3）。這三家代碼有一檔不同時照常判不一致，價格欄仍依代號配對：先比完整代碼，剩下的再比代號（不含交易所碼，例 `ABC UN` ↔ `ABC UQ`），兩邊都唯一才配；仍配不起來才依順序（2026-10-15 確認，Issue #265） |
 | 期初定價 | `initial_pricing` | `開盤價`、`收盤價` 或 `VWAP`（作業人員放在 `KO(%)` 前一欄）；空白時當成不是 VWAP，價格照常比對，說明書寫明期初定價（Citi、GS）時改依說明書判斷（Issue #246）；其他值 → 轉人工覆核。決定價格欄怎麼處理（Issue #122）；說明書寫明期初定價時（Citi 標的表表頭「期初評價日之收盤價格／VWAP」；GS 第一章第 15 項「初始參考價格」的定義句，Issue #248）另須相同，其他範本沒有對應資料（標準欄位 `initial_pricing` 交 `absent`），不比對（Issue #220） |
 | UL_n_進場價／執行價／下限價／KO價 | `underlying_n_initial_price` 等 | 表上值四捨五入（half-up）到 4 位後與說明書價格表相等；沒有 KI 時下限價必須是 `-`；說明書沒有 KO 價（SG、MS Non-Call = 天期）時 KO 價 = 期初價格，照常比對。期初定價為 `VWAP` 時不比對，改為**回填欄位**（§5） |
 | 發行機構 | — | 不是必要欄；表上有才確認該列屬於此上手（§2） |

@@ -16,7 +16,7 @@ from gs_synth import WARNING, Spec, check_iis
 from harness import field_problems as problems
 from harness import results as rule
 from pdf_writer import Edit
-from test_check_gs import VARIANTS
+from test_check_gs import VARIANTS, _reordered
 
 
 @pytest.mark.parametrize("spec", VARIANTS.values(), ids=VARIANTS.keys())
@@ -72,6 +72,18 @@ def test_ki_type_is_read_from_the_redemption_terms(tmp_path):
     edit = Edit("「下限觸發觀察期間」指自交易日開始（不含）至評價日結束（含）之期間。", "", "iis.redeem")
     r = check_iis(tmp_path, Spec(ki="D"), edits=[edit]).report
     assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
+
+
+def test_a_different_exchange_code_still_pairs_prices_by_symbol(tmp_path):
+    """表上順序不同且有一檔交易所碼寫錯（Issue #265）：投資人須知也只報代碼不符，價格依代號和表上同一檔比照常通過。"""
+    spec = Spec()
+    out = _reordered(spec)
+    symbol, exchange = out["UL_1"].split()
+    out["UL_1"] = f"{symbol} {'UN' if exchange != 'UN' else 'UQ'}"
+    r = check_iis(tmp_path, spec, **out).report
+    assert rule(r, "field.underlyings")[0].status == S.MISMATCH
+    prices = rule(r, "iis.underlying_prices")
+    assert prices and all(x.status == S.PASS for x in prices), [(x.field, x.status, x.message) for x in prices]
 
 
 def test_page_count_must_be_four(tmp_path):

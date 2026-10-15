@@ -118,7 +118,7 @@ def _prices(ctx: Context) -> list[CheckResult]:
     vwap = reference.is_vwap(ctx)
     ts_rows, why = _term_sheet_field(ctx, "underlying_prices", "價格表") if vwap else (None, None)
     order = ctx.order
-    slots = reference.sheet_slots(ctx, len(rows.value))  # 標的不看順序的上手依代號對到表上那一檔（Citi、JPM）
+    slots = reference.sheet_slots(ctx, len(rows.value))  # 標的不看順序的上手依代號對到表上那一檔（Citi、JPM、GS）
     out = []
     for i, row in enumerate(rows.value, start=1):
         label = uls.value[i - 1] if uls.ok and i <= len(uls.value) else f"第 {i} 檔標的"

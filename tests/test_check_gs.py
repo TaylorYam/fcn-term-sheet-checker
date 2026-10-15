@@ -84,6 +84,21 @@ def test_underlyings_are_matched_by_ticker_not_order(tmp_path):
     assert item.report.status == S.PASS, problems(item.report)
 
 
+def test_a_different_exchange_code_still_pairs_prices_by_symbol(tmp_path):
+    """表上順序不同且有一檔交易所碼寫錯（`UQ` 寫成 `UN`，Issue #265）：報代碼不符，價格仍依代號和表上同一檔比，
+    不會依順序拿不同標的互比而冒出疑似分割的提示。"""
+    spec = Spec()
+    out = _reordered(spec)
+    symbol, exchange = out["UL_1"].split()
+    out["UL_1"] = f"{symbol} {'UN' if exchange != 'UN' else 'UQ'}"
+    path = build_pdf(tmp_path / f"{spec.product_code}_TS.pdf", spec)
+    sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [out])
+    r = next(i for i in check_all(sheet, [path]).items if i.term_sheet == path).report
+    assert rule(r, "field.underlyings")[0].status == S.MISMATCH
+    prices = rule(r, "field.underlying_prices")
+    assert prices and all(x.status == S.PASS for x in prices), [(x.field, x.status, x.message) for x in prices]
+
+
 def test_a_different_ticker_is_a_mismatch(tmp_path):
     r = check(tmp_path, Spec(), **{"UL_2": "ZZZ UW"})
     assert rule(r, "field.underlyings")[0].status == S.MISMATCH
