@@ -38,6 +38,25 @@ VARIANTS = {
 }
 
 
+TITLES = {
+    9: "連結標的資產、相對權重與投資績效之關聯情形：",
+    12: "本商品年期、交易日、期初進場日、發行日、到期日、配息日、最終評價日及其他期日(依本商品性質決定之)：",
+    13: "配息資料及其計算公式：",
+    14: "自動提前到期事件之贖回計算公式：",
+    15: "到期日贖回之計算公式，包含最低保證配息及參與率：",
+    16: "投資收益計算方法，包含本金虧損之機率及以情境分析解說最大可能獲利、損失及其他狀況之年化平均報酬率：",
+}  # 合成器第 13～16 條的標題；其他條是「第n項說明（不核對）」
+
+
+def _renumbered_from(start: int) -> list[Edit]:
+    """第一章第 start 條起條號重新從 1 編起（Word 自動編號跑掉，Issue #270）。"""
+    edits = []
+    for n in range(start, 27):
+        title = TITLES.get(n, f"第{n}項說明（不核對）")
+        edits.append(Edit(f"{n}. {title}", f"{n - start + 1}. {title}", f"ts.art{n}"))
+    return edits
+
+
 @pytest.mark.parametrize("spec", VARIANTS.values(), ids=VARIANTS.keys())
 def test_supported_types_pass_and_are_filled(tmp_path, spec):
     item = check_item(tmp_path, spec)
@@ -249,3 +268,20 @@ def test_other_issuers_are_not_natixis(tmp_path, build):
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(Spec())])
     for item in check_all(sheet, [pdf]).items:
         assert item.report.template not in (NATIXIS.template_id, NATIXIS.iis.template_id)
+
+
+@pytest.mark.parametrize("start", [9, 13, 25])
+def test_chapter_one_numbering_restarting_from_one_is_read_in_order(tmp_path, start):
+    """第一章條號中途重新從 1 編起（例：第 12 條後接「1. 配息資料」…「14.」；共 26 條）：依先後當成第 1～26 條照常核對，
+    不另報條號錯誤（2026-10-15 確認，Issue #270）。"""
+    item = check_item(tmp_path, edits=_renumbered_from(start))
+    assert item.report.template == NATIXIS.template_id
+    assert item.report.status == S.PASS, problems(item.report)
+    assert item.fills_sheet
+
+
+def test_numbering_restarting_with_articles_missing_is_still_not_natixis(tmp_path):
+    """重編後合計不是 26 條（第 26 條不見）：仍認不出範本。"""
+    edits = [*_renumbered_from(13), Edit("14. 第26項說明（不核對）", "", "ts.art26")]
+    item = check_item(tmp_path, edits=edits)
+    assert item.report.template != NATIXIS.template_id

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from fcn_checker.issuers import NATIXIS
@@ -30,16 +32,31 @@ def test_supported_types_pass(tmp_path, spec):
     assert not [x for x in r.results if x.rule_id in ("iis.underlyings", "iis.underlying_prices")]  # 沒有價格表
 
 
-def test_ko_definition_without_a_percentage_is_a_mismatch(tmp_path):
-    """KO 定義寫成「…所列之期初進場價格」（沒有 %）：判不一致（NX7；2026-10-15 確認），且不另比 KO %。"""
-    edit = Edit(
-        "自動提前到期贖回價格為期初進場價格之105.00%。",
-        "自動提前到期贖回價格為中文產品說明書第一章第14項所列之期初進場價格。",
-        "iis.coupon",
-    )
+NO_PCT = "自動提前到期贖回價格為中文產品說明書第一章第14項所列之期初進場價格。"
+
+
+def test_ko_definition_without_a_percentage_reads_as_100_percent(tmp_path):
+    """KO 定義寫成「…所列之期初進場價格」（沒有 %）＝ KO 100%（2026-10-15 確認，Issue #270）：KO 100% 的商品通過。"""
+    spec = Spec(ko=Decimal("100.00"))
+    edit = Edit("自動提前到期贖回價格為期初進場價格之100.00%。", NO_PCT, "iis.coupon")
+    r = check_iis(tmp_path, spec, edits=[edit]).report
+    assert r.status == S.PASS, problems(r)
+    assert rule(r, "iis.ko_definition")[0].status == S.PASS
+    assert rule(r, "field.ko_pct")[0].actual == Decimal(100)
+
+
+def test_ko_definition_without_a_percentage_is_a_mismatch_when_ko_is_not_100(tmp_path):
+    """同上寫法、但 KO 是 105%（NX7 的情況）：KO % 判不一致（100 ≠ 105）。"""
+    edit = Edit("自動提前到期贖回價格為期初進場價格之105.00%。", NO_PCT, "iis.coupon")
     r = check_iis(tmp_path, edits=[edit]).report
-    assert rule(r, "iis.ko_definition")[0].status == S.MISMATCH
-    assert not [x for x in r.results if x.rule_id == "field.ko_pct"]
+    assert rule(r, "field.ko_pct")[0].status == S.MISMATCH
+    assert rule(r, "iis.ko_definition")[0].status == S.PASS
+
+
+def test_currency_bullet_may_be_a_black_circle_with_a_space(tmp_path):
+    """商品簡介「● 計價幣別：美元(USD)」（列項符號是 ●，後面有空格；Issue #270）也讀得到。"""
+    r = check_iis(tmp_path, edits=[Edit("• 計價幣別：", "● 計價幣別：", "iis")]).report
+    assert r.status == S.PASS, problems(r)
 
 
 def test_five_pages_is_a_mismatch(tmp_path):

@@ -138,7 +138,8 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
         )
     fields["ko_memory"] = natixis.ko_memory(st, sec, where="貳、商品事項")
     fields["strike_pct"] = iis.capture("strike_pct", st, natixis.STRIKE_DEF, Decimal)
-    # KO 價格定義：寫「期初進場價格之Y%」才交出 ko_pct；寫「…所列之期初進場價格」（沒有 %，NX7）由範本專屬規則判不一致
+    # KO 價格定義：「期初進場價格之Y%」→ ko_pct = Y；寫成「…所列之期初進場價格」（沒有 %）＝ KO 價格就是期初進場價格，
+    # ko_pct = 100，由共用規則和參考條件表比（KO 100% 通過、其他判不一致；Issue #270）
     found = list(st.finditer(r"自動提前到期贖回價格為(.{0,40}?期初進場價格(?:之\d+(?:\.\d+)?%)?)"))
     if len(found) != 1:
         fields["ko_definition"] = ParsedField.missing(
@@ -148,10 +149,9 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
         m = found[0]
         ev = st.lines_for(m.start(), m.end())
         fields["ko_definition"] = ParsedField.present("ko_definition", m[1], ev)
-        pct = re.fullmatch(r"期初進場價格之" + PCT, m[1])
-        if pct:
-            fields["ko_pct"] = ParsedField.present("ko_pct", Decimal(pct[1]), ev)
-            provided.add("ko_pct")
+        pct = re.fullmatch(r".*期初進場價格之" + PCT, m[1])
+        fields["ko_pct"] = ParsedField.present("ko_pct", Decimal(pct[1]) if pct else Decimal(100), ev)
+        provided.add("ko_pct")
     day = natixis.ki_day(st, sec, r"觸及事件判定日：(.+?)，?並依「中斷日」", "商品簡介")
     if day.status == FieldStatus.MISSING:  # 舊版只有到期贖回段的定義（NX1）
         day = natixis.ki_day(st, sec, r"「觸及事件判定日」係指於(.+?)，並依「中斷日」", "到期贖回")
@@ -205,7 +205,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     )
     fields["distributor_code"] = natixis.distributor_code(ti, code)
     # 貳、1. 商品簡介
-    put("currency_zh", rf"[•‧]計價幣別：({natixis.ZH_CCY})\([A-Z]{{3}}\)")
+    put("currency_zh", rf"[•‧●]\s*計價幣別：({natixis.ZH_CCY})\([A-Z]{{3}}\)")  # 列項符號也可能是「● 」（Issue #270）
     denom = rf"●每單位商品面額：([\d,]+)({natixis.CCY})"
     put("denomination", denom, number)
     minimum = rf"●最低申購金額：\d+單位商品面額，即([\d,]+)({natixis.CCY})"

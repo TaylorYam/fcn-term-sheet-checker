@@ -47,7 +47,7 @@ def test_samples_only_differ_where_the_exploration_said(items):
         {
             ("doc.distributor_product_code", "blank_field"): 1,
             ("iis.pages", "value_mismatch"): 1,
-            ("iis.ko_definition", "value_mismatch"): 1,
+            ("field.ko_pct", "value_mismatch"): 1,  # NX7 KO 定義沒寫 % 讀成 100%，KO 是 105%（Issue #270）
             ("batch.pairing", "reference_row_missing"): 1,
         }
     )

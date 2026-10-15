@@ -20,7 +20,7 @@ from ..standard_fields import Occurrence
 from ..text import squash
 from . import money
 from .common import RawText, by_column, capture_group, dec, derived, fee_rates, number
-from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
+from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
 PARSER_VERSION = "1"
@@ -63,7 +63,7 @@ CN_PERIOD = r"([一二三四五六七八九十]{1,3})"  # 中文數字的期別�
 KO_DAILY_BODY = r"從第" + CN_PERIOD + r"個配息觀察期間結束日\(含\)到最終評價日\(不含\)之每一預定交易日每日觀察"
 KO_DAILY = r"自動提前到期觀察日：" + KO_DAILY_BODY
 # 封面「TDCC 商品代號為…，ISIN 為…」：第 1 組商品代號、第 2 組受託機構商品代號（舊版有標籤、可能空白；沒有時為 None）、第 3 組 ISIN
-PRODUCT_CODES = r"TDCC商品代號為(\d{12})，(?:受託機構商品代號為(.*?)，)?ISIN為([A-Z]{2}[A-Z0-9]{10})"
+PRODUCT_CODES = rf"TDCC商品代號為(\d{{12}})，(?:{DISTRIBUTOR}商品代號為(.*?)，)?ISIN為([A-Z]{{2}}[A-Z0-9]{{10}})"
 KO_PERIODIC = "自動提前到期觀察日：如下表所列"
 # 第 14 項記憶式（範本規格 §4.2）
 MEMORY = "收盤價皆曾經高於或等於其自動提前到期贖回價格"
@@ -98,9 +98,42 @@ def _is_noise(ln: Line) -> bool:
     return ln.x0 < 50 and ln.y0 < 60 and bool(STRAY_DIGIT.match(text))
 
 
+class NatixisDocument(Document):
+    """第一章條號可能中途重新從 1 編起（Word 自動編號跑掉，例：第 12 條之後接「1. 配息資料」…「14. 掛牌交易」；
+    Issue #270）：依順序讀不滿 26 條時，改讀「編號中途從 1 重來、和第 1 條同一個 x、合計剛好 26 條」，依先後當成第 1～26 條。"""
+
+    def articles(self, chapter: int) -> dict[int, Span]:
+        strict = super().articles(chapter)
+        if chapter != 1 or len(strict) >= ARTICLES or 1 not in strict:
+            return strict
+        renumbered = self._renumbered_articles(chapter, self.lines[strict[1].start].x0)
+        return renumbered if len(renumbered) == ARTICLES else strict
+
+    def _renumbered_articles(self, chapter: int, x: float) -> dict[int, Span]:
+        sp = self.chapters[chapter]
+        marks: list[int] = []
+        printed = 1  # 下一個預期印出的編號
+        for i in range(sp.start + 1, sp.end):
+            ln = self.lines[i]
+            m = self.spec.article_re.match(ln.text)
+            if not m or abs(ln.x0 - x) > 2:
+                continue
+            if int(m.group(1)) == printed:
+                marks.append(i)
+                printed += 1
+            elif int(m.group(1)) == 1 and marks:  # 重新從 1 編起
+                marks.append(i)
+                printed = 2
+        out: dict[int, Span] = {}
+        for k, i in enumerate(marks):
+            end = marks[k + 1] if k + 1 < len(marks) else sp.end
+            out[k + 1] = Span(i, end, self._title_after(i, end))
+        return out
+
+
 def document(lines: Sequence[Line]) -> Document:
     """版面結構；頁尾（英文名稱、頁碼、分類標記）與左上角單獨的數字不算內文。"""
-    return Document([ln for ln in lines if not _is_noise(ln)], LAYOUT)
+    return NatixisDocument([ln for ln in lines if not _is_noise(ln)], LAYOUT)
 
 
 # ---------------------------------------------------------------- 封面「標籤：值」
