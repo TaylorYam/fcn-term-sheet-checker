@@ -226,3 +226,11 @@ def test_other_issuers_investor_sheets_are_not_citi(tmp_path, build):
     sheet = build_reference_sheet(tmp_path / "FCN參考條件.xlsx", [reference_row(Spec())])
     r = next(i.report for i in check_all(sheet, [ts, iis]).items if i.term_sheet == iis)
     assert r.template != CITI.iis.template_id
+
+
+def test_blank_sheet_pricing_with_a_vwap_term_sheet_compares_iis_prices_with_the_term_sheet(tmp_path):
+    """表上期初定價空白、說明書表頭寫 VWAP：投資人須知的價格改和說明書比，表上價格空白也通過（Issue #246）。"""
+    blank = {f"UL_{i}_{p}": None for i in range(1, 4) for p in ("進場價", "執行價", "下限價", "KO價")}
+    ts, iis = pair(tmp_path, VARIANTS["VWAP"], 期初定價=None, **blank)
+    assert bad(iis) == set(), bad(iis)
+    assert ts.report.status == PASS and ts.fills_sheet
