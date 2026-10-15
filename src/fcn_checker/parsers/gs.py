@@ -17,12 +17,12 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money
-from .common import Mention, RawText, by_column, capture_group, dec, derived, fee_rates, number, split_at_columns
+from . import money, price_table
+from .common import Mention, RawText, capture_group, dec, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "gs-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -75,7 +75,20 @@ INITIAL_REFERENCE = r"(?:該連結標的(?:\(i\))?)?於交易日之參考價格(
 REFERENCE_CLOSE = (
     rf"「參考價格{OPT_I}」(?:就各連結標的\(i\)而言，)?指經(?:相關)?參考交易所官方決定及公布之(?:該)?連結標的收盤價格"
 )
-PRICE_HEADS = (("strike", "執行價格"), ("ko", "提前出場價格"), ("ki", "下限觸發價格"))
+# 價格表（說明書第一章第 15 項、投資人須知二.1.(10)）：每檔一列、以左欄列號切列，價格後可能接報價幣別字
+PRICE_TABLE = price_table.TableSpec(
+    where="第一章第 15 項價格表",
+    initial="初始參考價格",
+    columns=(
+        price_table.Column("strike", "執行價格"),
+        price_table.Column("ko", "提前出場價格"),
+        price_table.Column("ki", "下限觸發價格", required=False),
+    ),
+    anchor="number",
+    pct=r"\(初始參考價格(?:\(i\))?之(\d+(?:\.\d+)?)%\)",
+    pct_label="(初始參考價格之X%)",
+    code="彭博代碼",
+)
 # 第 14 項（投資人須知二. 2.）配息率：第 1 組年利率、第 2 組每月配息率
 COUPON = r"「配息率」就每個觀察期間而言，指年利率" + PCT + r"/12（約為" + PCT + r"）"
 
@@ -318,7 +331,9 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
         ),
         None,
     )  # 人民幣商品價格表後接「連結標的匯率表」
-    table = price_table("underlying_table", art15[a + 1 : b] if a is not None and b is not None else [])
+    table = price_table.read(
+        "underlying_table", art15[a + 1 : b] if a is not None and b is not None else [], PRICE_TABLE
+    )
     fields["underlying_table"] = table
     _table_fields(fields, table)
     m = r"\(2\)最低保證收益率[:：]首(\d*)個觀察期間年利率" + PCT
@@ -330,7 +345,7 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
 def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
     """價格表 → 標準欄位：標的、各標的價格、K／KO／KI %（K、KI 主來源是定義，表頭 % 由規則交叉驗證；KO 只在表頭）。"""
     fields["underlyings"] = underlyings_field(table)
-    fields["underlying_prices"] = price_rows(table)
+    fields["underlying_prices"] = price_table.price_rows(table)
     fields["strike_pct"] = fields["strike_def_pct"]
     ki_t = fields["ki_type"]
     if ki_t.ok and ki_t.value == "none":
@@ -339,11 +354,11 @@ def _table_fields(fields: dict[str, ParsedField], table: ParsedField) -> None:
         )
     else:
         fields["ki_pct"] = fields["ki_def_pct"]
-    if table.ok and "ko" in table.value["pcts"]:
-        fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, table.value["pcts"]["ko"], list(table.evidence))
+    if table.ok and "ko" in table.value.pcts:
+        fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.PRESENT, table.value.pcts["ko"], list(table.evidence))
     elif table.ok:
         fields["ko_pct"] = ParsedField.invalid(
-            "ko_pct", table.value["header_lines"], "價格表表頭讀不到提前出場價格的 %"
+            "ko_pct", list(table.value.header_lines), "價格表表頭讀不到提前出場價格的 %"
         )
     else:
         fields["ko_pct"] = derived("ko_pct", table)
@@ -353,24 +368,7 @@ def underlyings_field(table: ParsedField) -> ParsedField:
     """價格表 → 標準欄位 `underlyings`（彭博代號，依表上順序）。"""
     if not table.ok:
         return derived("underlyings", table)
-    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value["tickers"]), list(table.evidence))
-
-
-def price_rows(table: ParsedField) -> ParsedField:
-    """價格表 → 標準欄位 `underlying_prices`（順序同 `underlyings`）。"""
-    if not table.ok:
-        return derived("underlying_prices", table)
-    return ParsedField(
-        "underlying_prices",
-        FieldStatus.PRESENT,
-        tuple(
-            standard_fields.PriceRow(ticker, dict(prices), tuple(Evidence.of(ln) for ln in lns), name=name)
-            for ticker, prices, lns, name in zip(
-                table.value["tickers"], table.value["rows"], table.value["row_lines"], table.value["names"], strict=True
-            )
-        ),
-        list(table.evidence),
-    )
+    return ParsedField("underlyings", FieldStatus.PRESENT, list(table.value.tickers), list(table.evidence))
 
 
 def ki_type(ti: TextIndex, lns: list[Line], where: str = "第一章第 15 項") -> ParsedField:
@@ -409,77 +407,6 @@ def initial_pricing(ti: TextIndex, lns: list[Line]) -> ParsedField:
     if re.fullmatch(INITIAL_REFERENCE, body) and close:
         return ParsedField.present(name, "close", ev + ti.lines_for(close.start(), close.end()))
     return ParsedField.invalid(name, ev, f"期初定價寫法「{body}」不在範本規格內")
-
-
-# ---------------------------------------------------------------- 價格表（說明書第 15 項、投資人須知二.1.(10)）
-
-
-def price_table(name: str, lines: list[Line]) -> ParsedField:
-    """連結標的價格表：表頭決定 K／KO／KI %（`(初始參考價格(i)之X%)`），每檔一列（以左欄列號切列）。
-
-    表頭與各格依座標分欄（`common.by_column`）後接起來：一格可能拆成多行（`12,345.000` / `0`、`13.6800美` / `元`），
-    相鄰幾格也可能擷取成同一行，先依字座標切回各欄（`common.split_at_columns`，Issue #264）。表頭與列都可能跨頁；
-    最後一列之後的下一頁沒有列號時，那一頁接在最後一列（其他沒有列號的頁仍讀不到）。價格取彭博代碼之後的 4 位小數數字（投資人須知後面接幣別字）。
-    值：{"columns", "pcts", "tickers", "names", "rows": [{欄: Decimal}], "row_lines", "header_lines", "indexed"}。
-    """
-    if not lines:
-        return ParsedField.missing(name, "找不到連結標的價格表")
-    lines = split_at_columns(lines)
-    marks: list[int] = []
-    for i, ln in enumerate(lines):
-        if re.fullmatch(r"\d{1,2}", squash(ln.text)) and int(squash(ln.text)) == len(marks) + 1:
-            if not marks or abs(ln.x0 - lines[marks[0]].x0) < 10:
-                marks.append(i)
-    if not marks:
-        return ParsedField.invalid(name, lines, "價格表找不到第 1 列")
-    header = lines[: marks[0]]
-    head = "".join(squash(ln.text) for ln in by_column(header))
-    columns, pcts = ["initial"], {}
-    for col, label in PRICE_HEADS:
-        m = re.search(label + OPT_I + r"\(初始參考價格" + OPT_I + "之" + PCT + r"\)", head)
-        if m:
-            columns.append(col)
-            pcts[col] = Decimal(m[1])
-        elif label in head:
-            return ParsedField.invalid(name, header, f"價格表表頭「{label}」讀不到「(初始參考價格之X%)」")
-    if "初始參考價格" not in head or columns[:3] != ["initial", "strike", "ko"]:
-        return ParsedField.invalid(name, header, "價格表表頭不是「初始參考價格、執行價格、提前出場價格…」")
-    anchors = [lines[i] for i in marks]
-    rows_lines: list[list[Line]] = [[] for _ in marks]
-    for ln in lines[marks[0] :]:
-        same = [k for k, a in enumerate(anchors) if a.page == ln.page]
-        if same:
-            k = min(same, key=lambda j: abs((anchors[j].y0 + anchors[j].y1) - (ln.y0 + ln.y1)))
-        elif ln.page == anchors[-1].page + 1:  # 最後一列之後的下一頁沒有列號：最後一列溢過來的部分
-            k = len(anchors) - 1
-        else:
-            return ParsedField.invalid(name, [ln], "價格表跨頁時讀不到該頁的列號")
-        rows_lines[k].append(ln)
-    tickers, names, rows = [], [], []
-    for k, lns in enumerate(rows_lines, start=1):
-        ordered = by_column(lns)
-        joined = " ".join(ln.text.strip() for ln in ordered)
-        found = list(TICKER.finditer(joined))
-        if len(found) != 1:
-            return ParsedField.invalid(name, lns, f"價格表第 {k} 列讀不到彭博代碼（代號 交易所碼 Equity）")
-        t = found[0]
-        values = [dec(x) for x in re.findall(PRICE, squash(joined[t.end() :]))]
-        if len(values) != len(columns):
-            return ParsedField.invalid(name, lns, f"價格表第 {k} 列有 {len(values)} 個價格，與 {len(columns)} 欄不符")
-        tickers.append(f"{t[1]} {t[2]}")
-        names.append(re.sub(r"^\d{1,2}\s*", "", joined[: t.start()]).strip())
-        rows.append(dict(zip(columns, values, strict=True)))
-    value = {
-        "columns": columns,
-        "pcts": pcts,
-        "tickers": tickers,
-        "names": names,
-        "rows": rows,
-        "row_lines": rows_lines,
-        "header_lines": header,
-        "indexed": "(i)" in head,  # 表頭寫「(i)」＝多標的寫法
-    }
-    return ParsedField.present(name, value, lines)
 
 
 # ---------------------------------------------------------------- 第 16 項、KO 排程

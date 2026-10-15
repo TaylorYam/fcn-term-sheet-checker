@@ -204,9 +204,9 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     if not (table.ok and scen.ok and denom.ok and scen_denom.ok):
         return [check.compare(None, None)]
     issues = []
-    if scen.value["pcts"] != table.value["pcts"]:
+    if scen.value.pcts != table.value.pcts:
         issues.append("情境價格表表頭 % 和第 9 項價格表不同")
-    rows, own = scen.value["rows"], table.value["rows"]
+    rows, own = scen.value.prices, table.value.prices
     if len(rows) != len(own):
         issues.append(f"情境價格表 {len(rows)} 列，第 9 項價格表 {len(own)} 列")
     else:

@@ -137,7 +137,7 @@ def underlying_count(ctx: IssuerContext) -> list[CheckResult]:
     label = {True: "多標的（最差表現）", False: "單一標的"}
     return [
         kit.doc_check(ctx, "doc.underlying_count", "worst_of_wording", "第 8 項標的數寫法", table, worst).compare(
-            label[len(table.value["tickers"]) >= 2] if table.ok else None,
+            label[len(table.value.tickers) >= 2] if table.ok else None,
             label.get(worst.value) if worst.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
@@ -168,7 +168,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
         ),
         kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "標的表觸碰價欄", ki, table).compare(
             label[doc_ki != "none"],
-            label["ki" in table.value["columns"]] if table.ok else None,
+            label["ki" in table.value.columns] if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="標的表有無觸碰價欄須與 KI 型態一致",
@@ -194,8 +194,8 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
         else [
             f"假設價格表{what}與標的表不同（{a}／{b}）"
             for what, a, b in (
-                ("欄位", scen.value["columns"], table.value["columns"]),
-                ("列數", len(scen.value["rows"]), len(table.value["rows"])),
+                ("欄位", scen.value.columns, table.value.columns),
+                ("列數", len(scen.value.rows), len(table.value.rows)),
             )
             if a != b
         ]
@@ -205,7 +205,7 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
     elif table.ok and scen.ok:
         issues = [
             f"第 {i} 列 {'、'.join(diff)} 與標的表第 {i} 檔不同"
-            for i, (a, b) in enumerate(zip(scen.value["rows"], table.value["rows"], strict=True), start=1)
+            for i, (a, b) in enumerate(zip(scen.value.prices, table.value.prices, strict=True), start=1)
             if (diff := [c for c in b if a.get(c) != b[c]])
         ]
         result = check.compare(
