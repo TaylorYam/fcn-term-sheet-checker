@@ -183,12 +183,12 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["product_codes"] = iis.occurrences(
         "product_codes",
         ti,
-        (("product_code_tdcc", "封面商品代號", "第 1 頁「TDCC 商品代號」", r"\(TDCC商品代號：(\d{12})\)"),),
+        (("product_code_tdcc", "product_code", "第 1 頁「TDCC 商品代號」", r"\(TDCC商品代號：(\d{12})\)"),),
     )
     fields["print_dates"] = iis.occurrences(
         "print_dates",
         ti,
-        (("print_date_iis", "刊印日期", "中文投資人須知刊印日期", r"中文投資人須知刊印日期：" + D),),
+        (("print_date_iis", "print_date", "中文投資人須知刊印日期", r"中文投資人須知刊印日期：" + D),),
         parse_date,
     )
     # 二、1. 商品簡介
@@ -204,13 +204,20 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["monthly_coupons"] = iis.occurrences(
         "monthly_coupons",
         ti,
-        (("monthly_coupon_iis", "月配息率", "二、2. 收益分配事項", r"配息率" + PCT + r"，換算年利率為"),),
+        (("monthly_coupon_iis", "monthly_coupon", "二、2. 收益分配事項", r"配息率" + PCT + r"，換算年利率為"),),
         Decimal,
     )
     fields["currency_others"] = iis.occurrences(
         "currency_others",
         ti,
-        (("redemption_currency", "剩餘金額幣別", "二、2.(c) 到期贖回「以X支付剩餘金額」", ca.REMAINDER_CURRENCY),),
+        (
+            (
+                "redemption_currency",
+                "remainder_currency",
+                "二、2.(c) 到期贖回「以X支付剩餘金額」",
+                ca.REMAINDER_CURRENCY,
+            ),
+        ),
     )
     fields["currency_others"] = standard_fields.occurrences(  # 說明文字的幣別字（Issue #319，同說明書）
         "currency_others",
@@ -220,11 +227,11 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
                 text_lines,
                 ca.PRINCIPAL_CURRENCY,
                 "principal_currency",
-                "投資本金幣別",
+                "principal_currency",
                 "二、3.(4)「可能低於100%X投資本金」",
             ),
             *money.currency_words(
-                text_lines, ca.INTEREST_CURRENCY, "interest_rate_currency", "利率幣別", "三、 利率風險"
+                text_lines, ca.INTEREST_CURRENCY, "interest_rate_currency", "interest_rate_currency", "三、 利率風險"
             ),
         ],
     )
@@ -232,8 +239,8 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "redemption_pcts",
         ti,
         (
-            ("ko_redemption_pct", "自動提前出場贖回 %", "二、2.(b) 自動提前出場贖回金額", ca.KO_REDEMPTION),
-            ("maturity_redemption_pct", "到期贖回 %", "二、2.(c) 到期贖回金額", ca.MATURITY_REDEMPTION),
+            ("ko_redemption_pct", "autocall_redemption_pct", "二、2.(b) 自動提前出場贖回金額", ca.KO_REDEMPTION),
+            ("maturity_redemption_pct", "maturity_redemption_pct", "二、2.(c) 到期贖回金額", ca.MATURITY_REDEMPTION),
         ),
         Decimal,
     )
@@ -243,21 +250,21 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "issuer_names",
             "issuer_name_org",
-            "發行機構名稱（相關機構）",
+            "issuer_name_org",
             "一、1.",
             r"1\.\s*發行機構\s*[:：]\s*(.+?)\s*\(營業所在地",
         ),
         (
             "distributor_names",
             "distributor_name_org",
-            "受託機構名稱（相關機構）",
+            "distributor_name_org",
             "一、4.",
             r"4\.\s*受託或銷售機構\s*[:：]\s*(.+?)\s*，\s*地址",
         ),
         (
             "distributor_addresses",
             "distributor_address_org",
-            "受託機構地址（相關機構）",
+            "distributor_address_org",
             "一、4.",
             r"4\.\s*受託或銷售機構\s*[:：]\s*.+?，\s*地址\s*[:：]\s*(.+?)\s*二、",
         ),

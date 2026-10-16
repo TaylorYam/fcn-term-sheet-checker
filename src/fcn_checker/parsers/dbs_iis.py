@@ -127,7 +127,7 @@ def print_dates(lines: Sequence[Line]) -> ParsedField:
                 if value
                 else ParsedField.invalid(f"print_date_p{ln.page}", [ln], f"「{ln.text.strip()}」無法辨識")
             )
-            items.append(Occurrence(pf.name, "刊印日期", f"第 {ln.page} 頁頁首中文投資人須知刊印日期", pf))
+            items.append(Occurrence(pf.name, "print_date", f"第 {ln.page} 頁頁首中文投資人須知刊印日期", pf))
     if not items:
         return ParsedField.missing("print_dates", "找不到頁首「中文投資人須知刊印日期：」")
     return standard_fields.occurrences("print_dates", items)
@@ -218,10 +218,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "product_codes",
         ti,
         (
-            ("product_code_iis", "封面商品代號", "第 1 頁「商品代號」", r"\(商品代號：(\d{12})\)"),
+            ("product_code_iis", "product_code", "第 1 頁「商品代號」", r"\(商品代號：(\d{12})\)"),
             (
                 "distributor_code_iis",
-                "受託或銷售機構商品代號",
+                "trustee_product_code",
                 "第 1 頁「受託或銷售機構商品代號」",
                 r"受託或銷售機構商品代號：(\d{12})\)",
             ),
@@ -237,7 +237,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             Occurrence(
                 "denomination_currency",
-                "每單位商品面額幣別",
+                "denomination_currency",
                 "商品簡介商品面額",
                 capture_group(text_lines, denom, 1, "denomination_currency"),
             )
@@ -256,7 +256,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "issuer_names",
             "issuer_name_org",
-            "發行機構名稱（相關機構）",
+            "issuer_name_org",
             "相關機構事業概況 1.",
             r"1\.\s*發行機構\s*：\s*(.+?)\s*；\s*營業所在地",
             1,
@@ -264,7 +264,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "distributor_names",
             "distributor_name_org",
-            "受託機構名稱（相關機構）",
+            "distributor_name_org",
             "相關機構事業概況 3.",
             r"3\.\s*受託或銷售機構\s*：\s*(.+?)\s*；\s*營業所在地\s*：\s*(.+?)\s*。",
             1,
@@ -272,7 +272,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "distributor_addresses",
             "distributor_address_org",
-            "受託機構地址（相關機構）",
+            "distributor_address_org",
             "相關機構事業概況 3.",
             r"3\.\s*受託或銷售機構\s*：\s*(.+?)\s*；\s*營業所在地\s*：\s*(.+?)\s*。",
             2,

@@ -207,10 +207,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "product_codes",
         ti,
         (
-            ("product_code_tdcc", "TDCC 商品代號", "第 1 頁「TDCC 商品代號」", r"TDCC商品代號：(\d{12})"),
+            ("product_code_tdcc", "product_code", "第 1 頁「TDCC 商品代號」", r"TDCC商品代號：(\d{12})"),
             (
                 "product_code_distributor",
-                "受託機構商品代號",
+                "trustee_product_code",
                 "第 1 頁「受託機構商品代號」",
                 r"受託機構商品代號：(\d{12})",
             ),
@@ -240,28 +240,28 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "issuer_names",
             "issuer_name_org",
-            "發行機構名稱（相關機構）",
+            "issuer_name_org",
             "一、 1.",
             r"1\.\s*發行機構\s*[:：]\s*(.+?)\s*\(營業所在地",
         ),
         (
             "distributor_names",
             "distributor_name_org",
-            "受託機構名稱（相關機構）",
+            "distributor_name_org",
             "一、 4.",
             r"4\.\s*受託機構\s*[:：]\s*(.+?)\s*\(電話",
         ),
         (
             "distributor_phones",
             "distributor_phone_org",
-            "受託機構電話（相關機構）",
+            "distributor_phone_org",
             "一、 4.",
             r"4\.\s*受託機構\s*[:：]\s*.+?\(電話\s*[:：]\s*(.+?)\s*，\s*營業所在地",
         ),
         (
             "distributor_addresses",
             "distributor_address_org",
-            "受託機構地址（相關機構）",
+            "distributor_address_org",
             "一、 4.",
             r"4\.\s*受託機構\s*[:：]\s*.+?營業所在地\s*[:：]\s*(.+?)\s*\)\s*二、",
         ),
@@ -277,7 +277,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             *fields["distributor_names"].value,
             *(
-                standard_fields.Occurrence(field, "受託機構名稱（警語）", where, iis.capture(field, wt, pattern))
+                standard_fields.Occurrence(field, "distributor_name_warning", where, iis.capture(field, wt, pattern))
                 for field, where, pattern in WARNING_NAMES
             ),
         ],
@@ -287,7 +287,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             occ
             for field, where, pattern in CURRENCY_WORDS
-            for occ in money.currency_words(iis.section(ti, PRODUCT) or [], pattern, field, "說明文字幣別", where)
+            for occ in money.currency_words(iis.section(ti, PRODUCT) or [], pattern, field, "wording_currency", where)
         ],
     )
     fees = iis.section(ti, ("四、費用", "五、"))

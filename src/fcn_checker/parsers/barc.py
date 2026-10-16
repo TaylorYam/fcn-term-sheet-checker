@@ -605,32 +605,32 @@ def _currency_occurrences(
     out = [
         occ(
             "denomination_currency",
-            "每單位商品面額幣別",
+            "denomination_currency",
             "第 6 條每單位商品面額",
             capture("denomination_currency", art6_ti, rf"面額為[\d,]+\s*({ccy})", whole_match=True),
         ),
         occ(
             "min_subscription_currency",
-            "最低申購金額幣別",
+            "minimum_subscription_currency",
             "第四章最低申購金額",
             capture("min_subscription_currency", ch4_ti, rf"至少為[\d,]+\s*({ccy})", whole_match=True),
         ),
         occ(
             "min_redemption_currency",
-            "最低贖回商品面額幣別",
+            "minimum_redemption_currency",
             "第四章最低贖回商品面額",
             capture("min_redemption_currency", ch4_ti, rf"最低贖回商品面額為[\d,]+\s*({ccy})", whole_match=True),
         ),
         occ(
             "scenario_notional_currency",
-            "情境假設面額幣別",
+            "scenario_denomination_currency",
             "第 16 條情境假設每單位商品面額",
             capture("scenario_notional_currency", s16, rf"每單位商品面額=[\d,]+\s*({ccy})", whole_match=True),
         ),
     ]
     pos = [s16.text.find(c) for c in _CASES]
     for k, case in enumerate(_CASES):
-        field, name, where = f"scenario_{_CASE_IDS[k]}_currency", f"情境 ({_CASE_IDS[k]}) 金額幣別", f"第 16 條{case}"
+        field, name, where = f"scenario_{_CASE_IDS[k]}_currency", "scenario_currency", f"第 16 條{case}"
         if pos[k] < 0 or (k + 1 < len(pos) and pos[k + 1] < pos[k]):
             gone = case if pos[k] < 0 else _CASES[k + 1]
             out.append(occ(field, name, where, ParsedField.missing(field, f"第 16 條找不到「{gone}」")))
@@ -836,8 +836,8 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("min_subscription", "最低申購金額", "第四章最低申購金額", flds["min_subscription"]),
-            occ("min_redemption", "最低贖回商品面額", "第四章最低贖回商品面額", flds["min_redemption"]),
+            occ("min_subscription", "minimum_subscription", "第四章最低申購金額", flds["min_subscription"]),
+            occ("min_redemption", "minimum_redemption", "第四章最低贖回商品面額", flds["min_redemption"]),
         ],
     )
     flds["subscription_dates"] = standard_fields.occurrences(
@@ -845,14 +845,14 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
         [
             occ(
                 "subscription_start_date",
-                "開始受理申購日",
+                "subscription_start",
                 "第四章商品開始受理申購日期",
                 flds["subscription_start_date"],
             )
         ],
     )
     flds["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "封面刊印日期", flds["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "封面刊印日期", flds["print_date"])]
     )
 
     repeats = _repeat_mentions(doc, arts, s16)

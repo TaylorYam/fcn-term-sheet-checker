@@ -241,7 +241,7 @@ def test_iis_cover_product_code_must_match_the_file_name(tmp_path):
     )
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert problems(sheet) == [
-        "封面受託或銷售機構商品代號：封面「受託或銷售機構商品代號」與檔名前 12 碼不同，可能放錯檔案"
+        "受託機構商品代號：封面「受託或銷售機構商品代號」與檔名前 12 碼不同，可能放錯檔案"
         "（預期 029199990001／投資人須知 029199990002）"
     ]
 
@@ -272,7 +272,7 @@ def test_vwap_iis_prices_are_compared_with_the_term_sheet(tmp_path):
         ),
         (
             {"而非由玉山綜合證券股份有限公司保證": "而非由玉山證券股份有限公司保證"},
-            "受託機構名稱（警語 5）：警語第 5 點的受託或銷售機構名稱與審查標準不同",
+            "受託機構名稱（警語）：警語第 5 點的受託或銷售機構名稱與審查標準不同",
         ),
         (
             {"為【證券交易所交易證券】": "為【證券交易所之交易證券】"},
@@ -538,7 +538,7 @@ def test_unexpected_error_while_reading_the_iis_names_the_iis(tmp_path):
         (
             Edit("每單位商品面額為10,000 美元，", "每單位商品面額為10,000 日幣，", "iis"),
             "denomination_currency",
-            "每單位商品面額",
+            "每單位面額",
         ),
         (
             Edit("最低申購金額為10,000 美元。", "最低申購金額為10,000 日幣。", "iis"),

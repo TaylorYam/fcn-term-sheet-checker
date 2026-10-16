@@ -144,7 +144,7 @@ def _currency_others(cover, items, **row):
     occs = [
         Occurrence(
             field,
-            f"{field} 名稱",
+            "wording_currency",
             f"{field} 位置",
             v if isinstance(v, ParsedField) else ParsedField.present(field, v, []),
         )
@@ -162,7 +162,7 @@ def test_currency_occurrences_map_chinese_words_and_iso_codes_to_the_sheet():
         ("c", MISMATCH, "JPY"),
         ("d", MISMATCH, "JPY"),
     ]
-    assert out[2].message == "c 位置須等於參考條件表「承作幣別」（日幣 → JPY）" and out[2].item.name == "c 名稱"
+    assert out[2].message == "c 位置須等於參考條件表「承作幣別」（日幣 → JPY）" and out[2].item.name == "說明文字幣別"
 
 
 def test_currency_word_outside_the_table_is_reported_once_at_the_cover():
@@ -193,3 +193,13 @@ def test_currency_occurrences_are_silent_when_the_sheet_currency_is_blank_or_abs
     assert reference.currency_others(context(ts, currency="USD")) == []
     [r] = _currency_others("美元", {"a": ParsedField.missing("a", "找不到")}, currency="USD")
     assert (r.status, r.reason_code) == (REVIEW, "document_missing")
+
+
+def test_occurrence_names_come_from_the_shared_table_by_code():
+    """出處清單的項目名稱只在 `OCCURRENCE_NAMES` 定義：上手交出出處代號，未知代號直接拒絕（Issue #294 留言 1）。"""
+    from fcn_checker.standard_fields import OCCURRENCE_NAMES
+
+    occ = Occurrence("subscription_end", "subscription_end", "第四章受理申購結束日", ParsedField.present("x", 1, []))
+    assert occ.name == OCCURRENCE_NAMES["subscription_end"] == "結束受理申購日"
+    with pytest.raises(ValueError, match="未知的出處代號"):
+        Occurrence("x", "結束受理申購日", "第四章", ParsedField.present("x", 1, []))

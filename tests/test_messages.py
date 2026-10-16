@@ -476,7 +476,7 @@ def test_each_minimum_amount_names_itself(tmp_path):
     msgs = [problem_message(r) for r in issues(report) if r.rule_id == "field.min_amounts"]
     assert msgs == [
         "最低申購金額對不起來：參考條件表 10000／說明書 1",
-        "最低贖回商品面額對不起來：參考條件表 10000／說明書 1",
+        "最低贖回金額對不起來：參考條件表 10000／說明書 1",
     ]
 
 

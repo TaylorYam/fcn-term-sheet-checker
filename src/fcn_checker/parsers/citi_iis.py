@@ -198,15 +198,15 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "product_code_trustee",
-                "封面受託或銷售機構商品代號",
+                "trustee_product_code",
                 "封面「受託或銷售機構商品代號」",
                 r"受託或銷售機構商品代號(?:為)?：?(\d{12}|\[\])",
             ),
-            ("product_code_tdcc", "封面集保商品代號", "封面「集保商品代號」", r"集保商品代號(?:為)?：?(\d{12})"),
+            ("product_code_tdcc", "product_code", "封面「集保商品代號」", r"集保商品代號(?:為)?：?(\d{12})"),
         ),
     )
     fields["print_dates"] = iis.occurrences(
-        "print_dates", ti, (("print_date_iis", "刊印日期", "封面刊印日期", r"刊印日期：" + iis.DATE),), parse_date
+        "print_dates", ti, (("print_date_iis", "print_date", "封面刊印日期", r"刊印日期：" + iis.DATE),), parse_date
     )
     # 商品簡介
     put("risk_level_summary", r"本商品之風險程度：(RR\d)")
@@ -223,7 +223,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     rates = [
         Occurrence(
             f"monthly_coupon_{i}",
-            "月配息率",
+            "monthly_coupon",
             f"收益分配事項配息金額（第 {i} 處）",
             ParsedField.present(f"monthly_coupon_{i}", Decimal(m[1]), ti.lines_for(m.start(), m.end())),
         )
@@ -259,10 +259,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         tuple(
             spec
             for spec in (
-                ("payment_currency_coupon", "配息給付幣別", "收益分配事項配息金額", rf"以({CCY})支付下列金額"),
+                ("payment_currency_coupon", "coupon_currency", "收益分配事項配息金額", rf"以({CCY})支付下列金額"),
                 (
                     "payment_currency_maturity",
-                    "到期給付幣別",
+                    "maturity_amount_currency",
                     "贖回價金之計算到期給付金額",
                     rf"以({CCY})支付本商品每單位商品面額的100%",
                 ),
@@ -276,10 +276,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "issuer_names",
         ti,
         (
-            ("issuer_name_w5", "發行機構名稱（警語 5）", "警語 5", r"保證保本率，係由(.+?)（發行機構）及"),
+            ("issuer_name_w5", "issuer_name_warning", "警語 5", r"保證保本率，係由(.+?)（發行機構）及"),
             (
                 "issuer_name_org",
-                "發行機構名稱（相關機構）",
+                "issuer_name_org",
                 "相關機構第 1 點",
                 r"1\.發行機構：(.+?)\([“\"]CGMHI[”\"]\)",
             ),
@@ -288,29 +288,29 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["guarantor_names"] = iis.occurrences(
         "guarantor_names",
         ti,
-        (("guarantor_name_w5", "保證機構名稱（警語 5）", "警語 5", r"（發行機構）及(.+?)（保證機構）保證"),),
+        (("guarantor_name_w5", "guarantor_name_warning", "警語 5", r"（發行機構）及(.+?)（保證機構）保證"),),
     )
     fields["guarantor_names_org"] = iis.occurrences(  # 只寫中文「花旗集團」由審查標準的等價寫法接受
         "guarantor_names_org",
         ti,
-        (("guarantor_name_org", "保證機構名稱（相關機構）", "相關機構第 2 點", r"2\.保證機構：(.+?)[（(]營業所在地"),),
+        (("guarantor_name_org", "guarantor_name_org", "相關機構第 2 點", r"2\.保證機構：(.+?)[（(]營業所在地"),),
     )
     fields["agent_names"] = iis.occurrences(
         "agent_names",
         ti,
-        (("agent_name_org", "總代理人名稱（相關機構）", "相關機構第 3 點", r"3\.總代理人：(.+?)[（(]營業所在地"),),
+        (("agent_name_org", "agent_name_org", "相關機構第 3 點", r"3\.總代理人：(.+?)[（(]營業所在地"),),
     )
     fields["distributor_names"] = iis.occurrences(
         "distributor_names",
         ti,
         (
-            ("distributor_name_w4a", "受託機構名稱（警語 4）", "警語 4", r"本商品雖經(.+?)審查"),
-            ("distributor_name_w4b", "受託機構名稱（警語 4）", "警語 4", r"之價值，且(.+?)對本商品投資盈虧"),
-            ("distributor_name_w4c", "受託機構名稱（警語 4）", "警語 4", r"不負任何責任。(.+?)依法不得承諾"),
-            ("distributor_name_w5", "受託機構名稱（警語 5）", "警語 5", r"而非由(.+?)（受託或銷售機構）所保證"),
+            ("distributor_name_w4a", "distributor_name_warning", "警語 4", r"本商品雖經(.+?)審查"),
+            ("distributor_name_w4b", "distributor_name_warning", "警語 4", r"之價值，且(.+?)對本商品投資盈虧"),
+            ("distributor_name_w4c", "distributor_name_warning", "警語 4", r"不負任何責任。(.+?)依法不得承諾"),
+            ("distributor_name_w5", "distributor_name_warning", "警語 5", r"而非由(.+?)（受託或銷售機構）所保證"),
             (
                 "distributor_name_org",
-                "受託機構名稱（相關機構）",
+                "distributor_name_org",
                 "相關機構第 4 點",
                 r"4\.受託或銷售機構：(.+?)[（(]營業所在地",
             ),
@@ -322,7 +322,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構第 4 點",
                 r"4\.受託或銷售機構：[^（(]{1,40}[（(]營業所在地：(.+?)[）)]二、",
             ),

@@ -126,7 +126,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["print_dates"] = iis.occurrences(
         "print_dates",
         ti,
-        (("print_date_iis", "刊印日期", "本投資人須知刊印日期", r"本投資人須知[刋刊]印日期[:：]" + D),),
+        (("print_date_iis", "print_date", "本投資人須知刊印日期", r"本投資人須知[刋刊]印日期[:：]" + D),),
         parse_date,
     )
     # 商品簡介
@@ -149,11 +149,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["issuing_branch"] = branch
     fields["issuer_names"] = standard_fields.occurrences(
         "issuer_names",
-        [
-            Occurrence(
-                "issuer_name_org", "發行機構名稱（相關機構）", "相關機構", ubs.derived_name(branch, "issuer_name_org")
-            )
-        ],
+        [Occurrence("issuer_name_org", "issuer_name_org", "相關機構", ubs.derived_name(branch, "issuer_name_org"))],
     )
     dist = r"[•‧]\s*受託機構(?:/銷售機構)?名稱\s*[:：]\s*(.+?)\s*，\s*地址\s*(?:[:：]|為)\s*(.+?)\s*。\s*(?:二、)?\s*商品事項"
     fields["distributor_names"] = standard_fields.occurrences(
@@ -161,7 +157,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             Occurrence(
                 "distributor_name_org",
-                "受託機構名稱（相關機構）",
+                "distributor_name_org",
                 "相關機構",
                 raw.capture("distributor_name_org", dist),
             )
@@ -172,7 +168,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             Occurrence(
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構",
                 raw.capture("distributor_address_org", dist, ubs.without_place_note, group=2),
             )
@@ -184,7 +180,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             Occurrence(
                 "distributor_phone_contact",
-                "受託機構電話（聯絡方式）",
+                "distributor_phone_contact",
                 "末頁受託機構聯絡方式",
                 raw.capture(
                     "distributor_phone_contact", r"受託機構聯絡方式\s*[:：].*?電話\s*[:：]?\s*([+\d][\d\-() ]*\d)"

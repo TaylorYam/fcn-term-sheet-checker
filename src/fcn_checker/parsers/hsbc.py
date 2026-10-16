@@ -279,12 +279,12 @@ def _scenario_currencies(scenarios: Sequence[Line]) -> list[standard_fields.Occu
     headings = list(ti.finditer(SCENARIO_HEADING))
     if not headings:
         return []
-    segments = [("scenario_assumption_currency", "情境假設金額幣別", "第 18 條情境假設", 0, headings[0].start())]
+    segments = [
+        ("scenario_assumption_currency", "scenario_assumption_currency", "第 18 條情境假設", 0, headings[0].start())
+    ]
     for i, h in enumerate(headings):
         end = headings[i + 1].start() if i + 1 < len(headings) else len(ti.text)
-        segments.append(
-            (f"scenario_{i + 1}_currency", f"情境 {i + 1} 金額幣別", f"第 18 條情境分析{h[1]})", h.start(), end)
-        )
+        segments.append((f"scenario_{i + 1}_currency", "scenario_currency", f"第 18 條情境分析{h[1]})", h.start(), end))
     out = []
     for field, name, where, start, end in segments:
         found = money.amounts(ti, money.CURRENCY_THEN_AMOUNT, currency_group=1, start=start, end=end)
@@ -444,16 +444,16 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_trade", "最低交易金額", "第一章第 7 條最低交易金額", fields["minimum_trade"]),
-            occ("minimum_subscription", "最低申購金額", "第四章最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購金額", "第四章最低加購金額", fields["minimum_additional"]),
+            occ("minimum_trade", "minimum_trade", "第一章第 7 條最低交易金額", fields["minimum_trade"]),
+            occ("minimum_subscription", "minimum_subscription", "第四章最低申購金額", fields["minimum_subscription"]),
+            occ("minimum_additional", "minimum_additional", "第四章最低加購金額", fields["minimum_additional"]),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
         "subscription_dates",
         [
-            occ("subscription_start", "開始受理申購日", "第四章商品開始受理申購日", fields["subscription_start"]),
-            occ("subscription_end", "申購結束受理日", "第四章商品申購結束受理日", fields["subscription_end"]),
+            occ("subscription_start", "subscription_start", "第四章商品開始受理申購日", fields["subscription_start"]),
+            occ("subscription_end", "subscription_end", "第四章商品申購結束受理日", fields["subscription_end"]),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
@@ -461,33 +461,38 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         [
             occ(
                 "print_date_review",
-                "刊印日期（參考性審閱版）",
+                "print_date_review",
                 "封面刊印日期（參考性審閱版）",
                 fields["print_date_review"],
             ),
-            occ("print_date_final", "刊印日期（最終版）", "封面刊印日期（最終版）", fields["print_date_final"]),
+            occ("print_date_final", "print_date_final", "封面刊印日期（最終版）", fields["print_date_final"]),
         ],
     )
     scenarios = article(18)
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others",
         [
-            occ("denomination_currency", "每單位面額幣別", "第一章第 6 條每單位面額", fields["denomination_currency"]),
+            occ(
+                "denomination_currency",
+                "denomination_currency",
+                "第一章第 6 條每單位面額",
+                fields["denomination_currency"],
+            ),
             occ(
                 "minimum_trade_currency",
-                "最低交易金額幣別",
+                "minimum_trade_currency",
                 "第一章第 7 條最低交易金額",
                 fields["minimum_trade_currency"],
             ),
             occ(
                 "minimum_subscription_currency",
-                "最低申購金額幣別",
+                "minimum_subscription_currency",
                 "第四章最低申購金額",
                 fields["minimum_subscription_currency"],
             ),
             occ(
                 "minimum_additional_currency",
-                "最低加購金額幣別",
+                "minimum_additional_currency",
                 "第四章最低加購金額",
                 fields["minimum_additional_currency"],
             ),

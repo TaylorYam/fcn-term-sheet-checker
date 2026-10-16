@@ -124,14 +124,127 @@ class Money:
     evidence: tuple[Evidence, ...]
 
 
+# 出處代號 → 項目名稱（Issue #294 留言 1）：出處清單的項目名稱只在這裡定義，上手只交出（出處代號、位置、值）。
+# 同一件事各上手用同一個代號；說明書上的寫法差異（例：第四章／第 IV 部分、警語第幾點）寫在位置裡。
+OCCURRENCE_NAMES: dict[str, str] = {
+    # 商品代號與機構名稱
+    "product_code": "商品代號",
+    "trustee_product_code": "受託機構商品代號",
+    "issuer_name": "發行機構名稱",
+    "issuer_name_summary": "發行機構名稱（商品簡介）",
+    "issuer_name_org": "發行機構名稱（相關機構）",
+    "issuer_name_warning": "發行機構名稱（警語）",
+    "guarantor_name_risk": "保證機構名稱（信用風險）",
+    "guarantor_name_org": "保證機構名稱（相關機構）",
+    "guarantor_name_warning": "保證機構名稱（警語）",
+    "agent_name_org": "總代理人名稱（相關機構）",
+    "distributor_name": "受託機構名稱",
+    "distributor_name_structure": "受託機構名稱（交易架構）",
+    "distributor_name_org": "受託機構名稱（相關機構）",
+    "distributor_name_warning": "受託機構名稱（警語）",
+    "distributor_name_detail": "受託機構名稱（第 1 頁明細）",
+    "distributor_address_org": "受託機構地址（相關機構）",
+    "distributor_address_detail": "受託機構地址（第 1 頁明細）",
+    "chairman_detail": "受託機構負責人（第 1 頁明細）",
+    "distributor_phone_org": "受託機構電話（相關機構）",
+    "distributor_phone_rights": "受託機構電話（權益保護）",
+    "distributor_phone_section8": "受託機構電話（第八）",
+    "distributor_phone_contact": "受託機構電話（聯絡方式）",
+    # 刊印日期與受理申購日（`print_dates`、`subscription_dates`）
+    "print_date": "刊印日期",
+    "print_date_review": "刊印日期（參考性審閱版）",
+    "print_date_final": "刊印日期（最終版）",
+    "subscription_start": "開始受理申購日",
+    "subscription_end": "結束受理申購日",
+    # 最低金額（`min_amounts`）
+    "minimum_subscription": "最低申購金額",
+    "minimum_additional": "最低加購金額",
+    "minimum_redemption": "最低贖回金額",
+    "redemption_increment": "增加贖回單位",
+    "minimum_trade": "最低交易金額",
+    "minimum_investment": "最低投資金額",
+    "early_redemption_minimum": "提前贖回最低金額",
+    "early_redemption_increment": "提前贖回增加單位",
+    # 發行價格的其他出處（`issue_price_others`）
+    "issue_price_subscription": "發行價格（申購價金）",
+    "issue_price_scenario": "發行價格（情境假設）",
+    "issue_price_principal": "發行價格（情境投資本金）",
+    # 金額旁的幣別（`currency_others`）：一處金額與它的幣別用同一個詞
+    "denomination_currency": "每單位面額幣別",
+    "minimum_subscription_currency": "最低申購金額幣別",
+    "minimum_additional_currency": "最低加購金額幣別",
+    "minimum_redemption_currency": "最低贖回金額幣別",
+    "redemption_increment_currency": "增加贖回單位幣別",
+    "minimum_trade_currency": "最低交易金額幣別",
+    "minimum_investment_currency": "最低投資金額幣別",
+    "early_redemption_minimum_currency": "提前贖回最低金額幣別",
+    "early_redemption_increment_currency": "提前贖回增加單位幣別",
+    "issue_price_amount_currency": "發行價格金額幣別",
+    "subscription_price_currency": "申購價金幣別",
+    "unit_amount_currency": "每一單位金額幣別",
+    "coupon_currency": "配息幣別",
+    "payment_currency": "給付幣別",
+    "autocall_amount_currency": "自動提前出場給付幣別",
+    "maturity_amount_currency": "到期給付幣別",
+    "delivery_unit_currency": "實物交付計算單位幣別",
+    "remainder_currency": "剩餘金額幣別",
+    "interest_rate_currency": "利率幣別",
+    "principal_currency": "投資本金幣別",
+    "wording_currency": "說明文字幣別",
+    "scenario_currency": "情境金額幣別",
+    "scenario_assumption_currency": "情境假設金額幣別",
+    "scenario_denomination_currency": "情境假設面額幣別",
+    "scenario_principal_currency": "情境假設本金幣別",
+    "scenario_investment_currency": "情境假設投資金額幣別",
+    # 情境假設值（`scenario_params`，要等於的正式值見 `SCENARIO_TARGETS`）
+    "scenario_denomination": "每單位面額",
+    "scenario_principal": "本金",
+    "scenario_investment": "總投資金額",
+    "scenario_initial_investment": "初始投資金額",
+    "scenario_tenor": "天期",
+    "scenario_coupon_months": "配息月數",
+    "scenario_coupon_periods": "配息期數",
+    "scenario_coupon_pa": "年利率",
+    "scenario_annualized_return": "年化報酬率",
+    "scenario_monthly_coupon": "配息率",
+    "scenario_issue_price": "發行價格",
+    "scenario_strike_pct": "執行價 %",
+    # 其他重複寫出的值（投資人須知、上手規則）
+    "monthly_coupon": "月配息率",
+    "monthly_coupon_autocall": "月配息率（提前出場配息公式）",
+    "coupon_pa_autocall": "年利率（自動提前出場配息金額）",
+    "tenor_months": "天期（月）",
+    "redemption_pct": "贖回 %",
+    "maturity_redemption_pct": "到期贖回 %",
+    "autocall_redemption_pct": "自動提前出場贖回 %",
+    "barrier_pct": "下限值 %",
+    "ko_value_pct": "出場值 %",
+    "first_coupon_pct": "第 1 期配息率",
+    "observation_start": "觀察起算日",
+    "interest_formula_rate": "利息算式最大利率值",
+    "coupon_rows": "配息列數",
+    "coupon_formula_denomination": "配息算式的面額",
+    "original_principal": "原始投資本金",
+    "physical_denomination": "實物交割算式的面額",
+}
+
+
 @dataclass(frozen=True)
 class Occurrence:
-    """審查標準規則涵蓋的一處出處；每處各自產生一筆結果。"""
+    """一處出處；每處各自產生一筆結果。項目名稱由出處代號查 `OCCURRENCE_NAMES`。"""
 
     field: str  # 結果的欄位名稱（例：print_date_final）
-    name: str  # 結果的項目名稱，由上手隨出處交出；各上手同一件事用同一個名稱（例：刊印日期（最終版）、最低申購金額）
+    code: str  # 出處代號（`OCCURRENCE_NAMES` 的鍵；例：print_date_final、minimum_subscription）
     where: str  # 說明書上的位置，用在結果訊息（例：第四章商品開始受理申購日期）
     value: ParsedField
+
+    def __post_init__(self) -> None:
+        if self.code not in OCCURRENCE_NAMES:
+            raise ValueError(f"未知的出處代號：{self.code}")
+
+    @property
+    def name(self) -> str:
+        return OCCURRENCE_NAMES[self.code]
 
 
 @dataclass(frozen=True)
@@ -143,26 +256,27 @@ class TableAt:
     table: PriceTable
 
 
-# 情境假設值的出處代號 → （出處名稱, 要等於的正式值標準欄位）；名稱只在這裡定義（Issue #294 決定 2b）
-SCENARIO_TARGETS: dict[str, tuple[str, str]] = {
-    "scenario_denomination": ("每單位面額", "denomination"),
-    "scenario_principal": ("本金", "denomination"),
-    "scenario_investment": ("總投資金額", "denomination"),  # 面額 × 倍數（同一處寫的單位數）
-    "scenario_initial_investment": ("初始投資金額", "denomination"),  # 每單位的初始投資金額
-    "scenario_tenor": ("天期", "tenor_months"),
-    "scenario_coupon_months": ("配息月數", "tenor_months"),
-    "scenario_coupon_periods": ("配息期數", "tenor_months"),
-    "scenario_coupon_pa": ("年利率", "coupon_pa_pct"),
-    "scenario_annualized_return": ("年化報酬率", "coupon_pa_pct"),
-    "scenario_monthly_coupon": ("配息率", "monthly_coupon_pct"),
-    "scenario_issue_price": ("發行價格", "issue_price_pct"),
-    "scenario_strike_pct": ("執行價 %", "strike_pct"),
+# 情境假設值的出處代號 → 要等於的正式值標準欄位（Issue #294 決定 2b；名稱在 `OCCURRENCE_NAMES`）
+SCENARIO_TARGETS: dict[str, str] = {
+    "scenario_denomination": "denomination",
+    "scenario_principal": "denomination",
+    "scenario_investment": "denomination",  # 面額 × 倍數（同一處寫的單位數）
+    "scenario_initial_investment": "denomination",  # 每單位的初始投資金額
+    "scenario_tenor": "tenor_months",
+    "scenario_coupon_months": "tenor_months",
+    "scenario_coupon_periods": "tenor_months",
+    "scenario_coupon_pa": "coupon_pa_pct",
+    "scenario_annualized_return": "coupon_pa_pct",
+    "scenario_monthly_coupon": "monthly_coupon_pct",
+    "scenario_issue_price": "issue_price_pct",
+    "scenario_strike_pct": "strike_pct",
 }
 
 
 @dataclass(frozen=True)
 class ScenarioParam:
-    """情境假設值的一處（Issue #294 (b)）：出處代號（`SCENARIO_TARGETS` 的鍵，決定名稱與正式值）、位置、值。"""
+    """情境假設值的一處（Issue #294 (b)）：出處代號（`SCENARIO_TARGETS` 的鍵，決定正式值；名稱查 `OCCURRENCE_NAMES`）、
+    位置、值。"""
 
     code: str
     where: str  # 項目名稱的開頭（例：第 16 項基本假設、第 15 項情境 (i) 到期贖回金額的）
@@ -171,11 +285,11 @@ class ScenarioParam:
 
     @property
     def name(self) -> str:
-        return SCENARIO_TARGETS[self.code][0]
+        return OCCURRENCE_NAMES[self.code]
 
     @property
     def target(self) -> str:
-        return SCENARIO_TARGETS[self.code][1]
+        return SCENARIO_TARGETS[self.code]
 
 
 @dataclass(frozen=True)

@@ -155,8 +155,8 @@ def _redeem_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
     fields["ki_type"] = gs.ki_type(sec_ti, sec, where="買回價金之計算")
 
 
-def _occurrences(field: str, name: str, found: list[Mention]) -> list[Occurrence]:
-    return [Occurrence(field, name, m.where, m.parsed(field)) for m in found]
+def _occurrences(field: str, code: str, found: list[Mention]) -> list[Occurrence]:
+    return [Occurrence(field, code, m.where, m.parsed(field)) for m in found]
 
 
 def _repeated(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
@@ -168,28 +168,28 @@ def _repeated(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
         "currency_others",
         [
             *fields["currency_others"].value,
-            *words(redeem, gs.ODD_LOT_CURRENCY, "odd_lot_currency", "說明文字幣別", "二.3.(1) 可交付資產"),
+            *words(redeem, gs.ODD_LOT_CURRENCY, "odd_lot_currency", "wording_currency", "二.3.(1) 可交付資產"),
             *words(
                 risks,
                 gs.RISK_CURRENCY,
                 "risk_currency",
-                "說明文字幣別",
+                "wording_currency",
                 "三.1. 利率風險、匯兌風險「計價幣別（X）」",
             ),
-            *words(risks, gs.RISK_BASED_CURRENCY, "risk_based_currency", "說明文字幣別", "三.1.(6) 匯兌風險"),
+            *words(risks, gs.RISK_BASED_CURRENCY, "risk_based_currency", "wording_currency", "三.1.(6) 匯兌風險"),
             *words(
                 fees,
                 gs.FEE_EXAMPLE_CURRENCY,
                 "fee_example_currency",
-                "說明文字幣別",
+                "wording_currency",
                 "四. 費用說明",
             ),
-            *words(fees, gs.FEE_NAV_CURRENCY, "fee_nav_currency", "說明文字幣別", "四. 費用說明期初淨值"),
+            *words(fees, gs.FEE_NAV_CURRENCY, "fee_nav_currency", "wording_currency", "四. 費用說明期初淨值"),
             *words(
                 fees,
                 gs.FEE_NAV_AFTER_CURRENCY,
                 "fee_nav_after_currency",
-                "說明文字幣別",
+                "wording_currency",
                 "四. 期初淨值降至",
             ),
         ],
@@ -199,11 +199,11 @@ def _repeated(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
         *gs.pattern_mentions(fees, gs.TENOR_FEE, "四. 費用說明「於N個月間」", int),
     ]
     fields["tenor_mentions"] = standard_fields.occurrences(
-        "tenor_mentions", _occurrences("tenor_mention", "天期（月）", tenor)
+        "tenor_mentions", _occurrences("tenor_mention", "tenor_months", tenor)
     )
     pct = gs.pattern_mentions(redeem, gs.REDEMPTION, "二.3.(1) 到期買回金額「每單位面額 × X%」", Decimal)
     fields["redemption_pct_mentions"] = standard_fields.occurrences(
-        "redemption_pct_mentions", _occurrences("redemption_pct", "到期買回金額 %", pct)
+        "redemption_pct_mentions", _occurrences("redemption_pct", "maturity_redemption_pct", pct)
     )
 
 
@@ -221,7 +221,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["print_dates"] = iis.occurrences(
         "print_dates",
         ti,
-        (("print_date_iis", "刊印日期", "第 1 頁中文投資人須知刊印日期", r"中文投資人須知刊印日期[:：]" + gs.D),),
+        (("print_date_iis", "print_date", "第 1 頁中文投資人須知刊印日期", r"中文投資人須知刊印日期[:：]" + gs.D),),
         parse_date,
     )
     cover = (
@@ -232,7 +232,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["product_codes"] = iis.occurrences(
         "product_codes",
         ti,
-        (("product_code_tdcc", "封面商品代號", "封面「TDCC 商品代號為」", r"（TDCC商品代號為(\d{12})，ISIN"),),
+        (("product_code_tdcc", "product_code", "封面「TDCC 商品代號為」", r"（TDCC商品代號為(\d{12})，ISIN"),),
     )
     raw = RawText(text_lines)
     fields["name_en"] = raw.capture("name_en", r"英文名稱\s*[:：]\s*(.+?)\s*（商品種類")
@@ -245,7 +245,14 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["currency_others"] = iis.occurrences(
         "currency_others",
         ti,
-        (("denomination_currency", "每單位面額幣別", "二.1.(7) 每單位面額", rf"\(7\)每單位面額[:：][\d,]+({gs.CCY})"),),
+        (
+            (
+                "denomination_currency",
+                "denomination_currency",
+                "二.1.(7) 每單位面額",
+                rf"\(7\)每單位面額[:：][\d,]+({gs.CCY})",
+            ),
+        ),
     )
     _repeated(ti, fields)
     a = next((i for i, ln in enumerate(text_lines) if squash(ln.text).startswith("(10)連結標的資產")), None)
@@ -274,7 +281,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     # 每月配息率 = 年利率 ÷ 12 四捨五入到 4 位（共用規則 iis.monthly_coupon 的「每一處」寫法，同 MS；範本規格 §4.5）
     monthly = r"「配息率」就每個觀察期間而言，指年利率\d+(?:\.\d+)?%/12（約為" + gs.PCT + r"）"
     fields["monthly_coupons"] = iis.occurrences(
-        "monthly_coupons", ti, (("monthly_coupon_iis", "每月配息率", "二. 2. 收益分配事項", monthly),), Decimal
+        "monthly_coupons", ti, (("monthly_coupon_iis", "monthly_coupon", "二. 2. 收益分配事項", monthly),), Decimal
     )
     _redeem_terms(ti, fields)
     provided = set(PROVIDED)
@@ -288,21 +295,21 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "issuer_names_zh",
             "issuer_name_org",
-            "發行機構名稱（相關機構）",
+            "issuer_name_org",
             "一. 1.",
             r"1\.\s*發行機構\s*[:：]\s*(.+?)\s*（營業所在地",
         ),
         (
             "distributor_names",
             "distributor_name_org",
-            "受託機構名稱（相關機構）",
+            "distributor_name_org",
             "一. 4.",
             r"4\.\s*受託機構\s*[:：]\s*(.+?)\s*（營業所在地",
         ),
         (
             "distributor_addresses",
             "distributor_address_org",
-            "受託機構地址（相關機構）",
+            "distributor_address_org",
             "一. 4.",
             r"4\.\s*受託機構\s*[:：]\s*.+?（營業所在地\s*[:：]\s*(.+?)\s*）。?\s*二\.",
         ),

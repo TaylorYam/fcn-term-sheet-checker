@@ -146,10 +146,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "product_codes",
         ti,
         (
-            ("product_code_cover", "封面商品代號", "封面「商品代號」", r"(?<!機構)商品代號[:：](\d{12})"),
+            ("product_code_cover", "product_code", "封面「商品代號」", r"(?<!機構)商品代號[:：](\d{12})"),
             (
                 "product_code_distributor",
-                "封面受託或銷售機構商品代號",
+                "trustee_product_code",
                 "封面「受託或銷售機構商品代號」",
                 r"受託或銷售機構商品代號[:：](\d{12})",
             ),
@@ -168,13 +168,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "denomination_currency",
-                "每單位商品面額幣別",
+                "denomination_currency",
                 "商品簡介每單位商品面額",
                 rf"每單位商品面額為[\d,]+\s*({money.CURRENCY})",
             ),
             (
                 "min_subscription_currency",
-                "最低申購金額幣別",
+                "minimum_subscription_currency",
                 "商品簡介最低申購金額",
                 rf"最低申購金額為[\d,]+\s*({money.CURRENCY})",
             ),
@@ -192,21 +192,31 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["issuer_names"] = iis.occurrences(
         "issuer_names",
         ti,
-        (("issuer_name_org", "發行機構名稱", "相關機構事業概況第 1 點", r"1\.發行機構[:：](.+?)；營業所在地"),),
+        (("issuer_name_org", "issuer_name", "相關機構事業概況第 1 點", r"1\.發行機構[:：](.+?)；營業所在地"),),
     )
     fields["distributor_names"] = iis.occurrences(
         "distributor_names",
         ti,
         (
-            ("distributor_name_w4a", "受託機構名稱（警語 4）", "警語第 4 點", r"4\.本商品雖經(.+?)審查"),
-            ("distributor_name_w4b", "受託機構名稱（警語 4）", "警語第 4 點", r"之價值，且(.+?)不負本商品投資盈虧之責"),
-            ("distributor_name_w4c", "受託機構名稱（警語 4）", "警語第 4 點", r"盈虧之責。(.+?)依法不得承諾"),
-            ("distributor_name_w5", "受託機構名稱（警語 5）", "警語第 5 點", r"5\.本商品持有期間.+?而非由(.+?)保證。"),
-            ("distributor_name_w6", "受託機構名稱（警語 6）", "警語第 6 點", r"另行訂定者，係由(.+?)負責外"),
-            ("distributor_name_w9", "受託機構名稱（警語 9）", "警語第 9 點", r"9\.(.{1,30}?)應提供專業投資人"),
+            ("distributor_name_w4a", "distributor_name_warning", "警語第 4 點", r"4\.本商品雖經(.+?)審查"),
+            (
+                "distributor_name_w4b",
+                "distributor_name_warning",
+                "警語第 4 點",
+                r"之價值，且(.+?)不負本商品投資盈虧之責",
+            ),
+            ("distributor_name_w4c", "distributor_name_warning", "警語第 4 點", r"盈虧之責。(.+?)依法不得承諾"),
+            (
+                "distributor_name_w5",
+                "distributor_name_warning",
+                "警語第 5 點",
+                r"5\.本商品持有期間.+?而非由(.+?)保證。",
+            ),
+            ("distributor_name_w6", "distributor_name_warning", "警語第 6 點", r"另行訂定者，係由(.+?)負責外"),
+            ("distributor_name_w9", "distributor_name_warning", "警語第 9 點", r"9\.(.{1,30}?)應提供專業投資人"),
             (
                 "distributor_name_org",
-                "受託機構名稱（相關機構）",
+                "distributor_name_org",
                 "相關機構事業概況第 3 點",
                 r"3\.受託或銷售機構[:：](.+?)；營業所在地",
             ),
@@ -218,7 +228,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構事業概況第 3 點",
                 r"3\.受託或銷售機構[:：].{1,30}?；營業所在地[:：](.+?)。商品簡介",
             ),

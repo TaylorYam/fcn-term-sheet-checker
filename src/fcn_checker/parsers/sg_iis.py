@@ -198,10 +198,10 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "product_codes",
         ti,
         (
-            ("product_code_tdcc", "封面 TDCC 商品代號", "封面「TDCC商品代號」", r"TDCC商品代號(\d{12})"),
+            ("product_code_tdcc", "product_code", "封面「TDCC商品代號」", r"TDCC商品代號(\d{12})"),
             (
                 "product_code_trustee",
-                "封面受託機構商品代號",
+                "trustee_product_code",
                 "封面「受託機構商品代號」",
                 r"受託(?:或銷售)?機構商品代號(\d{12})",
             ),
@@ -210,7 +210,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["print_dates"] = iis.occurrences(
         "print_dates",
         ti,
-        (("print_date_iis", "刊印日期", "封面刊印日期", r"中文投資人須知刊印日期：" + iis.DATE),),
+        (("print_date_iis", "print_date", "封面刊印日期", r"中文投資人須知刊印日期：" + iis.DATE),),
         parse_date,
     )
     # 商品簡介
@@ -229,7 +229,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "subscription_dates",
         [
             Occurrence(
-                "subscription_start", "開始受理申購日", "商品簡介商品開始受理申購日期", fields["subscription_start"]
+                "subscription_start", "subscription_start", "商品簡介商品開始受理申購日期", fields["subscription_start"]
             )
         ],
     )
@@ -238,22 +238,27 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["monthly_coupons"] = iis.occurrences(
         "monthly_coupons",
         ti,
-        (("monthly_coupon_rate", "月配息率", "收益分配事項配息率", r"配息率=(\d+(?:\.\d+)?)%（相當於年率"),),
+        (("monthly_coupon_rate", "monthly_coupon", "收益分配事項配息率", r"配息率=(\d+(?:\.\d+)?)%（相當於年率"),),
         iis.number,
     )
     _ko_terms(iis.section(ti, PAYOUT_SECTION), fields)
     has_autocall = fields["has_autocall"].ok and fields["has_autocall"].value
-    pay = [("payment_currency_coupon", "配息給付幣別", "收益分配事項配息日", "於配息日")]
+    pay = [("payment_currency_coupon", "coupon_currency", "收益分配事項配息日", "於配息日")]
     if has_autocall:
         pay.append(
-            ("payment_currency_autocall", "自動提前出場給付幣別", "收益分配事項自動提前出場日", "於自動提前出場日")
+            ("payment_currency_autocall", "autocall_amount_currency", "收益分配事項自動提前出場日", "於自動提前出場日")
         )
-    pay.append(("payment_currency_maturity", "到期給付幣別", "收益分配事項到期日", "於到期日"))
+    pay.append(("payment_currency_maturity", "maturity_amount_currency", "收益分配事項到期日", "於到期日"))
     fields["currency_others"] = iis.occurrences(  # 金額旁的幣別字 = 參考條件表承作幣別（Issue #170）
         "currency_others",
         ti,
         (
-            ("denomination_currency", "每單位面額幣別", "商品簡介每單位面額", rf"每單位面額：[\d,]+({money.CURRENCY})"),
+            (
+                "denomination_currency",
+                "denomination_currency",
+                "商品簡介每單位面額",
+                rf"每單位面額：[\d,]+({money.CURRENCY})",
+            ),
             *(
                 (f, n, w, rf"{lead}，發行機構將依下列計算公式以({money.CURRENCY})為計價單位給付")
                 for f, n, w, lead in pay
@@ -271,42 +276,42 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "issuer_names",
         ti,
         (
-            ("issuer_name_w5a", "發行機構名稱（警語五）", "警語五", r"保證配息，係由(.+?)（發行機構）或"),
-            ("issuer_name_w5b", "發行機構名稱（警語五）", "警語五", r"所保證。(.+?)（發行機構）與"),
-            ("issuer_name_w6", "發行機構名稱（警語六）", "警語六", r"其餘內容應由(.+?)（發行機構）或"),
-            ("issuer_name_org", "發行機構名稱（相關機構）", "相關機構第 1 點", r"1\.發行機構：(.+?)\(地址："),
+            ("issuer_name_w5a", "issuer_name_warning", "警語五", r"保證配息，係由(.+?)（發行機構）或"),
+            ("issuer_name_w5b", "issuer_name_warning", "警語五", r"所保證。(.+?)（發行機構）與"),
+            ("issuer_name_w6", "issuer_name_warning", "警語六", r"其餘內容應由(.+?)（發行機構）或"),
+            ("issuer_name_org", "issuer_name_org", "相關機構第 1 點", r"1\.發行機構：(.+?)\(地址："),
         ),
     )
     fields["guarantor_names"] = iis.occurrences(
         "guarantor_names",
         ti,
         (
-            ("guarantor_name_w5a", "保證機構名稱（警語五）", "警語五", r"（發行機構）或([^（]+?)（保證機構）保證"),
-            ("guarantor_name_w5b", "保證機構名稱（警語五）", "警語五", r"（發行機構）與([^（]+?)（保證機構）有財務"),
+            ("guarantor_name_w5a", "guarantor_name_warning", "警語五", r"（發行機構）或([^（]+?)（保證機構）保證"),
+            ("guarantor_name_w5b", "guarantor_name_warning", "警語五", r"（發行機構）與([^（]+?)（保證機構）有財務"),
         ),
     )
     fields["guarantor_names_org"] = iis.occurrences(  # 英文名沒有括號的寫法另由審查標準的等價寫法接受
         "guarantor_names_org",
         ti,
-        (("guarantor_name_org", "保證機構名稱（相關機構）", "相關機構第 2 點", r"2\.保證機構：(.+?)\(地址："),),
+        (("guarantor_name_org", "guarantor_name_org", "相關機構第 2 點", r"2\.保證機構：(.+?)\(地址："),),
     )
     fields["agent_names"] = iis.occurrences(
         "agent_names",
         ti,
-        (("agent_name_org", "總代理人名稱（相關機構）", "相關機構第 3 點", r"3\.總代理人：(.+?)\(地址："),),
+        (("agent_name_org", "agent_name_org", "相關機構第 3 點", r"3\.總代理人：(.+?)\(地址："),),
     )
     fields["distributor_names"] = iis.occurrences(
         "distributor_names",
         ti,
         (
-            ("distributor_name_w4a", "受託機構名稱（警語四）", "警語四", r"四、本商品雖經(.+?)審查"),
-            ("distributor_name_w4b", "受託機構名稱（警語四）", "警語四", r"之價值，且(.+?)不負本商品投資盈虧之責"),
-            ("distributor_name_w4c", "受託機構名稱（警語四）", "警語四", r"投資盈虧之責。(.+?)依法不得承諾"),
-            ("distributor_name_w5", "受託機構名稱（警語五）", "警語五", r"而非由(.+?)所保證"),
-            ("distributor_name_w6", "受託機構名稱（警語六）", "警語六", r"受託或銷售機構（即(.+?)）負責外"),
+            ("distributor_name_w4a", "distributor_name_warning", "警語四", r"四、本商品雖經(.+?)審查"),
+            ("distributor_name_w4b", "distributor_name_warning", "警語四", r"之價值，且(.+?)不負本商品投資盈虧之責"),
+            ("distributor_name_w4c", "distributor_name_warning", "警語四", r"投資盈虧之責。(.+?)依法不得承諾"),
+            ("distributor_name_w5", "distributor_name_warning", "警語五", r"而非由(.+?)所保證"),
+            ("distributor_name_w6", "distributor_name_warning", "警語六", r"受託或銷售機構（即(.+?)）負責外"),
             (
                 "distributor_name_org",
-                "受託機構名稱（相關機構）",
+                "distributor_name_org",
                 "相關機構第 4 點",
                 r"4\.受託或銷售機構：(.+?)（下稱「",
             ),
@@ -318,7 +323,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構第 4 點",
                 r"4\.受託或銷售機構：[^(]{1,40}\(地址：(.+?)\)貳、",
             ),

@@ -193,7 +193,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "print_date_iis",
-                "刊印日期",
+                "print_date",
                 "第 1 頁中文投資人須知刊印日期",
                 r"^中文投資人須知\(適用於專業投資人及OSU客戶\)刊印日期：" + D,
             ),
@@ -209,7 +209,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("product_type", r"商品種類：(.+?)，TDCC")
     code = natixis.PRODUCT_CODES
     fields["product_codes"] = iis.occurrences(
-        "product_codes", ti, (("product_code_tdcc", "封面商品代號", "第 1 頁「TDCC商品代號為」", code),)
+        "product_codes", ti, (("product_code_tdcc", "product_code", "第 1 頁「TDCC商品代號為」", code),)
     )
     found = list(ti.finditer(code))
     fields["isin"] = (
@@ -230,13 +230,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "denomination_currency",
-                "每單位商品面額幣別",
+                "denomination_currency",
                 "貳 1. 每單位商品面額",
                 rf"●每單位商品面額：[\d,]+({natixis.CCY})",
             ),
             (
                 "min_subscription_currency",
-                "最低申購金額幣別",
+                "minimum_subscription_currency",
                 "貳 1. 最低申購金額",
                 minimum.replace("([\\d,]+)", "[\\d,]+"),
             ),
@@ -246,7 +246,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         occ
         for field, pattern, where, optional in CURRENCY_WORDING
         if not optional or any(ti.finditer(pattern))
-        for occ in money.currency_words(text_lines, pattern, field, "說明文字幣別", where)
+        for occ in money.currency_words(text_lines, pattern, field, "wording_currency", where)
     ]
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [*fields["currency_others"].value, *wording]
@@ -262,7 +262,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["monthly_coupons"] = iis.occurrences(
         "monthly_coupons",
         ti,
-        (("monthly_coupon_iis", "月配息率", "貳 2. 收益分配事項", r"月配息率：" + PCT + r"\(即年利率"),),
+        (("monthly_coupon_iis", "monthly_coupon", "貳 2. 收益分配事項", r"月配息率：" + PCT + r"\(即年利率"),),
         Decimal,
     )
     _product_terms(ti, fields, provided)
@@ -271,21 +271,21 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "issuer_names",
             "issuer_name_org",
-            "發行機構名稱（相關機構）",
+            "issuer_name_org",
             "壹 1.",
             r"1\.\s*發行機構\s*[:：]\s*(.+?)\s*\(地址",
         ),
         (
             "distributor_names",
             "distributor_name_org",
-            "受託機構名稱（相關機構）",
+            "distributor_name_org",
             "壹 4.",
             rf"4\.\s*{natixis.DISTRIBUTOR}\s*[:：]\s*(.+?)\s*\(地址",
         ),
         (
             "distributor_addresses",
             "distributor_address_org",
-            "受託機構地址（相關機構）",
+            "distributor_address_org",
             "壹 4.",
             rf"4\.\s*{natixis.DISTRIBUTOR}\s*[:：]\s*.+?\(地址\s*[:：]\s*(.+?)\s*\)\s*貳、",
         ),

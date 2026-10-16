@@ -495,27 +495,37 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_subscription", "最低申購金額", "第四章第 4 項最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購金額", "第四章第 4 項最低加購金額", fields["minimum_additional"]),
-            occ("minimum_redemption", "最低贖回金額", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
+            occ(
+                "minimum_subscription",
+                "minimum_subscription",
+                "第四章第 4 項最低申購金額",
+                fields["minimum_subscription"],
+            ),
+            occ("minimum_additional", "minimum_additional", "第四章第 4 項最低加購金額", fields["minimum_additional"]),
+            occ("minimum_redemption", "minimum_redemption", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
         "subscription_dates",
         [
-            occ("subscription_start", "開始受理申購日", "第四章第 1 項開始受理申購日期", fields["subscription_start"]),
-            occ("subscription_end", "結束受理申購日", "第四章第 1 項結束受理申購日期", fields["subscription_end"]),
+            occ(
+                "subscription_start",
+                "subscription_start",
+                "第四章第 1 項開始受理申購日期",
+                fields["subscription_start"],
+            ),
+            occ("subscription_end", "subscription_end", "第四章第 1 項結束受理申購日期", fields["subscription_end"]),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "封面產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "封面產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
         [
             occ(
                 "issue_price_ch4",
-                "發行價格（第四章申購價金）",
+                "issue_price_subscription",
                 "第四章第 5 項申購價金之計算",
                 fields["issue_price_ch4"],
             )
@@ -525,7 +535,7 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
         occ
         for field, where, pattern in CURRENCY_WORDS
         for occ in money.currency_words(
-            article(7) if field.startswith("note7") else doc.chapter_lines(3), pattern, field, "說明文字幣別", where
+            article(7) if field.startswith("note7") else doc.chapter_lines(3), pattern, field, "wording_currency", where
         )
     ]
     fields["currency_others"] = standard_fields.occurrences(
@@ -715,7 +725,7 @@ def _scenarios(t15: TextIndex, assumptions_at: int) -> _Scenarios:
             spans.append((k, m[1] if m else f"第 {k} 個", a, b))
     if not spans:  # 一個有算式的情境都找不到：情境的值都讀不到
         missing = ParsedField.missing("scenario_currency", "第 15 項「假設：」之後找不到「情境：」段落")
-        out.currencies.append(Occurrence("scenario_currency", "情境金額幣別", "第 15 項情境", missing))
+        out.currencies.append(Occurrence("scenario_currency", "scenario_currency", "第 15 項情境", missing))
     labels = re.compile(r"(" + "|".join(HEADER_PCT) + r")\($")
     for k, name, a, b in spans:
         where = f"第 15 項情境「{name}」"
@@ -737,11 +747,11 @@ def _scenarios(t15: TextIndex, assumptions_at: int) -> _Scenarios:
         calc = text.find("(一)", a, b)
         if calc < 0:
             missing = ParsedField.missing(field, f"{where}找不到「(一)」之後的配息與給付算式")
-            out.currencies.append(Occurrence(field, f"{name}金額幣別", where, missing))
+            out.currencies.append(Occurrence(field, "scenario_currency", where, missing))
             continue
         found = money.amounts(t15, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=calc, end=b)
         out.currencies.append(
-            money.scenario_occurrence(field, f"{name}金額幣別", where, found, t15.lines_for(a, a + 1))
+            money.scenario_occurrence(field, "scenario_currency", where, found, t15.lines_for(a, a + 1))
         )
     return out
 
@@ -930,48 +940,48 @@ def _currency_occurrences(fields: dict[str, ParsedField]) -> list[Occurrence]:
     out = [
         occ(
             "denomination_currency",
-            "每單位商品面額幣別",
+            "denomination_currency",
             "第一章第 5 項每單位商品面額",
             fields["denomination_currency"],
         ),
-        occ("currency_art8", "到期給付幣別", "第一章第 8 項到期日給付「以…支付」", fields["currency_art8"]),
+        occ("currency_art8", "maturity_amount_currency", "第一章第 8 項到期日給付「以…支付」", fields["currency_art8"]),
         occ(
             "delivery_unit_currency",
-            "實物交付計算單位幣別",
+            "delivery_unit_currency",
             "第一章第 8 項(3)(i)「關於每…」",
             fields["delivery_unit_currency"],
         ),
         occ(
             "scenario_denomination_currency",
-            "情境假設面額幣別",
+            "scenario_denomination_currency",
             "第 15 項假設 a) 每單位商品面額",
             fields["scenario_denomination_currency"],
         ),
         occ(
             "scenario_total_currency",
-            "情境假設初始投資金額幣別",
+            "scenario_investment_currency",
             "第 15 項假設 c) 初始投資金額",
             fields["scenario_total_currency"],
         ),
         occ(
             "minimum_subscription_currency",
-            "最低申購金額幣別",
+            "minimum_subscription_currency",
             "第四章第 4 項最低申購金額",
             fields["minimum_subscription_currency"],
         ),
         occ(
             "minimum_additional_currency",
-            "最低加購金額幣別",
+            "minimum_additional_currency",
             "第四章第 4 項最低加購金額",
             fields["minimum_additional_currency"],
         ),
         occ(
             "minimum_redemption_currency",
-            "最低贖回金額幣別",
+            "minimum_redemption_currency",
             "第四章第 8 項最低贖回金額",
             fields["minimum_redemption_currency"],
         ),
     ]
     if "currency_art13" in fields:
-        out.insert(2, occ("currency_art13", "配息幣別", "第一章第 13 項「應以…支付」", fields["currency_art13"]))
+        out.insert(2, occ("currency_art13", "coupon_currency", "第一章第 13 項「應以…支付」", fields["currency_art13"]))
     return out

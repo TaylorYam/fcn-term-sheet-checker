@@ -287,20 +287,30 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_subscription", "最低申購金額", "第四章第 4 項最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購單位", "第四章第 4 項最低加購單位", fields["minimum_additional"]),
-            occ("minimum_redemption", "最低贖回金額", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
-            occ("redemption_increment", "累加贖回單位", "第四章第 8 項累加贖回單位", fields["redemption_increment"]),
+            occ(
+                "minimum_subscription",
+                "minimum_subscription",
+                "第四章第 4 項最低申購金額",
+                fields["minimum_subscription"],
+            ),
+            occ("minimum_additional", "minimum_additional", "第四章第 4 項最低加購單位", fields["minimum_additional"]),
+            occ("minimum_redemption", "minimum_redemption", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
+            occ(
+                "redemption_increment",
+                "redemption_increment",
+                "第四章第 8 項累加贖回單位",
+                fields["redemption_increment"],
+            ),
         ],
     )
     scenarios = ms_scenario.section(article(18))
     fields["currency_others"] = standard_fields.occurrences("currency_others", _currency_occurrences(fields, scenarios))
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
-        [occ("issue_price_ch4", "發行價格（第四章申購價金）", "第四章第 5 項申購價金", fields["issue_price_ch4"])],
+        [occ("issue_price_ch4", "issue_price_subscription", "第四章第 5 項申購價金", fields["issue_price_ch4"])],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "封面刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "封面刊印日期", fields["print_date"])]
     )
     fields["subscription_dates"] = standard_fields.absent(
         "subscription_dates", "受理申購日（MS 改核對第四章開始受理贖回日期）"
@@ -323,31 +333,31 @@ def _currency_occurrences(
     out = [
         occ(
             "denomination_currency",
-            "每單位商品面額幣別",
+            "denomination_currency",
             "第一章第 6 項每單位商品面額",
             fields["denomination_currency"],
         ),
         occ(
             "minimum_subscription_currency",
-            "最低申購金額幣別",
+            "minimum_subscription_currency",
             "第四章第 4 項最低申購金額",
             fields["minimum_subscription_currency"],
         ),
         occ(
             "minimum_additional_currency",
-            "最低加購單位幣別",
+            "minimum_additional_currency",
             "第四章第 4 項最低加購單位",
             fields["minimum_additional_currency"],
         ),
         occ(
             "minimum_redemption_currency",
-            "最低贖回金額幣別",
+            "minimum_redemption_currency",
             "第四章第 8 項最低贖回金額",
             fields["minimum_redemption_currency"],
         ),
         occ(
             "redemption_increment_currency",
-            "累加贖回單位幣別",
+            "redemption_increment_currency",
             "第四章第 8 項累加贖回單位",
             fields["redemption_increment_currency"],
         ),
@@ -357,7 +367,7 @@ def _currency_occurrences(
     out.append(
         occ(
             name,
-            "情境假設總投資金額幣別",
+            "scenario_investment_currency",
             where,
             ParsedField.present(name, hit.value, list(hit.lines))
             if hit
@@ -369,7 +379,7 @@ def _currency_occurrences(
             continue
         field = f"情境{s.number}_currency"
         out.append(
-            money.scenario_occurrence(field, f"情境{s.number}金額幣別", f"第 18 項情境{s.number}", s.money, s.lines[:1])
+            money.scenario_occurrence(field, "scenario_currency", f"第 18 項情境{s.number}", s.money, s.lines[:1])
         )
     return out
 

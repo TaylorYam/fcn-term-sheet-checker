@@ -337,20 +337,20 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     _occurrences(fields)
     wording = (  # 說明文字的幣別字（Issue #316，比照 BBVA #305）
         *money.currency_words(
-            article(7), rf"以({CCY})為計價單位", "payment_currency", "說明文字幣別", "第一章第 7 項主要給付項目"
+            article(7), rf"以({CCY})為計價單位", "payment_currency", "wording_currency", "第一章第 7 項主要給付項目"
         ),
         *money.currency_words(
-            doc.chapter_lines(3), rf"本商品係以({CCY})計價", "risk_currency", "說明文字幣別", "第三章匯率風險"
+            doc.chapter_lines(3), rf"本商品係以({CCY})計價", "risk_currency", "wording_currency", "第三章匯率風險"
         ),
         *money.currency_words(
             doc.chapter_lines(3),
             rf"轉換成({CCY})進行投資",
             "risk_conversion_currency",
-            "說明文字幣別",
+            "wording_currency",
             "第三章匯率風險",
         ),
         *money.currency_words(
-            doc.chapter_lines(3), rf"若({CCY})利率上漲", "rate_risk_currency", "說明文字幣別", "第三章利率風險"
+            doc.chapter_lines(3), rf"若({CCY})利率上漲", "rate_risk_currency", "wording_currency", "第三章利率風險"
         ),
     )
     fields["currency_others"] = standard_fields.occurrences(
@@ -826,10 +826,10 @@ def _scenario3_currency(art14: list[Line]) -> Occurrence:
     a, b = t14.text.find("情境三（"), t14.text.find("情境四（")
     if a < 0 or b < a:
         missing = ParsedField.missing("scenario3_currency", "第 14 項找不到情境三到情境四之間的段落")
-        return Occurrence("scenario3_currency", "情境三金額幣別", "第 14 項情境三", missing)
+        return Occurrence("scenario3_currency", "scenario_currency", "第 14 項情境三", missing)
     found = money.amounts(t14, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=lambda _: False, start=a, end=b)
     return money.scenario_occurrence(
-        "scenario3_currency", "情境三金額幣別", "第 14 項情境三", found, t14.lines_for(a, a + 1)
+        "scenario3_currency", "scenario_currency", "第 14 項情境三", found, t14.lines_for(a, a + 1)
     )
 
 
@@ -895,23 +895,38 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_investment", "最低投資金額", "第一章第 7 項最低投資金額", fields["minimum_investment"]),
+            occ("minimum_investment", "minimum_investment", "第一章第 7 項最低投資金額", fields["minimum_investment"]),
             occ(
                 "early_redemption_minimum",
-                "提前贖回最低金額",
+                "early_redemption_minimum",
                 "第一章第 16 項(1) 投資人提前贖回最低金額",
                 fields["early_redemption_minimum"],
             ),
             occ(
                 "early_redemption_increment",
-                "提前贖回增加單位",
+                "early_redemption_increment",
                 "第一章第 16 項(1) 增加贖回之單位",
                 fields["early_redemption_increment"],
             ),
-            occ("minimum_subscription", "最低申購金額", "第四章第 4 項最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購金額", "第四章第 4 項最低加價申購金額", fields["minimum_additional"]),
-            occ("minimum_redemption", "最低贖回金額", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
-            occ("redemption_increment", "增加贖回單位", "第四章第 8 項增加贖回之單位", fields["redemption_increment"]),
+            occ(
+                "minimum_subscription",
+                "minimum_subscription",
+                "第四章第 4 項最低申購金額",
+                fields["minimum_subscription"],
+            ),
+            occ(
+                "minimum_additional",
+                "minimum_additional",
+                "第四章第 4 項最低加價申購金額",
+                fields["minimum_additional"],
+            ),
+            occ("minimum_redemption", "minimum_redemption", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
+            occ(
+                "redemption_increment",
+                "redemption_increment",
+                "第四章第 8 項增加贖回之單位",
+                fields["redemption_increment"],
+            ),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
@@ -919,44 +934,48 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         [
             occ(
                 "subscription_start",
-                "開始受理申購日",
+                "subscription_start",
                 "第四章第 1 項(1) 商品開始受理申購日期",
                 fields["subscription_start"],
             ),
-            occ("subscription_end", "結束受理申購日", "第四章第 1 項(2) 接受申購截止日", fields["subscription_end"]),
+            occ("subscription_end", "subscription_end", "第四章第 1 項(2) 接受申購截止日", fields["subscription_end"]),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "封面產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "封面產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
         [
             occ(
                 "issue_price_art14",
-                "發行價格（第 14 項設定參數）",
+                "issue_price_scenario",
                 "第一章第 14 項設定參數",
                 fields["scenario_issue_price"],
             ),
             occ(
                 "issue_price_ch4",
-                "發行價格（第四章申購價金）",
+                "issue_price_subscription",
                 "第四章第 5 項申購價金之計算",
                 fields["issue_price_ch4"],
             ),
         ],
     )
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表價格不列入；說明文字與情境三另在 read 加入（Issue #316）
-        ("minimum_investment_currency", "最低投資金額幣別", "第一章第 7 項最低投資金額"),
-        ("denomination_currency", "每單位商品面額幣別", "第一章第 7 項每單位商品面額"),
-        ("scenario_denomination_currency", "情境設定參數面額幣別", "第一章第 14 項設定參數每單位商品面額"),
-        ("scenario_investment_currency", "情境設定參數投資金額幣別", "第一章第 14 項設定參數投資金額"),
-        ("early_redemption_minimum_currency", "提前贖回最低金額幣別", "第一章第 16 項(1) 最低金額"),
-        ("early_redemption_increment_currency", "提前贖回增加單位幣別", "第一章第 16 項(1) 增加贖回之單位"),
-        ("minimum_subscription_currency", "最低申購金額幣別", "第四章第 4 項最低申購金額"),
-        ("minimum_additional_currency", "最低加購金額幣別", "第四章第 4 項最低加價申購金額"),
-        ("minimum_redemption_currency", "最低贖回金額幣別", "第四章第 8 項最低贖回金額"),
-        ("redemption_increment_currency", "增加贖回單位幣別", "第四章第 8 項增加贖回之單位"),
+        ("minimum_investment_currency", "minimum_investment_currency", "第一章第 7 項最低投資金額"),
+        ("denomination_currency", "denomination_currency", "第一章第 7 項每單位商品面額"),
+        ("scenario_denomination_currency", "scenario_denomination_currency", "第一章第 14 項設定參數每單位商品面額"),
+        ("scenario_investment_currency", "scenario_investment_currency", "第一章第 14 項設定參數投資金額"),
+        ("early_redemption_minimum_currency", "early_redemption_minimum_currency", "第一章第 16 項(1) 最低金額"),
+        (
+            "early_redemption_increment_currency",
+            "early_redemption_increment_currency",
+            "第一章第 16 項(1) 增加贖回之單位",
+        ),
+        ("minimum_subscription_currency", "minimum_subscription_currency", "第四章第 4 項最低申購金額"),
+        ("minimum_additional_currency", "minimum_additional_currency", "第四章第 4 項最低加價申購金額"),
+        ("minimum_redemption_currency", "minimum_redemption_currency", "第四章第 8 項最低贖回金額"),
+        ("redemption_increment_currency", "redemption_increment_currency", "第四章第 8 項增加贖回之單位"),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]

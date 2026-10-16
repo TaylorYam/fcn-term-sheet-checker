@@ -88,7 +88,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "denomination_currency",
-                "每單位面額幣別",
+                "denomination_currency",
                 "第一商品簡介第 7 點每單位面額",
                 rf"7\.每單位面額[:：][\d,]+\s*({money.CURRENCY})",
             ),
@@ -102,24 +102,24 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["print_dates"] = iis.occurrences(
         "print_dates",
         ti,
-        (("print_date_iis", "刊印日期", "警語十", r"刊印日期[:：]" + iis.DATE),),
+        (("print_date_iis", "print_date", "警語十", r"刊印日期[:：]" + iis.DATE),),
         parse_date,
     )
     fields["issuer_names_zh"] = iis.occurrences(  # 發行機構名稱只寫中文
         "issuer_names_zh",
         ti,
         (
-            ("issuer_name_w5", "發行機構名稱（警語五）", "警語五", r"五、本商品持有期間.+?係由(.+?)保證"),
-            ("issuer_name_org", "發行機構名稱（相關機構）", "相關機構", r"相關機構.?發行機構[:：](.+?)，電話"),
+            ("issuer_name_w5", "issuer_name_warning", "警語五", r"五、本商品持有期間.+?係由(.+?)保證"),
+            ("issuer_name_org", "issuer_name_org", "相關機構", r"相關機構.?發行機構[:：](.+?)，電話"),
         ),
     )
     fields["distributor_names"] = iis.occurrences(
         "distributor_names",
         ti,
         (
-            ("distributor_name_w4", "受託機構名稱（警語四）", "警語四", r"四、本商品雖經(.+?)審查"),
-            ("distributor_name_w5", "受託機構名稱（警語五）", "警語五", r"五、本商品持有期間.+?而非由(.+?)所保證"),
-            ("distributor_name_org", "受託機構名稱（相關機構）", "相關機構", r"受託或銷售機構[:：](.{1,30}?)，電話"),
+            ("distributor_name_w4", "distributor_name_warning", "警語四", r"四、本商品雖經(.+?)審查"),
+            ("distributor_name_w5", "distributor_name_warning", "警語五", r"五、本商品持有期間.+?而非由(.+?)所保證"),
+            ("distributor_name_org", "distributor_name_org", "相關機構", r"受託或銷售機構[:：](.{1,30}?)，電話"),
         ),
     )
     fields["distributor_phones"] = iis.occurrences(
@@ -128,13 +128,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_phone_org",
-                "受託機構電話（相關機構）",
+                "distributor_phone_org",
                 "相關機構",
                 r"受託或銷售機構[:：].{1,30}?，電話[:：]([^，]+)，地址",
             ),
             (
                 "distributor_phone_s8",
-                "受託機構電話（第八）",
+                "distributor_phone_section8",
                 "第八第 3 點",
                 r"受託或銷售機構連絡方式[:：]電話[:：]([+\d-]+)",
             ),
@@ -146,7 +146,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構",
                 r"受託或銷售機構[:：].{1,30}?，電話[:：][^，]+，地址[:：](.+?)(?:[(（]營業活動所在地[)）])?第一商品簡介",
             ),

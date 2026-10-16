@@ -188,7 +188,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["product_codes"] = iis.occurrences(
         "product_codes",
         ti,
-        (("product_code_tdcc", "封面商品代號", "封面「TDCC商品代號為」", r"TDCC商品代號為(\d{12})"),),
+        (("product_code_tdcc", "product_code", "封面「TDCC商品代號為」", r"TDCC商品代號為(\d{12})"),),
     )
     # 商品簡介
     put("risk_level_summary", r"本商品風險程度：(RR\d)")
@@ -196,7 +196,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["currency_others"] = standard_fields.occurrences(  # 說明文字的幣別字（Issue #316）
         "currency_others",
         money.currency_words(
-            text_lines, rf"以({nomura.CCY})為計價單位", "payment_currency", "說明文字幣別", "收益分配事項"
+            text_lines, rf"以({nomura.CCY})為計價單位", "payment_currency", "wording_currency", "收益分配事項"
         ),
     )
     fields["underlying_names_en"] = _underlying_names(ti)
@@ -218,35 +218,35 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             "issuer_names",
             "issuer_name_org",
-            "發行機構名稱（相關機構）",
+            "issuer_name_org",
             "第一 1.",
             r"1\.\s*發行機構\s*[:：]\s*(.+?)\s*，營業所在地",
         ),
         (
             "guarantor_names",
             "guarantor_name_org",
-            "保證機構名稱（相關機構）",
+            "guarantor_name_org",
             "第一 2.",
             r"2\.\s*保證機構\s*[:：]\s*(.+?)\s*，營業所在地",
         ),
         (
             "agent_names",
             "agent_name_org",
-            "總代理人名稱（相關機構）",
+            "agent_name_org",
             "第一 3.",
             r"3\.\s*總代理人\s*[:：]\s*(.+?)\s*，營業所在地",
         ),
         (
             "distributor_names",
             "distributor_name_org",
-            "受託機構名稱（相關機構）",
+            "distributor_name_org",
             "第一 4.",
             r"4\.\s*受託機構\s*[:：]\s*(.+?)\s*，營業所在地",
         ),
         (
             "distributor_addresses",
             "distributor_address_org",
-            "受託機構地址（相關機構）",
+            "distributor_address_org",
             "第一 4.",
             r"4\.\s*受託機構\s*[:：]\s*.+?，營業所在地：\s*(.+?)\s*第二\s*商品簡介",
         ),
@@ -258,7 +258,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     phone = nomura.rest_of_line("distributor_phone_rights", text_lines, "受託機構聯絡方式：")
     fields["distributor_phones"] = standard_fields.occurrences(
         "distributor_phones",
-        [standard_fields.Occurrence("distributor_phone_rights", "受託機構電話（權益保護）", "第九 1.", phone)],
+        [standard_fields.Occurrence("distributor_phone_rights", "distributor_phone_rights", "第九 1.", phone)],
     )
     fees = iis.section(ti, ("第七商品相關費用", "第八"))
     if fees is None:
