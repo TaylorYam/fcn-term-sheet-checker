@@ -18,7 +18,7 @@ NEW_RULES = (
     "doc.name_consistency",
     "doc.distributor_product_code",
     "doc.currency_consistency",
-    "doc.scenario_notional",
+    "scenario.params",
     "doc.price_header_pct",
     "doc.coupon_repeats",
     "doc.scenario_returns",
@@ -35,10 +35,11 @@ def test_new_rules_pass_when_document_is_consistent(tmp_path):
     assert problems(report) == set()
     for rule_id in NEW_RULES:
         assert {r.status for r in results(report, rule_id)} == {PASS}, rule_id
-    # 第 9 條(3) 與第 16 條都有逐處比對，且附證據
+    # 第 9 條(3) 與第 16 條都有逐處比對，且附證據（第 16 條由共用情境規則核對，Issue #294）
     repeats = {r.field: r for r in results(report, "doc.coupon_repeats")}
-    assert set(repeats) == {"第9條(3)", "第16條"}
-    assert all(r.document_evidence for r in repeats.values())
+    assert set(repeats) == {"第9條(3)"}
+    scenario = [r for r in results(report, "scenario.params") if r.field.startswith("scenario_monthly_coupon")]
+    assert scenario and all(r.document_evidence for r in [*repeats.values(), *scenario])
 
 
 @pytest.mark.parametrize(
@@ -74,19 +75,19 @@ def test_t_range_without_guaranteed_period(tmp_path):
     [
         # 正式月配息率（第 9、14、15(2)、17 條）全部正確，只有重複出現處其中一處錯
         ([Edit("相關配息率為1.0000%", "相關配息率為1.0100%", "ts.art9")], "doc.coupon_repeats"),
-        ([Edit("(100% + 1.0000%)", "(100% + 1.0100%)", "ts.art16.i")], "doc.coupon_repeats"),
-        ([Edit("1.0000%", "1.0100%", "ts.art16.ii")], "doc.coupon_repeats"),
-        ([Edit("1.0000%", "0.1000%", "ts.art16.iii")], "doc.coupon_repeats"),
+        ([Edit("(100% + 1.0000%)", "(100% + 1.0100%)", "ts.art16.i")], "scenario.params"),
+        ([Edit("1.0000%", "1.0100%", "ts.art16.ii")], "scenario.params"),
+        ([Edit("1.0000%", "0.1000%", "ts.art16.iii")], "scenario.params"),
         # 定義句正確，只有價格表或情境表欄頭的執行比例錯
         ([Edit("格的70.00%", "格的71.00%", "ts.art15.price")], "doc.price_header_pct"),
-        ([Edit("格的70.00%", "格的71.00%", "ts.art16.price")], "doc.price_header_pct"),
+        ([Edit("格的70.00%", "格的71.00%", "ts.art16.price")], "scenario.reprint"),  # 重印價格表 = §15（Issue #294）
         ([Edit("最初價格的70.00%", "最初價格的71.00%", "ts.art16.ii")], "doc.price_header_pct"),
         # 情境試算的總報酬與年化率
         ([Edit("= 6.0000%", "= 6.10%", "ts.art16.ii")], "doc.scenario_returns"),
-        ([Edit("報酬率：12.00%", "報酬率：12.50%", "ts.art16.ii")], "doc.scenario_returns"),
+        ([Edit("報酬率：12.00%", "報酬率：12.50%", "ts.art16.ii")], "scenario.params"),
         ([Edit("- 1 = 1.0000%", "- 1 = 1.1000%", "ts.art16.i")], "doc.scenario_returns"),
         # 其他重複出現處
-        ([Edit("10,000 美元", "5,000 美元", "ts.art16")], "doc.scenario_notional"),
+        ([Edit("10,000 美元", "5,000 美元", "ts.art16")], "scenario.params"),
         ([Edit("至6 的情況", "至5 的情況", "ts.art13")], "doc.observation_t_range"),
         (
             [
@@ -100,17 +101,20 @@ def test_t_range_without_guaranteed_period(tmp_path):
 )
 def test_repeated_value_wrong_while_formal_terms_are_right(tmp_path, edits, rule_id):
     report = check(tmp_path, edits=edits)
-    assert problems(report) == {(rule_id, MISMATCH)}
+    # §15 價格表欄頭改了，§16 重印價格表的欄頭就和 §15 不同（同一處錯誤的兩種表現）
+    also = {("scenario.reprint", MISMATCH)} if edits[0].where == "ts.art15.price" else set()
+    assert problems(report) == {(rule_id, MISMATCH), *also}
     bad = [r for r in results(report, rule_id) if r.status == MISMATCH]
     assert bad and all(r.document_evidence for r in bad)
 
 
 def test_repeated_coupon_mismatch_points_to_the_wrong_place(tmp_path):
     report = check(tmp_path, edits=[Edit("1.0000%", "1.0100%", "ts.art16.ii")])
-    r = {x.field: x for x in results(report, "doc.coupon_repeats")}
-    assert r["第9條(3)"].status == PASS
-    assert r["第16條"].status == MISMATCH and r["第16條"].actual == ["1.0100"]
-    assert any("1.0100" in e.text for e in r["第16條"].document_evidence)
+    assert [x.status for x in results(report, "doc.coupon_repeats")] == [PASS]  # 第9條(3)
+    coupons = [x for x in results(report, "scenario.params") if x.field.startswith("scenario_monthly_coupon")]
+    bad = [x for x in coupons if x.status == MISMATCH]
+    assert len(bad) == 1 and bad[0].actual == Decimal("1.0100") and len(coupons) == 2  # 同一個值一筆
+    assert any("1.0100" in e.text for e in bad[0].document_evidence)
     assert {x.status for x in results(report, "doc.coupon_consistency")} == {PASS}
 
 

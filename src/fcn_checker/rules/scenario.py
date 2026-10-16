@@ -135,6 +135,10 @@ def params(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
+# 依說明書顯示位數四捨五入後比的出處：獲利情境的年化報酬率是算出來的，常比年利率少寫位數
+ROUNDED = frozenset({"scenario_annualized_return"})
+
+
 def _param(ctx: IssuerContext, p: ScenarioParam, field: str) -> CheckResult:
     name = f"{p.where}{p.name}"
     times = () if p.times is None else (p.times,)
@@ -145,11 +149,13 @@ def _param(ctx: IssuerContext, p: ScenarioParam, field: str) -> CheckResult:
     if (problem := check.blocked) is not None:
         return problem
     suffix = f" × {p.times.value}" if p.times is not None else ""
-    return check.compare(
-        _times(official.value, p.times),
-        p.value.value,
-        fail_message=f"須等於說明書{OFFICIAL[p.target].name}{suffix}",
-    )
+    fail_message = f"須等於說明書{OFFICIAL[p.target].name}{suffix}"
+    if p.code in ROUNDED:
+        ok, expected = kit.cmp_pct(official.value, p.value.value)
+        return check.compare(
+            expected, p.value.value, ok=ok, tolerance="依說明書顯示位數四捨五入後比對", fail_message=fail_message
+        )
+    return check.compare(_times(official.value, p.times), p.value.value, fail_message=fail_message)
 
 
 def _against_sheet(ctx: IssuerContext, p: ScenarioParam, field: str, name: str, times) -> CheckResult:

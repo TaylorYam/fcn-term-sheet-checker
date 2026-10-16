@@ -24,7 +24,7 @@ SCHEDULE_RULES = (
     "schedule.last_payment",
     "schedule.autocall_dates",
     "doc.autocall_trigger_per_period",
-    "doc.scenario_price_table",
+    "scenario.reprint",
     "field.min_amounts",
 )
 
@@ -132,7 +132,7 @@ def test_trigger_per_period(tmp_path):
 
 def test_scenario_price_table_reprint(tmp_path):
     report = check(tmp_path, edits=[Edit("86.4150", "86.4200", "ts.art16.price.1.strike")])
-    assert problems(report) == {("doc.scenario_price_table", MISMATCH)}
+    assert problems(report) == {("scenario.reprint", MISMATCH)}
 
 
 def test_min_subscription_must_equal_denomination(tmp_path):
