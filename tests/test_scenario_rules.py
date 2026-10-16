@@ -87,7 +87,9 @@ def test_reprint_header_pct_and_ticker_must_match_when_both_sides_have_them():
     assert r.status == MISMATCH and "第 2 列彭博代碼" in r.message
     [r] = reprint(tickers=(None, None))  # 情境表沒有代碼：不比
     assert r.status == PASS
-    [r] = reprint(pcts={})  # 情境表表頭沒寫百分比：不比
+    [r] = reprint(pcts={k: v for k, v in PCTS.items() if k != "ki"})  # 情境表寫了百分比卻少一欄：不一致
+    assert r.status == MISMATCH and "表頭下限價 % （沒寫）" in r.message
+    [r] = reprint(pcts={})  # 情境表表頭整個沒寫百分比：不比
     assert r.status == PASS
 
 

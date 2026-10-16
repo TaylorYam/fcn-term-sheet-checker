@@ -621,8 +621,10 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
     if not spans:
         note = "第 15 項找不到情境 (i)～(iii)（到「請注意：情境分析結果不保證」為止）"
         params += [
-            ScenarioParam("scenario_coupon_pa", "第 15 項情境每次配息金額的", ParsedField.missing("scenario", note)),
-            ScenarioParam("scenario_principal", "第 15 項情境的", ParsedField.missing("scenario", note)),
+            ScenarioParam(
+                "scenario_coupon_pa", "第 15 項情境每次配息金額的", ParsedField.missing("scenario_coupon_pa", note)
+            ),
+            ScenarioParam("scenario_principal", "第 15 項情境的", ParsedField.missing("scenario_principal", note)),
         ]
         fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
         fields["scenario_prices"] = ParsedField.missing("scenario_prices", note)

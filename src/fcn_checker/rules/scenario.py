@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -22,79 +24,96 @@ from . import kit
 from .kit import Check, IssuerContext, read_standard
 
 COLUMNS = {"initial": "期初價格", "strike": "執行價", "ko": "KO 價", "ki": "下限價"}
-OFFICIAL = {  # 正式值的標準欄位 → 錯訊裡的名稱
-    "denomination": "每單位面額",
-    "tenor_months": "天期",
-    "coupon_pa_pct": "年利率",
-    "monthly_coupon_pct": "月配息率",
-    "issue_price_pct": "發行價格",
-    "strike_pct": "執行價 %",
+
+
+@dataclass(frozen=True)
+class Official:
+    """情境假設值要等於的正式值（標準欄位）：錯訊裡的名稱，以及範本沒有它（absent）時怎麼改比參考條件表。
+    出處本身的名稱（例：本金、總投資金額）在 `standard_fields.SCENARIO_TARGETS`。"""
+
+    name: str
+    sheet_key: str | None  # 改比的參考條件表欄位（上手須在 reference_fields 宣告）；None 為表上沒有可比的欄位
+    convert: Callable[[Any], Any] = kit.to_decimal
+    shown_digits: bool = False  # 百分比：表上的值依說明書顯示位數四捨五入後比
+    of_sheet: Callable[[Decimal], Decimal] | None = None  # 由表上的值推得預期值（月配息率 = 年利率 ÷ 12）
+
+
+OFFICIAL = {
+    "denomination": Official("每單位面額", "denomination"),
+    "tenor_months": Official("天期", "tenor_months", kit.to_int),
+    "coupon_pa_pct": Official("年利率", "coupon_pa_pct", shown_digits=True),
+    "monthly_coupon_pct": Official("月配息率", "coupon_pa_pct", of_sheet=kit.monthly_of_annual),
+    "issue_price_pct": Official("發行價格", None),
+    "strike_pct": Official("執行價 %", "strike_pct", shown_digits=True),
 }
-# 範本沒有正式值（absent）時改比的參考條件表欄位；月配息率由年利率 ÷ 12 推（上手須在 reference_fields 宣告）
-SHEET_KEY = {
-    "denomination": "denomination",
-    "tenor_months": "tenor_months",
-    "coupon_pa_pct": "coupon_pa_pct",
-    "monthly_coupon_pct": "coupon_pa_pct",
-    "strike_pct": "strike_pct",
-}
-PCT_TARGETS = ("coupon_pa_pct", "strike_pct")  # 和參考條件表比時依說明書顯示位數四捨五入
 
 
 def run(ctx: IssuerContext) -> list[CheckResult]:
     return [*reprint(ctx), *params(ctx), *prices(ctx)]
 
 
+def _provided(ctx: IssuerContext, rid: str, name: str, what: str) -> tuple[ParsedField | None, list[CheckResult]]:
+    """讀一塊的標準欄位：範本沒有時（None, []）；交出的讀不到時（None, [人工覆核]）；否則（欄位, []）。"""
+    pf = read_standard(ctx.ts, name)
+    if pf.status == FieldStatus.NOT_APPLICABLE:
+        return None, []
+    if not pf.ok:
+        return None, [Check(rid, name, Item.expected(what), ctx.document).review(pf)]
+    return pf, []
+
+
 # ---------------------------------------------------------------- 重印價格表（§7.1）
 
 
 def reprint(ctx: IssuerContext) -> list[CheckResult]:
-    scen = read_standard(ctx.ts, "scenario_reprint_table")
-    if scen.status == FieldStatus.NOT_APPLICABLE:
-        return []
-    if not scen.ok:
-        return [
-            Check("scenario.reprint", "scenario_reprint_table", Item.expected("情境價格表"), ctx.document).review(scen)
-        ]
-    s: TableAt = scen.value
+    field, problems = _provided(ctx, "scenario.reprint", "scenario_reprint_table", "情境價格表")
+    if field is None:
+        return problems
+    reprinted: TableAt = field.value
     main = read_standard(ctx.ts, "main_price_table")
-    check = Check("scenario.reprint", "scenario_reprint_table", Item.expected(s.where), ctx.document).needs(scen, main)
+    check = Check("scenario.reprint", field.name, Item.expected(reprinted.where), ctx.document).needs(field, main)
     if (problem := check.blocked) is not None:
         return [problem]
-    m: TableAt = main.value
-    a, b = s.table, m.table
+    source: TableAt = main.value
+    scen, own, where = reprinted.table, source.table, source.where
     shape = []
-    if set(a.columns) != set(b.columns):
-        shape.append(f"價格欄{_names(a.columns)}，{m.where}為{_names(b.columns)}")
-    if len(a.rows) != len(b.rows):
-        shape.append(f"列數 {len(a.rows)}，{m.where}為 {len(b.rows)}")
+    if set(scen.columns) != set(own.columns):
+        shape.append(f"價格欄{_names(scen.columns)}，{where}為{_names(own.columns)}")
+    if len(scen.rows) != len(own.rows):
+        shape.append(f"列數 {len(scen.rows)}，{where}為 {len(own.rows)}")
     if shape:  # 表格讀法有疑義，不判對錯
         return [check.result(S.REVIEW_REQUIRED, reason="document_inconsistent", message="；".join(shape))]
-    issues = [
-        f"表頭{COLUMNS[c]} % {a.pcts[c]}%，{m.where}為 {b.pcts[c]}%"
-        for c in b.columns
-        if c in a.pcts and c in b.pcts and a.pcts[c] != b.pcts[c]
-    ]
-    for i, (x, y) in enumerate(zip(a.rows, b.rows, strict=True), start=1):
+    issues = []
+    if scen.pcts:  # 情境表表頭寫了百分比：每一欄都要和主表相同（情境表表頭整個沒寫百分比時不比）
         issues += [
-            f"第 {i} 列{COLUMNS[c]} {_shown(x.prices.get(c))}，{m.where}為 {_shown(y.prices.get(c))}"
-            for c in b.columns
-            if x.prices.get(c) != y.prices.get(c)
+            f"表頭{COLUMNS[c]} % {_pct(scen.pcts.get(c))}，{where}為 {_pct(own.pcts.get(c))}"
+            for c in own.columns
+            if scen.pcts.get(c) != own.pcts.get(c)
         ]
-        if x.ticker and y.ticker and x.ticker != y.ticker:
-            issues.append(f"第 {i} 列彭博代碼 {x.ticker}，{m.where}為 {y.ticker}")
+    for i, (row, base) in enumerate(zip(scen.rows, own.rows, strict=True), start=1):
+        issues += [
+            f"第 {i} 列{COLUMNS[c]} {_shown(row.prices.get(c))}，{where}為 {_shown(base.prices.get(c))}"
+            for c in own.columns
+            if row.prices.get(c) != base.prices.get(c)
+        ]
+        if row.ticker and base.ticker and row.ticker != base.ticker:
+            issues.append(f"第 {i} 列彭博代碼 {row.ticker}，{where}為 {base.ticker}")
     return [
         check.compare(
-            kit.price_cells(b.prices),
-            kit.price_cells(a.prices),
+            kit.price_cells(own.prices),
+            kit.price_cells(scen.prices),
             ok=not issues,
-            message="；".join(issues) or f"逐格等於{m.where}",
+            message="；".join(issues) or f"逐格等於{where}",
         )
     ]
 
 
 def _shown(price: Decimal | None) -> str:
     return "（空白）" if price is None else f"{price:,}"
+
+
+def _pct(pct: Decimal | None) -> str:
+    return "（沒寫）" if pct is None else f"{pct}%"
 
 
 def _names(columns) -> str:
@@ -105,16 +124,12 @@ def _names(columns) -> str:
 
 
 def params(ctx: IssuerContext) -> list[CheckResult]:
-    container = read_standard(ctx.ts, "scenario_params")
-    if container.status == FieldStatus.NOT_APPLICABLE:
-        return []
-    if not container.ok:
-        return [
-            Check("scenario.params", "scenario_params", Item.expected("情境假設值"), ctx.document).review(container)
-        ]
+    field, problems = _provided(ctx, "scenario.params", "scenario_params", "情境假設值")
+    if field is None:
+        return problems
     seen: Counter[str] = Counter()
     out = []
-    for p in container.value:
+    for p in field.value:
         seen[p.code] += 1
         out.append(_param(ctx, p, f"{p.code}_{seen[p.code]}"))
     return out
@@ -124,57 +139,58 @@ def _param(ctx: IssuerContext, p: ScenarioParam, field: str) -> CheckResult:
     name = f"{p.where}{p.name}"
     times = () if p.times is None else (p.times,)
     official = read_standard(ctx.ts, p.target)
-    what = OFFICIAL[p.target]
     if official.status == FieldStatus.NOT_APPLICABLE:
         return _against_sheet(ctx, p, field, name, times)
     check = Check("scenario.params", field, Item.expected(name), ctx.document).needs(p.value, *times, official)
     if (problem := check.blocked) is not None:
         return problem
-    expected = _times(official.value, p.times)
     suffix = f" × {p.times.value}" if p.times is not None else ""
-    return check.compare(expected, p.value.value, fail_message=f"須等於說明書{what}{suffix}")
+    return check.compare(
+        _times(official.value, p.times),
+        p.value.value,
+        fail_message=f"須等於說明書{OFFICIAL[p.target].name}{suffix}",
+    )
 
 
 def _against_sheet(ctx: IssuerContext, p: ScenarioParam, field: str, name: str, times) -> CheckResult:
     """範本沒有正式值：和參考條件表比（面額、天期、年利率、執行價 % 同名欄位；月配息率 = 年利率 ÷ 12）。"""
-    key = SHEET_KEY.get(p.target)
-    what = OFFICIAL[p.target]
-    if key is None:
+    spec = OFFICIAL[p.target]
+    if spec.sheet_key is None:
         return Check("scenario.params", field, Item.expected(name), ctx.document).result(
             S.REVIEW_REQUIRED,
             actual=p.value.value if p.value.ok else None,
             evidence=p.value.evidence,
             reason="document_not_applicable",
-            message=f"範本沒有{what}，參考條件表也沒有可比的欄位",
+            message=f"範本沒有{spec.name}，參考條件表也沒有可比的欄位",
         )
-    convert = kit.to_int if p.target == "tenor_months" else kit.to_decimal
+    sheet_name = OFFICIAL[spec.sheet_key].name
     v, ov, problem = kit.order_value(
-        ctx, key, "scenario.params", field, p.value, convert, "數字", name=OFFICIAL.get(key, what)
+        ctx, spec.sheet_key, "scenario.params", field, p.value, spec.convert, "數字", name=sheet_name
     )
     if problem is not None:
         return problem
-    monthly = p.target == "monthly_coupon_pct"
-    item = Item.derived(name, [ov]) if monthly else Item.sheet(name, [ov])
+    item = Item.derived(name, [ov]) if spec.of_sheet else Item.sheet(name, [ov])
     check = Check("scenario.params", field, item, ctx.document, ov=(ov,)).needs(p.value, *times)
     if (problem := check.blocked) is not None:
         return problem
     actual = p.value.value
-    if monthly:
-        expected, tolerance = kit.monthly_of_annual(v), "年利率 ÷ 12 四捨五入（half-up）到 4 位後比數值"
+    tolerance = None
+    if spec.of_sheet is not None:
+        expected, tolerance = spec.of_sheet(v), f"{sheet_name} ÷ 12 四捨五入（half-up）到 4 位後比數值"
         ok = expected == actual
-    elif p.target in PCT_TARGETS:
+    elif spec.shown_digits:
         ok, expected = kit.cmp_pct(v, actual)
         tolerance = "依說明書顯示位數四捨五入後比對"
     else:
-        expected, tolerance = _times(v, p.times), None
+        expected = _times(v, p.times)
         ok = expected == actual
     return check.compare(
         expected,
         actual,
         ok=ok,
         tolerance=tolerance,
-        message=f"範本沒有{what}，和參考條件表比",
-        fail_message=f"；須等於{'年利率 ÷ 12' if monthly else what}",
+        message=f"範本沒有{spec.name}，和參考條件表比",
+        fail_message=f"；須等於{sheet_name + ' ÷ 12' if spec.of_sheet else spec.name}",
     )
 
 
@@ -186,15 +202,11 @@ def _times(value: Any, times: ParsedField | None) -> Any:
 
 
 def prices(ctx: IssuerContext) -> list[CheckResult]:
-    container = read_standard(ctx.ts, "scenario_prices")
-    if container.status == FieldStatus.NOT_APPLICABLE:
-        return []
-    if not container.ok:
-        return [
-            Check("scenario.strike", "scenario_prices", Item.expected("較差情境價格"), ctx.document).review(container)
-        ]
+    field, problems = _provided(ctx, "scenario.strike", "scenario_prices", "較差情境價格")
+    if field is None:
+        return problems
     table = read_standard(ctx.ts, "underlying_prices")
-    return [_price(ctx, sp, table, f"scenario_price_{n}") for n, sp in enumerate(container.value, start=1)]
+    return [_price(ctx, sp, table, f"scenario_price_{n}") for n, sp in enumerate(field.value, start=1)]
 
 
 def _price(ctx: IssuerContext, sp: ScenarioPrice, table: ParsedField, field: str) -> CheckResult:

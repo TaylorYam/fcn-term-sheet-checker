@@ -521,10 +521,11 @@ def _article17(fields: dict[str, ParsedField], art17: list[Line]) -> tuple[Parse
     if len(found) == 1:
         m = found[0]
         lns = ti.lines_for(m.start(), m.end())
-        initial, strike, pct = (ParsedField.present("scenario4", v, lns) for v in (dec(m[1]), dec(m[3]), Decimal(m[4])))
+        values = (dec(m[1]), dec(m[3]), Decimal(m[4]))
+        initial, strike, pct = (ParsedField.present("scenario4_first_underlying", v, lns) for v in values)
     else:
         initial = strike = pct = ParsedField.missing(
-            "scenario4", "情境 4 找不到或有多處「初始參考價格(1)…執行價格(1)…（初始參考價格(1)之X%）」"
+            "scenario4_first_underlying", "情境 4 找不到或有多處「初始參考價格(1)…執行價格(1)…（初始參考價格(1)之X%）」"
         )
     fields["scenario_prices"] = standard_fields.occurrences(
         "scenario_prices", [ScenarioPrice(where, 1, "initial", initial), ScenarioPrice(where, 1, "strike", strike)]
