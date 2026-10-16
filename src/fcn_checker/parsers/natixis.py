@@ -106,9 +106,15 @@ AUTOCALL_REDEMPTION = (
     r"自動提前到期贖回金額=發生自動提前到期事件之自動提前到期觀察日持有之商品單位數x每單位商品面額x" + PCT
 )
 MATURITY_REDEMPTION = r"則本商品於到期日將以每單位商品面額之" + PCT + "贖回"  # 第 15 項情況一
-MATURITY_REPEATS = (  # 第 15 項情況一公式、2.a（有 KI 才有）的 %
-    ("art15_formula", "第一章第 15 項到期贖回金額公式", r"到期贖回金額=到期日持有之商品單位數x每單位商品面額x" + PCT),
-    ("art15_case2a", "第一章第 15 項 2.a", r"則本商品將以每單位商品面額之" + PCT + "贖回"),
+# 第 15 項情況一公式、2.a（有 KI 才有）的 %：(欄位, 每一處的位置, pattern, 每種型態都有)
+MATURITY_REPEATS = (
+    (
+        "art15_formula",
+        ("第一章第 15 項情況一到期贖回金額公式", "第一章第 15 項 2.a 到期贖回金額公式"),
+        r"到期贖回金額=到期日持有之商品單位數x每單位商品面額x" + PCT,
+        True,
+    ),
+    ("art15_case2a", ("第一章第 15 項 2.a",), r"則本商品將以每單位商品面額之" + PCT + "贖回", False),
 )
 SCENARIO_HEAD = r"情境([一二三四])[(（]"  # 情境一～四（無 KI 只有一～三）
 SCENARIO_END = "關於上述情境分析之警語"
@@ -738,9 +744,11 @@ def _mentions(
     convert: Callable,
     *,
     group: int = 1,
+    required: bool = True,
 ) -> list[Occurrence]:
     """情境裡重複寫出的值（Issue #318）：每個情境一筆（欄位 `<name>_<第幾個情境>`），值是該情境裡每一處的值（依序）；
-    沒有這句的情境不列（依情境可有可無，例：原始投資本金只在現金交割的情境）。"""
+    沒有這句的情境不列（依情境可有可無，例：原始投資本金只在現金交割的情境）。每種型態都會寫的句子（`required`）
+    在所有情境都找不到時，交出一筆缺漏（轉人工覆核）。"""
     out = []
     for n, (case, a, b) in enumerate(spans, start=1):
         hits = [m for m in ti.finditer(pattern) if a <= m.start() < b]
@@ -748,6 +756,10 @@ def _mentions(
             lines = [ln for m in hits for ln in ti.lines_for(m.start(), m.end())]
             pf = ParsedField.present(f"{name}_{n}", tuple(convert(m[group]) for m in hits), lines)
             out.append(Occurrence(f"{name}_{n}", label, f"第 16 項{case}", pf))
+    if required and not out:
+        out.append(
+            Occurrence(name, label, "第 16 項情境", ParsedField.missing(name, f"第 16 項情境找不到{label}的句子"))
+        )
     return out
 
 
@@ -755,16 +767,15 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
     """第 16 項情境與第 15 項重複寫出的值（Issue #318，比照 BBVA #305）：各情境配息列數、配息算式／原始投資本金／實物交割
     算式的面額、自動提前到期與到期贖回的 %、實物交割算式的執行價格；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
     ti, t15 = TextIndex(art16), TextIndex(art15)
-    repeats = [  # 情況一公式、2.a（有 KI 才有）：每處一筆（欄位 `<field>_<第幾處>`）
-        Occurrence(
-            f"{field}_{n}",
-            "到期贖回 %",
-            where,
-            ParsedField.present(f"{field}_{n}", (Decimal(m[1]),), t15.lines_for(m.start(), m.end())),
-        )
-        for field, where, pattern in MATURITY_REPEATS
-        for n, m in enumerate(t15.finditer(pattern), start=1)
-    ]
+    repeats = []  # 情況一公式、2.a（有 KI 才有）：每處一筆（欄位 `<field>_<第幾處>`）
+    for field, places, pattern, required in MATURITY_REPEATS:
+        hits = list(t15.finditer(pattern))
+        if required and not hits:
+            missing = ParsedField.missing(field, f"{places[0]}找不到「每單位商品面額 x X%」")
+            repeats.append(Occurrence(field, "到期贖回 %", places[0], missing))
+        for n, m in enumerate(hits, start=1):
+            pf = ParsedField.present(f"{field}_{n}", (Decimal(m[1]),), t15.lines_for(m.start(), m.end()))
+            repeats.append(Occurrence(f"{field}_{n}", "到期贖回 %", places[min(n, len(places)) - 1], pf))
     spans = _scenario_spans(ti)
     if not spans:
         missing = "第 16 項找不到情境一～三（或四）到「關於上述情境分析之警語」的段落"
@@ -801,7 +812,16 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
     denominations = [
         *coupon_denominations,
         *_mentions("scenario_principal", "原始投資本金", ti, spans, SCENARIO_PRINCIPAL, number),
-        *_mentions("scenario_physical_denomination", "實物交割算式的面額", ti, spans, WORST_STRIKE, number, group=2),
+        *_mentions(
+            "scenario_physical_denomination",
+            "實物交割算式的面額",
+            ti,
+            spans,
+            WORST_STRIKE,
+            number,
+            group=2,
+            required=False,
+        ),  # 讀不到時由 `scenario_worst_strike` 轉人工覆核
     ]
     fields["scenario_denomination_mentions"] = standard_fields.occurrences(
         "scenario_denomination_mentions", denominations
@@ -901,10 +921,14 @@ def _distributor_names(doc: Document) -> ParsedField:
         ("ch3", "第三章第 5 項", TextIndex(doc.span_lines(ch3.get(5)))),
     )
     items = [
-        Occurrence(field, "受託機構名稱（警語）", where + label, capture(field, ti, pattern))
+        Occurrence(
+            f"distributor_name_{tag}_{key}",
+            "受託機構名稱（警語）",
+            where + label,
+            capture(f"distributor_name_{tag}_{key}", ti, pattern),
+        )
         for tag, where, ti in places
         for key, label, pattern in WARNING_NAMES
-        for field in (f"distributor_name_{tag}_{key}",)
     ]
     items += [
         Occurrence(field, "受託機構名稱", where, capture(field, TextIndex(doc.span_lines(ch4.get(n))), pattern))
@@ -944,7 +968,8 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
     fields.update(
         standard_fields.absent_all(
-            ("distributor_addresses_others", "chairman_others"), "受託機構地址、負責人的其他出處"
+            [x for x in standard_fields.DISTRIBUTOR_OTHERS if x != "distributor_names_others"],
+            "受託機構地址、負責人的其他出處",
         )
     )
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表貨幣欄不列入；說明文字與情境另在 read 加入（Issue #318）

@@ -245,6 +245,25 @@ def test_repeated_values_must_equal_the_terms(tmp_path, spec, edit, expected):
         (Edit("執行價格 = 10,000", "執行價格約 10,000", "ts.art16"), ("doc.scenario_table", "scenario_worst_strike")),
         (Edit("10,000 美元 x (18.00%/12) = 150.00 美元", "", "ts.art16.s2"), ("doc.coupon_periods", "scenario2_rows")),
         (
+            Edit("自動提前到期贖回金額為原始投資本金乘以100%", "自動提前到期贖回金額為原始投資本金", "ts.art16"),
+            ("doc.redemption_pct", "scenario_autocall_pct"),
+        ),
+        (
+            Edit("的原始投資本金。", "的本金。", "ts.art16"),
+            ("doc.scenario_params", "scenario_principal"),
+        ),
+        (
+            Edit("每單位商品面額 x 100%", "每單位商品面額", "ts.art15"),
+            ("doc.redemption_pct", "art15_formula"),
+        ),
+        (Edit("所得之美元金額", "所得之金額", "ts.art15"), ("field.currency", "cash_remainder_currency")),
+        (
+            Edit(
+                "績效表現最差之連結標的(虛構控股一)執行價格", "績效表現最差之連結標的(虛構控股九)執行價格", "ts.art16"
+            ),
+            ("doc.scenario_table", "scenario_worst_strike"),
+        ),
+        (
             Edit(f"受託或銷售機構({DIST['name']})提出", "受託或銷售機構提出", "ts.ch四"),
             ("standard.distributor", "distributor_name_ch4_10a"),
         ),

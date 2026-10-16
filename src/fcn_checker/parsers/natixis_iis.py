@@ -41,11 +41,7 @@ NOISE = re.compile(r"^(第\d+頁/共\d+頁|C[12] - (?:Inter ?nal|Public) Natixis
 D = natixis.D
 PCT = natixis.PCT
 # 警語裡寫受託機構名稱的地方（Issue #306：每處都算受託機構名稱出處）：(欄位, 位置, pattern)
-WARNING_NAMES = (
-    ("distributor_name_w5", "警語 (5)「而非由…所保證」", rf"而非由{natixis.DISTRIBUTOR}[(（](.+?)[)）]所保證"),
-    ("distributor_name_w6a", "警語 (6)「由…另行訂定」", rf"及由{natixis.DISTRIBUTOR}[(（](.+?)[)）]另行訂定者"),
-    ("distributor_name_w6b", "警語 (6)「係由…負責」", rf"係由{natixis.DISTRIBUTOR}[(（](.+?)[)）]負責外"),
-)
+WARNING_NAMES = tuple((f"distributor_name_{key}", where, pattern) for key, where, pattern in natixis.WARNING_NAMES)
 # 說明文字的幣別字（Issue #318）：(欄位, pattern, 位置, 依型態可有可無)；配息金額的捨入幣別只有日圓商品才寫
 CURRENCY_WORDING = (
     ("principal_currency", rf"低於\d+(?:\.\d+)?%({natixis.CCY})投資本金", "貳 1. 計價貨幣本金保本率", False),

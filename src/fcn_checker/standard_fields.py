@@ -158,7 +158,7 @@ STANDARD_FIELDS: dict[str, str] = {
     "minimum_issue_size": "str：第四章發行不成立門檻的金額寫法（審查標準 minimum_issue_size.<上手> 有固定值時核對）",
     "distributor_phone_ch4": "str：第四章受託機構聯絡電話（BNP 第四章第 16 項）；範本沒有這處時交出 absent",
     "distributor_names_others": "tuple[Occurrence, ...]：受託機構名稱的其他出處（值為 str，例：BBVA 第 1 頁 13. 後的明細 (i)；"
-    "Issue #305）；範本沒有時交出 absent",
+    "Issue #305；Natixis 封面與第三章警語、第四章 10.、14.，Issue #318）；範本沒有時交出 absent",
     "distributor_addresses_others": "tuple[Occurrence, ...]：受託機構地址的其他出處（BBVA 第 1 頁明細 (iii)）；範本沒有時交出 absent",
     "chairman_others": "tuple[Occurrence, ...]：受託機構負責人的其他出處（BBVA 第 1 頁明細 (iv)），保留原字碼；範本沒有時交出 absent",
 }
