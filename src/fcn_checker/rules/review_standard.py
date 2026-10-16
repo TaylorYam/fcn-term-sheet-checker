@@ -135,8 +135,13 @@ def _codepoints(s: str) -> str:
 
 
 def _chairman(ctx: Context) -> CheckResult:
-    rid, pf, exp = "standard.chairman", standard_field(ctx, "chairman"), ctx.std.chairman
-    check = Check(rid, "chairman", Item.standard("受託機構負責人"), ctx.document, expected=exp).needs(pf)
+    return chairman_text(ctx, "chairman", standard_field(ctx, "chairman"), "受託機構負責人")
+
+
+def chairman_text(ctx: Context, field: str, pf: ParsedField, name: str) -> CheckResult:
+    """一處受託機構負責人姓名 = 審查標準，逐字（含字碼）相等（上手專屬規則的其他出處也用這個，例：BBVA 第 1 頁明細）。"""
+    rid, exp = "standard.chairman", ctx.std.chairman
+    check = Check(rid, field, Item.standard(name), ctx.document, expected=exp).needs(pf)
     if (problem := check.blocked) is not None:
         return problem
     return check.compare(
@@ -348,16 +353,16 @@ def _distributor_info(ctx: Context) -> list[CheckResult]:
             ),  # 只有 BNP 範本有這處
         )
     return [
-        _distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)
+        distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)
         for name, kind, exp, what, zh in checks
     ]
 
 
-def _distributor_text(
+def distributor_text(
     ctx: Context, rid: str, field: str, pf: ParsedField, exp: str, what: str, name: str, *, kind: str
 ) -> CheckResult:
     """受託或銷售機構的一處文字（`kind`：name 名稱／phone 電話／address 地址）= 審查標準；
-    電話、地址另接受審查標準列出的等價寫法（忽略空白後相等）。"""
+    電話、地址另接受審查標準列出的等價寫法（忽略空白後相等）。上手專屬規則的其他出處也用這個（例：BBVA 第 1 頁明細）。"""
     std = ctx.issuer_std
     listed = {
         "phone": (std.distributor_phone_equivalents, "電話", "distributor.phone_equivalents"),
@@ -668,7 +673,7 @@ def _iis_occurrences(
             for occ in items
         ]
     return [
-        _distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, kind=kind)
+        distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, kind=kind)
         for occ in items
     ]
 

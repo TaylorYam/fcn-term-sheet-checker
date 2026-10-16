@@ -38,6 +38,11 @@ def test_supported_types_pass(tmp_path, spec):
         "distributor_name_org",
         "distributor_address_org",
         "distributor_phone_org",
+        *(f"distributor_name_w{n}" for n in ("4_1", "4_2", "4_3", "5", "6", "9")),  # 警語裡的全名（Issue #305）
+    }
+    assert {x.field for x in rule(r, "field.currency")} == {"currency", "payment_currency_1", "payment_currency_2"} | {
+        "payment_currency_3",
+        "secondary_market_currency",
     }
 
 
@@ -101,6 +106,31 @@ def test_supported_types_pass(tmp_path, spec):
             Edit("B.V. (營業所在地", "B.V. Ltd. (營業所在地", "iis.org"),
             ("standard.issuer_name", "issuer_name_org"),
             id="發行機構名稱",
+        ),
+        # Issue #305：重複寫出的值，只有這一處錯
+        pytest.param(
+            Spec(),
+            Edit("且玉山綜合證券股份有限公司不負", "且玉山證券股份有限公司不負", "iis.warn"),
+            ("standard.distributor", "distributor_name_w4_2"),
+            id="警語受託機構全名",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("係由玉山綜合證券股份有限公司負責外", "係由玉山綜合證券有限公司負責外", "iis.warn"),
+            ("standard.distributor", "distributor_name_w6"),
+            id="警語 6 受託機構全名",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("以美元為計價單位的到期贖回金額", "以日圓為計價單位的到期贖回金額", "iis.coupon"),
+            ("field.currency", "payment_currency_2"),
+            id="計價單位幣別",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("其最低總額為10,000 美元", "其最低總額為10,000 日圓", "iis.coupon"),
+            ("field.currency", "secondary_market_currency"),
+            id="次級市場最低總額幣別",
         ),
     ],
 )

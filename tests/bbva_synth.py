@@ -7,7 +7,8 @@
 測試 test_real_bbva.py 涵蓋，同 GS）。
 改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`（第 1～2 頁；警語 `ts.warn`）、第一章各條
 `ts.art{n}`（連結標的表 `ts.art9.table`、日期表 `ts.art12.table`（每期型的自動提前贖回表 `ts.art12.table.ko`）、價格表
-`ts.art14.table`、情境價格表 `ts.art16.table`）、其他各章 `ts.ch二`～`ts.ch六`。
+`ts.art14.table`、情境價格表 `ts.art16.table`）、其他各章 `ts.ch二`～`ts.ch六`。第 8、15、18 項、第 16 項情境二～四、
+第三章匯率風險有重複寫出的幣別、%、起算日（Issue #305）。
 投資人須知（docs/templates/bbva-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
 段落代號 `iis.cover`、`iis.warn`、`iis.org`（一、）、`iis.summary`（二、 1.）、`iis.coupon`（二、 2.）、`iis.fees`（四、）、
 `iis.rest`（其他）。
@@ -103,6 +104,11 @@ class Spec(ProductSpec):
         return [weekday_on_or_after(d + dt.timedelta(days=2)) for d in self.ends]
 
     @property
+    def ko_start(self) -> dt.date:
+        """自動提前贖回觀察期間起日（第 12 項 (10)）= 第 Non-Call 期終止日；第 14 項最佳表現值與情境的起算日也寫這天。"""
+        return self.ends[self.first_callable - 1]
+
+    @property
     def monthly(self) -> Decimal:
         return (self.annual / 12).quantize(Q4, ROUND_HALF_UP)
 
@@ -136,9 +142,12 @@ def _warnings() -> list[str]:
         WARNING,
         "本商品係複雜的金融商品，必須經過符合資格的人員解說後再進行投資。",
         "本商品並非存款，投資不受存款保險之保障，最大損失為全部本金及利息。",
-        f"本商品雖經{DIST['name']}審查，並不代表證實申請事項或保證該境外結構型商品之價值。",
-        f"本商品持有期間如有保證配息收益，係由{ISSUER_EN}（發行機構）或{GUARANTOR}（保證機構）保證。",
-        f"本中文產品說明書之內容如有虛偽或隱匿之情事者，其餘內容應由{AGENT}及其負責人依法負責。",
+        f"本商品雖經{DIST['name']}審查，並不代表證實申請事項或保證該境外結構型商品之價值，且{DIST['name']}不負本商品"
+        f"投資盈虧之責。{DIST['name']}依法不得承諾擔保投資本金或最低收益率。",
+        f"本商品持有期間如有保證配息收益或保證保本率，係由{ISSUER_EN}（發行機構）或{GUARANTOR}（保證機構）保證，"
+        f"而非由{DIST['name']}保證。",
+        "本中文產品說明書之內容如有虛偽或隱匿之情事者，除商品風險程度、受託或銷售對象、受託機構收取之費用及由受託機構"
+        f"另行訂定者，係由{DIST['name']}負責外，其餘內容應由{AGENT}及其負責人依法負責。",
         "本商品條款及條件之準據法為英國法，並無商品註冊地；本商品係依境外結構型商品管理規則於中華民國境內受託投資或受託買賣。",
         "投資人未清楚瞭解產品說明書、受託或銷售契約條款及所有銷售文件內容前，請勿於相關文件簽名或蓋章。",
         f"{DIST['name']}應提供專業投資人相關契約審閱期間。",
@@ -420,6 +429,13 @@ def _article14(d: _Doc, s: Spec) -> None:
     conds.append("否則，發行機構將不須支付到期贖回金額，且適用「實物交割」。")
     for letter, c in zip("ABC", conds, strict=False):
         d.text(50, f"({letter}) {c}")
+    if s.memory:
+        until = "贖回評價日（含）止最高" if s.ko_obs == "D" else "該觀察日（含）止最高"
+        d.text(
+            55,
+            "* 最佳表現值 (Highest RI Value)：就任一連結標的而言，該連結標的（i）於任一預定交易日之正式收盤價／（ii）"
+            f"期初價格（即「表現值｣）為自{s.date(s.ko_start)}（含）起至{until}或同等於最高的表現值。",
+        )
     d.text(55, f"* 轉換比例 (Put Strike Percentage)：{s.strike}%")
     d.text(55, "* 交割營業日：紐約")
     d.section = "art14.table"
@@ -430,6 +446,10 @@ def _article14(d: _Doc, s: Spec) -> None:
 
 def _article15(d: _Doc, s: Spec) -> None:
     d.text(50, "自動提前贖回金額 = 每單位面額 X 100%")
+    d.text(
+        50,
+        f"若發生「自動提前贖回事件」，發行機構將於自動提前贖回日支付以{s.currency_zh}為計價單位的自動提前贖回金額。",
+    )
     if s.memory:
         d.text(
             50,
@@ -469,8 +489,46 @@ def _article16(d: _Doc, s: Spec) -> None:
             29,
             f"第1 個配息日之配息金額＝10 單位面額X 配息率X 計息天數慣例＝10X{s.denom * s.monthly / 100:,.2f} {s.currency_zh}",
         )
+    barrier = f"期初價格的{s.ki_pct}%（下限值）" if s.ki != "none" else f"期初價格的{s.strike}%"
+    no_ko = (
+        f"，且籃子中任一連結標的於{s.date(s.ko_start)}（含）至贖回評價日（含）的所有預定交易日之最佳表現值小於"
+        f"{s.ko}%（出場值）"
+        if s.memory
+        else ""
+    )
+    coupons = (
+        f"第1～{s.tenor} 個配息觀察期間之配息金額＝10 單位面額X 配息率＝10 X {s.money(s.denom)} X {s.monthly}%"
+        if s.ko_obs == "D"
+        else f"第1～{s.tenor} 個配息日之配息金額＝10 單位面額X 配息率X 計息天數慣例＝10X{s.denom * s.monthly / 100:,.2f} "
+        f"{s.currency_zh}"
+    )
     d.text(29, "情境二：中間情況")
-    d.text(29, "假設未曾發生自動提前贖回事件。")
+    d.text(
+        29,
+        f"假設未曾發生自動提前贖回事件，且於贖回評價日的表現最差連結標的之收盤價大於或等於表現最差連結標的之{barrier}。",
+    )
+    d.text(29, coupons)
+    d.text(29, f"到期贖回金額＝10 單位面額X 100%＝10 x {s.money(s.denom)} X 100%＝{s.money(10 * s.denom)}")
+    for case, close in (("情境三：較差情況", "50.0000"), ("情境四：最差情況", "0.0000")):
+        d.text(29, case)
+        d.text(
+            29,
+            f"假設未曾發生自動提前贖回事件，且於贖回評價日之表現最差之連結標的（k=1）收盤價＝{close} 美元（小於表現最差"
+            f"連結標的之{barrier}）{no_ko}。於到期日以實體交付股數並支付剩餘金額的形式結算收益：",
+        )
+        d.text(29, coupons)
+        d.text(29, f"剩餘金額＝0.5000 X {close} 美元 = 25.00 {s.currency_zh}")
+        d.text(29, f"總投資金額＝10 單位面額，因此到期日將獲得100 股的表現最差連結標的加上現金{s.money(250)}。")
+    d.text(29, "免責聲明：以上情境分析之解說僅供投資人參考之用。")
+
+
+def _article18(d: _Doc, s: Spec) -> None:
+    who = "籃子中每個連結標的之「最佳表現值｣" if s.memory else "「最差表現值｣"
+    d.text(50, "(1) 自動提前贖回事件：")
+    d.text(
+        64,
+        f"就自動提前贖回觀察期間之任何自動提前贖回觀察日而言，若{who}大於或等於{s.ko}%，則視為發生自動提前贖回事件。",
+    )
 
 
 ARTICLE_TITLES = {
@@ -478,12 +536,14 @@ ARTICLE_TITLES = {
     2: "商品風險程度：",
     3: "發行機構或保證機構名稱及其長期債務信用評等：",
     5: "計價幣別：",
+    8: "主要給付項目及其計算方式",
     9: "連結標的資產(例如:指數或個股名稱等)，及其相對權重、與投資績效之關連情形",
     12: "商品年期、發行日、到期日及其他依個別商品性質而定之日期",
     13: "配息資料及其計算公式",
     14: "到期贖回計算公式，包含最低保證收益率及參與率",
     15: "自動提前贖回計算公式",
     16: "投資收益計算方法",
+    18: "發行機構得提前贖回或投資人得提前贖回之條件及應注意事項",
 }
 
 
@@ -509,6 +569,16 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             d.text(50, f"(1) 發行機構：{ISSUER_EN}")
             d.text(50, "發行機構信用評等：虛構評等")
             d.text(50, f"(2) 保證機構：{GUARANTOR}")
+        elif n == 8:
+            for k, (label, what) in enumerate(
+                (
+                    ("配息金額", "就各配息日而言，發行機構將支付"),
+                    ("到期贖回金額", "到期日"),
+                    ("自動提前贖回金額", "發行機構應支付"),
+                )
+            ):
+                d.text(50, f"({k + 1}) 「{label}」：")
+                d.text(71, f"{what}以{s.currency_zh}為計價單位的{label}。")
         elif n == 9:
             d.text(53, "(1) 連結標的資產")
             d.section = "art9.table"
@@ -525,6 +595,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             _article15(d, s)
         elif n == 16:
             _article16(d, s)
+        elif n == 18:
+            _article18(d, s)
 
     d.chapter("二", "相關機構事業概況")
     d.text(28, "1. 發行機構")
@@ -553,6 +625,12 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
 
     d.chapter("三", "商品風險揭露")
     d.text(28, "1. 基本風險資訊:")
+    d.text(
+        50,
+        f"(5) 匯率風險：本商品屬{s.currency_zh}計價之產品，若投資人於投資之初以新臺幣或其他幣別轉換成{s.currency_zh}"
+        "來投資本商品，投資人可能承擔匯率風險。",
+        72,
+    )
     d.text(28, "5. 該商品之投資風險警語")
     for k, t in enumerate(_warnings(), 1):
         d.text(50, f"({k}) {t}", 72)
@@ -670,6 +748,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     d.section = "coupon"
     w.line(14, "2. 收益分配事項：", size=9)
     w.line(17, "(1) 配息金額", size=9)
+    d.text(38, f"就各配息日而言，發行機構將依下列計算公式支付以{s.currency_zh}為計價單位的配息金額：", size=9)
     if s.ko_obs == "D":
         d.text(
             38,
@@ -683,6 +762,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
         d.text(38, f"配息率（Rate of Interest）：{s.monthly}%。", size=9)
         d.text(38, "計息天數慣例（Day Count Fraction）：「1/1｣（如證券一般條件第4(k)條所定義）", size=9)
     w.line(17, "(2) 到期贖回金額", size=9)
+    d.text(38, f"發行機構將依下列公式於到期日支付以{s.currency_zh}為計價單位的到期贖回金額：", size=9)
     barrier = (
         f"若於贖回評價日之最差表現值大於或等於{s.ki_pct}%（下限值）：100%"
         if s.ki != "none"
@@ -694,6 +774,11 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     for letter, c in zip("ABC", conds, strict=False):
         d.text(38, f"({letter}) {c}", size=9)
     w.line(17, "(3) 自動提前贖回金額", size=9)
+    d.text(
+        38,
+        f"若發生「自動提前贖回事件」，發行機構將依下列公式支付以{s.currency_zh}為計價單位之自動提前贖回金額：",
+        size=9,
+    )
     event = (
         f"「自動提前贖回事件」：就任一自動提前贖回觀察期間之自動提前贖回觀察日而言，籃子中每個連結標的之最佳表現值大於或等於{s.ko}%。"
         if s.memory
@@ -701,6 +786,13 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     )
     d.text(38, event, size=9)
     w.line(14, "3. 贖回價金之計算：請參考上述收益分配事項。", size=9)
+    d.text(
+        17,
+        "(3) 投資人於次級市場提前贖回：總代理人就初始買方所擁有之本商品，提供確定購買價格（「確定價格」），其最低總額為"
+        f"{s.money(s.denom)}，並符合正常市場及資金條件。",
+        35,
+        size=9,
+    )
     w.line(14, "4. 發行不成立之處理：發行機構可全權決定取消本商品之發行。", size=9)
     d.section = "rest"
     w.line(14, "三、 商品風險揭露", size=9)
