@@ -491,7 +491,7 @@ def occurrences_of(
 
 def price_cells(rows: list[dict]) -> list[str]:
     """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值，看得出逐格比了哪些價格
-    （BBVA #305、JPM #315）。"""
+    （BBVA #305、JPM #315、CA #319）。"""
     return [f"{v:,}" for row in rows for v in row.values()]
 
 
@@ -602,8 +602,3 @@ def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
         "依說明書顯示位數四捨五入後比對",
         lambda annual: "獲利情境的年化報酬率應等於年利率",
     )
-
-
-def price_cells(rows: list[dict]) -> list[str]:
-    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值（Issue #305、#319：看得出逐格比了哪些價格）。"""
-    return [f"{v:,}" for row in rows for v in row.values()]
