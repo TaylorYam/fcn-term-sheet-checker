@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -18,12 +17,13 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table
+from . import money, price_table, schedule
 from .common import RawText, capture_group, compat_normalized, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "bbva-zh-pd"
-PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #305）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #305）；4：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -470,11 +470,36 @@ def _article12(fields: dict[str, ParsedField], art12: list[Line]) -> None:
         fields["date_table"] = ParsedField.invalid("date_table", art12, note)
 
 
+SCHEDULE_WHERE = "第 12 項日期表"
+# 下一期起始日 = 前一期終止日後的第一個預定交易日；第 1 期起始日 = 發行日（範本規格 §4.4）
+SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
+
+
+def _schedule_table(fields: dict[str, ParsedField]) -> ParsedField:
+    """日期表：D 為配息觀察期間表（觀察日 = 終止日）；P 為配息日表，觀察日取自動提前贖回觀察日表裡自動提前贖回日 = 該期
+    配息日的那一列，最後一期為贖回評價日（觀察日表只到倒數第二期），沒有起始日欄。"""
+    final = fields["final_valuation_date"]
+
+    def build(value: dict) -> standard_fields.DateTable:
+        if value["kind"] == "D":
+            return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
+        observed = {r["autocall"]: r["observation"] for r in value["ko_rows"]}
+        rows = [
+            standard_fields.DateRow(r["period"], observation=observed.get(r["payment"]), payment=r["payment"])
+            for r in value["rows"]
+        ]
+        if rows and final.ok:
+            rows[-1] = replace(rows[-1], observation=final.value)
+        return standard_fields.DateTable(SCHEDULE_WHERE, tuple(rows))
+
+    return schedule.table_field(fields["date_table"], build)
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前贖回期與提前贖回排程（範本規格 §4.1）。
+    """日期表與提前贖回排程（`parsers/schedule.py`，範本規格 §4.1）。
 
     D：觀察期間起日 = 日期表第 k 期終止日，k 即 Non-Call；比價日為第 k 期終止日與贖回評價日。
-    P：k = 表第 1 列自動提前贖回日在配息日表的期別；表的期別須從 k 連續到天期 − 1，比價日為每列的自動提前贖回觀察日，
+    P：k = 表第 1 列自動提前贖回日在配息日表的期別；表的期別須從 k 連續到天期 − 1，比價日為每期的自動提前贖回觀察日，
     最後一期為贖回評價日。"""
     wording, table, period, final = (
         fields["ko_wording"],
@@ -482,46 +507,40 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
         fields["ko_period"],
         fields["final_valuation_date"],
     )
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = _schedule_table(fields)
     bad = next((p for p in (wording, table, period, final) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(schedule.failed(bad))
         return
     kind = wording.value
     rows = table.value["rows"]
     n = len(rows)
     ev = list(wording.evidence) + list(period.evidence) + list(table.evidence)
-
-    def invalid(note: str) -> None:
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
-    dates: dict[int, dt.date]
+    note, k = "", None
     if kind == "D":
         ends = [r["end"] for r in rows]
         if period.value["start"] not in ends:
-            invalid("自動提前贖回觀察期間的起日不是日期表任何一期的終止日")
-            return
-        k = ends.index(period.value["start"]) + 1
-        dates = {k: rows[k - 1]["end"], n: final.value}
+            note = "自動提前贖回觀察期間的起日不是日期表任何一期的終止日"
+        else:
+            k = ends.index(period.value["start"]) + 1
     else:
         period_of = {r["payment"]: r["period"] for r in rows}
-        mapped = [(period_of.get(r["autocall"]), r["observation"]) for r in table.value["ko_rows"]]
-        if any(p is None for p, _ in mapped):
-            invalid("自動提前贖回觀察日表的自動提前贖回日不在配息日表內")
-            return
-        k = mapped[0][0]
-        if [p for p, _ in mapped] != list(range(k, n)):
-            invalid(f"自動提前贖回觀察日表的期別不是第 {k} 期到第 {n - 1} 期連續")
-            return
-        dates = {p: d for p, d in mapped}
-        dates[n] = final.value
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(kind, k, n, dates), ev
-    )
+        mapped = [period_of.get(r["autocall"]) for r in table.value["ko_rows"]]
+        if any(p is None for p in mapped):
+            note = "自動提前贖回觀察日表的自動提前贖回日不在配息日表內"
+        elif mapped != list(range(mapped[0], n)):
+            note = f"自動提前贖回觀察日表的期別不是第 {mapped[0]} 期到第 {n - 1} 期連續"
+        else:
+            k = mapped[0]
+    if note:
+        fields.update(
+            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in schedule.SCHEDULE_KEYS}
+        )
+        return
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    column = "end" if kind == "D" else "observation"
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"], column, final))
 
 
 # ---------------------------------------------------------------- 第 16 項情境分析

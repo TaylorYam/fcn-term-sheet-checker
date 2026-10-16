@@ -206,7 +206,7 @@ def test_forbidden_wording_in_chapter_four_follows_the_trade_date_exemption(tmp_
             Edit(
                 "2030 年2 月11 日（含）起至2030 年6 月10 日", "2030 年2 月11 日（含）起至2030 年6 月11 日", "ts.art12"
             ),
-            ("schedule.coupon_dates", "coupon_dates"),
+            ("schedule.autocall_dates", "ko_rows"),
             id="每期觀察期間迄日",
         ),
         # Issue #305：重複寫出的值，只有這一處錯
