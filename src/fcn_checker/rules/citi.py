@@ -34,7 +34,8 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表；情境算式、投資單位數、假設收盤價、總報酬率與年化報酬率"
+        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表與情境重複寫出的配息率、給付 100%、小表表頭 %、金額幣別"
+        "（Issue #314）；情境算式、配息金額、投資單位數、股數、假設收盤價、小表的期初股價與門檻價、總報酬率與年化報酬率"
         "不核對（2026-10-14 確認）",
     },
     {
@@ -63,7 +64,8 @@ def monthly_rate(annual: Decimal) -> Decimal:
 
 
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 13 項、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 的配息率 = 參考條件表年利率 ÷ 12，四捨五入到 4 位。"""
+    """第 13 項、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 與各情境的配息率 = 參考條件表年利率 ÷ 12，四捨五入到
+    4 位。"""
     return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
@@ -77,7 +79,7 @@ def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def annual_mentions(ctx: IssuerContext) -> list[CheckResult]:
-    """第 14 項(2)、第 13 項末段舉例的年化配息率 = 參考條件表年利率。"""
+    """第 13 項其他處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 的年化配息率 = 參考條件表年利率。"""
     return kit.rate_mentions(
         ctx,
         "derive.coupon_pa_mentions",
@@ -143,6 +145,22 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(
             ctx, "doc.initial_valuation_date", "initial_valuation_date", "第 12 項期初評價日", trade, initial
         ).compare(trade.value, initial.value, fail_message="第 12 項期初評價日須等於交易日")
+    )
+    for field, name, source, where in (  # 第五章 (2) 重複寫出的日期（Issue #314）
+        ("summary_date_ch5", "第五章 (2) 條款及條件摘要日期", "print_date", "封面產品說明書刊印日期"),
+        ("issue_date_ch5", "第五章 (2) 發行日", "issue_date", "第 12 項發行日"),
+    ):
+        expected, pf = f(source), f(field)
+        out.append(
+            kit.doc_check(ctx, "doc.date_mentions", field, name, expected, pf).compare(
+                expected.value, pf.value, fail_message=f"須等於{where}"
+            )
+        )
+    denom, unit = f("denomination"), f("delivery_unit")
+    out.append(
+        kit.doc_check(  # 第 8 項(3)(i)「關於每N幣別」的 N = 面額（Issue #314）
+            ctx, "doc.denomination_mentions", "delivery_unit", "第 8 項(3)(i) 實物交付計算單位", denom, unit
+        ).compare(denom.value, unit.value, fail_message="須等於第 5 項每單位商品面額")
     )
     return out
 
@@ -287,14 +305,35 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def redemption(ctx: IssuerContext) -> list[CheckResult]:
-    """第 8 項(3)(a) 到期給付 = 每單位商品面額的 100%（固定）。"""
+    """第 8 項(3)(a) 到期給付 = 每單位商品面額的 100%（固定）；第 8 項(3)(b)、(4)、第 13 項、第 15 項各情境、第 17 項(C)
+    重複寫出的到期與提前出場給付 % 也都是 100%（Issue #314）。"""
     pf = ctx.ts.f("maturity_redemption_pct")
     check = Check("doc.redemption_pct", "maturity_redemption_pct", Item.expected("第 8 項到期給付"), ctx.document)
-    return [check.needs(pf).compare(100, pf.value, fail_message="第 8 項到期給付須為每單位商品面額的 100%")]
+    out = [check.needs(pf).compare(100, pf.value, fail_message="第 8 項到期給付須為每單位商品面額的 100%")]
+    for field, m, _ in ctx.ts.redemption_mentions:
+        check = Check("doc.redemption_pct", field, Item.expected(m.where), ctx.document)
+        if m.value is None:
+            out.append(_unreadable(check, m, "給付「每單位商品面額的100%」"))
+            continue
+        out.append(check.compare(100, m.value, evidence=list(m.evidence), fail_message="給付須為每單位商品面額的 100%"))
+    return out
+
+
+def _unreadable(check: Check, m, what: str) -> CheckResult:
+    """重複寫出處讀不到（Issue #314）：轉人工覆核。"""
+    return check.result(
+        S.REVIEW_REQUIRED, evidence=list(m.evidence), reason="document_missing", message=f"說明書{m.where}讀不到{what}"
+    )
+
+
+def _cells(table) -> list[str]:
+    """價格表各格「代碼 價格…」依列、欄順序，放進結果的預期值／實際值（Issue #314：看得出逐格比了哪些格）。"""
+    return [f"{r.ticker} {r.prices[c]:,}" for r in table.rows for c in table.columns if c in r.prices]
 
 
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """§9 價格表表頭 % = 第 8、13 項的 K／KI／KO %；§15 假設價格表逐格 = §9 價格表（代碼、各價格、表頭 %）。"""
+    """§9 價格表表頭 % = 第 8、13 項的 K／KI／KO %；§15 各情境小表表頭 % 也是（`doc.scenario_header_pct`，Issue #314）；
+    §15 假設價格表逐格 = §9 價格表（代碼、各價格、表頭 %）。"""
     f = ctx.ts.f
     table, scen = f("underlying_table"), f("scenario_table")
     out = []
@@ -311,6 +350,13 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
                 pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
+    for field, m, key in ctx.ts.header_mentions:
+        check = Check("doc.scenario_header_pct", field, Item.expected(m.where), ctx.document)
+        if m.value is None:
+            out.append(_unreadable(check, m, "表頭「執行價／下限價／自動提前出場界限(期初股價的X%)」"))
+            continue
+        pf = f(key)
+        out.append(check.needs(pf).compare(pf.value, m.value, evidence=list(m.evidence)))
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 15 項假設價格表", table, scen)
     if table.ok and scen.ok:
         issues = []
@@ -326,7 +372,11 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
                 issues.append(f"第 {i} 檔 {'、'.join(diff)} 與價格表不同")
         out.append(
             check.compare(
-                None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項價格表"
+                _cells(table.value),
+                _cells(scen.value),
+                ok=not issues,
+                reason="value_mismatch",
+                message="；".join(issues) or "逐格等於第 9 項價格表",
             )
         )
     else:
