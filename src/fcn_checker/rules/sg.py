@@ -13,6 +13,7 @@ from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
 from . import kit, sg_scenario
+from . import schedule as date_schedule
 from .kit import Check, IssuerContext
 
 ISSUER = "SG"
@@ -132,9 +133,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 中英文名稱月數 = 第 15 項假設天期。"""
+    """天期 = 中英文名稱月數 = 第 15 項假設天期（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -152,9 +153,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     zh_months = months(zh, r"計價(\d+)個月", "商品中文名稱")
     en_months = months(en, r"(\d+)-month", "商品英文名稱")
     return [
-        kit.doc_check(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -294,66 +292,25 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def schedule(ctx: IssuerContext) -> list[CheckResult]:
+    """SG 獨有的日期表交叉驗證；期數、配息日與觀察日順序、末期日期、起始日由共用規則（rules/schedule.py）檢查。
+
+    - 末列標「（最終評價日）」「（到期日）」，其他列不標。
+    - D：第 k+1 期起始日 = 第 8 項觀察期間起始日；配息按比例條款與自動提前出場日寫法。P：第 8 項期數與評價日「不適用」列。
+    """
     f = ctx.ts.f
-    table, maturity, wording, k = (f(x) for x in ("date_table", "maturity_date", "ko_wording", "first_callable_period"))
-    names = {
-        "schedule.coupon_dates": "日期表配息日與末期標籤",
-        "schedule.period_starts": "日期表配息週期起始日",
-        "schedule.autocall_dates": "提前出場期別與觀察期間",
-    }
+    table, wording, k = (f(x) for x in ("date_table", "ko_wording", "first_callable_period"))
+    names = {"schedule.row_labels": "日期表末列標籤", "schedule.autocall_dates": "提前出場期別與觀察期間"}
     if not table.ok:
         return [Check(rid, "date_table", Item.expected(n), ctx.document).review(table) for rid, n in names.items()]
-    kind, rows = table.value["type"], table.value["rows"]
-    observed = "end" if kind == "D" else "pricing"
-    label = "配息週期終止日" if kind == "D" else "評價日"
-    out = []
-
-    issues = []
-    payments = [r["payment"] for r in rows]
-    if any(a >= b for a, b in zip(payments, payments[1:], strict=False)):
-        issues.append("配息日沒有逐期遞增")
-    late = [r["period"] for r in rows if r[observed] is not None and r[observed] >= r["payment"]]
-    if late:
-        issues.append(f"第 {'、'.join(map(str, late))} 期{label}沒有早於配息日")
-    last = rows[-1]["period"]
+    rows = table.value["rows"]
+    last, issues = rows[-1]["period"], []
     for key, text in (("final_label_rows", "（最終評價日）"), ("maturity_label_rows", "（到期日）")):
         marked = table.value[key]
         if last not in marked:
             issues.append(f"末列沒有標「{text}」")
         if other := sorted({p for p in marked if p != last}):
             issues.append(f"第 {'、'.join(map(str, other))} 期不是末列卻標「{text}」")
-    if maturity.ok and payments[-1] != maturity.value:
-        issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
-    out.append(
-        kit.structure_check(
-            ctx, "schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], [table, maturity], issues
-        )
-    )
-
-    if kind == "D":
-        issues = []
-        if k.ok and wording.ok and wording.value["type"] == "D":
-            n = k.value
-            blank = [r["period"] for r in rows if r["start"] is None]
-            if blank != list(range(1, n + 1)):
-                issues.append(f"起始日為「不適用」的期別應為第 1～{n} 期，實際為 {blank or '無'}")
-            if n < len(rows) and rows[n]["start"] != wording.value["start"]:
-                issues.append(
-                    f"第 {n + 1} 期起始日 {rows[n]['start']} 不等於第 8 項觀察期間起始日 {wording.value['start']}"
-                )
-        for prev, row in zip(rows, rows[1:], strict=False):
-            if prev["end"] is not None and row["start"] is not None and row["start"] != prev["end"]:
-                issues.append(f"第 {row['period']} 期起始日 {row['start']} 不等於前期終止日 {prev['end']}")
-        out.append(
-            kit.structure_check(
-                ctx,
-                "schedule.period_starts",
-                "period_starts",
-                names["schedule.period_starts"],
-                [table, k, wording],
-                issues,
-            )
-        )
+    out = [kit.structure_check(ctx, "schedule.row_labels", "row_labels", names["schedule.row_labels"], [table], issues)]
 
     issues = []
     if k.ok and wording.ok:
@@ -361,6 +318,10 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
         if not 1 <= n <= len(rows):
             issues.append(f"第一個可提前出場期 {n} 不在第 1～{len(rows)} 期之間")
         elif wtype == "D":
+            if n < len(rows) and rows[n]["start"] != wording.value["start"]:
+                issues.append(
+                    f"第 {n + 1} 期起始日 {rows[n]['start']} 不等於第 8 項觀察期間起始日 {wording.value['start']}"
+                )
             pr, day = f("prorate_range"), f("autocall_day")
             if pr.ok and pr.value != (n + 1, len(rows)):
                 issues.append(
@@ -409,6 +370,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *ki_terms(ctx),
         *redemption(ctx),
+        *date_schedule.run(ctx),  # 日期表共用檢查（Issue #289）
         *schedule(ctx),
         *sg_scenario.run(ctx),
     ]

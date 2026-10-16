@@ -225,6 +225,9 @@ def test_periodic_schedule_has_every_period_from_k_and_final_overrides_the_last(
     obs, first = present("ko_observation", "P"), present("first_callable_period", 1)
     sched = autocall_schedule(obs, first, TABLE, "observation", final)["autocall_schedule"].value
     assert sched.dates == {1: D(2030, 2, 4), 2: D(2030, 3, 4), 3: D(2030, 4, 5)}
+    start = present("ko_start", D(2030, 2, 1))
+    daily = autocall_schedule(present("ko_observation", "D"), first, TABLE, first_date=start)["autocall_schedule"]
+    assert daily.value.dates == {1: D(2030, 2, 1), 3: D(2030, 4, 4)}, "第 k 期取 first_date"
 
 
 def test_derivation_failures_pass_the_status_through_all_three_fields():

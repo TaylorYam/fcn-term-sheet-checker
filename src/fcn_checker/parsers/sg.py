@@ -17,11 +17,13 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money, price_table, sg_scenario, sg_tables
+from . import schedule as sg_schedule
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "sg-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "3"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -547,14 +549,33 @@ def _autocall_day(t12: TextIndex, art12: list[Line], has_autocall: bool) -> Pars
     return ParsedField.missing(name, "第 12 項找不到自動提前出場日的定義")
 
 
+SCHEDULE_WHERE = "第 12 項日期表"
+
+
+def _schedule_table(value: dict) -> standard_fields.DateTable:
+    """日期表：D 觀察日 = 配息週期終止日，起始日（不含）= 前期終止日，第 1～Non-Call 期起始日「不適用」；P 觀察日 = 評價日，
+    沒有起始日欄。"""
+    if value["type"] != "D":
+        rows = sg_schedule.rows_of(value["rows"], "pricing", value["row_lines"])
+        return standard_fields.DateTable(SCHEDULE_WHERE, rows)
+    rows = sg_schedule.rows_of(value["rows"], "end", value["row_lines"])
+    dated = next((r.period for r in rows if r.start is not None), None)
+    blank = dated - 1 if dated is not None else None
+    start = standard_fields.PeriodStart("previous_end", None, blank)
+    return standard_fields.DateTable(SCHEDULE_WHERE, rows, start)
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前出場期、提前出場排程與最終評價日（範本規格 §4.1、§4.3）。"""
+    """日期表、KO 觀察方式、第一個可提前出場期、提前出場排程（`parsers/schedule.py`）與最終評價日（範本規格 §4.1、§4.3）。
+
+    D：日期表第一個有起始日的期別 i → k = i − 1，比價日為第 8 項觀察期間起始日與末期的配息週期終止日。P：k 取第 8 項，比價日為第 k 期起的
+    評價日。無自動提前出場：k = 天期，以 P 表示，比價日只有末期評價日。"""
     table, wording = fields["date_table"], fields["ko_wording"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule", "final_valuation_date")
+    fields["schedule_table"] = sg_schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(sg_schedule.failed(bad))
+        fields["final_valuation_date"] = derived("final_valuation_date", bad)
         return
     kind, rows = table.value["type"], table.value["rows"]
     ev = table.evidence + wording.evidence
@@ -566,40 +587,33 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
         if final is not None
         else ParsedField.invalid("final_valuation_date", table.value["row_lines"][-1], "日期表末列的評價日是「不適用」")
     )
-
-    def invalid(note: str) -> None:
-        for key in keys[:3]:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
+    note, k = "", None
     if (wtype == "D") != (kind == "D"):
-        invalid("第 8 項觀察期間的寫法與第 12 項日期表表頭不一致（一個是每日觀察、一個是每期觀察）")
-        return
-    if wtype == "D":
+        note = "第 8 項觀察期間的寫法與第 12 項日期表表頭不一致（一個是每日觀察、一個是每期觀察）"
+    elif wtype == "D":
         dated = next((r["period"] for r in rows if r["start"] is not None), None)
         if dated is None:
-            invalid("日期表每一期的起始日都是「不適用」，找不到第一個可提前出場期")
-            return
-        k = dated - 1
-        if k < 1:
-            invalid("日期表第 1 期就有起始日，找不到第一個可提前出場期（SG 範本第 1～Non-Call 期應為「不適用」）")
-            return
-        dates = {k: wording.value["start"], len(rows): last["end"]}
-        observation = "D"
-    elif wtype == "P":
-        k = wording.value["k"]
-        dates = {r["period"]: r["pricing"] for r in rows if r["pricing"] is not None}
-        observation = "P"
-    else:  # 無自動提前出場：Non-Call = 天期，只有末期有評價日（參考條件表以 P／Non-Call = 天期表示）
-        k = len(rows)
-        dates = {len(rows): final}
-        observation = "P"
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, observation, ev)
-    fields["first_callable_period"] = ParsedField(
-        "first_callable_period", FieldStatus.PRESENT, k, list(wording.evidence)
+            note = "日期表每一期的起始日都是「不適用」，找不到第一個可提前出場期"
+        elif dated == 1:
+            note = "日期表第 1 期就有起始日，找不到第一個可提前出場期（SG 範本第 1～Non-Call 期應為「不適用」）"
+        else:
+            k = dated - 1
+    else:
+        k = wording.value["k"] if wtype == "P" else len(rows)  # 無自動提前出場：Non-Call = 天期
+    if note:
+        invalid = {
+            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in sg_schedule.SCHEDULE_KEYS
+        }
+        fields.update(invalid)
+        return
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, "D" if wtype == "D" else "P", ev)
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, list(wording.evidence))
+    start = (  # D：第 k 期終止日「不適用」，比價日取第 8 項觀察期間起始日
+        ParsedField("ko_start", FieldStatus.PRESENT, wording.value["start"], list(wording.evidence))
+        if wtype == "D"
+        else None
     )
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(observation, k, len(rows), dates), ev
-    )
+    fields.update(sg_schedule.autocall_schedule(obs, first, fields["schedule_table"], first_date=start))
 
 
 # ---------------------------------------------------------------- 第二章、幣別出處、出處清單

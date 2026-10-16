@@ -34,16 +34,18 @@ def autocall_schedule(
     table: ParsedField,
     column: str | None = None,
     final: ParsedField | None = None,
+    first_date: ParsedField | None = None,
 ) -> dict[str, ParsedField]:
     """KO 觀察方式、第一個可提前出場期與提前出場排程（`SCHEDULE_KEYS` → 欄位）。
 
     `table` 為標準欄位 `schedule_table`（`DateTable`）；`column` 為比價日所在的 `DateRow` 欄，沒給時 D 取期末日（`end`）、
     P 取觀察日（`observation`）；
-    `final` 有給時末期比價日取最終評價日，否則取表的末列。依賴的欄位第一個有問題的決定三個欄位的狀態；
+    `final` 有給時末期比價日取最終評價日，否則取表的末列；`first_date` 有給時第 k 期比價日取它（SG：第 k 期終止日
+    「不適用」，取第 8 項觀察期間起始日）。依賴的欄位第一個有問題的決定三個欄位的狀態；
     k 不在第 1～n 期之間、需要的比價日空白時只有排程不合法（Non-Call 與比價日轉人工覆核），KO 觀察方式與 k 照說明書交出
     （上手規則仍可核對 k 的範圍）。
     """
-    deps = [observation, first, table] + ([final] if final is not None else [])
+    deps = [observation, first, table] + [p for p in (final, first_date) if p is not None]
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
         return failed(bad)
@@ -64,6 +66,8 @@ def autocall_schedule(
     column = column or ("end" if daily else "observation")
     periods = (k, n) if daily else range(k, n + 1)
     dates: dict[int, dt.date | None] = {p: getattr(t.rows[p - 1], column) for p in periods}
+    if first_date is not None:
+        dates[k] = first_date.value
     if final is not None:
         dates[n] = final.value
     blank = [p for p, d in dates.items() if d is None]
