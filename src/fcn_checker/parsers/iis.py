@@ -74,6 +74,29 @@ def occurrences(name: str, ti: TextIndex, specs: Sequence[tuple[str, str, str, s
     return standard_fields.occurrences(name, items)
 
 
+def warning_distributor_names(
+    fields: dict[str, ParsedField],
+    ti: TextIndex,
+    anchors: tuple[str, str],
+    specs: Sequence[tuple[str, str, str]],
+) -> None:
+    """警語裡寫出受託機構名稱的每一處（欄位、位置說明、pattern）加進 `distributor_names`（Issue #306，每處都算名稱出處）。
+
+    只在警語段（`anchors` 之間）內找；找不到警語段時每處都是缺漏，由審查標準規則轉人工覆核。
+    """
+    warnings = TextIndex(section(ti, anchors) or [])
+    fields["distributor_names"] = standard_fields.occurrences(
+        "distributor_names",
+        [
+            *fields["distributor_names"].value,
+            *(
+                Occurrence(field, "受託機構名稱（警語）", where, capture(field, warnings, pattern))
+                for field, where, pattern in specs
+            ),
+        ],
+    )
+
+
 def section(ti: TextIndex, anchors: tuple[str, str]) -> list[Line] | None:
     """兩個錨點之間（含錨點所在行）的原文行；找不到或開頭錨點重複時為 None（BNP、SG）。"""
     start, end = anchors

@@ -26,7 +26,7 @@ def test_supported_types_pass(tmp_path, spec):
     assert rule(r, "iis.page_totals")[0].status == S.PASS
     assert rule(r, "iis.issuing_branch")[0].status == S.PASS
     assert rule(r, "standard.fixed_warning")[0].actual == 1  # 警語 1.
-    assert len(rule(r, "standard.distributor")) == 3  # 名稱、地址（相關機構）、電話（末頁聯絡方式）
+    assert len(rule(r, "standard.distributor")) == 8  # 名稱 1＋警語 5、地址（相關機構）、電話（末頁聯絡方式）
     assert [x.status for x in rule(r, "doc.print_date")] == [S.PASS]
     nothing = (  # 範本沒有：商品代號、ISIN、交易日、期末訂價日、KO／KI、配息率、價格與 %
         "iis.product_code",
@@ -108,3 +108,57 @@ def test_private_use_space_is_removed():
         sheet.f("name_zh").value == "瑞銀每日觀察提前出場固定配息連結股票（不保本）（無擔保）（無保證機構）結構型商品"
     )
     assert str(sheet.f("issue_date").value) == "2030-01-14"
+
+
+@pytest.mark.parametrize(
+    ("edit", "field"),
+    [
+        (
+            Edit(
+                "4. 本商品雖經玉山綜合證券股份有限公司(受託機構)",
+                "4. 本商品雖經玉山綜合證券有限公司(受託機構)",
+                "iis.warn",
+            ),
+            "distributor_name_w4a",
+        ),
+        (
+            Edit("且玉山綜合證券股份有限公司(受託機構)不負", "且玉山綜合證券有限公司(受託機構)不負", "iis.warn"),
+            "distributor_name_w4b",
+        ),
+        (
+            Edit("責。玉山綜合證券股份有限公司(受託機構)依法", "責。玉山綜合證券有限公司(受託機構)依法", "iis.warn"),
+            "distributor_name_w4c",
+        ),
+        (
+            Edit(
+                "而非由玉山綜合證券股份有限公司(受託機構)所保證",
+                "而非由玉山綜合證券有限公司(受託機構)所保證",
+                "iis.warn",
+            ),
+            "distributor_name_w5",
+        ),
+        (
+            Edit(
+                "係由玉山綜合證券股份有限公司(受託機構)負責外", "係由玉山綜合證券有限公司(受託機構)負責外", "iis.warn"
+            ),
+            "distributor_name_w6",
+        ),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.old[:14],
+)
+def test_warning_distributor_name_is_checked(tmp_path, edit, field):
+    """警語裡的受託機構名稱每處都算名稱出處（Issue #306）：只有這一處錯，相關機構名稱正確。"""
+    r = check_iis(tmp_path, edits=[edit]).report
+    assert ("standard.distributor", field) in {(rid, f) for rid, f, _ in problems(r)}, problems(r)
+
+
+def test_warning_distributor_names_are_read(tmp_path):
+    r = check_iis(tmp_path).report
+    assert {x.field for x in rule(r, "standard.distributor")} >= {
+        "distributor_name_org",
+        "distributor_name_w4a",
+        "distributor_name_w4b",
+        "distributor_name_w4c",
+        "distributor_name_w5",
+        "distributor_name_w6",
+    }
