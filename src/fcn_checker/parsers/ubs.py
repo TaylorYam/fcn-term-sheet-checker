@@ -786,6 +786,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
                 f"商品基本資料十五情境分析{zh}",
                 found,
                 ti.lines_for(start, start + 1),
+                f"情境分析{zh}",
             )
         )
     return out

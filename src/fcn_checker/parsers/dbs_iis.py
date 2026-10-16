@@ -278,9 +278,9 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             2,
         ),
     )
-    for container, field, label, where, pattern, group in org:
+    for container, field, code, where, pattern, group in org:
         fields[container] = standard_fields.occurrences(
-            container, [Occurrence(field, label, where, raw.capture(field, pattern, group=group))]
+            container, [Occurrence(field, code, where, raw.capture(field, pattern, group=group))]
         )
     fees = iis.section(ti, ("投資人應負擔的各項費用及金額或計算基準之表列", "相關機構之權利、義務及責任"))
     if fees is None:

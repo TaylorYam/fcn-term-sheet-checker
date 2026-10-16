@@ -681,7 +681,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         found = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=a, end=b)
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", "scenario_currency", f"第 15 項{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"第 15 項{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out

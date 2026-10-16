@@ -69,7 +69,7 @@ def raw(ti: TextIndex, pattern: str) -> tuple[str, list[Line]] | None:
 def occurrences(name: str, ti: TextIndex, specs: Sequence[tuple[str, str, str, str]], convert=lambda x: x):
     """出處清單型欄位：每個出處（欄位、出處代號、位置說明、pattern）各讀一個值，每處各自核對。"""
     items = [
-        Occurrence(field, label, where, capture(field, ti, pattern, convert)) for field, label, where, pattern in specs
+        Occurrence(field, code, where, capture(field, ti, pattern, convert)) for field, code, where, pattern in specs
     ]
     return standard_fields.occurrences(name, items)
 

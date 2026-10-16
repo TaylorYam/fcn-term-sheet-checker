@@ -237,6 +237,8 @@ class Occurrence:
     code: str  # 出處代號（`OCCURRENCE_NAMES` 的鍵；例：print_date_final、minimum_subscription）
     where: str  # 說明書上的位置，用在結果訊息（例：第四章商品開始受理申購日期）
     value: ParsedField
+    # 同一份文件同一個代號有好幾處、錯訊只寫項目名稱時，用來分辨是哪一處（例：情境一）；接在名稱後面的括號裡
+    qualifier: str = ""
 
     def __post_init__(self) -> None:
         if self.code not in OCCURRENCE_NAMES:
@@ -244,7 +246,8 @@ class Occurrence:
 
     @property
     def name(self) -> str:
-        return OCCURRENCE_NAMES[self.code]
+        name = OCCURRENCE_NAMES[self.code]
+        return f"{name}（{self.qualifier}）" if self.qualifier else name
 
 
 @dataclass(frozen=True)

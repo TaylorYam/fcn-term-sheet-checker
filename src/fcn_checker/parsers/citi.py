@@ -747,11 +747,11 @@ def _scenarios(t15: TextIndex, assumptions_at: int) -> _Scenarios:
         calc = text.find("(一)", a, b)
         if calc < 0:
             missing = ParsedField.missing(field, f"{where}找不到「(一)」之後的配息與給付算式")
-            out.currencies.append(Occurrence(field, "scenario_currency", where, missing))
+            out.currencies.append(Occurrence(field, "scenario_currency", where, missing, name))
             continue
         found = money.amounts(t15, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=calc, end=b)
         out.currencies.append(
-            money.scenario_occurrence(field, "scenario_currency", where, found, t15.lines_for(a, a + 1))
+            money.scenario_occurrence(field, "scenario_currency", where, found, t15.lines_for(a, a + 1), name)
         )
     return out
 

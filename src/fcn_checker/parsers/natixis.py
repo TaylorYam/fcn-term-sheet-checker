@@ -897,7 +897,7 @@ def _scenarios(
         )
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", "scenario_currency", f"第 16 項{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"第 16 項{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out

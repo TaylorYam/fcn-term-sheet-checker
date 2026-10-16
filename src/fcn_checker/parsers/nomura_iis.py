@@ -251,9 +251,9 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             r"4\.\s*受託機構\s*[:：]\s*.+?，營業所在地：\s*(.+?)\s*第二\s*商品簡介",
         ),
     )
-    for container, field, label, where, pattern in org:
+    for container, field, code, where, pattern in org:
         fields[container] = standard_fields.occurrences(
-            container, [standard_fields.Occurrence(field, label, where, full.capture(field, pattern))]
+            container, [standard_fields.Occurrence(field, code, where, full.capture(field, pattern))]
         )
     phone = nomura.rest_of_line("distributor_phone_rights", text_lines, "受託機構聯絡方式：")
     fields["distributor_phones"] = standard_fields.occurrences(

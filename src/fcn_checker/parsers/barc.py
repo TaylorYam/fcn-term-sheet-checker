@@ -630,14 +630,16 @@ def _currency_occurrences(
     ]
     pos = [s16.text.find(c) for c in _CASES]
     for k, case in enumerate(_CASES):
-        field, name, where = f"scenario_{_CASE_IDS[k]}_currency", "scenario_currency", f"第 16 條{case}"
+        field, where, label = f"scenario_{_CASE_IDS[k]}_currency", f"第 16 條{case}", f"情境 ({_CASE_IDS[k]})"
         if pos[k] < 0 or (k + 1 < len(pos) and pos[k + 1] < pos[k]):
             gone = case if pos[k] < 0 else _CASES[k + 1]
-            out.append(occ(field, name, where, ParsedField.missing(field, f"第 16 條找不到「{gone}」")))
+            missing = ParsedField.missing(field, f"第 16 條找不到「{gone}」")
+            out.append(occ(field, "scenario_currency", where, missing, label))
             continue
         end = pos[k + 1] if k + 1 < len(pos) else None
         found = money.amounts(s16, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=pos[k], end=end)
-        out.append(money.scenario_occurrence(field, name, where, found, s16.lines_for(pos[k], pos[k] + len(case))))
+        fallback = s16.lines_for(pos[k], pos[k] + len(case))
+        out.append(money.scenario_occurrence(field, "scenario_currency", where, found, fallback, label))
     return out
 
 

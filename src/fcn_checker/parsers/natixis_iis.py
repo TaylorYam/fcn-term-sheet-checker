@@ -290,9 +290,9 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             rf"4\.\s*{natixis.DISTRIBUTOR}\s*[:：]\s*.+?\(地址\s*[:：]\s*(.+?)\s*\)\s*貳、",
         ),
     )
-    for container, field, label, where, pattern in org:
+    for container, field, code, where, pattern in org:
         fields[container] = standard_fields.occurrences(
-            container, [standard_fields.Occurrence(field, label, where, raw.capture(field, pattern))]
+            container, [standard_fields.Occurrence(field, code, where, raw.capture(field, pattern))]
         )
     iis.warning_distributor_names(fields, ti, ("本商品之投資風險警語", "壹、相關機構"), WARNING_NAMES)
     fees = iis.section(ti, ("肆、投資人應負擔的各項費用", "伍、"))

@@ -557,7 +557,7 @@ def _scenario_mentions(fields: dict[str, ParsedField], ti: TextIndex) -> list[Oc
         ]
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", "scenario_currency", f"情境分析{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"情境分析{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out

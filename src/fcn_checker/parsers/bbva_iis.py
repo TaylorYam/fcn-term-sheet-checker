@@ -266,9 +266,9 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             r"4\.\s*受託機構\s*[:：]\s*.+?營業所在地\s*[:：]\s*(.+?)\s*\)\s*二、",
         ),
     )
-    for container, field, label, where, pattern in org:
+    for container, field, code, where, pattern in org:
         fields[container] = standard_fields.occurrences(
-            container, [standard_fields.Occurrence(field, label, where, raw.capture(field, pattern))]
+            container, [standard_fields.Occurrence(field, code, where, raw.capture(field, pattern))]
         )
     warnings = iis.section(ti, ("商品之投資風險警語：", "一、相關機構事業概況"))
     wt = TextIndex(warnings or [])

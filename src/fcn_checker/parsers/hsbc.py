@@ -280,15 +280,16 @@ def _scenario_currencies(scenarios: Sequence[Line]) -> list[standard_fields.Occu
     if not headings:
         return []
     segments = [
-        ("scenario_assumption_currency", "scenario_assumption_currency", "第 18 條情境假設", 0, headings[0].start())
+        ("scenario_assumption_currency", "scenario_assumption_currency", "第 18 條情境假設", "", 0, headings[0].start())
     ]
     for i, h in enumerate(headings):
         end = headings[i + 1].start() if i + 1 < len(headings) else len(ti.text)
-        segments.append((f"scenario_{i + 1}_currency", "scenario_currency", f"第 18 條情境分析{h[1]})", h.start(), end))
+        where = f"第 18 條情境分析{h[1]})"
+        segments.append((f"scenario_{i + 1}_currency", "scenario_currency", where, f"情境 {i + 1}", h.start(), end))
     out = []
-    for field, name, where, start, end in segments:
+    for field, code, where, case, start, end in segments:
         found = money.amounts(ti, money.CURRENCY_THEN_AMOUNT, currency_group=1, start=start, end=end)
-        out.append(money.scenario_occurrence(field, name, where, found, ti.lines_for(start, start + 1)))
+        out.append(money.scenario_occurrence(field, code, where, found, ti.lines_for(start, start + 1), case))
     return out
 
 

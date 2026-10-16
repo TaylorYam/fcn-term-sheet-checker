@@ -379,7 +379,9 @@ def _currency_occurrences(
             continue
         field = f"情境{s.number}_currency"
         out.append(
-            money.scenario_occurrence(field, "scenario_currency", f"第 18 項情境{s.number}", s.money, s.lines[:1])
+            money.scenario_occurrence(
+                field, "scenario_currency", f"第 18 項情境{s.number}", s.money, s.lines[:1], f"情境{s.number}"
+            )
         )
     return out
 

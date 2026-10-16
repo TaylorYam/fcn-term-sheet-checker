@@ -290,9 +290,9 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line], put: Callable) -> 
     fields["issuer_name_cover"] = standard_fields.absent("issuer_name_cover", "第 1 頁發行機構名稱欄")
     # 13. 後的受託機構明細 (i)～(iv)：任一標籤出現就算有這段、三處都核對；沒有不報缺漏（Issue #305）
     has_details = re.search(COVER_DETAIL_LABEL, raw.text) is not None
-    for container, field, label, where, pattern in COVER_DETAILS:
+    for container, field, code, where, pattern in COVER_DETAILS:
         fields[container] = (
-            standard_fields.occurrences(container, [Occurrence(field, label, where, raw.capture(field, pattern))])
+            standard_fields.occurrences(container, [Occurrence(field, code, where, raw.capture(field, pattern))])
             if has_details
             else standard_fields.absent(container, "第 1 頁受託機構明細")
         )
@@ -671,7 +671,7 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], assumed: list[
         found = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=skip, start=a, end=b)
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", "scenario_currency", f"第 16 項{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"第 16 項{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out

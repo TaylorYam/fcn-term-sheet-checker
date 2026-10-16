@@ -826,10 +826,10 @@ def _scenario3_currency(art14: list[Line]) -> Occurrence:
     a, b = t14.text.find("情境三（"), t14.text.find("情境四（")
     if a < 0 or b < a:
         missing = ParsedField.missing("scenario3_currency", "第 14 項找不到情境三到情境四之間的段落")
-        return Occurrence("scenario3_currency", "scenario_currency", "第 14 項情境三", missing)
+        return Occurrence("scenario3_currency", "scenario_currency", "第 14 項情境三", missing, "情境三")
     found = money.amounts(t14, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=lambda _: False, start=a, end=b)
     return money.scenario_occurrence(
-        "scenario3_currency", "scenario_currency", "第 14 項情境三", found, t14.lines_for(a, a + 1)
+        "scenario3_currency", "scenario_currency", "第 14 項情境三", found, t14.lines_for(a, a + 1), "情境三"
     )
 
 

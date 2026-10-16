@@ -649,8 +649,8 @@ def _scenarios(fields: dict[str, ParsedField], ti: TextIndex, assumed: list[Scen
                     _months,
                 )
             )
-        for container, field, label, place, group, convert in mentions:
-            lists[container].append(Occurrence(field, label, f"{where}{place}", coupon(field, group, convert)))
+        for container, field, code, place, group, convert in mentions:
+            lists[container].append(Occurrence(field, code, f"{where}{place}", coupon(field, group, convert)))
         for m, label, container in SCENARIO_REDEMPTIONS:
             if m != n:
                 continue
@@ -896,8 +896,8 @@ def _repeated(fields: dict[str, ParsedField], doc: Document, article: Callable[[
         "currency_others", [*fields["currency_others"].value, *wording]
     )
     names = [
-        Occurrence(field, label, where, capture(field, TextIndex(lns), pattern))
-        for lns, label, specs in (
+        Occurrence(field, code, where, capture(field, TextIndex(lns), pattern))
+        for lns, code, specs in (
             (doc.before_chapter1(), "distributor_name_warning", COVER_WARNING_NAMES),
             (doc.span_lines(ch3.get(6)), "distributor_name_warning", CH3_WARNING_NAMES),
             (doc.span_lines(doc.articles(2).get(4)), "distributor_name_structure", STRUCTURE_NAMES),
