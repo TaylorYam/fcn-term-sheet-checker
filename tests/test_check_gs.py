@@ -226,8 +226,8 @@ def test_unreadable_repeats_need_review(tmp_path, edit, broken):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("自第3個觀察期間結束日開始", "自第9個觀察期間結束日開始", "ts.art16")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_memory_wording_in_the_name_must_match_article_16(tmp_path):

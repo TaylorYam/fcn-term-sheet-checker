@@ -15,11 +15,12 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import bnp_scenario, bnp_tables, money
+from . import schedule as bnp_schedule
 from .common import NUM, Hit, Mention, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "bnp-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：日期表標準欄位與共用排程推導（Issue #289）
 CHAPTER_NAMES = {
     1: ("一", "商品相關基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -487,41 +488,48 @@ def _ko_wording(art14: list[Line]) -> ParsedField:
     return ParsedField.invalid(name, art14, "第 14 項配息日／自動提前贖回評價日的寫法缺漏或不在範本規格內")
 
 
+SCHEDULE_WHERE = "第 14 項日期表"
+# D 型配息期開始日 = 前期結束日後的下一個一籃子預定交易日；第 1 期開始日 = 發行日（範本規格 §6）
+SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
+
+
+def _schedule_table(value: dict) -> standard_fields.DateTable:
+    """日期表：D 觀察日 = 配息期結束日；P 觀察日 = 自動提前贖回評價日（第 1～k−1 期「不適用」為空），沒有開始日欄。"""
+    if value["type"] == "D":
+        rows = bnp_schedule.rows_of(value["rows"], "end", value["row_lines"])
+        return standard_fields.DateTable(SCHEDULE_WHERE, rows, SCHEDULE_START)
+    return standard_fields.DateTable(SCHEDULE_WHERE, bnp_schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式（日期表表頭與第 14 項寫法一致）、第一個可提前出場期、提前出場排程（範本規格 §4.1、§4.3）。"""
+    """日期表、KO 觀察方式（日期表表頭與第 14 項寫法一致）、第一個可提前出場期、提前出場排程（`parsers/schedule.py`，
+    範本規格 §4.1、§4.3）：D 型 k 取第 14 項(8)，P 型為第一個有自動提前贖回評價日的期別。"""
     table, wording = fields["date_table"], fields["ko_wording"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = bnp_schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(bnp_schedule.failed(bad))
         return
     kind, rows = table.value["type"], table.value["rows"]
     ev = table.evidence + wording.evidence
+    note = ""
     if wording.value["type"] != kind:
         note = "第 14 項日期表表頭與 (6)(7)(8) 的寫法不一致（一個是每日觀察、一個是每期觀察）"
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-        return
-    if kind == "D":
+    elif kind == "D":
         k = wording.value["k"]
-        dates = {r["period"]: r["end"] for r in rows if r["period"] >= k}
-    else:
-        dated = [r["period"] for r in rows if r["pricing"] is not None]
-        if not dated:
-            note = "日期表每一期的自動提前贖回評價日都是「不適用」，找不到第一個可提前出場期"
-            for key in keys:
-                fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-            return
+    elif dated := [r["period"] for r in rows if r["pricing"] is not None]:
         k = dated[0]
-        dates = {r["period"]: r["pricing"] for r in rows if r["pricing"] is not None}
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, kind, ev)
-    fields["first_callable_period"] = ParsedField(
-        "first_callable_period", FieldStatus.PRESENT, k, list(wording.evidence)
-    )
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(kind, k, len(rows), dates), ev
-    )
+    else:
+        note = "日期表每一期的自動提前贖回評價日都是「不適用」，找不到第一個可提前出場期"
+    if note:
+        invalid = {
+            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in bnp_schedule.SCHEDULE_KEYS
+        }
+        fields.update(invalid)
+        return
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, ev)
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, list(wording.evidence))
+    fields.update(bnp_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 def price_fields(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line]) -> None:

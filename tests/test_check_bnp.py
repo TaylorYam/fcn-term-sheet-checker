@@ -184,10 +184,10 @@ S0 = Spec()
             S.MISMATCH,
         ),
         # 日期表與提前出場
-        (("art14.table", zh_date(S0.starts[1]), "2030 年2 月21 日"), "schedule.period_starts", S.MISMATCH),
-        (("art14.table", zh_date(S0.starts[0]), "2030 年1 月15 日"), "schedule.period_starts", S.MISMATCH),
-        (("art14.table", zh_date(S0.payments[-1]), "2030 年8 月20 日"), "schedule.coupon_dates", S.MISMATCH),
-        (("art14.table", zh_date(S0.payments[1]), "2030 年3 月13 日"), "schedule.coupon_dates", S.MISMATCH),
+        (("art14.table", zh_date(S0.starts[1]), "2030 年2 月21 日"), "schedule.period_start", S.MISMATCH),
+        (("art14.table", zh_date(S0.starts[0]), "2030 年1 月15 日"), "schedule.period_start", S.MISMATCH),
+        (("art14.table", zh_date(S0.payments[-1]), "2030 年8 月20 日"), "schedule.last_payment", S.MISMATCH),
+        (("art14.table", zh_date(S0.payments[1]), "2030 年3 月13 日"), "schedule.observation_order", S.MISMATCH),
         (("art14", "自第2 個配息期結束日", "自第9 個配息期結束日"), "schedule.autocall_dates", S.MISMATCH),
         # 標的表
         (("art11.table", "之70.00%", "之71.00%"), "derive.prices", S.MISMATCH),

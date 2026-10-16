@@ -40,7 +40,8 @@ def autocall_schedule(
     `table` 為標準欄位 `schedule_table`（`DateTable`）；`column` 為比價日所在的 `DateRow` 欄，沒給時 D 取期末日（`end`）、
     P 取觀察日（`observation`）；
     `final` 有給時末期比價日取最終評價日，否則取表的末列。依賴的欄位第一個有問題的決定三個欄位的狀態；
-    k 不在第 1～n 期之間、需要的比價日空白時三個欄位都是不合法。
+    k 不在第 1～n 期之間、需要的比價日空白時只有排程不合法（Non-Call 與比價日轉人工覆核），KO 觀察方式與 k 照說明書交出
+    （上手規則仍可核對 k 的範圍）。
     """
     deps = [observation, first, table] + ([final] if final is not None else [])
     bad = next((p for p in deps if not p.ok), None)
@@ -49,9 +50,16 @@ def autocall_schedule(
     t: DateTable = table.value
     k, n = first.value, len(t.rows)
     ev = list(first.evidence) + list(table.evidence)
+    terms = {
+        "ko_observation": _renamed("ko_observation", observation),
+        "first_callable_period": _renamed("first_callable_period", first),
+    }
     if not 1 <= k <= n:
         note = f"第一個可提前出場期（第 {k} 期）不在{t.where}的第 1～{n} 期之間"
-        return {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in SCHEDULE_KEYS}
+        return {
+            **terms,
+            "autocall_schedule": ParsedField("autocall_schedule", FieldStatus.INVALID, evidence=ev, note=note),
+        }
     daily = observation.value == "D"
     column = column or ("end" if daily else "observation")
     periods = (k, n) if daily else range(k, n + 1)
@@ -61,13 +69,12 @@ def autocall_schedule(
     blank = [p for p, d in dates.items() if d is None]
     if blank:
         note = f"{t.where}以下期別沒有比價日：" + "、".join(f"第 {p} 期" for p in blank)
-        return {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in SCHEDULE_KEYS}
+        return {
+            **terms,
+            "autocall_schedule": ParsedField("autocall_schedule", FieldStatus.INVALID, evidence=ev, note=note),
+        }
     sched = AutocallSchedule(observation.value, k, n, {p: d for p, d in dates.items() if d is not None})
-    return {
-        "ko_observation": _renamed("ko_observation", observation),
-        "first_callable_period": _renamed("first_callable_period", first),
-        "autocall_schedule": ParsedField("autocall_schedule", FieldStatus.PRESENT, sched, ev),
-    }
+    return {**terms, "autocall_schedule": ParsedField("autocall_schedule", FieldStatus.PRESENT, sched, ev)}
 
 
 def rows_of(

@@ -234,8 +234,11 @@ def test_derivation_failures_pass_the_status_through_all_three_fields():
     assert out["autocall_schedule"].candidates == [2, 3]
 
     out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 4), TABLE, "end")
-    assert {pf.status for pf in out.values()} == {FieldStatus.INVALID}
+    assert out["autocall_schedule"].status == FieldStatus.INVALID
     assert "不在第 13 項日期表的第 1～3 期之間" in out["autocall_schedule"].note
+    assert (out["ko_observation"].value, out["first_callable_period"].value) == ("D", 4), (
+        "照說明書交出，Non-Call 仍可比"
+    )
 
     blank = present("schedule_table", table((ROWS[0], replace(ROWS[1], end=None), ROWS[2])))
     out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 2), blank, "end")
