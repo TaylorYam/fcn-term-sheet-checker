@@ -310,7 +310,34 @@ def _scenario(d: _Doc, s: Spec) -> None:
         ]
         d.w.row([(x["label"], f"連結標的{i}"), *values], gap=15, size=9)
     d.section = "art15"
-    d.text(35, "(i) 最佳情境：發生自動提前出場事件（情境內容為虛構說明，不核對）")
+    w, ccy, principal = s.worst, s.currency_zh, s.money(s.denom)
+    coupon = f"每次配息金額 = {principal} x {s.annual}% x 1/12 = {s.denom * s.annual / 1200:,.2f}{ccy}"
+    annualized = f"平均年化報酬率(以簡單平均年化報酬率之方式計算) = {s.annual}% (不含相關費用)"
+    strike = price(s.underlyings[0].initial, s.strike)
+    assumed = "(此假設最差表現連結標的為連結標的1)" if s.count > 1 else ""
+    for line in (
+        "(i) 最佳情境：發生自動提前出場事件",
+        "假設於第一個自動提前出場評價日，所有連結標的均發生自動提前出場事件",
+        coupon,
+        f"到期贖回金額 = {principal}",
+        annualized,
+        "(ii) 一般情境：未發生自動提前出場事件",
+        f"假設於最後評價日，{w}之股票收盤價大於或等於執行價",
+        coupon,
+        f"到期贖回金額 = {principal}",
+        annualized,
+        f"(iii) 最差情境：未發生自動提前出場事件、最後評價日時{w}之收盤價小於執行價",
+        f"假設於最後評價日，{w}之股票收盤價為執行價的20%{assumed}",
+        coupon,
+        f"(a) {w}交割股數計算方式為：",
+        f"每單位面額/執行價 x 適用匯率 = {principal}/{strike:,.4f}{ccy} x 1 = 142.5000股",
+        "(b) 畸零股數(即0.5000股)則以現金支付(即“剩餘金額”)，計算方式為:",
+        f"最後評價日時{w}之收盤價 x 畸零股數/適用匯率",
+        f"= 14.07{ccy} x 0.5000/1 = 7.04{ccy}",
+        "平均年化報酬率(以簡單平均年化報酬率之方式計算) = -80.00%(不含相關費用)",
+        "請注意：情境分析結果不保證本商品未來績效",
+    ):
+        d.text(35, line)
 
 
 def _warnings(*, iis: bool = False) -> list[str]:
