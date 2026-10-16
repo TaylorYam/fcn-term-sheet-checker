@@ -195,6 +195,19 @@ def test_memory_sentences_must_agree(tmp_path):
     assert ("field.ko_memory", "ko_memory", REVIEW) in bad(iis)
 
 
+@pytest.mark.parametrize("new", ["下限價：係指相關連結標的之期初價格的", ""], ids=["寫法不在範本規格內", "整句刪掉"])
+def test_unreadable_ki_pct_of_a_ki_product_needs_review(tmp_path, new):
+    """KI 商品的「下限價：係指…X%」讀不到：KI % 轉人工覆核，不從核對清單消失（Issue #297）。"""
+    old = f"下限價：係指相關連結標的之期初股價的{S.ki_pct:.2f}%。"
+    _, iis = pair(tmp_path, edits=[Edit(old, new + (f"{S.ki_pct:.2f}%。" if new else ""), "iis.redeem")])
+    assert ("field.ki_pct", "ki_pct", REVIEW) in bad(iis)
+
+
+def test_no_ki_investor_sheet_does_not_list_ki_pct(tmp_path):
+    _, iis = pair(tmp_path, Spec(ko_obs="P", ki="none", count=4, tenor=7, ko=Decimal("105.00")))
+    assert not [r for r in iis.report.results if r.field == "ki_pct"]
+
+
 def test_has_autocall_must_match_the_term_sheet(tmp_path):
     """說明書有自動提前出場、投資人須知寫成沒有：有無自動提前出場不一致。"""
     ts_spec = Spec(ki="none")

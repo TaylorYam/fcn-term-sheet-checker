@@ -80,9 +80,10 @@ def test_the_2025_documents_use_the_2025_06_24_review_date(items):
     )
 
 
-def test_annual_rate_and_scenario_returns_follow_the_period_rate(items):
+def test_period_rate_follows_the_annual_rate_from_the_scenarios(items):
+    """範本規格 §4.6：8 份每期配息率都等於年利率（情境一、二年化報酬率）÷ 12 四捨五入到 4 位（Issue #297）。"""
     term_sheets, investor_sheets = items
-    for rid, n in (("derive.coupon_pa", 8), ("derive.annualized_return", 16), ("doc.coupon_mentions", 16)):
+    for rid, n in (("field.coupon_pa_pct", 8), ("derive.monthly_coupon", 8), ("doc.coupon_mentions", 16)):
         found = [r for i in term_sheets for r in i.report.results if r.rule_id == rid]
         assert len(found) == n and all(r.status == S.PASS for r in found), rid
     found = [

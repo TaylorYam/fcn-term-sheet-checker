@@ -24,7 +24,8 @@ from .common import RawText, capture_group, derived, fee_rates, number, zh_numbe
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：非記憶式要有明確的提前出場事件句（Issue #297）
+PARSER_VERSION = "3"
 SECTIONS = ("商品基本資料", "相關機構事業概況", "商品風險揭露", "投資風險警語", "一般交易事項", "特別記載事項")
 PRODUCT_TYPE = "股權結構型商品"
 OLD_PRODUCT_TYPE = "股權結構型債券"
@@ -50,6 +51,11 @@ KO_PERIODIC = r"為自第(\d{1,2})個配息觀察的每個配息觀察日"
 # 記憶式（範本規格 §4.2）
 MEMORY = "即使各股票在不同提前出場觀察日成為鎖定股票，提前出場事件仍被視為發生"
 LOCK = r"鎖定股票[:：]係指"
+# 非記憶式的提前出場事件句（範本規格 §4.2；多標的「所有…之收盤價皆高於或等於其提前出場價」、單一標的「…的收盤價高於或等於提前出場價」）
+NO_MEMORY_EVENT = (
+    r"若(?:籃子中)?(?:所有)?連結標的股票在任一提前出場觀察日.{0,80}?[之的]收盤價皆?高於或等於其?提前出場價.{0,30}?，"
+    r"則提前出場事件視同"
+)
 # 觸及下限事件（範本規格 §4.4）
 KI_DEFINITION = r"觸及下限事件[:：]?(若在.{0,40}?)，(?:籃子中)?(?:任一)?連結標的股票的收盤價低於(?:其)?下限價，則觸及下限事件視同發生"
 KI_KINDS = (
@@ -398,18 +404,27 @@ def ko_wording(name: str, ti: TextIndex) -> ParsedField:
 
 
 def _memory(fields: dict[str, ParsedField], ti: TextIndex) -> None:
-    """記憶式（範本規格 §4.2）：「即使各股票在不同提前出場觀察日成為鎖定股票…仍被視為發生」與「鎖定股票：係指」都有 = Y、
-    都沒有 = N；只有其一不合法。"""
+    """記憶式（範本規格 §4.2）：「即使各股票在不同提前出場觀察日成為鎖定股票…仍被視為發生」與「鎖定股票：係指」都有 = Y；
+    都沒有且有非記憶式的提前出場事件句（收盤價高於或等於提前出場價）= N；其他寫法不合法。"""
     sentence, lock = MEMORY in ti.text, re.search(LOCK, ti.text) is not None
+    plain = re.search(NO_MEMORY_EVENT, ti.text)
     if sentence != lock:
         fields["ko_memory"] = ParsedField.invalid(
             "ko_memory", ti.lines, "記憶式句型「即使各股票在不同提前出場觀察日成為鎖定股票」與「鎖定股票」定義只有其一"
         )
-        return
-    anchor = MEMORY if sentence else "提前出場事件視同"
-    p = ti.text.find(anchor)
-    ev = ti.lines_for(p, p + len(anchor)) if p >= 0 else ti.lines
-    fields["ko_memory"] = ParsedField.present("ko_memory", sentence, ev)
+    elif sentence and plain:
+        fields["ko_memory"] = ParsedField.invalid(
+            "ko_memory", ti.lines, "商品基本資料八、記憶式句型與非記憶式的提前出場事件句同時出現"
+        )
+    elif sentence:
+        p = ti.text.find(MEMORY)
+        fields["ko_memory"] = ParsedField.present("ko_memory", True, ti.lines_for(p, p + len(MEMORY)))
+    elif plain:
+        fields["ko_memory"] = ParsedField.present("ko_memory", False, ti.lines_for(plain.start(), plain.end()))
+    else:
+        fields["ko_memory"] = ParsedField.invalid(
+            "ko_memory", ti.lines, "商品基本資料八、提前出場事件句（記憶式或非記憶式）的寫法缺漏或不在範本規格內"
+        )
 
 
 def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:

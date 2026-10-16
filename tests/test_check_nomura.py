@@ -66,8 +66,7 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     own = [x for x in r.results if x.rule_id.startswith(("doc.", "derive.", "schedule."))]
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in NOMURA.not_covered}
-    assert [x.status for x in rule(r, "derive.coupon_pa")] == [S.PASS]
-    assert [x.status for x in rule(r, "derive.annualized_return")] == [S.PASS, S.PASS]  # 情境一、二
+    assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
     assert len(rule(r, "doc.coupon_mentions")) == 2  # 第 14 項設定參數、第 15 項(1)
     assert rule(r, "standard.fixed_warning")[0].actual == 2  # 上手別說明書次數
     assert len(rule(r, "standard.guarantor_name")) == 3
@@ -75,7 +74,7 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert len(rule(r, "standard.issuer_name")) == 2  # 封面、第二章；第一章沒有出處
     assert len(rule(r, "field.min_amounts")) == 7
     assert rule(r, "standard.distributor", "distributor_phone_ch4")[0].status == S.PASS
-    assert rule(r, "field.coupon_pa_pct")[0].status == S.NOT_APPLICABLE  # 說明書沒有年利率
+    assert rule(r, "field.coupon_pa_pct")[0].status == S.PASS  # 年利率 = 情境一、二年化報酬率
     assert rule(r, "standard.product_name", "name_en")[0].status == S.PASS
 
 
@@ -87,19 +86,47 @@ def test_vwap_prices_are_filled_from_the_term_sheet(tmp_path):
     assert cells["UL_1_進場價"].expected == spec.underlyings[0].initial
 
 
-# ---------------------------------------------------------------- 年利率（每期配息率 × 12）與情境年化報酬率
+# ---------------------------------------------------------------- 年利率（情境一、二年化報酬率）與每期配息率（年利率 ÷ 12）
 
 
-def test_annual_rate_is_derived_from_the_period_rate(tmp_path):
+def test_annual_rate_from_the_scenarios_is_compared_with_the_sheet(tmp_path):
     r = check(tmp_path, Spec(), **{"Coupon p.a. (%)": 10.5})
-    assert rule(r, "derive.coupon_pa")[0].status == S.MISMATCH
-    assert {x.status for x in rule(r, "derive.annualized_return")} == {S.MISMATCH}
+    assert rule(r, "field.coupon_pa_pct")[0].status == S.MISMATCH
+    assert rule(r, "derive.monthly_coupon")[0].status == S.PASS  # 說明書內部一致
+
+
+def test_period_rate_must_be_the_annual_rate_divided_by_12(tmp_path):
+    """年利率 10.00%、每期配息率 0.8337%：× 12 四捨五入仍是 10.00%，但 ÷ 12 四捨五入到 4 位是 0.8333%，判不一致（Issue #297）。"""
+    edit = Edit("固定配息率：就每配息日而言，0.8333%", "固定配息率：就每配息日而言，0.8337%", "ts.art7")
+    r = check(tmp_path, Spec(), edits=[edit])
+    found = rule(r, "derive.monthly_coupon")[0]
+    assert (found.status, found.expected, found.actual) == (S.MISMATCH, Decimal("0.8333"), Decimal("0.8337"))
+
+
+def test_different_scenario_annual_rates_need_review(tmp_path):
+    """情境一、二的年化報酬率不同：年利率歧義，轉人工覆核。"""
+    r = check(tmp_path, edits=[Edit("本情境中年化報酬率為10.00%", "本情境中年化報酬率為10.50%", "ts.art14")])
+    assert rule(r, "field.coupon_pa_pct")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "derive.monthly_coupon")[0].status == S.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        Edit("本情境中年化報酬率為10.00%", "本情境中年化報酬率約為10.00%", "ts.art14"),
+        Edit("情境一（自動提前出場）", "情境1（自動提前出場）", "ts.art14"),
+    ],
+    ids=["年化報酬率寫法不在範本規格內", "找不到情境一"],
+)
+def test_missing_scenario_annual_rate_needs_review(tmp_path, edit):
+    r = check(tmp_path, edits=[edit])
+    assert rule(r, "field.coupon_pa_pct")[0].status == S.REVIEW_REQUIRED
 
 
 def test_non_monthly_coupon_needs_review(tmp_path):
-    """日期表列數 ≠ 天期（不是每月配息）：無法由每期配息率換算年利率，轉人工覆核。"""
+    """日期表列數 ≠ 天期（不是每月配息）：無法由年利率換算每期配息率，轉人工覆核。"""
     r = check(tmp_path, Spec(), edits=[Edit("(1) 商品年期：6個月", "(1) 商品年期：12個月", "ts.art11")])
-    found = rule(r, "derive.coupon_pa")[0]
+    found = rule(r, "derive.monthly_coupon")[0]
     assert (found.status, found.reason_code) == (S.REVIEW_REQUIRED, "coupon_frequency_unknown")
 
 
@@ -115,7 +142,6 @@ def test_non_monthly_coupon_needs_review(tmp_path):
             "doc.coupon_mentions",
         ),
         (Edit("就每配息日而言，0.8333%", "就每配息日而言，0.8334%", "ts.art14.table"), "doc.coupon_mentions"),
-        (Edit("本情境中年化報酬率為10.00%", "本情境中年化報酬率為10.50%", "ts.art14"), "derive.annualized_return"),
         (Edit("70.00%", "75.00%", "ts.art14.table"), "doc.scenario_table"),
         (Edit("10,000美元", "1,000美元", "ts.art14.table"), "doc.scenario_params"),
         (
@@ -216,6 +242,13 @@ def test_unreadable_ki_type_sends_the_redemption_check_to_review(tmp_path):
         tmp_path, Spec(ki="AM"), edits=[Edit("下限觸發決定日：最終評價日", "下限觸發決定日：每月最後交易日", "ts.art7")]
     )
     assert rule(r, "doc.redemption_pct")[0].status == S.REVIEW_REQUIRED
+
+
+def test_ki_type_without_the_no_ki_redemption_case_needs_review(tmp_path):
+    """沒有下限觸發字樣、也沒有無 KI 的到期贖回第 (2) 款：KI 型態轉人工覆核，不推定為無 KI（Issue #297）。"""
+    edit = Edit("之最終價格低於個別執行價時", "之最終價格跌破個別執行價時", "ts.art7")
+    r = check(tmp_path, Spec(), edits=[edit])
+    assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
 
 
 def test_article_8_count_must_match_the_table(tmp_path):

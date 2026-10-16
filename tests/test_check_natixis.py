@@ -166,6 +166,14 @@ def test_ki_period_must_match_the_judgement_day(tmp_path):
     assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
 
 
+def test_ki_type_without_the_no_ki_redemption_wording_needs_review(tmp_path):
+    """沒有觸及事件與界限價格定義、到期贖回情況二也不是只有實物交割：KI 型態轉人工覆核（Issue #297）。"""
+    spec = VARIANTS["KO 每期非記憶式、Non-Call = 天期、無 KI"]
+    edit = Edit("則於到期日發行機構將依下列所述情況", "則於到期日發行機構將依下列方式", "ts.art15")
+    r = check(tmp_path, spec, edits=[edit])
+    assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
+
+
 def test_ki_definition_must_match_the_ki_wording(tmp_path):
     edit = Edit(
         "「界限價格」係指就任一連結標的而言，各該連結標的之期初進場價格之60.00%，惟可能因第一章第11 項之規定而調整。",

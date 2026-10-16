@@ -20,7 +20,8 @@ from .common import RawText, fee_rates, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "natixis-zh-iis"
-PARSER_VERSION = "3"  # 2：計價幣別「● 」（Issue #270）；3：KO 定義沒寫 % 視為參照說明書（Issue #272）
+# 2：計價幣別「● 」（Issue #270）；3：KO 定義沒寫 % 視為參照說明書（Issue #272）；4：無 KI 要有明確寫法（Issue #297）
+PARSER_VERSION = "4"
 # 貳 2. KO 定義的兩種寫法：寫出 %，或沒寫 %（參照說明書第一章第 14 項，投資人須知不核對 KO %）
 KO_DEF_PCT = r"期初進場價格之(\d+(?:\.\d+)?)%"
 KO_DEF_INITIAL = "中文產品說明書第一章第14項所列之期初進場價格"
