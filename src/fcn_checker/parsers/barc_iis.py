@@ -110,12 +110,7 @@ def _price_table(lines: Sequence[Line]) -> dict[str, ParsedField]:
             n: ParsedField.missing(n, "找不到價格表")
             for n in ("underlying_prices", "underlying_names", "strike_pct", "ko_pct")
         }
-    spec = PRICE_TABLE
-    if any(squash(ln.text).startswith(barc.KO_LEVEL) for ln in region):
-        spec = replace(
-            spec, columns=tuple(replace(c, word=barc.KO_LEVEL) if c.key == "ko" else c for c in spec.columns)
-        )
-    table = price_table.read("underlying_prices", region, spec)
+    table = price_table.read("underlying_prices", region, barc.table_spec(region, PRICE_TABLE.where))
     if not table.ok:
         return {n: derived(n, table) for n in ("underlying_prices", "underlying_names", "strike_pct", "ko_pct")}
     t: price_table.PriceTable = table.value

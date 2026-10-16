@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from decimal import Decimal
 
 from ..schema import Line, ParsedField
 from ..text import squash
@@ -17,8 +16,6 @@ from . import price_table as price_table_module
 from .layout import DATE_RE, TextIndex, capture, parse_date
 
 CCY = money.CURRENCY
-PRICE = r"([\d,]+\.\d{4})"
-PRICE_CELL = PRICE + "(" + CCY + ")"
 # 第 8 項價格表（表頭沒有百分比）與第 15 項重印價格表（表頭帶「(期初價格的X%)」）
 PRICE_TABLE = price_table_module.TableSpec(
     where="第一章第 8 項價格表",
@@ -58,10 +55,6 @@ FEE_PATTERNS = {  # 第四章 §2 費用表（去空白）：費用項目 → �
     "提前贖回費用": r"提前贖回費用投資人提前贖回價金的(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)",
     "分銷費用": r"分銷費用[(（][^)）]*[)）]申購價金的(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)",
 }
-
-
-def _dec(s: str) -> Decimal:
-    return Decimal(s.replace(",", ""))
 
 
 # ---------------------------------------------------------------- 封面兩欄表

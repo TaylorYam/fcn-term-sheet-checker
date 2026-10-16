@@ -44,7 +44,6 @@ KO_D = r"(?:記憶事件)?觀察期間：自" + iis.DATE + r"起（含）起至�
 KO_D_EVENT = r"自動提前出場事件：若於(?:記憶事件)?觀察期間內之任一預定交易日"
 KO_P = r"自動提前出場事件：若於任一評價日i\(i=(\d+)-(\d+)\)"
 P_RANGE = r"評價日i\(i=(\d+)-(\d+)\)"
-PRICE = rf"(\d[\d,]*\.\d{{4}})({money.CURRENCY})"
 IIS_TABLE = price_table.TableSpec(
     where="商品簡介價格表",
     initial="期初價格",

@@ -107,12 +107,14 @@ class HsbcTermSheet:
 
 
 def _price_table(name: str, lines: list[Line], spec: price_table.TableSpec) -> ParsedField:
-    """價格表；每列的幣別（三碼）與交易所（英數字）讀不到時轉人工覆核（情境價格表逐列比對要用）。"""
+    """價格表；每列的幣別（已知的三碼幣別）與交易所（英數字）讀不到時轉人工覆核（情境價格表逐列比對要用）。"""
     table = price_table.read(name, lines, spec)
     if not table.ok:
         return table
     for k, r in enumerate(table.value.rows, start=1):
-        if not re.fullmatch(r"[A-Z]{3}", r.texts["currency"]) or not re.fullmatch(r"[A-Z0-9]+", r.texts["exchange"]):
+        if not re.fullmatch(r"USD|JPY|CNH|HKD|EUR|AUD|GBP", r.texts["currency"]) or not re.fullmatch(
+            r"[A-Z0-9]+", r.texts["exchange"]
+        ):
             return ParsedField.invalid(name, list(r.lines), f"{spec.where}第 {k} 列讀不到幣別或交易所")
     return table
 

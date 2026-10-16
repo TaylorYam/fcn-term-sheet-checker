@@ -352,10 +352,15 @@ def _price_table(lines: list[Line], name: str, where: str, start: str, end_pat: 
     if region is None:
         return ParsedField.missing(name, f"找不到{where}的開始或結束錨點")
     seg = [lines[i] for i in region]
+    return price_table.read(name, seg, table_spec(seg, where))
+
+
+def table_spec(region: list[Line], where: str) -> price_table.TableSpec:
+    """這張價格表的宣告：KO 欄頭寫「觸發水準（…）」時 KO 欄的關鍵字換成它（說明書與投資人須知共用）。"""
     spec = replace(PRICE_TABLE, where=where)
-    if any(squash(ln.text).startswith(KO_LEVEL) for ln in seg):
+    if any(squash(ln.text).startswith(KO_LEVEL) for ln in region):
         spec = replace(spec, columns=tuple(replace(c, word=KO_LEVEL) if c.key == "ko" else c for c in spec.columns))
-    return price_table.read(name, seg, spec)
+    return spec
 
 
 _MONTHLY_PATTERNS = {
@@ -630,7 +635,7 @@ def _currency_occurrences(
     return out
 
 
-_HEADER_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}
+_COLUMN_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}  # 價格欄 → 定義欄位
 
 
 def _header_pcts(table: ParsedField, article: str) -> list[HeaderPct]:
@@ -639,14 +644,14 @@ def _header_pcts(table: ParsedField, article: str) -> list[HeaderPct]:
         return []
     t: price_table.PriceTable = table.value
     return [
-        HeaderPct(_HEADER_FIELD[c], Mention(article, t.pcts[c], list(t.head_lines[c])))
+        HeaderPct(_COLUMN_FIELD[c], Mention(article, t.pcts[c], list(t.head_lines[c])))
         for c in t.columns
         if c in t.pcts
     ]
 
 
 _HEADER_PCT = re.compile(r"(執行價格|觸及生效價格|觸發水準)（為最初價格的([\d.]+)%")
-_HEADER_TERM = {"執行價格": "strike_pct", "觸及生效價格": "ki_pct", "觸發水準": "ko_pct"}
+_HEADER_TERM = {"執行價格": "strike_pct", "觸及生效價格": "ki_pct", "觸發水準": "ko_pct"}  # 情境表欄頭用語 → 定義欄位
 
 
 def _scenario_header_pcts(s16: list[Line]) -> list[HeaderPct]:
