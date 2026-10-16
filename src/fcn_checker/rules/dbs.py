@@ -14,7 +14,7 @@ from decimal import ROUND_CEILING, Decimal
 
 from ..schema import CheckResult, Item, ParsedField
 from ..text import full_brackets, squash
-from . import kit, schedule
+from . import kit
 from .kit import Q4, Check, IssuerContext
 
 ISSUER = "DBS"
@@ -336,5 +336,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *tables(ctx),
         *scenario_investment(ctx),
         *scenario3(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
     ]

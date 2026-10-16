@@ -13,7 +13,7 @@ import re
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, schedule
+from . import kit
 from .iis import IisIssuerContext
 from .kit import Check, IssuerContext
 
@@ -387,5 +387,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *repeated_terms(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
     ]

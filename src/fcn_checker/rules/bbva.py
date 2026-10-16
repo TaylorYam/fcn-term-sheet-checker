@@ -15,7 +15,7 @@ from ..parsers.bbva import ISSUER_EN
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, schedule
+from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "BBVA"
@@ -392,7 +392,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *memory_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
         *autocall_table(ctx),
         *repeated_terms(ctx),
     ]

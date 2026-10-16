@@ -14,7 +14,6 @@ from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from . import kit
-from . import schedule as date_schedule
 from .kit import Check, IssuerContext
 
 ISSUER = "CITI"
@@ -418,6 +417,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *redemption(ctx),
         *tables(ctx),
-        *date_schedule.run(ctx),  # 日期表共用檢查（Issue #289）
         *schedule(ctx),
     ]

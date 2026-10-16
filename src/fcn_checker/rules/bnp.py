@@ -12,7 +12,7 @@ import re
 from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import bnp_scenario, kit, schedule
+from . import bnp_scenario, kit
 from .kit import Check, IssuerContext
 
 ISSUER = "BNP"
@@ -261,7 +261,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *periods(ctx),
         *ko_terms(ctx),
         *redemption(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
         autocall_dates(ctx),
         base_prospectus(ctx),
         page_count(ctx),

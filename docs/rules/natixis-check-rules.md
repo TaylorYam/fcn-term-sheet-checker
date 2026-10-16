@@ -223,7 +223,7 @@
 | 情境一自動提前到期贖回 % = 第 14 項；第 15 項情況一公式、2.a 與其他情境的到期贖回 % = 第 15 項情況一（Issue #318） | `doc.redemption_pct` |
 | 情境配息算式、原始投資本金、實物交割算式的面額 = 每單位商品面額（Issue #318） | `doc.scenario_params` |
 | 情境配息列數：情境一 = Non-Call、其他 = 天期（Issue #318） | `doc.coupon_periods` |
-| 日期表（D：開始日 = 發行日、連續、末列 = 最終評價日／到期日；P：配息日遞增、觀察日表末列 = 最終評價日／到期日） | `schedule.coupon_dates` |
+| 日期表（D：開始日 = 發行日、連續、末列 = 最終評價日／到期日；P：配息日遞增、觀察日表末列 = 最終評價日／到期日） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）；開始日 = 前一期結束日 |
 | 投資人須知 KO 定義寫法（`之Y%` 或沒寫 %；沒寫 % 是參照說明書第一章第 14 項，不核對 KO %，Issue #272） | `iis.ko_definition`（範本專屬規則） |
 
 KO 型態與日期表種類不一致、P 型觀察日表的自動提前到期日不在配息日表或期別不連續時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。連結標的表依座標讀：表頭各行依 x 中心分欄（欄序依關鍵字順序），每檔以左欄列號切列，數字依座標由左到右接起，拆行的數字接回；情境價格表以右側貨幣欄切列。費用表沿用 GS 的座標讀法（`gs.fee_rates`）。

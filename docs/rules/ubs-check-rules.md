@@ -238,7 +238,7 @@
 | 價格表列數與名稱 = 九：不同時 parser 交出不合法（`field.underlyings` 與價格欄轉人工覆核） | （parser） |
 | KO 條款 `提前出場價（即期初價格的Y%）` = 表頭 | `doc.ko_pct_mentions`（新） |
 | 情境價格表逐格與表頭 % = 八；設定參數面額、發行價格 = 八 | `doc.scenario_table` |
-| 配息表（列數、期別、末列 = 到期日／期末訂價日、日期先後） | `schedule.coupon_dates` |
+| 配息表（列數、期別、末列 = 到期日／期末訂價日、日期先後；D 型開始日 = 前一期結束日後的下一個一籃子預定交易日、第 1 期 = 發行日後的下一個一籃子預定交易日） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | 到期日兩個日期不同：parser 交出歧義（`field.maturity_date` 轉人工覆核） | （parser） |
 
 KO 型態與配息表種類不一致時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。價格表依座標讀：表頭各行依 x 中心分欄（欄序依關鍵字順序），以價格行的 y 切列，名稱拆行接回。費用表沿用共用 `common.fee_rates`。

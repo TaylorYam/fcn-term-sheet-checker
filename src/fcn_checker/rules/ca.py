@@ -15,7 +15,7 @@ from decimal import Decimal
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, schedule
+from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "CA"
@@ -283,5 +283,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *memory(ctx),
         *tables(ctx),
         *repeated_terms(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
     ]

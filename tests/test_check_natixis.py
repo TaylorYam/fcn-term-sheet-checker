@@ -290,8 +290,8 @@ def test_scenario_results_show_each_cell(tmp_path):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("觀察日：從第二個配息觀察期間", "觀察日：從第九個配息觀察期間", "ts.art12")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_ki_period_must_match_the_judgement_day(tmp_path):

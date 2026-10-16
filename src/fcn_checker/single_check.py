@@ -3,7 +3,8 @@
 1. 接收批量入口的配對結果（上手、讀出的說明書、對到的參考條件表列；配對失敗時只有辨識結果）
 2. 參考條件表欄位規則（rules/reference.py；表頭缺必要欄或重複時讀檔就整批錯誤，Issue #199）
 3. 各上手共用的說明書推算規則（rules/derivation.py：價格推算）
-4. 上手說明書內部規則（Issuer.rules；只拿到讀出結果、審查標準與上手宣告的參考條件表欄位）
+4. 日期表結構檢查（rules/schedule.py，各上手共用，Issue #289）與上手說明書內部規則（Issuer.rules；只拿到讀出結果、
+   審查標準與上手宣告的參考條件表欄位）
 5. 審查標準規則（rules/review_standard.py）
 6. Non-Call(月)、TS、IIS、ISIN、發行日、比價日、VWAP 商品的各標的價格
 7. 回填決策（backfill.py）
@@ -25,7 +26,7 @@ from .identification import Identification
 from .investor_sheet import IisSheet
 from .issuers import Issuer
 from .orders.reference import OrderRecord
-from .rules import derivation, iis, reference
+from .rules import derivation, iis, reference, schedule
 from .rules.kit import Context, IssuerContext
 from .rules.review_standard import iis_review_standard_rules, review_standard_rules
 from .schema import CheckReport, CheckResult, CheckStatus, DocKind, overall_status
@@ -76,7 +77,9 @@ def check_document(pairing: Sequence[CheckResult], paired: Paired | None, config
         ctx = Context(paired.ts, paired.row, std, rfmt, paired.issuer.code)
         results.extend(reference.field_rules(ctx))
         results.extend(derivation.prices(ctx))
-        results.extend(paired.issuer.rules(_issuer_context(paired, config)))
+        issuer_ctx = _issuer_context(paired, config)
+        results.extend(schedule.run(issuer_ctx))
+        results.extend(paired.issuer.rules(issuer_ctx))
         results.extend(review_standard_rules(ctx, reference_trade=iis.trade_date(ctx)))
         results.append(reference.first_callable_period(ctx))
         decisions, backfill_results = [], []

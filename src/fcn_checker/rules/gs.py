@@ -14,7 +14,7 @@ from ..parsers import gs
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, schedule
+from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "GS"
@@ -359,5 +359,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *repeated(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
     ]

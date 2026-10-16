@@ -286,8 +286,8 @@ def test_periodic_table_must_cover_non_call_to_the_last_period(tmp_path):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("自第1 個配息期結束日", "自第9 個配息期結束日", "ts.art9")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_ki_definition_must_match_the_maturity_wording(tmp_path):

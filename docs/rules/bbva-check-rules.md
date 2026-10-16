@@ -215,7 +215,7 @@
 | 「（下限值）」⇔ 價格表下限值欄；無 KI 到期門檻 = 轉換比例 | `doc.ki_consistency` |
 | 價格表表頭 KO／K／KI % = 定義 | `doc.table_header_pct` |
 | 情境價格表逐格與表頭 % = 價格表；情境總投資金額 ÷ 單位數 = 面額 | `doc.scenario_table` |
-| 日期表（D：起始日 = 發行日、遞增、末列 = 贖回評價日／到期日、觀察期間起日在表內；P：配息日遞增、末列 = 到期日、自動提前贖回表） | `schedule.coupon_dates` |
+| 日期表（D：起始日 = 發行日、遞增、末列 = 贖回評價日／到期日、觀察期間起日在表內；P：配息日遞增、末列 = 到期日、自動提前贖回表） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）；起始日只查晚於前一期終止日（`after_previous_end`：起始日會跳過美股開市的銀行假日，2026-10-16 使用者決定）；自動提前贖回觀察日兩欄相同、觀察期間起訖 = 觀察日表首末列為 `schedule.autocall_dates` |
 | 投資人須知開始受理贖回日期 = 說明書 | `iis.redemption_start`（範本專屬規則） |
 | 第 1 頁受託機構明細 (i)、(iii)、(iv)（有才核） | `standard.distributor`、`standard.chairman`（adapter 交出 `distributor_names_others`、`distributor_addresses_others`、`chairman_others`，共用規則核對；任一標籤出現就算有這段，三處都要讀到） |
 | 第 14 項最佳表現值與情境的觀察起算日 = 第 12 項 (10) 起日 | `doc.ko_period_mentions` |
