@@ -472,6 +472,11 @@ def _article15(d: _Doc, s: Spec) -> None:
     _price_table(d, s)
     d.section = "art15"
     d.text(54, f"固定配息率：{s.monthly}%。（年化配息率為{s.annual}%）。")
+    if s.ko_obs == "D":  # 真實樣本 KO 每日型十五設定參數重複八的變動配息率與 t 期別
+        d.text(54, f"變動配息率：{s.monthly}%X（nt/Nt）（年化配息率為{s.annual}%）。")
+        if s.first_callable < s.tenor:
+            k = s.first_callable + 1
+            d.text(54, f"t 係為{k} 至{s.tenor} 的數字，代表第{k} 至第{s.tenor} 個月。")
     d.text(54, "情境分析一：在第1 個提前出場觀察日發生提前出場事件。")
 
 
