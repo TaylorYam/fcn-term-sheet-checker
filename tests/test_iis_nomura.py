@@ -159,6 +159,11 @@ def test_fixed_warning_appears_once(tmp_path):
             Edit("有效申購金額總計至少達三十萬美元", "有效申購金額總計至少達五十萬美元", "iis.redeem"),
             {("standard.minimum_issue_size", "minimum_issue_size", MISMATCH)},
         ),
+        (
+            Spec(),
+            Edit("商品面額以美元為計價單位給付", "商品面額以日圓為計價單位給付", "iis.coupon"),
+            {("field.currency", "payment_currency", MISMATCH)},
+        ),
     ],
     ids=[
         "每期配息率",
@@ -172,6 +177,7 @@ def test_fixed_warning_appears_once(tmp_path):
         "固定警語",
         "保證機構",
         "發行不成立門檻",
+        "計價單位幣別",
     ],
 )
 def test_iis_rules_find_the_wrong_value(tmp_path, spec, edit, expected):

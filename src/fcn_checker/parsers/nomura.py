@@ -333,6 +333,24 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
 
     _occurrences(fields)
+    wording = (  # 說明文字的幣別字（Issue #316，比照 BBVA #305）
+        *money.currency_words(
+            article(7), rf"以({CCY})為計價單位", "payment_currency", "說明文字幣別", "第一章第 7 項主要給付項目"
+        ),
+        *money.currency_words(
+            doc.chapter_lines(3), rf"本商品係以({CCY})計價", "risk_currency", "說明文字幣別", "第三章匯率風險"
+        ),
+        *money.currency_words(
+            doc.chapter_lines(3),
+            rf"轉換成({CCY})進行投資",
+            "risk_conversion_currency",
+            "說明文字幣別",
+            "第三章匯率風險",
+        ),
+    )
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [*fields["currency_others"].value, *wording, _scenario3_currency(article(14))]
+    )
     coupons = [
         Mention.of_field("第 14 項設定參數固定配息率", fields["coupon_art14"]),
         Mention.of_field("第 15 項(1) 固定配息率", fields["coupon_art15"]),
@@ -748,6 +766,11 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
         params, rf"每單位商品面額{AMOUNT}", 2, "scenario_denomination_currency"
     )
     put("scenario_issue_price", params, r"發行價格(\d+(?:\.\d+)?)%", Decimal)
+    investment = rf"投資金額([\d,]+)x(\d+(?:\.\d+)?)%x(\d+)={AMOUNT}"
+    put("scenario_investment", params, investment, number)
+    fields["scenario_units"] = capture_group(params, investment, 3, "scenario_units", int)
+    fields["scenario_investment_amount"] = capture_group(params, investment, 4, "scenario_investment_amount", number)
+    fields["scenario_investment_currency"] = capture_group(params, investment, 5, "scenario_investment_currency")
     put("coupon_art14", params, r"固定配息率就每配息日而言，" + PCT, Decimal)
     fields["scenario_table"] = _pct_table(params)
     sections = {k: t14.text.find(f"情境{k}（") for k in ("一", "二", "三")}
@@ -769,6 +792,20 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
         "coupon_pa_pct",
         [(h.value, h.lines) for h in picked],
         ambiguous_note="第 14 項情境一、二的年化報酬率不同",
+    )
+
+
+def _scenario3_currency(art14: list[Line]) -> Occurrence:
+    """情境三（較差情境）每一處金額旁的幣別（Issue #316）：Nomura 的假設股價、執行價、利息、剩餘現金都寫承作幣別
+    （示意數字，不是標的報價幣別），所以整段都算承作幣別的出處。"""
+    t14 = TextIndex(art14)
+    a, b = t14.text.find("情境三（"), t14.text.find("情境四（")
+    if a < 0 or b < a:
+        missing = ParsedField.missing("scenario3_currency", "第 14 項找不到情境三到情境四之間的段落")
+        return Occurrence("scenario3_currency", "情境三金額幣別", "第 14 項情境三", missing)
+    found = money.amounts(t14, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=lambda _: False, start=a, end=b)
+    return money.scenario_occurrence(
+        "scenario3_currency", "情境三金額幣別", "第 14 項情境三", found, t14.lines_for(a, a + 1)
     )
 
 
@@ -885,10 +922,11 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
             ),
         ],
     )
-    currencies = (  # 金額旁的幣別字（Issue #170）：價格表價格、情境算式金額不列入
+    currencies = (  # 金額旁的幣別字（Issue #170）：價格表價格不列入；說明文字與情境三另在 read 加入（Issue #316）
         ("minimum_investment_currency", "最低投資金額幣別", "第一章第 7 項最低投資金額"),
         ("denomination_currency", "每單位商品面額幣別", "第一章第 7 項每單位商品面額"),
         ("scenario_denomination_currency", "情境設定參數面額幣別", "第一章第 14 項設定參數每單位商品面額"),
+        ("scenario_investment_currency", "情境設定參數投資金額幣別", "第一章第 14 項設定參數投資金額"),
         ("early_redemption_minimum_currency", "提前贖回最低金額幣別", "第一章第 16 項(1) 最低金額"),
         ("early_redemption_increment_currency", "提前贖回增加單位幣別", "第一章第 16 項(1) 增加贖回之單位"),
         ("minimum_subscription_currency", "最低申購金額幣別", "第四章第 4 項最低申購金額"),

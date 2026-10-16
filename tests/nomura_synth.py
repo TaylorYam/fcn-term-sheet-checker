@@ -515,7 +515,8 @@ def _article14(d: _Doc, s: Spec) -> None:
     d.text(70, "情境三（較差情境）")
     d.text(
         70,
-        f"假設於最終評價日，連結標的的最終價格為或相當於35{s.currency_zh}，低於執行價70{s.currency_zh}，較原始投資金額損失約41.34%。",
+        f"假設於最終評價日，連結標的的最終價格為或相當於35{s.currency_zh}，低於執行價70{s.currency_zh}，則投資人除利息"
+        f"{total:,}{s.currency_zh}外，發行機構將支付30.00{s.currency_zh}，較原始投資金額損失約41.34%。",
     )
     d.text(70, "情境四（發行機構或保證機構無法履約）")
     d.text(70, "在最壞情況下，投資人將損失其投資之所有本金及利息（總報酬率則為-100%）。")
@@ -619,6 +620,13 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.chapter("三", "商品風險揭露")
     for n, title in ((1, "基本風險資訊："), (2, "個別商品風險資訊："), (6, "本商品之投資風險警語")):
         d.article(n, title)
+        if n == 2:  # 匯率風險的幣別說明文字（Issue #316）
+            d.text(
+                71,
+                f"本商品係以{s.currency_zh}計價，當投資人以新台幣或其他貨幣轉換成{s.currency_zh}進行投資時，"
+                "本金加利息轉換回新台幣或其他幣別可能產生匯兌風險。",
+                95,
+            )
         if n == 6:
             for k, t in enumerate(_warnings(), 1):
                 d.text(71, f"({k}) {t}", 95)

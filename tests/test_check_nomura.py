@@ -161,6 +161,11 @@ def test_non_monthly_coupon_needs_review(tmp_path):
         (Edit("6個月", "7個月", "ts.art14.table"), "doc.coupon_periods"),
         (Edit("彭博代碼：ZNB UW Equity", "彭博代碼：ZNX UW Equity", "ts.art9"), "doc.underlying_tickers"),
         (Edit("每單位商品面額x 100.00%", "每單位商品面額x 99.00%", "ts.art7"), "doc.redemption_pct"),
+        # Issue #316：說明文字、情境三、設定參數投資金額重複寫出的幣別與金額
+        (Edit("以美元為計價單位給付（四捨五入", "以日圓為計價單位給付（四捨五入", "ts.art7"), "field.currency"),
+        (Edit("本商品係以美元計價", "本商品係以日圓計價", "ts.ch三"), "field.currency"),
+        (Edit("支付30.00美元", "支付30.00日圓", "ts.art14"), "field.currency"),
+        (Edit("x 100% x 1 = 10,000美元", "x 100% x 1 = 20,000美元", "ts.art14.table"), "doc.scenario_params"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where,
 )

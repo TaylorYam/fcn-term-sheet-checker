@@ -139,3 +139,21 @@ def scenario_occurrence(
     else:
         pf = ParsedField(field, FieldStatus.PRESENT, tuple(found), [e for money in found for e in money.evidence])
     return Occurrence(field, name, where, pf)
+
+
+def currency_words(lns: list[Line], pattern: str, field: str, name: str, where: str) -> list[Occurrence]:
+    """說明文字裡每一處幣別字（`pattern` 第 1 組，例：`以美元為計價單位`；BBVA、Nomura，Issue #305、#316）：每處一筆
+    （欄位 `<field>_<n>`，只有一處時為 `<field>`），沒有任何一處時一筆缺漏。"""
+    ti = TextIndex(lns)
+    hits = list(ti.finditer(pattern))
+    if not hits:
+        return [Occurrence(field, name, where, ParsedField.missing(field, f"{where}找不到幣別說明文字"))]
+    return [
+        Occurrence(
+            f"{field}_{n}" if len(hits) > 1 else field,
+            name,
+            where,
+            ParsedField.present(field, m[1], ti.lines_for(m.start(), m.end())),
+        )
+        for n, m in enumerate(hits, start=1)
+    ]
