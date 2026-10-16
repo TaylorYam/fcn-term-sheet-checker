@@ -104,3 +104,42 @@ def test_entrusted_investment_wording_is_exempt_up_to_2026_10_15(tmp_path):
 def _dirs(tmp_path):
     (tmp_path / "old").mkdir()
     (tmp_path / "new").mkdir()
+
+
+@pytest.mark.parametrize(
+    ("edit", "field"),
+    [
+        (
+            Edit("四 本商品雖經玉山證券（受託機構）審查", "四 本商品雖經玉山証券（受託機構）審查", "iis.warn"),
+            "distributor_name_w4a",
+        ),
+        (Edit("且玉山證券（受託機構）不負", "且玉山証券（受託機構）不負", "iis.warn"), "distributor_name_w4b"),
+        (Edit("責。玉山證券（受託機構）依法", "責。玉山証券（受託機構）依法", "iis.warn"), "distributor_name_w4c"),
+        (
+            Edit("而非由玉山證券（受託機構）所保證", "而非由玉山証券（受託機構）所保證", "iis.warn"),
+            "distributor_name_w5",
+        ),
+        (Edit("受託機構（玉山證券）收取", "受託機構（玉山証券）收取", "iis.warn"), "distributor_name_w6a"),
+        (Edit("及由玉山證券（受託機構）另行", "及由玉山証券（受託機構）另行", "iis.warn"), "distributor_name_w6b"),
+        (Edit("係由玉山證券（受託機構）負責外", "係由玉山証券（受託機構）負責外", "iis.warn"), "distributor_name_w6c"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.old[:14],
+)
+def test_warning_distributor_name_is_checked(tmp_path, edit, field):
+    """警語裡的受託機構名稱每處都算名稱出處（Issue #306）：只有這一處錯，相關機構名稱正確。"""
+    r = check_iis(tmp_path, edits=[edit]).report
+    assert ("standard.distributor", field) in {(rid, f) for rid, f, _ in problems(r)}, problems(r)
+
+
+def test_warning_distributor_names_are_read(tmp_path):
+    r = check_iis(tmp_path).report
+    assert {x.field for x in rule(r, "standard.distributor")} >= {
+        "distributor_name_org",
+        "distributor_name_w4a",
+        "distributor_name_w4b",
+        "distributor_name_w4c",
+        "distributor_name_w5",
+        "distributor_name_w6a",
+        "distributor_name_w6b",
+        "distributor_name_w6c",
+    }

@@ -21,7 +21,7 @@ from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "natixis-zh-iis"
 # 2：計價幣別「● 」（Issue #270）；3：KO 定義沒寫 % 視為參照說明書（Issue #272）；4：無 KI 要有明確寫法（Issue #297）
-PARSER_VERSION = "4"
+PARSER_VERSION = "5"  # 5：警語的受託機構名稱（Issue #306）
 # 貳 2. KO 定義的兩種寫法：寫出 %，或沒寫 %（參照說明書第一章第 14 項，投資人須知不核對 KO %）
 KO_DEF_PCT = r"期初進場價格之(\d+(?:\.\d+)?)%"
 KO_DEF_INITIAL = "中文產品說明書第一章第14項所列之期初進場價格"
@@ -40,6 +40,12 @@ PAGE = r"第(\d+)頁/共(\d+)頁"  # 頁底頁碼
 NOISE = re.compile(r"^(第\d+頁/共\d+頁|C[12] - (?:Inter ?nal|Public) Natixis)$")
 D = natixis.D
 PCT = natixis.PCT
+# 警語裡寫受託機構名稱的地方（Issue #306：每處都算受託機構名稱出處）：(欄位, 位置, pattern)
+WARNING_NAMES = (
+    ("distributor_name_w5", "警語 (5)「而非由…所保證」", rf"而非由{natixis.DISTRIBUTOR}[(（](.+?)[)）]所保證"),
+    ("distributor_name_w6a", "警語 (6)「由…另行訂定」", rf"及由{natixis.DISTRIBUTOR}[(（](.+?)[)）]另行訂定者"),
+    ("distributor_name_w6b", "警語 (6)「係由…負責」", rf"係由{natixis.DISTRIBUTOR}[(（](.+?)[)）]負責外"),
+)
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -278,6 +284,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         fields[container] = standard_fields.occurrences(
             container, [standard_fields.Occurrence(field, label, where, raw.capture(field, pattern))]
         )
+    iis.warning_distributor_names(fields, ti, ("本商品之投資風險警語", "壹、相關機構"), WARNING_NAMES)
     fees = iis.section(ti, ("肆、投資人應負擔的各項費用", "伍、"))
     if fees is None:
         fields.update(

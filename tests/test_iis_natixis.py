@@ -114,3 +114,28 @@ def test_ki_type_without_the_no_ki_redemption_wording_needs_review(tmp_path):
     edit = Edit("則於到期日發行機構將依下列所述情況", "則於到期日發行機構將依下列方式", "iis.coupon")
     r = check_iis(tmp_path, spec, edits=[edit]).report
     assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("edit", "field"),
+    [
+        (Edit("股份有限公司)所保證", "股份有限公司X)所保證", "iis.warn"), "distributor_name_w5"),
+        (Edit("股份有限公司)另行訂定者", "股份有限公司X)另行訂定者", "iis.warn"), "distributor_name_w6a"),
+        (Edit("股份有限公司)負責外", "股份有限公司X)負責外", "iis.warn"), "distributor_name_w6b"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.old[:14],
+)
+def test_warning_distributor_name_is_checked(tmp_path, edit, field):
+    """警語裡的受託機構名稱每處都算名稱出處（Issue #306）：只有這一處錯，相關機構名稱正確。"""
+    r = check_iis(tmp_path, edits=[edit]).report
+    assert ("standard.distributor", field) in {(rid, f) for rid, f, _ in problems(r)}, problems(r)
+
+
+def test_warning_distributor_names_are_read(tmp_path):
+    r = check_iis(tmp_path).report
+    assert {x.field for x in rule(r, "standard.distributor")} >= {
+        "distributor_name_org",
+        "distributor_name_w5",
+        "distributor_name_w6a",
+        "distributor_name_w6b",
+    }

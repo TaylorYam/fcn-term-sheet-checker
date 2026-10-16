@@ -20,11 +20,19 @@ from .common import RawText, fee_rates
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "ubs-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：警語的受託機構名稱（Issue #306）
 SECTIONS = ("警語", "相關機構", "商品事項", "商品風險揭露", "相關機構之權利、義務及責任")
 NOISE = re.compile(iis.PAGE_OF)
 D = ubs.D
 TICKER = r"彭博代碼[:：]([A-Z0-9][A-Z0-9./-]*?)([A-Z]{2})）"  # 去空白後「ABCUW）」：最後兩個大寫字母是交易所碼
+# 警語裡寫受託機構名稱的地方（Issue #306：每處都算受託機構名稱出處）：(欄位, 位置, pattern)
+WARNING_NAMES = (
+    ("distributor_name_w4a", "警語 4.「本商品雖經…審查」", r"4\.本商品雖經(.+?)[(（](?:下稱|受託機構)"),
+    ("distributor_name_w4b", "警語 4.「…不負本商品投資盈虧之責」", r"之價值，且(.+?)[(（]受託機構[)）]不負本商品"),
+    ("distributor_name_w4c", "警語 4.「…依法不得承諾擔保」", r"盈虧之責。(.+?)[(（]受託機構[)）]依法不得承諾"),
+    ("distributor_name_w5", "警語 5.「而非由…所保證」", r"而非由(.+?)[(（]受託機構[)）]所保證"),
+    ("distributor_name_w6", "警語 6.「係由…負責」", r"另行訂定/提供者，係由(.+?)[(（]受託機構[)）]負責外"),
+)
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -170,6 +178,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
             )
         ],
     )
+    iis.warning_distributor_names(fields, ti, ("警語1.", "相關機構"), WARNING_NAMES)
     fields["distributor_phones"] = standard_fields.occurrences(
         "distributor_phones",
         [

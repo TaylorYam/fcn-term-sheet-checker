@@ -20,7 +20,7 @@ from .common import RawText, compat_normalized, fee_rates
 from .layout import TextIndex, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：警語的受託機構名稱（Issue #306）
 SECTIONS = (
     "本商品之投資風險警語：",
     "中文投資人須知刊印日期：",
@@ -38,6 +38,14 @@ D = ca.D
 PCT = ca.PCT
 COUPON = r"配息率" + PCT + r"，換算年利率為" + PCT
 TICKER = re.compile(r"(?:^|\s)([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})$")  # 名稱和代碼可能在同一行
+# 警語裡寫受託機構名稱的地方（Issue #306：每處都算受託機構名稱出處）：(欄位, 位置, pattern)
+WARNING_NAMES = (
+    ("distributor_name_w4a", "警語 4.「本商品雖經…審查」", r"4\.本商品雖經(.+?)審查"),
+    ("distributor_name_w4b", "警語 4.「…不負本商品投資盈虧之責」", r"之價值，(.+?)不負本商品投資盈虧之責"),
+    ("distributor_name_w4c", "警語 4.「…依法不得承諾擔保」", r"盈虧之責。(.+?)依法不得承諾"),
+    ("distributor_name_w5", "警語 5.「而非由…所保證」", r"而非由(.+?)所保證"),
+    ("distributor_name_w6", "警語 6.「(即…)負責」", r"受託或銷售機構[(（]即(.+?)[)）]負責外"),
+)
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -239,6 +247,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         fields[container] = standard_fields.occurrences(
             container, [standard_fields.Occurrence(field, label, where, raw.capture(field, pattern))]
         )
+    iis.warning_distributor_names(fields, ti, ("本商品之投資風險警語：", "一、相關機構事業概況"), WARNING_NAMES)
     fees = iis.section(ti, ("四、費用", "五、"))
     if fees is None:
         fields.update(

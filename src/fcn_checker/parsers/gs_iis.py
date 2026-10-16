@@ -21,7 +21,7 @@ from .common import RawText, compat_normalized, derived, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "gs-zh-iis"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
+PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：警語的受託機構名稱（Issue #306）
 SECTIONS = (
     "本商品之投資風險警語",
     "一.相關機構",
@@ -39,6 +39,16 @@ EVENT_MEMORY = "各連結標的至少發生過一次記憶提前出場事件，�
 MEMORY_EVENT = "「記憶提前出場事件」：就連結標的而言"
 EVENT_SINGLE = "如於任一提前出場觀察日之參考價格等於或高於提前出場價格，則視為已發生自動提前出場事件"
 PRICE_TABLE = replace(gs.PRICE_TABLE, where="二. 1. (10) 價格表")
+# 警語裡寫受託機構名稱的地方（Issue #306：每處都算受託機構名稱出處；GS 只寫簡稱）：(欄位, 位置, pattern)
+WARNING_NAMES = (
+    ("distributor_name_w4a", "警語四「本商品雖經…審查」", r"本商品雖經(.+?)[（(]受託機構[）)]審查"),
+    ("distributor_name_w4b", "警語四「…不負本商品投資盈虧之責」", r"之價值，且(.+?)[（(]受託機構[）)]不負本商品"),
+    ("distributor_name_w4c", "警語四「…依法不得承諾擔保」", r"盈虧之責。(.+?)[（(]受託機構[）)]依法不得承諾"),
+    ("distributor_name_w5", "警語五「而非由…所保證」", r"而非由(.+?)[（(]受託機構[）)]所保證"),
+    ("distributor_name_w6a", "警語六「受託機構（…）收取之費用」", r"受託對象、受託機構[（(](.+?)[）)]收取之費用"),
+    ("distributor_name_w6b", "警語六「由…另行訂定」", r"收取之費用及由(.+?)[（(]受託機構[）)]另行訂定"),
+    ("distributor_name_w6c", "警語六「係由…負責」", r"另行訂定者，係由(.+?)[（(]受託機構[）)]負責外"),
+)
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -242,6 +252,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         fields[container] = standard_fields.occurrences(
             container, [standard_fields.Occurrence(field, label, where, raw.capture(field, pattern))]
         )
+    iis.warning_distributor_names(fields, ti, ("本商品之投資風險警語", "一.相關機構"), WARNING_NAMES)
     fees = iis.section(ti, ("四.費用", "五."))
     if fees is None:
         fields.update(
