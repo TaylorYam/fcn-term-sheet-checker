@@ -57,7 +57,9 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in NATIXIS.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    assert len(rule(r, "doc.coupon_mentions")) == 2  # 情境假設年利率、各期配息年利率
+    assert {"scenario_coupon_pa_1", "scenario_coupon_pa_2"} <= {
+        x.field for x in rule(r, "scenario.params")
+    }  # 情境假設年利率、各期配息年利率
     assert rule(r, "standard.fixed_warning")[0].actual == 3
     assert len(rule(r, "standard.issuer_name")) == 3  # 封面、第一章第 3 項、第二章
     skipped = ("standard.guarantor_name", "standard.agent_name", "standard.minimum_issue_size")  # 決定不核對
@@ -120,13 +122,13 @@ def test_periodic_ki_is_read_from_the_judgement_day(tmp_path):
     ("edit", "broken"),
     [
         (Edit("月配息率：1.5000%", "月配息率：1.5100%", "ts.art13"), "derive.monthly_coupon"),
-        (Edit("f. 年利率：每年18.00%", "f. 年利率：每年18.50%", "ts.art16"), "doc.coupon_mentions"),
-        (Edit("x (18.00%/12)", "x (18.50%/12)", "ts.art16"), "doc.coupon_mentions"),
+        (Edit("f. 年利率：每年18.00%", "f. 年利率：每年18.50%", "ts.art16"), "scenario.params"),
+        (Edit("x (18.00%/12)", "x (18.50%/12)", "ts.art16"), "scenario.params"),
         (Edit("自動提前到期事件於第二個", "自動提前到期事件於第三個", "ts.art16"), "doc.autocall_terms"),
         (Edit("e. 自動提前到期觀察日：從第二個", "e. 自動提前到期觀察日：從第三個", "ts.art16"), "doc.autocall_terms"),
-        (Edit("c. 天期：6 個月", "c. 天期：7 個月", "ts.art16"), "doc.coupon_periods"),
-        (Edit("105.4725", "105.4726", "ts.art16.table"), "doc.scenario_table"),
-        (Edit("a. 每單位商品面額 = 10,000 美元", "a. 每單位商品面額 = 1,000 美元", "ts.art16"), "doc.scenario_table"),
+        (Edit("c. 天期：6 個月", "c. 天期：7 個月", "ts.art16"), "scenario.params"),
+        (Edit("105.4725", "105.4726", "ts.art16.table"), "scenario.reprint"),
+        (Edit("a. 每單位商品面額 = 10,000 美元", "a. 每單位商品面額 = 1,000 美元", "ts.art16"), "scenario.params"),
         (Edit("之75.00%)", "之76.00%)", "ts.art9.table"), "doc.table_header_pct"),
         (Edit("6個月美元計價", "7個月美元計價", "ts.cover.title"), "doc.name_consistency"),
         (Edit("6個月美元計價", "7個月美元計價", "ts.art1"), "doc.name_consistency"),
@@ -145,7 +147,7 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     bad = {rid for rid, _, _ in problems(r)}
     assert broken in bad, problems(r)
     # 連結標的表表頭 % 改了，情境價格表的表頭 % 就和連結標的表不同（同一處錯誤的兩種表現）
-    also = {"doc.scenario_table"} if broken == "doc.table_header_pct" else set()
+    also = {"scenario.reprint"} if broken == "doc.table_header_pct" else set()
     assert bad <= {broken, "standard.product_name", *also}, problems(r)
 
 
@@ -179,19 +181,19 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
         (
             Spec(),
             Edit("10,000 美元 x (18.00%/12)", "1,000 美元 x (18.00%/12)", "ts.art16.s3.r4"),
-            ("doc.scenario_params", "scenario_coupon_denomination_3"),
+            ("scenario.params", "scenario_denomination_5"),  # 情境三配息算式第 4 列（同一情境同一個值一筆）
         ),
         (
             Spec(),
             Edit("自動提前到期日收到10,000 美元", "自動提前到期日收到1,000 美元", "ts.art16"),
-            ("doc.scenario_params", "scenario_principal_1"),
+            ("scenario.params", "scenario_principal_1"),
         ),
         (
             Spec(),
             Edit("執行價格 = 10,000 美元/", "執行價格 = 1,000 美元/", "ts.art16"),
-            ("doc.scenario_params", "scenario_physical_denomination_4"),
+            ("scenario.params", "scenario_denomination_6"),  # 情境四實物交割算式
         ),
-        (Spec(), Edit("/ 75.3375 美元", "/ 75.3376 美元", "ts.art16"), ("doc.scenario_table", "scenario_worst_strike")),
+        (Spec(), Edit("/ 75.3375 美元", "/ 75.3376 美元", "ts.art16"), ("scenario.strike", "scenario_price_1")),
         (
             Spec(),
             Edit("10,000 美元 x (18.00%/12) = 150.00 美元", "", "ts.art16.s2.r6"),
@@ -242,7 +244,7 @@ def test_repeated_values_must_equal_the_terms(tmp_path, spec, edit, expected):
     ("edit", "expected"),
     [
         (Edit("100% 美元投資本金", "100%投資本金", "ts.art6"), ("field.currency", "principal_currency")),
-        (Edit("執行價格 = 10,000", "執行價格約 10,000", "ts.art16"), ("doc.scenario_table", "scenario_worst_strike")),
+        (Edit("執行價格 = 10,000", "執行價格約 10,000", "ts.art16"), ("scenario.strike", "scenario_price_1")),
         (Edit("10,000 美元 x (18.00%/12) = 150.00 美元", "", "ts.art16.s2"), ("doc.coupon_periods", "scenario2_rows")),
         (
             Edit("自動提前到期贖回金額為原始投資本金乘以100%", "自動提前到期贖回金額為原始投資本金", "ts.art16"),
@@ -250,7 +252,7 @@ def test_repeated_values_must_equal_the_terms(tmp_path, spec, edit, expected):
         ),
         (
             Edit("的原始投資本金。", "的本金。", "ts.art16"),
-            ("doc.scenario_params", "scenario_principal"),
+            ("scenario.params", "scenario_principal_1"),
         ),
         (
             Edit("每單位商品面額 x 100%", "每單位商品面額", "ts.art15"),
@@ -261,7 +263,7 @@ def test_repeated_values_must_equal_the_terms(tmp_path, spec, edit, expected):
             Edit(
                 "績效表現最差之連結標的(虛構控股一)執行價格", "績效表現最差之連結標的(虛構控股九)執行價格", "ts.art16"
             ),
-            ("doc.scenario_table", "scenario_worst_strike"),
+            ("scenario.strike", "scenario_price_1"),
         ),
         (
             Edit(f"受託或銷售機構({DIST['name']})提出", "受託或銷售機構提出", "ts.ch四"),
@@ -279,12 +281,12 @@ def test_unreadable_repeated_values_need_review(tmp_path, edit, expected):
 def test_scenario_results_show_each_cell(tmp_path):
     """情境價格表、贖回 %、面額的結果帶出每一格／每一處（Issue #318）。"""
     r = check(tmp_path)
-    table = rule(r, "doc.scenario_table")[0]
+    table = rule(r, "scenario.reprint")[0]
     assert table.status == S.PASS and len(table.actual) == 12 and table.actual == table.expected  # 3 檔 x 4 欄
-    assert {x.field for x in rule(r, "doc.scenario_params")} >= {
-        "scenario_coupon_denomination_1",
+    assert {x.field for x in rule(r, "scenario.params")} >= {
+        "scenario_denomination_2",  # 情境一配息算式
         "scenario_principal_1",
-        "scenario_physical_denomination_4",
+        "scenario_denomination_6",  # 情境四實物交割算式
     }
 
 

@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
 from . import money, price_table, schedule
 from .common import RawText, capture_group, derived, fee_rates, number
@@ -24,8 +24,9 @@ from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
 # 2：第一章條號中途重編、新版受託機構標籤（Issue #270）；3：價格表改由 parsers/price_table.py 讀（Issue #287）；
-# 4：無 KI 要有到期贖回情況二只有實物交割的寫法（Issue #297）；5：重複寫出處（Issue #318）；6：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "6"
+# 4：無 KI 要有到期贖回情況二只有實物交割的寫法（Issue #297）；5：重複寫出處（Issue #318）；6：日期表標準欄位與共用排程推導（Issue #289）；
+# 7：情境價格表、假設值與實物交割執行價格交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "7"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -359,6 +360,7 @@ def read(lines: Sequence[Line]) -> NatixisTermSheet:
 
     table = underlying_table("underlying_table", article(9))
     fields["underlying_table"] = table
+    fields["main_price_table"] = price_table.at("main_price_table", table, PRICE_TABLE)
 
     art12 = article(12)
     put("tenor_months", art12, r"商品年期：(\d+)個月", int)
@@ -383,8 +385,8 @@ def read(lines: Sequence[Line]) -> NatixisTermSheet:
     put("maturity_redemption_pct", art15, MATURITY_REDEMPTION, Decimal)
     _table_fields(fields, table)
     _schedule(fields)
-    _article16(fields, article(16))
-    scenario_currencies = _scenarios(fields, article(16), art15)
+    assumed = _article16(fields, article(16))
+    scenario_currencies = _scenarios(fields, article(16), art15, assumed)
 
     _chapter2(fields, doc)
     _chapter4(fields, doc, put)
@@ -686,29 +688,52 @@ def scenario_ko_kind(text: str) -> tuple[str, int | None] | None:
     return ("P", None) if text.startswith("依第一章第12(7)項所列") else None
 
 
-def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
-    """情境假設（天期、期數、KO 觀察文字、年利率、面額）、情境價格表、情境一提前到期期別、各期配息的年利率（範本規格 §4.9）。"""
+def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> list[ScenarioParam]:
+    """情境假設（天期、期數、KO 觀察文字、年利率、面額）、情境價格表、情境一提前到期期別、各期配息的年利率（範本規格 §4.9）；
+    回傳交給共用情境規則的情境假設與各期配息的年利率（Issue #294）。"""
     ti = TextIndex(art16)
-    fields["scenario_denomination"] = capture(
-        "scenario_denomination", ti, r"a\.每單位商品面額=([\d,]+)", number, whole_match=True
-    )
-    fields["scenario_tenor"] = capture("scenario_tenor", ti, r"c\.天期：(\d+)個月", int, whole_match=True)
-    fields["scenario_periods"] = capture("scenario_periods", ti, r"共(\d+)個配息觀察期間\)", int, whole_match=True)
+    where = "第 16 項情境假設"
+    assumed = [
+        ScenarioParam(
+            "scenario_denomination",
+            f"{where} a. ",
+            capture("scenario_denomination", ti, r"a\.每單位商品面額=([\d,]+)", number, whole_match=True),
+        ),
+        ScenarioParam(
+            "scenario_tenor",
+            f"{where} c. ",
+            capture("scenario_tenor", ti, r"c\.天期：(\d+)個月", int, whole_match=True),
+        ),
+        ScenarioParam(
+            "scenario_coupon_periods",
+            f"{where} d. ",
+            capture("scenario_periods", ti, r"共(\d+)個配息觀察期間\)", int, whole_match=True),
+        ),
+        ScenarioParam(
+            "scenario_coupon_pa",
+            f"{where} f. ",
+            capture("scenario_coupon_pct", ti, r"f\.年利率：每年" + PCT, Decimal, whole_match=True),
+        ),
+    ]
     fields["scenario_ko_wording"] = capture(
         "scenario_ko_wording", ti, r"e\.自動提前到期觀察日：(.+?)f\.年利率", scenario_ko_kind, whole_match=True
     )
-    fields["scenario_coupon_pct"] = capture(
-        "scenario_coupon_pct", ti, r"f\.年利率：每年" + PCT, Decimal, whole_match=True
-    )
-    terms = [(Decimal(m[1]), ti.lines_for(m.start(), m.end())) for m in ti.finditer(r"x\(" + PCT + r"/12\)")]
-    fields["scenario_coupon_terms"] = (
-        ParsedField.present(
-            "scenario_coupon_terms", sorted({v for v, _ in terms}), [ln for _, lns in terms for ln in lns]
+    terms: dict[Decimal, list[Line]] = {}  # 各期配息「x (y%/12)」的 y：同一個值一筆
+    for m in ti.finditer(r"x\(" + PCT + r"/12\)"):
+        terms.setdefault(Decimal(m[1]), []).extend(ti.lines_for(m.start(), m.end()))
+    assumed += [
+        ScenarioParam("scenario_coupon_pa", "第 16 項各期配息的", ParsedField.present("scenario_coupon_pa", v, lns))
+        for v, lns in terms.items()
+    ] or [
+        ScenarioParam(
+            "scenario_coupon_pa",
+            "第 16 項各期配息的",
+            ParsedField.missing("scenario_coupon_pa", "情境找不到各期配息「x (年利率/12)」"),
         )
-        if terms
-        else ParsedField.missing("scenario_coupon_terms", "情境找不到各期配息「x (年利率/12)」")
-    )
-    fields["scenario_table"] = scenario_table("scenario_table", art16)
+    ]
+    table = scenario_table("scenario_table", art16)
+    fields["scenario_table"] = table
+    fields["scenario_reprint_table"] = price_table.at("scenario_reprint_table", table, SCENARIO_TABLE)
     section1 = re.search(r"情境一(.+?)情境二", ti.text)
     first = (
         list(
@@ -730,6 +755,7 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
             "scenario_first_period",
             "情境一找不到或有多處「在較佳情況下，自動提前到期事件於第k個配息觀察期間結束日發生」",
         )
+    return assumed
 
 
 def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
@@ -772,9 +798,12 @@ def _mentions(
     return out
 
 
-def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Line]) -> list[Occurrence]:
-    """第 16 項情境與第 15 項重複寫出的值（Issue #318，比照 BBVA #305）：各情境配息列數、配息算式／原始投資本金／實物交割
-    算式的面額、自動提前到期與到期贖回的 %、實物交割算式的執行價格；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
+def _scenarios(
+    fields: dict[str, ParsedField], art16: list[Line], art15: list[Line], assumed: list[ScenarioParam]
+) -> list[Occurrence]:
+    """第 16 項情境與第 15 項重複寫出的值（Issue #318，比照 BBVA #305）：各情境配息列數、自動提前到期與到期贖回的 %；
+    配息算式／原始投資本金／實物交割算式的面額併入情境假設 `assumed` 交成共用情境規則的 `scenario_params`，實物交割算式的
+    執行價格交成 `scenario_prices`（Issue #294）；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
     ti, t15 = TextIndex(art16), TextIndex(art15)
     repeats = []  # 情況一公式、2.a（有 KI 才有）：每處一筆（欄位 `<field>_<第幾處>`）
     for field, places, pattern, required in MATURITY_REPEATS:
@@ -788,14 +817,13 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
     spans = _scenario_spans(ti)
     if not spans:
         missing = "第 16 項找不到情境一～三（或四）到「關於上述情境分析之警語」的段落"
-        for name in (
-            "scenario_row_counts",
-            "scenario_denomination_mentions",
-            "autocall_redemption_mentions",
-            "maturity_redemption_mentions",
-            "scenario_worst_strike",
-        ):
+        for name in ("scenario_row_counts", "autocall_redemption_mentions", "maturity_redemption_mentions"):
             fields[name] = ParsedField.missing(name, missing)
+        denomination = ScenarioParam(
+            "scenario_denomination", "第 16 項情境的", ParsedField.missing("scenario", missing)
+        )
+        fields["scenario_params"] = standard_fields.occurrences("scenario_params", [*assumed, denomination])
+        fields["scenario_prices"] = _worst_strike(fields, ParsedField.missing("scenario_worst_strike", missing))
         pf = ParsedField.missing("scenario_currency", missing)
         return [Occurrence("scenario_currency", "情境金額幣別", "第 16 項情境", pf)]
     rows, coupon_denominations = [], []
@@ -832,8 +860,8 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
             required=False,
         ),  # 讀不到時由 `scenario_worst_strike` 轉人工覆核
     ]
-    fields["scenario_denomination_mentions"] = standard_fields.occurrences(
-        "scenario_denomination_mentions", denominations
+    fields["scenario_params"] = standard_fields.occurrences(
+        "scenario_params", [*assumed, *(p for occ in denominations for p in _denomination_params(occ))]
     )
     fields["autocall_redemption_mentions"] = standard_fields.occurrences(
         "autocall_redemption_mentions",
@@ -844,7 +872,8 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
         [*repeats, *_mentions("scenario_maturity_pct", "到期贖回 %", ti, spans, SCENARIO_MATURITY_PCT, Decimal)],
     )
     worst = list(ti.finditer(WORST_STRIKE))
-    fields["scenario_worst_strike"] = (
+    fields["scenario_prices"] = _worst_strike(
+        fields,
         ParsedField.present(
             "scenario_worst_strike",
             (squash(worst[0][1]), number(worst[0][4])),
@@ -853,7 +882,7 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
         if len(worst) == 1
         else ParsedField.missing(
             "scenario_worst_strike", "情境找不到或有多處實物交割算式「…(標的)執行價格 = 面額 / 執行價格」"
-        )
+        ),
     )
 
     def skip(text: str) -> bool:
@@ -871,6 +900,44 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], art15: list[Li
             )
         )
     return out
+
+
+# 情境裡重複寫出的面額（`_mentions` 的標籤）→ 共用情境規則的（出處代號, 位置接在情境名稱後面的字）
+DENOMINATION_PARAMS = {
+    "配息算式的面額": ("scenario_denomination", "配息算式的"),
+    "原始投資本金": ("scenario_principal", "原始投資"),
+    "實物交割算式的面額": ("scenario_denomination", "實物交割算式的"),
+}
+
+
+def _denomination_params(occ: Occurrence) -> list[ScenarioParam]:
+    """情境的一種面額句（每個情境一筆，值是該情境每一處的值）→ 共用情境規則的出處：同一個情境裡同一個值一筆。"""
+    code, suffix = DENOMINATION_PARAMS[occ.name]
+    pf = occ.value
+    if not pf.ok:
+        return [ScenarioParam(code, f"{occ.where}{suffix}", replace(pf, name=code))]
+    return [
+        ScenarioParam(code, f"{occ.where}{suffix}", ParsedField(code, FieldStatus.PRESENT, v, list(pf.evidence)))
+        for v in dict.fromkeys(pf.value)
+    ]
+
+
+def _worst_strike(fields: dict[str, ParsedField], worst: ParsedField) -> ParsedField:
+    """實物交割算式「…(標的)執行價格 = 面額 / 執行價格」→ 共用情境規則 `scenario_prices`：依標的名稱對到情境價格表
+    那一列（= 第 9 項價格表同一列，由 `scenario.reprint` 核對）。情境價格表讀不到時不交（已由 `scenario.reprint` 轉
+    人工覆核，不重複報）；找不到或有多列同名時認不出是哪一檔。"""
+    table, where = fields["scenario_table"], "第 16 項實物交割算式的"
+    if not table.ok:
+        return standard_fields.occurrences("scenario_prices", [])
+    if not worst.ok:
+        return standard_fields.occurrences("scenario_prices", [ScenarioPrice(where, None, "strike", worst)])
+    name, strike = worst.value
+    # 情境價格表的名稱可能和期初進場價格擠在同一行（`特斯拉公司 195.92`），比名稱時去掉結尾的數字
+    rows = [n for n, r in enumerate(table.value.rows, start=1) if squash(re.sub(r"[\d,.\s]+$", "", r.name)) == name]
+    value = ParsedField("scenario_worst_strike", FieldStatus.PRESENT, strike, list(worst.evidence))
+    return standard_fields.occurrences(
+        "scenario_prices", [ScenarioPrice(where, rows[0] if len(rows) == 1 else None, "strike", value)]
+    )
 
 
 # ---------------------------------------------------------------- 第二章、第四章
