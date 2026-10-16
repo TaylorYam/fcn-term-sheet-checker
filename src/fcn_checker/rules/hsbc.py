@@ -2,6 +2,8 @@
 
 參考條件表欄位、Non-Call、ISIN 與比價日由各上手共用的 rules/reference.py 核對。
 每筆結果的項目名稱寫在規則旁（與 BARC 同一件事用同一個名稱）；預期值來自說明書其他位置或推算。
+第 18 條情境價格表（價格、代號、欄頭 %）、情境假設值與情境寫出的執行價、觸及不保本價格由共用情境規則（rules/scenario.py，
+Issue #294）核對。
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from dataclasses import replace
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
 from ..text import full_brackets, squash
-from . import hsbc_scenario, kit
+from . import hsbc_scenario, kit, scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "HSBC"
@@ -90,9 +92,10 @@ def schedules(ctx):
 
 
 def price_headers(ctx):
-    """價格表欄頭百分比與情境試算價格表（價格推算是各上手共用規則，見 rules/derivation.py）。"""
+    """價格表欄頭百分比與情境試算價格表每列的幣別、交易所（價格推算是各上手共用規則，見 rules/derivation.py；情境價格表的
+    價格、代號與欄頭 % 由共用情境規則 `scenario.reprint` 核對，Issue #294）。"""
     pf = ctx.ts.f("price_table")
-    scenario = ctx.ts.f("scenario_table")
+    reprinted = ctx.ts.f("scenario_table")
     if not pf.ok:
         return [
             Check(rid, "prices", PRICE_TABLE, ctx.document).review(pf)
@@ -112,41 +115,21 @@ def price_headers(ctx):
             continue
         header = replace(header, expected=pct.value).needs(pf, pct)
         out.append(header.compare(pct.value, headers.get(col)))
-    if not scenario.ok:
-        out.append(
-            Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document).review(scenario)
-        )
-    else:
-        # Chinese label is deliberately excluded; currency and exchange are internal consistency only.
-        def normalized(table):
-            return [
-                {
-                    "ticker": r.ticker,
-                    "currency": r.texts["currency"],
-                    "exchange": r.texts["exchange"],
-                    "prices": r.prices,
-                }
-                for r in table.rows
-            ]
+    if not reprinted.ok:  # 讀不到已由 scenario.reprint 轉人工覆核
+        return out
 
-        table, header = normalized(pf.value), normalized(scenario.value)
-        out.append(
-            Check("doc.scenario_table", "prices", Item.expected("情境試算價格表"), ctx.document, expected=table)
-            .needs(pf, scenario)
-            .compare(table, header)
-        )
-        scenario_headers = scenario.value.pcts
-        out.append(
-            Check(
-                "doc.scenario_header_pct",
-                "headers",
-                Item.expected("情境試算價格表欄頭"),
-                ctx.document,
-                expected=headers,
-            )
-            .needs(pf, scenario)
-            .compare(headers, scenario_headers)
-        )
+    # 中文名稱刻意不比；幣別與交易所只做說明書內部一致（價格與代號由 scenario.reprint 比）
+    def texts(table):
+        return [
+            {"ticker": r.ticker, "currency": r.texts["currency"], "exchange": r.texts["exchange"]} for r in table.rows
+        ]
+
+    table, reprint = texts(pf.value), texts(reprinted.value)
+    out.append(
+        Check("doc.scenario_table", "texts", Item.expected("情境試算價格表幣別與交易所"), ctx.document, expected=table)
+        .needs(pf, reprinted)
+        .compare(table, reprint)
+    )
     return out
 
 
@@ -192,5 +175,6 @@ def run_all(ctx: IssuerContext) -> list:
     out = price_headers(ctx)
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
+    out.extend(scenario.run(ctx))  # 第 18 條情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
     out.extend(hsbc_scenario.run(ctx))
     return out

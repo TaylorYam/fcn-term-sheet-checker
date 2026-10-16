@@ -5,18 +5,20 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import ScenarioParam, ScenarioPrice
 from ..text import full_brackets, squash
 from . import hsbc_tables as tables
 from . import money, price_table, schedule
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "3"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）；
+# 4：情境價格表、情境假設值與情境的執行價、觸及不保本價格交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "4"
 # 條號自成一行（`9.`），也可能與標題同一行（`10. 發行價格：`，真實樣本第 10 條起是這種版面，Issue #185）
 LAYOUT = LayoutSpec(
     r"第{zh}章\s*{name}", re.compile(r"^(\d{1,2})\.(?:\s+\S.*)?$"), 100, re.compile(r"^\((\d{1,2})\)\s*(.*)$"), 110
@@ -127,6 +129,151 @@ def _standard_prices(table: ParsedField) -> ParsedField:
 
 
 SCENARIO_HEADING = r"情境分析([一二三四五六])\)"
+SCENARIO_CCY = money.CURRENCY  # 金額前的幣別字（任一已知寫法）：只讀數字，幣別由共用規則 field.currency 逐處核對
+# 情境配息與本金給付算式：面額 × 月配息率 %（× 期數或 × 分子/分母）= 金額
+SCENARIO_FORMULA = SCENARIO_CCY + N + r"[×xX]" + N + r"%(?:[×xX](\d+)(?:/(\d+))?)?=" + SCENARIO_CCY + N
+SCENARIO_ANNUALIZED = r"平均年化報酬率\(以簡單平均年化報酬率之方式計算\)為" + N + "%"
+SCENARIO_REFERENCES = (("執行價", "strike"), ("觸及不保本價格", "ki"))  # 較差情境寫出的價格（標籤 → 價格表欄）
+
+
+def scenario_number(s: str) -> Decimal:
+    return Decimal(s.replace(",", ""))
+
+
+@dataclass(frozen=True)
+class ScenarioText:
+    """第 18 條情境文字：情境假設段與情境一～n（3 個或有 KI 時 4 個）。"""
+
+    assumptions: ScenarioIndex
+    segments: list[ScenarioIndex]
+
+
+def scenario_text(ti: ScenarioIndex, ki_type: ParsedField) -> ScenarioText | None:
+    """依情境標題切段；情境數量或順序不符已知範本（無 KI 3 個、有 KI 4 個）時為 None。"""
+    headings = list(ti.finditer(SCENARIO_HEADING))
+    expected = 3 if ki_type.ok and ki_type.value == "none" else 4
+    if len(headings) != expected or [m[1] for m in headings] != list("一二三四")[:expected]:
+        return None
+    ends = [h.start() for h in headings[1:]] + [len(ti.text)]
+    return ScenarioText(
+        ScenarioIndex(ti.lines_for(0, headings[0].start())),
+        [ScenarioIndex(ti.lines_for(h.start(), end)) for h, end in zip(headings, ends, strict=True)],
+    )
+
+
+def scenario_worst(segment: ScenarioIndex) -> bool:
+    """較差情境（有交割股數、零股或實物給付）：完整贖回與損益不重算。"""
+    return any(w in segment.text for w in ("交割股數", "零股數", "實物給付"))
+
+
+def scenario_formulas(segment: ScenarioIndex) -> list[tuple[re.Match, bool]]:
+    """情境裡每一個「面額 × % … = 金額」算式與它是不是本金給付（前面最近的是「提前到期給付金額／到期贖回金額」而不是
+    「配息金額」）。"""
+    out = []
+    for m in segment.finditer(SCENARIO_FORMULA):
+        before = segment.text[max(0, m.start() - 120) : m.start()]
+        principal = max(before.rfind("提前到期給付金額"), before.rfind("到期贖回金額"))
+        out.append((m, principal >= 0 and principal > before.rfind("配息金額")))
+    return out
+
+
+def _scenario_standard(fields: dict[str, ParsedField], ti: ScenarioIndex) -> None:
+    """交給共用情境規則的標準欄位（Issue #294）：情境價格表；情境假設的天期、每單位面額、固定配息率、配息期數、發行價格，
+    各情境的天期、配息次數、配息算式的面額與配息率、平均年化報酬率（`scenario_params`）；情境寫出的執行價、觸及不保本
+    價格（`scenario_prices`，依「（中文名稱）」對到價格表那一列，單一標的為第 1 列）。配息金額、總額與損益仍由 HSBC 規則重算。"""
+    fields["main_price_table"] = price_table.at("main_price_table", fields["price_table"], PRICE_TABLE)
+    fields["scenario_reprint_table"] = price_table.at(
+        "scenario_reprint_table", fields["scenario_table"], SCENARIO_TABLE
+    )
+    annual = fields["coupon_pa_pct"]  # 說明書只寫年利率：固定配息率 = 年利率 ÷ 12 四捨五入 4 位
+    fields["monthly_coupon_pct"] = (
+        ParsedField(
+            "monthly_coupon_pct",
+            FieldStatus.PRESENT,
+            (annual.value / 12).quantize(Decimal("0.0001"), ROUND_HALF_UP),
+            list(annual.evidence),
+        )
+        if annual.ok
+        else replace(annual, name="monthly_coupon_pct")
+    )
+    text = scenario_text(ti, fields["ki_type"])
+    if text is None:
+        note = "第 18 條情境數量或順序不符已知範本"
+        fields["scenario_params"] = ParsedField.missing("scenario_params", note)
+        fields["scenario_prices"] = ParsedField.missing("scenario_prices", note)
+        return
+    params: list[ScenarioParam] = []
+
+    def mention(
+        index: ScenarioIndex, pattern: str, code: str, where: str, convert=scenario_number, required=True
+    ) -> None:
+        found = list(index.finditer(pattern))
+        if required and not found:
+            missing = ParsedField.missing(code, f"{where}的句子缺漏、損壞或寫法未知")
+            params.append(
+                ScenarioParam(code, where, replace(missing, evidence=[Evidence.of(x) for x in index.lines[:2]]))
+            )
+        for m in found:
+            pf = ParsedField.present(code, convert(m[1]), index.lines_for(m.start(), m.end()))
+            params.append(ScenarioParam(code, where, pf))
+
+    a = text.assumptions
+    mention(a, r"商品天期為(\d+)個月期", "scenario_tenor", "情境假設", int)
+    mention(a, r"每單位面額為" + SCENARIO_CCY + N + "元", "scenario_denomination", "情境假設")
+    mention(a, r"固定配息率為" + N + "%", "scenario_monthly_coupon", "情境假設固定")
+    mention(a, r"配息期數=(\d+)", "scenario_coupon_periods", "情境假設", int)
+    mention(a, r"發行價格為" + N + "%", "scenario_issue_price", "情境假設")
+    table = fields["price_table"]
+    rows = table.value.rows if table.ok else ()
+    prices: list[ScenarioPrice] = []
+    for i, segment in enumerate(text.segments):
+        where = f"情境 {i + 1} "
+        mention(segment, r"(?:存續期間|本商品於)(\d+)個月", "scenario_tenor", where, int, required=False)
+        mention(segment, r"於(\d+)個月存續期間", "scenario_tenor", where, int, required=i > 0)
+        mention(segment, r"共(\d+)次配息", "scenario_coupon_periods", where, int, required=i > 0)
+        for m, principal in scenario_formulas(segment):
+            if principal:
+                continue
+            lines = segment.lines_for(m.start(), m.end())
+            params.append(
+                ScenarioParam(
+                    "scenario_denomination",
+                    f"{where}配息計算的",
+                    ParsedField.present("scenario_denomination", scenario_number(m[1]), lines),
+                )
+            )
+            params.append(
+                ScenarioParam(
+                    "scenario_monthly_coupon",
+                    where,
+                    ParsedField.present("scenario_monthly_coupon", scenario_number(m[2]), lines),
+                )
+            )
+        if i > 0 and not scenario_worst(segment):  # 較差情境（實物交割）的年化報酬率不核對（未涵蓋清單）
+            mention(segment, SCENARIO_ANNUALIZED, "scenario_annualized_return", f"{where}平均")
+        # 較差情境寫出的價格要對到同一檔，不是任一檔數值相同就算
+        named = [
+            n for n, r in enumerate(rows, start=1) if r.texts.get("label") and f"（{r.texts['label']}）" in segment.text
+        ]
+        row = 1 if len(rows) == 1 else named[0] if len(named) == 1 else None
+        for label, key in SCENARIO_REFERENCES:
+            refs = list(segment.finditer(re.escape(label) + SCENARIO_CCY + N))
+            required = i >= 2 and (key == "strike" or len(text.segments) == 4)
+            written = len(re.findall(re.escape(label) + SCENARIO_CCY, segment.text))
+            if (required and not refs) or written > len(refs):
+                missing = ParsedField.missing(f"scenario_{key}", f"{where}{label}缺漏、損壞或寫法未知")
+                prices.append(
+                    ScenarioPrice(
+                        where, row, key, replace(missing, evidence=[Evidence.of(x) for x in segment.lines[:2]])
+                    )
+                )
+            for m in refs:
+                pf = ParsedField.present(
+                    f"scenario_{key}", scenario_number(m[1]), segment.lines_for(m.start(), m.end())
+                )
+                prices.append(ScenarioPrice(where, row, key, pf))
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
+    fields["scenario_prices"] = standard_fields.occurrences("scenario_prices", prices)
 
 
 def _scenario_currencies(scenarios: Sequence[Line]) -> list[standard_fields.Occurrence]:
@@ -363,6 +510,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         fields["scenario_table"] = _price_table("scenario_table", scenarios[a:b], SCENARIO_TABLE)
     else:
         fields["scenario_table"] = ParsedField.missing("scenario_table", "情境價格表錨點缺漏／重複")
+    _scenario_standard(fields, ScenarioIndex(scenarios))
     f = fields.get
     fields["first_callable_period"] = first_callable(lambda k: f(k, ParsedField.missing(k)))
     fields["schedule_table"] = schedule_table(lambda k: f(k, ParsedField.missing(k)), fields["first_callable_period"])

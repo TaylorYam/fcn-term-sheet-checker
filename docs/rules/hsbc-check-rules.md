@@ -195,8 +195,9 @@
 | `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 ≤ 交易日、兩個刊印日期在交易日（含）至發行日（不含）之間（#254）（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
 | `doc.currency_consistency`、`doc.name_consistency` | 文件重複欄位 |
 | `field.currency`（其他出處） | 面額與最低金額、情境假設與各情境金額前的幣別字 = 參考條件表承作幣別（共用，Issue #170；欄位 `denomination_currency`、`minimum_trade_currency`、`minimum_subscription_currency`、`minimum_additional_currency`、`scenario_assumption_currency`、`scenario_n_currency`） |
-| `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_parameters` | 情境每處參數與正式條款一致；情境文字的執行價、觸及不保本價格 = §12(1) 該檔的值，或 = 期初股價 × % 依文件位數四捨五入／無條件捨去（兩種進位都接受；2026-10-15，#259） |
-| `doc.scenario_calculations`、`doc.scenario_general_annualized` | 本金、配息、部分期間配息、簡單損益；一般到期情境年化率 |
+| 共用 `scenario.reprint`、`scenario.params`、`scenario.strike`（Issue #294） | 情境價格表的價格、代號、欄頭 % = §12(1)；情境假設與各情境的天期、面額、固定配息率（年利率 ÷ 12 四捨五入 4 位）、配息期數、發行價格、非較差情境的平均年化報酬率 = 正式條款；情境文字的執行價、觸及不保本價格 = §12(1) 該檔的值，或 = 期初股價 × % 依文件位數四捨五入／無條件捨去（兩種進位都接受；2026-10-15，#259） |
+| `doc.scenario_table`、`doc.scenario_parameters` | 情境價格表每列的幣別、交易所 = §12(1)；各情境計息期間、配息公式期數、配息總期數 |
+| `doc.scenario_calculations` | 期初投資金額、本金、配息、部分期間配息、配息總額、簡單損益 |
 | `standard.*` | 審查日期、負責人、固定名稱／電話／地址、法人全名、三處警語、風險等級、禁用詞、費率、發行價格、商品命名 |
 
 本機八份範本均可辨識。新版整理表可配對七份；未列入的樣本回報 `reference_row_missing`，不擅用另一列。七份核對保留兩份舊審查日期差異，保留原文證據。H07 有利情境的簡單損益總額與明列兩項已進位配息金額加總相差 0.01，屬上手以未進位月配息率加總的尾差，依 Issue #82 容差判定通過。完整交易資料與逐項報告只留在本機，不提交 Git。
