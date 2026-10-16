@@ -222,9 +222,10 @@
 | §3.1 最低金額倍數 | `field.min_amounts`（倍數 `min_amount_multiples.bnp`） | 共用 `rules/reference.py` |
 | §3.2 審查標準共用項目 | `standard.approval_date`、`standard.chairman`、`standard.distributor`（含第四章 §16 電話：標準欄位 `distributor_phone_ch4`，由共用規則核對，Issue #196）、`standard.issuer_name`、`standard.fixed_warning`、`standard.risk_level`、`standard.forbidden_wording`、`standard.product_name`、`standard.fees`、`standard.issue_price`（三處重印）、`doc.denomination`、`doc.print_date`、`doc.subscription_start_date` | 共用 `rules/review_standard.py` |
 | §3.2 商品種類、發行不成立門檻 | `standard.product_type`、`standard.minimum_issue_size` | 共用 `rules/review_standard.py`（有該上手分節才核對） |
-| §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
+| §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`（第 15 項兩處）、`doc.min_coupon_rate` | `rules/bnp.py` |
+| §3.3 第 18 項假設與各情境算式的月配息率（= 第 15 項）、獲利情境年化報酬率（= 第 15 項年利率，依說明書位數四捨五入；Issue #294 決定 4 起不再和參考條件表比） | 共用 `scenario.params` | `rules/scenario.py` |
 | §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`、投資人須知 `iis.underlying_prices`（`split_suspected`，Issue #222） | 共用 `rules/reference.py` 的 `compare_sheet_prices` |
-| §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike`（表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/bnp_scenario.py` |
+| §3.4 重印表、較差情境執行價（Issue #294） | 共用 `scenario.reprint`、`scenario.strike`（假設句與股數算式的執行價格各一筆；表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/scenario.py`（對檔在 `parsers/bnp.py`） |
 | §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.autocall_dates` | `rules/bnp.py`（日期表結構為共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）） |
 | §3.6 保證機構名稱 | `standard.guarantor_name`（`guarantor_name.bnp` 三處） | 共用 `rules/review_standard.py` |
-| §3.7 情境分析 | `doc.scenario_parameters`（假設、情境種類）、`doc.scenario_calculations`（`情境一_assumed` 假設句期別、`情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_shares`／`_remainder`） | `rules/bnp_scenario.py` |
+| §3.7 情境分析 | 共用 `scenario.params`（假設的商品面額、投資本金）、`doc.scenario_parameters`（情境種類）、`doc.scenario_calculations`（`情境一_assumed` 假設句期別、`情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_shares`／`_remainder`） | `rules/bnp_scenario.py` |

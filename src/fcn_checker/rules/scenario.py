@@ -112,8 +112,12 @@ def _shown(price: Decimal | None) -> str:
     return "（空白）" if price is None else f"{price:,}"
 
 
-def _pct(pct: Decimal | None) -> str:
-    return "（沒寫）" if pct is None else f"{pct}%"
+def _pct(pct: Decimal | tuple[Decimal, ...] | None) -> str:
+    if pct is None:
+        return "（沒寫）"
+    if isinstance(pct, tuple):  # 每檔各寫一個百分比（BNP、SG）
+        return "、".join(f"{p}%" for p in pct)
+    return f"{pct}%"
 
 
 def _names(columns) -> str:

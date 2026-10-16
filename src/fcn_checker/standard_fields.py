@@ -136,7 +136,8 @@ class Occurrence:
 
 @dataclass(frozen=True)
 class TableAt:
-    """說明書上的一張價格表：位置（用在項目名稱與錯訊，例：第 9 項價格表）與 parsers/price_table.py 讀出的表。"""
+    """說明書上的一張價格表：位置（用在項目名稱與錯訊，例：第 9 項價格表）與 parsers/price_table.py 讀出的表（或同形狀的表：
+    BNP、SG 的標的表每檔各寫一個百分比，`pcts` 為各欄依檔序的百分比 tuple）。"""
 
     where: str
     table: PriceTable

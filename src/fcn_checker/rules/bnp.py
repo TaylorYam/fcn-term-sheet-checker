@@ -12,7 +12,7 @@ import re
 from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import bnp_scenario, kit
+from . import bnp_scenario, kit, scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "BNP"
@@ -47,8 +47,8 @@ BASE_PROSPECTUS_PLACES = 3  # 基本公開說明書日期：封面警語 (7)、�
 
 
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項兩處、第 18 項假設與各情境算式的每個月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到說明書顯示的位數
-    （USD／GBP 4 位、JPY 6 位）。"""
+    """第 15 項月配息率與固定配息金額算式的月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到說明書顯示的位數
+    （USD／GBP 4 位、JPY 6 位）。第 18 項假設與各情境算式的月配息率由共用情境規則 `scenario.params` 和第 15 項比（Issue #294）。"""
     return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
@@ -255,7 +255,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果、審查標準與宣告的參考條件表欄位（年利率）。"""
     return [
         *monthly_coupon(ctx),
-        *kit.annualized_return(ctx),
         min_coupon_rate(ctx),
         *document_info(ctx),
         *periods(ctx),
@@ -264,5 +263,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         autocall_dates(ctx),
         base_prospectus(ctx),
         page_count(ctx),
+        *scenario.run(ctx),  # 第 18 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *bnp_scenario.run(ctx),
     ]
