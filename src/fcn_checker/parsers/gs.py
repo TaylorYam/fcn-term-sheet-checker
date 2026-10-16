@@ -15,15 +15,16 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
 from . import money, price_table, schedule
 from .common import Mention, RawText, capture_group, dec, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "gs-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #317）；4：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "4"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #317）；4：日期表標準欄位與共用排程推導（Issue #289）；
+# 5：情境價格與假設值交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "5"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -185,7 +186,7 @@ class GsTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
-    # 年利率主來源（第 14 項）以外、須等於年利率的出處：第 15 項(2) 最低保證收益率、第 17 項情境假設與各配息金額算式
+    # 年利率主來源（第 14 項）以外、須等於年利率的出處：第 15 項(2) 最低保證收益率（第 17 項情境的交給共用情境規則）
     coupon_mentions: list[Mention]
     # 其他重複寫出的值（Issue #317）：種類 → 各出處；每種須等於的正式條款見 rules/gs.py `repeated`
     repeated: dict[str, list[Mention]]
@@ -241,7 +242,7 @@ def read(lines: Sequence[Line]) -> GsTermSheet:
     _article15(fields, article(15))
     _article16(fields, article(16))
     _schedule(fields)
-    scenario_coupon = _article17(fields, article(17))
+    scenario_coupon, strike_pct = _article17(fields, article(17))
 
     _chapter2(fields, doc)
     _chapter4(fields, doc, put)
@@ -249,15 +250,21 @@ def read(lines: Sequence[Line]) -> GsTermSheet:
     ch4 = doc.articles(4)
     ch4_art = {n: doc.span_lines(ch4.get(n)) for n in (2, 5, 9)}
     ch3 = doc.chapter_lines(3)
-    repeated, scenario_coupons = _repeated(article, ch4_art, ch3)
+    repeated, scenario_coupons, scenario_denoms = _repeated(article, ch4_art, ch3)
+    fields["scenario_params"] = standard_fields.occurrences(  # 共用情境規則（Issue #294）
+        "scenario_params",
+        [
+            ScenarioParam("scenario_coupon_pa", "第一章第 17 項情境假設配息率的", scenario_coupon),
+            *_params("scenario_coupon_pa", "年利率", scenario_coupons),
+            *_params("scenario_denomination", "每單位面額", scenario_denoms),
+            ScenarioParam("scenario_strike_pct", "第一章第 17 項情境 4 第 1 檔", strike_pct),
+        ],
+    )
+    fields["scenario_reprint_table"] = standard_fields.absent("scenario_reprint_table", "重印的價格表")
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [*fields["currency_others"].value, *_currency_mentions(article, ch4_art, ch3)]
     )
-    coupons = [
-        Mention.of_field("第一章第 15 項(2) 最低保證收益率", fields["minimum_return_pct"]),
-        Mention.of_field("第一章第 17 項情境假設配息率", scenario_coupon),
-        *scenario_coupons,
-    ]
+    coupons = [Mention.of_field("第一章第 15 項(2) 最低保證收益率", fields["minimum_return_pct"])]
     return GsTermSheet(fields, TextIndex(doc.lines), doc, coupons, repeated)
 
 
@@ -491,8 +498,9 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 # ---------------------------------------------------------------- 第 17 項情境
 
 
-def _article17(fields: dict[str, ParsedField], art17: list[Line]) -> ParsedField:
-    """情境假設配息率、情境 1 的期別、情境 4 第 1 檔的初始參考價格／執行價格／K %（範本規格 §4.9）；回傳情境假設配息率。"""
+def _article17(fields: dict[str, ParsedField], art17: list[Line]) -> tuple[ParsedField, ParsedField]:
+    """情境假設配息率、情境 1 的期別、情境 4 第 1 檔的初始參考價格／執行價格（共用情境規則的 `scenario_prices`）與 K %
+    （範本規格 §4.9）；回傳情境假設配息率與情境 4 的 K %。"""
     ti = TextIndex(art17)
     coupon = capture("scenario_coupon_pct", ti, r"\(2\)配息率[:：]年利率" + PCT, Decimal, whole_match=True)
     fields["scenario_units"] = capture("scenario_units", ti, r"×最低申購單位數（(\d+)單位）", int, whole_match=True)
@@ -509,17 +517,19 @@ def _article17(fields: dict[str, ParsedField], art17: list[Line]) -> ParsedField
         rf"執行價格{p}[:：]({PRICE})[^\d（]*?（初始參考價格{p}之{PCT}）"
     )
     found = list(ti.finditer(scen4))
+    where = "第一章第 17 項情境 4 "
     if len(found) == 1:
         m = found[0]
-        value = {"initial": dec(m[1]), "strike": dec(m[3]), "strike_pct": Decimal(m[4])}
-        fields["scenario_first_underlying"] = ParsedField.present(
-            "scenario_first_underlying", value, ti.lines_for(m.start(), m.end())
-        )
+        lns = ti.lines_for(m.start(), m.end())
+        initial, strike, pct = (ParsedField.present("scenario4", v, lns) for v in (dec(m[1]), dec(m[3]), Decimal(m[4])))
     else:
-        fields["scenario_first_underlying"] = ParsedField.missing(
-            "scenario_first_underlying", "情境 4 找不到或有多處「初始參考價格(1)…執行價格(1)…（初始參考價格(1)之X%）」"
+        initial = strike = pct = ParsedField.missing(
+            "scenario4", "情境 4 找不到或有多處「初始參考價格(1)…執行價格(1)…（初始參考價格(1)之X%）」"
         )
-    return coupon
+    fields["scenario_prices"] = standard_fields.occurrences(
+        "scenario_prices", [ScenarioPrice(where, 1, "initial", initial), ScenarioPrice(where, 1, "strike", strike)]
+    )
+    return coupon, pct
 
 
 # ---------------------------------------------------------------- 第二章、第四章
@@ -690,9 +700,15 @@ def _scenario_mentions(
 
 def _repeated(
     article: Callable[[int], list[Line]], ch4: dict[int, list[Line]], ch3: list[Line]
-) -> tuple[dict[str, list[Mention]], list[Mention]]:
-    """重複寫出的面額、到期買回 %、情境申購單位數與初始投資金額、天期；另回傳情境各配息金額算式的年利率。"""
+) -> tuple[dict[str, list[Mention]], list[Mention], list[Mention]]:
+    """重複寫出的面額、到期買回 %、情境申購單位數與初始投資金額、天期；另回傳情境各配息金額算式的年利率與情境裡的
+    每單位面額（交給共用情境規則）。"""
     art17 = article(17)
+    scenario_denoms = [
+        *pattern_mentions(art17, DENOM_MENTION, "第一章第 17 項情境假設初始投資金額的每單位面額", number),
+        *_scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的每單位面額", number, (1, 2, 3, 4)),
+        *_scenario_mentions(art17, SCENARIO_PAR, "總報酬率算式的每單位面額", number, (1, 2, 3)),
+    ]
     denom = [
         *(
             m
@@ -701,9 +717,6 @@ def _repeated(
                 article(n), DENOM_MENTION, f"第一章第 {n} 項每單位面額", number, minimum=3 if n == 9 else 1
             )
         ),
-        *pattern_mentions(art17, DENOM_MENTION, "第一章第 17 項情境假設初始投資金額的每單位面額", number),
-        *_scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的每單位面額", number, (1, 2, 3, 4)),
-        *_scenario_mentions(art17, SCENARIO_PAR, "總報酬率算式的每單位面額", number, (1, 2, 3)),
         *pattern_mentions(ch4[5], DENOM_MENTION, "第四章第 5 項申購價金之計算的每單位面額", number),
         *pattern_mentions(ch4[9], DENOM_MENTION, "第四章第 9 項提前贖回價金的每單位面額", number),
     ]
@@ -730,7 +743,13 @@ def _repeated(
             *pattern_mentions(ch4[2], TENOR_FEE, "第四章第 2 項通路服務費說明「於N個月間」", int),
         ],
     }
-    return repeated, _scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的年利率", Decimal, (1, 2, 3, 4), group=3)
+    coupons = _scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的年利率", Decimal, (1, 2, 3, 4), group=3)
+    return repeated, coupons, scenario_denoms
+
+
+def _params(code: str, name: str, mentions: list[Mention]) -> list[ScenarioParam]:
+    """GS 的出處（位置含名稱）→ 共用情境規則的出處：名稱由共用表給，位置去掉名稱。"""
+    return [ScenarioParam(code, m.where.replace(name, "", 1), m.parsed(code)) for m in mentions]
 
 
 def _currency_mentions(

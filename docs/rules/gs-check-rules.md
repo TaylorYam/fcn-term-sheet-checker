@@ -118,14 +118,16 @@
 - 情境 1 `（且落在第k個觀察期間結束日）` 的 k = Non-Call。
 - 情境 4 `初始參考價格(1): P`、`執行價格(1): S（初始參考價格(1)之X%）`（單一標的沒有 `(1)`）：P、S = 價格表第 1 檔的初始參考價格、執行價格（數值相等），X = K %。
 
-不重算配息金額、股數、畸零金額、總報酬率。找不到情境 1 或 4 的這幾句 → 轉人工覆核。情境 4 第 1 檔的結果帶出預期值／實際值（初始參考價格、執行價格、K %、最低申購單位數；Issue #317）。情境裡其他重複寫出的值見 §3.10。
+不重算配息金額、股數、畸零金額、總報酬率。找不到情境 1 或 4 的這幾句 → 轉人工覆核。情境裡其他重複寫出的值見 §3.10。
+
+2026-10-16 起假設配息率、情境 4 第 1 檔的價格與 K % 改由共用情境規則核對（[共用核對規則](shared-check-rules.md) §7，Issue #294）：`scenario.params`（年利率、K %）、`scenario.strike`（初始參考價格、執行價格各一筆）。執行價格因此和其他上手一樣，接受初始參考價格 × K % 依位數四捨五入或無條件捨去（Issue #259）。
 
 ### 3.8 最低申購與贖回（2026-10-15 確認）
 
 - 第四章 4. `最低申購為N單位且其後增加單位應為一單位之倍數。每一單位為X幣別。`：parser 交出最低申購 = N × X、最低加購 = 1 × X（`每一單位` 的金額 X 也列入 `currency_others`）。
 - 第四章 8.(2) `每筆交易之最低贖回單位數為1單位，後續為一單位之倍數`：最低贖回、增加贖回單位 = 單位數 × 面額。
 - 審查標準 `min_amount_multiples.gs`：`minimum_subscription = { USD = 5, JPY = 1, CNH = 1 }`（其他幣別沒有樣本 → 轉人工覆核，同 SG 依幣別的寫法）、`minimum_additional = 1`、`minimum_redemption = 1`、`redemption_increment = 1`。
-- 交叉驗證：第 17 項 `最低申購單位數（N單位）` 的 N = 第四章 4. 的 N（併入 `doc.scenario_table` 的結果，不另出一筆）。
+- 交叉驗證：第 17 項 `最低申購單位數（N單位）` 的 N = 第四章 4. 的 N（`doc.scenario_units`）；任一邊讀不到轉人工覆核（Issue #294 起，原本判不一致）。
 
 ### 3.10 重複寫出的值（2026-10-16，Issue #317）
 
@@ -133,11 +135,12 @@
 
 | 出處 | 須等於 | rule_id |
 |---|---|---|
-| 第一章第 9 項 (1)～(3)、第 14、15、16 項，第 17 項初始投資金額，第四章 5.、9.(2) `每單位面額（N X）`；情境 1～4 配息金額算式 `= N X × …`、情境 1～3 總報酬率 `= [(N X + …` | 第一章第 6 項每單位面額 | `doc.denomination_mentions` |
+| 第一章第 9 項 (1)～(3)、第 14、15、16 項，第四章 5.、9.(2) `每單位面額（N X）` | 第一章第 6 項每單位面額 | `doc.denomination_mentions` |
+| 第 17 項初始投資金額 `每單位面額（N X）`；情境 1～4 配息金額算式 `= N X × …`、情境 1～3 總報酬率 `= [(N X + …` | 第一章第 6 項每單位面額 | 共用 `scenario.params`（Issue #294） |
 | 第 9 項 (2)、第 15 項 (1) 到期買回 `每單位面額（…）× X%`；情境 1～3 總報酬率 `每單位面額 × X%` | 100 | `doc.redemption_pct` |
-| 情境 1～4 配息金額算式 `× C% / 12`（5 列） | 第 14 項年利率 | `doc.coupon_mentions` |
-| 情境 1～4 總報酬率 `× n / …` 的 n | 第四章 4. 最低申購單位數 | `doc.scenario_params` |
-| `(3)…假設期初本金金額為M`、初始投資金額 `= M`、情境 1～4 總報酬率 `/ M` | 最低申購單位數 × 每一單位金額 | `doc.scenario_params` |
+| 情境 1～4 配息金額算式 `× C% / 12`（5 列） | 第 14 項年利率 | 共用 `scenario.params`（Issue #294） |
+| 情境 1～4 總報酬率 `× n / …` 的 n | 第四章 4. 最低申購單位數 | `doc.scenario_units` |
+| `(3)…假設期初本金金額為M`、初始投資金額 `= M`、情境 1～4 總報酬率 `/ M` | 最低申購單位數 × 每一單位金額 | `doc.scenario_units` |
 | 第三章匯兌風險 `於N個月後始返還本金`、第四章 2. 通路服務費說明 `通路服務費率於N個月間` | 第 13 項 (1) 年期 | `doc.tenor_mentions` |
 | 上列面額旁的幣別（第四章 5. 原本就有）；第 9 項 `以X支付配息金額及到期買回金額`（非美元商品才有）；第 15 項 `以X計價之畸零現金金額`；第三章 `計價幣別（X）` 3 處、`本商品係以X計價`；第四章 2. `假設申購n單位（M X）`、`期初淨值自M X降至M' X` 兩個幣別；第 17 項 `(3)` 到情境 4 價格段之前每一處金額（情境 4 價格段跟著標的走，不列入） | 參考條件表承作幣別 | `field.currency`（`currency_others`） |
 
@@ -220,15 +223,17 @@
 | 規則 | rule_id |
 |---|---|
 | 第 14 項「約為Y%」= 年利率 ÷ 12（4 位） | `derive.monthly_coupon` |
-| 第 15 項(2) 最低保證收益率、第 17 項情境假設的年利率 = 第 14 項 | `doc.coupon_mentions` |
+| 第 15 項(2) 最低保證收益率 = 第 14 項 | `doc.coupon_mentions` |
+| 第 17 項情境假設的年利率、情境裡的面額與配息算式的年利率、情境 4 第 1 檔的 K % | 共用 `scenario.params`（Issue #294） |
+| 情境 4 第 1 檔的初始參考價格、執行價格 = 價格表第 1 檔 | 共用 `scenario.strike`（Issue #294） |
 | 第 15 項(2) 首 k 個、情境 1 第 k 個觀察期間 = 第 16 項 k | `doc.autocall_terms` |
 | 商品代號四處；ISIN 三處；第一章第 1 項中文名稱；第一章第 3 項發行機構全名 = 第 1 頁第 7 項；第一章第 5 項幣別與 ISO 代碼（CNY 視為 CNH） | `doc.product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.issuer_name`、`doc.currency_consistency` |
 | 期數（觀察時程表列數、中英文名稱月數） | `doc.coupon_periods` |
 | 記憶式句型 ⇔ 名稱；單一／多標的寫法（第 16 項句型、價格表表頭有無「(i)」）⇔ 價格表檔數；第 10 項代碼集合與檔數 = 價格表（不看順序） | `doc.ko_memory`、`doc.underlying_count`、`doc.underlying_tickers` |
 | KI 寫法 ⇔ 價格表下限觸發價格欄 ⇔「下限觸發價格」定義 | `doc.ki_consistency` |
-| 價格表表頭 K／KI % = 定義；情境 4 第 1 檔價格與 K %、情境假設最低申購單位數 = 第四章 4. | `doc.table_header_pct`、`doc.scenario_table` |
+| 價格表表頭 K／KI % = 定義；情境假設最低申購單位數 = 第四章 4. | `doc.table_header_pct`、`doc.scenario_units` |
 | 觀察時程表末列、結束日早於付息日；起始日 = 前一期結束日後的下一個一籃子預定交易日（Issue #289 前只查晚於前一期結束日；本機 42 份樣本都成立，2026-10-16 使用者決定改查；第 1 期不核對） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
-| 重複寫出的面額、到期買回 %、情境配息率、申購單位數與初始投資金額、天期（§3.10，Issue #317） | `doc.denomination_mentions`、`doc.redemption_pct`、`doc.coupon_mentions`、`doc.scenario_params`、`doc.tenor_mentions` |
+| 重複寫出的面額、到期買回 %、申購單位數與初始投資金額、天期（§3.10，Issue #317） | `doc.denomination_mentions`、`doc.redemption_pct`、`doc.scenario_units`、`doc.tenor_mentions` |
 
 第一章第 3 項寫發行機構全名：共用 `standard.issuer_name` 的 `issuer_name_ch1` 是「只寫中文的出處」，parser 交中文部分給共用規則，全名另由 `doc.issuer_name` 和第 1 頁比（實作時決定）。價格表依座標分欄讀（表頭與數字欄由左到右、每欄由上到下接起來；列以左欄列號切），費用表費率欄取「費率（百分比）」到「收取時點」之間、一列剛好一個 X%~Y%。投資人須知的 CJK 相容字在 `parsers/gs_iis.py` 讀之前轉換；合成文件畫不出相容字，這一點只由本機真實樣本測試（`tests/test_real_gs.py`）涵蓋。
 

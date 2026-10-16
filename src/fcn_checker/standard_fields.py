@@ -12,10 +12,13 @@ import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from .parsers.layout import TextIndex
 from .schema import Evidence, FieldStatus, ParsedField
+
+if TYPE_CHECKING:
+    from .parsers.price_table import PriceTable
 
 
 class TermSheet(Protocol):
@@ -131,7 +134,58 @@ class Occurrence:
     value: ParsedField
 
 
-def occurrences(name: str, items: list[Occurrence]) -> ParsedField:
+@dataclass(frozen=True)
+class TableAt:
+    """說明書上的一張價格表：位置（用在項目名稱與錯訊，例：第 9 項價格表）與 parsers/price_table.py 讀出的表。"""
+
+    where: str
+    table: PriceTable
+
+
+# 情境假設值的出處代號 → （出處名稱, 要等於的正式值標準欄位）；名稱只在這裡定義（Issue #294 決定 2b）
+SCENARIO_TARGETS: dict[str, tuple[str, str]] = {
+    "scenario_denomination": ("每單位面額", "denomination"),
+    "scenario_principal": ("本金", "denomination"),
+    "scenario_investment": ("總投資金額", "denomination"),  # 面額 × 倍數（同一處寫的單位數）
+    "scenario_tenor": ("天期", "tenor_months"),
+    "scenario_coupon_months": ("配息月數", "tenor_months"),
+    "scenario_coupon_pa": ("年利率", "coupon_pa_pct"),
+    "scenario_annualized_return": ("年化報酬率", "coupon_pa_pct"),
+    "scenario_monthly_coupon": ("配息率", "monthly_coupon_pct"),
+    "scenario_issue_price": ("發行價格", "issue_price_pct"),
+    "scenario_strike_pct": ("執行價 %", "strike_pct"),
+}
+
+
+@dataclass(frozen=True)
+class ScenarioParam:
+    """情境假設值的一處（Issue #294 (b)）：出處代號（`SCENARIO_TARGETS` 的鍵，決定名稱與正式值）、位置、值。"""
+
+    code: str
+    where: str  # 項目名稱的開頭（例：第 16 項基本假設、第 15 項情境 (i) 到期贖回金額的）
+    value: ParsedField
+    times: ParsedField | None = None  # 倍數：值 = 正式值 × 倍數（例：總投資金額 = 單位數 × 面額，倍數是同一處的單位數）
+
+    @property
+    def name(self) -> str:
+        return SCENARIO_TARGETS[self.code][0]
+
+    @property
+    def target(self) -> str:
+        return SCENARIO_TARGETS[self.code][1]
+
+
+@dataclass(frozen=True)
+class ScenarioPrice:
+    """較差情境寫出的一個價格（Issue #294 (c)）：對到主價格表 `underlying_prices` 第幾檔（從 1 起）的哪一欄。"""
+
+    where: str  # 項目名稱的開頭（例：第 15 項情境 (iii) 交割股數算式的）
+    row: int | None  # 第幾檔；上手認不出是哪一檔時為 None（轉人工覆核）
+    column: str  # initial／strike／ko／ki
+    value: ParsedField  # 情境寫的價格（Decimal）
+
+
+def occurrences(name: str, items: Sequence[Occurrence | ScenarioParam | ScenarioPrice]) -> ParsedField:
     """把上手的各出處包成一個標準欄位（清單本身一定存在，各出處自帶狀態與證據）。"""
     return ParsedField(name, FieldStatus.PRESENT, tuple(items))
 
@@ -173,6 +227,13 @@ STANDARD_FIELDS: dict[str, str] = {
     "倍數依審查標準 min_amount_multiples.<上手>.<出處欄位>，沒設定為 1",
     "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",
     "print_dates": "tuple[Occurrence, ...]：須在交易日當天至允許天數內的刊印日期出處",
+    "monthly_coupon_pct": "Decimal：說明書正式的月配息率 %（例：配息表、條款寫的每月配息率），保留說明書顯示位數；"
+    "只有情境假設值要比它時才讀（rules/scenario.py）；範本沒有時交出 absent",
+    # 情境分析（docs/rules/shared-check-rules.md §7，Issue #294）；範本沒有時交出 absent
+    "main_price_table": "TableAt：說明書主價格表的位置與讀出的表；情境重印價格表要等於它",
+    "scenario_reprint_table": "TableAt：情境分析重印的價格表；逐格、表頭百分比、代碼、列數 = `main_price_table`",
+    "scenario_params": "tuple[ScenarioParam, ...]：情境假設值的各出處（出處代號、位置、值、倍數），每處 = 對應的正式值",
+    "scenario_prices": "tuple[ScenarioPrice, ...]：較差情境寫出的價格（對到 `underlying_prices` 第幾檔的哪一欄）",
     # 審查標準規則（docs/rules/review-standard.md）
     "name_zh": "str：商品中文名稱",
     "name_en": "str：商品英文名稱",
