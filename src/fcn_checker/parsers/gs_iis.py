@@ -15,13 +15,15 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import Occurrence
 from ..text import squash
-from . import gs, iis, price_table
-from .common import RawText, compat_normalized, derived, number
+from . import gs, iis, money, price_table
+from .common import Mention, RawText, compat_normalized, derived, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "gs-zh-iis"
-PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：警語的受託機構名稱（Issue #306）
+PARSER_VERSION = "4"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：警語的受託機構名稱（Issue #306）；
+# 4：重複寫出的幣別、天期、買回 %（Issue #317）
 SECTIONS = (
     "本商品之投資風險警語",
     "一.相關機構",
@@ -33,6 +35,8 @@ SECTIONS = (
     "七.發行機構、總代理人及受託機構與投資人爭議之處理方式",
 )
 REDEEM = ("3.買回價金之計算", "4.發行或受託不成立之處理")  # KO／KI 寫法所在的段落
+RISKS = ("三.主要投資風險", "四.費用")
+FEES = ("四.費用", "五.")
 PAGE = r"第-\s*(\d+)\s*-頁，共(\d+)頁"  # 頁底頁碼
 # 記憶式（範本規格 §4.2）：名詞沒有「(i)」、「自動提前出場事件」沒有「」
 EVENT_MEMORY = "各連結標的至少發生過一次記憶提前出場事件，則視為已發生自動提前出場事件"
@@ -77,6 +81,8 @@ PROVIDED = frozenset(
         "first_callable_period",
         "ko_memory",
         "ki_type",
+        "tenor_mentions",
+        "redemption_pct_mentions",
         "issuer_names_zh",
         "distributor_names",
         "distributor_addresses",
@@ -149,6 +155,69 @@ def _redeem_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
     fields["ki_type"] = gs.ki_type(sec_ti, sec, where="買回價金之計算")
 
 
+def _occurrences(field: str, name: str, found: list[Mention]) -> list[Occurrence]:
+    return [
+        Occurrence(
+            field,
+            name,
+            m.where,
+            ParsedField(field, FieldStatus.PRESENT, m.value, list(m.evidence))
+            if m.value is not None
+            else ParsedField.missing(field, f"找不到{m.where}"),
+        )
+        for m in found
+    ]
+
+
+def _repeated(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
+    """重複寫出的值（Issue #317，同說明書）：說明文字幣別字併入 `currency_others`；天期兩處、到期買回「每單位面額 × X%」
+    交給 GS 投資人須知規則。"""
+    redeem, risks, fees = (iis.section(ti, x) or [] for x in (REDEEM, RISKS, FEES))
+    words = money.currency_words
+    ccy, amount = gs.CCY, gs.AMOUNT
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others",
+        [
+            *fields["currency_others"].value,
+            *words(redeem, rf"以({ccy})計價之畸零現金金額", "odd_lot_currency", "說明文字幣別", "二.3.(1) 可交付資產"),
+            *words(
+                risks,
+                rf"計價幣別（({ccy})）",
+                "risk_currency",
+                "說明文字幣別",
+                "三.1. 利率風險、匯兌風險「計價幣別（X）」",
+            ),
+            *words(risks, rf"本商品係以({ccy})計價", "risk_based_currency", "說明文字幣別", "三.1.(6) 匯兌風險"),
+            *words(
+                fees,
+                rf"假設申購\d+單位[（(]{amount}({ccy})[）)]",
+                "fee_example_currency",
+                "說明文字幣別",
+                "四. 費用說明",
+            ),
+            *words(fees, rf"期初淨值自{amount}({ccy})降至", "fee_nav_currency", "說明文字幣別", "四. 費用說明期初淨值"),
+            *words(
+                fees,
+                rf"期初淨值自{amount}{ccy}降至{amount}({ccy})",
+                "fee_nav_after_currency",
+                "說明文字幣別",
+                "四. 期初淨值降至",
+            ),
+        ],
+    )
+    tenor = [
+        *gs.mentions(risks, r"於(\d+)個月後始返還本金", "三.1.(6) 匯兌風險「於N個月後始返還本金」", int),
+        *gs.mentions(fees, r"通路服務費率於(\d+)個月間", "四. 費用說明「於N個月間」", int),
+    ]
+    fields["tenor_mentions"] = standard_fields.occurrences(
+        "tenor_mentions", _occurrences("tenor_mention", "天期（月）", tenor)
+    )
+    pct = gs.mentions(redeem, rf"每單位面額×{gs.PCT}", "二.3.(1) 到期買回金額「每單位面額 × X%」", Decimal)
+    fields["redemption_pct_mentions"] = standard_fields.occurrences(
+        "redemption_pct_mentions", _occurrences("redemption_pct", "到期買回金額 %", pct)
+    )
+
+
 def read(lines: Sequence[Line]) -> iis.IisSheet:
     text_lines = body(lines)
     ti = TextIndex(text_lines)
@@ -189,6 +258,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         ti,
         (("denomination_currency", "每單位面額幣別", "二.1.(7) 每單位面額", rf"\(7\)每單位面額[:：][\d,]+({gs.CCY})"),),
     )
+    _repeated(ti, fields)
     a = next((i for i, ln in enumerate(text_lines) if squash(ln.text).startswith("(10)連結標的資產")), None)
     b = next(
         (i for i, ln in enumerate(text_lines) if a is not None and i > a and squash(ln.text).startswith("(11)")), None

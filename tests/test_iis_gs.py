@@ -53,6 +53,13 @@ def test_supported_types_pass(tmp_path, spec):
         ),
         (Edit("(6) 計價幣別:美元", "(6) 計價幣別:日圓", "iis.summary"), "field.currency"),
         (Edit("TDCC 商品代號為148199990001", "TDCC 商品代號為148199990002", "iis.cover"), "iis.product_code"),
+        # Issue #317：重複寫出的幣別字、天期、到期買回 %
+        (Edit("以美元計價之畸零現金金額", "以日圓計價之畸零現金金額", "iis.redeem"), "field.currency"),
+        (Edit("本商品係以美元計價", "本商品係以日圓計價", "iis.rest"), "field.currency"),
+        (Edit("期初淨值自50,000美元", "期初淨值自50,000日圓", "iis.fees"), "field.currency"),
+        (Edit("包含於6個月後始返還本金", "包含於7個月後始返還本金", "iis.rest"), "iis.tenor_mentions"),
+        (Edit("通路服務費率於6個月間", "通路服務費率於7個月間", "iis.fees"), "iis.tenor_mentions"),
+        (Edit("每單位面額 × 100%;", "每單位面額 × 99%;", "iis.redeem"), "iis.redemption_pct"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )
