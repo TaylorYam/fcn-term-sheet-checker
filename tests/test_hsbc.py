@@ -382,7 +382,7 @@ def test_warning_risk_wording_and_name_rules(tmp_path):
     "old,new,rule",
     [
         ("70.0000", "71.0000", "doc.scenario_table"),
-        ("執行價(即期初股價的70%)", "執行價(即期初股價的71%)", "doc.scenario_header_pct"),
+        ("(即期初股價的70%)", "(即期初股價的71%)", "doc.scenario_header_pct"),
     ],
 )
 def test_scenario_table_is_independently_compared(tmp_path, old, new, rule):

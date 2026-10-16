@@ -27,6 +27,19 @@ CNH_NOTE = (
 )
 
 
+# 價格表各欄的左緣（真實樣本的欄序）
+TABLE_X = {
+    "code": 60.0,
+    "name": 110.0,
+    "ccy": 170.0,
+    "exchange": 200.0,
+    "initial": 250.0,
+    "strike": 310.0,
+    "ko": 390.0,
+    "ki": 470.0,
+}
+
+
 def underlyings(count: int) -> tuple[UL, ...]:
     """HSBC 合成文件的標的：ZZn UW、虛構標的n、期初價 100。"""
     return tuple(UL(f"虛構標的{i}", "NASDAQ", f"ZZ{i} UW", Decimal("100.0000")) for i in range(1, count + 1))
@@ -144,18 +157,28 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         w.line(80, f"({n})")
 
     def table(section):
+        """價格表（真實欄列版面）：彭博代號、中文名稱、幣別、交易所、期初股價，價格欄的「(即期初股價的X%)」在欄名下一行。"""
         w.section = section
-        for t in [
-            "期初股價",
-            f"執行價(即期初股價的{pct(s.strike)}%)",
-            f"自動提前到期價格(即期初股價的{pct(s.ko)}%)",
-        ] + ([f"觸及不保本價格(即期初股價的{pct(s.ki_pct)}%)"] if s.ki != "none" else []):
-            line(t)
+        x = TABLE_X
+        heads = [
+            (x["code"], ["彭博代號"]),
+            (x["name"], ["中文名稱"]),
+            (x["ccy"], ["幣別"]),
+            (x["exchange"], ["交易所"]),
+        ]
+        heads.append((x["initial"], ["期初股價"]))
+        cols = [("strike", "執行價", s.strike), ("ko", "自動提前到期價格", s.ko)]
+        if s.ki != "none":
+            cols.append(("ki", "觸及不保本價格", s.ki_pct))
+        heads += [(x[key], [label, f"(即期初股價的{pct(p)}%)"]) for key, label, p in cols]
+        rows = []
         for u in s.underlyings:
-            prices = [price(u.initial, p) for p in (s.strike, s.ko) + ((s.ki_pct,) if s.ki != "none" else ())]
             # 幣別格是商品的承作幣別（不是標的自己的交易幣別，Issue #167）
-            for t in [u.ticker, u.name, s.ccy, u.exchange, f"{u.initial:.4f}", *(f"{p:.4f}" for p in prices)]:
-                line(t)
+            cells = [(x["code"], [u.ticker]), (x["name"], [u.name]), (x["ccy"], [s.ccy]), (x["exchange"], [u.exchange])]
+            cells.append((x["initial"], [f"{u.initial:.4f}"]))
+            cells += [(x[key], [f"{price(u.initial, p):.4f}"]) for key, _, p in cols]
+            rows.append(cells)
+        w.grid(heads, rows)
 
     w.section = "cover"
     short = s.name.replace("（以下簡稱「本商品」）", "")

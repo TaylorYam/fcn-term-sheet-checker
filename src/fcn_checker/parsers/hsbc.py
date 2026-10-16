@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import hsbc_tables as tables
-from . import money
+from . import money, price_table
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
 # 條號自成一行（`9.`），也可能與標題同一行（`10. 發行價格：`，真實樣本第 10 條起是這種版面，Issue #185）
 LAYOUT = LayoutSpec(
     r"第{zh}章\s*{name}", re.compile(r"^(\d{1,2})\.(?:\s+\S.*)?$"), 100, re.compile(r"^\((\d{1,2})\)\s*(.*)$"), 110
@@ -23,6 +23,27 @@ LAYOUT = LayoutSpec(
 N = r"([\d,]+(?:\.\d+)?)"
 D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 CURRENCY_WORD = "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True))  # 中文幣別字，長的先比
+# 第 12 條(1) 價格表：彭博代號、中文名稱、幣別、交易所、期初股價、執行價、自動提前到期價格、（觸及不保本價格），
+# 期初股價以外各帶「(即期初股價的X%)」；第 18 條情境價格表同一張表、沒有中文名稱欄
+PRICE_TABLE = price_table.TableSpec(
+    where="第一章第 12 條價格表",
+    initial="期初股價",
+    columns=(
+        price_table.Column("strike", "執行價"),
+        price_table.Column("ko", "自動提前到期價格"),
+        price_table.Column("ki", "觸及不保本價格", required=False),
+    ),
+    anchor="ticker",
+    pct=r"\(即期初股價的([\d.]+)%\)",
+    pct_label="(即期初股價的X%)",
+    code="彭博代號",
+    texts=(
+        price_table.Column("label", "中文名稱", required=False),
+        price_table.Column("currency", "幣別"),
+        price_table.Column("exchange", "交易所"),
+    ),
+)
+SCENARIO_TABLE = replace(PRICE_TABLE, where="第一章第 18 條情境價格表")
 
 
 def document(lines: Sequence[Line]) -> Document:
@@ -85,16 +106,21 @@ class HsbcTermSheet:
         return standard_fields.lookup(self.fields, name)
 
 
-def _standard_prices(table: ParsedField) -> ParsedField:
-    """標準欄位 `underlying_prices`：第 12 條價格表各列（代號、四種價格、該列原文）。"""
-    name = "underlying_prices"
+def _price_table(name: str, lines: list[Line], spec: price_table.TableSpec) -> ParsedField:
+    """價格表；每列的幣別（三碼）與交易所（英數字）讀不到時轉人工覆核（情境價格表逐列比對要用）。"""
+    table = price_table.read(name, lines, spec)
     if not table.ok:
-        return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
-    value = tuple(
-        standard_fields.PriceRow(r["ticker"], dict(r["prices"]), tuple(Evidence.of(ln) for ln in lns), r.get("label"))
-        for r, lns in zip(table.value["rows"], table.value["row_lines"], strict=True)
-    )
-    return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
+        return table
+    for k, r in enumerate(table.value.rows, start=1):
+        if not re.fullmatch(r"[A-Z]{3}", r.texts["currency"]) or not re.fullmatch(r"[A-Z0-9]+", r.texts["exchange"]):
+            return ParsedField.invalid(name, list(r.lines), f"{spec.where}第 {k} 列讀不到幣別或交易所")
+    return table
+
+
+def _standard_prices(table: ParsedField) -> ParsedField:
+    """標準欄位 `underlying_prices`：第 12 條價格表各列（代號、四種價格、中文名稱、該列原文）。"""
+    names = [r.texts.get("label") or None for r in table.value.rows] if table.ok else None
+    return price_table.price_rows(table, names=names)
 
 
 SCENARIO_HEADING = r"情境分析([一二三四五六])\)"
@@ -215,14 +241,9 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     fields["ko_table"] = (
         tables.ko_table(sub(11, 2)) if not daily else ParsedField("ko_table", FieldStatus.NOT_APPLICABLE)
     )
-    fields["price_table"] = tables.price_table("price_table", sub(12, 1))
-    pt = fields["price_table"]
-    fields["underlyings"] = (
-        ParsedField.present("underlyings", [r["ticker"] for r in pt.value["rows"]], sub(12, 1))
-        if pt.ok
-        else ParsedField("underlyings", pt.status, evidence=pt.evidence, note=pt.note)
-    )
-    fields["underlying_prices"] = _standard_prices(pt)
+    fields["price_table"] = _price_table("price_table", sub(12, 1), PRICE_TABLE)
+    fields["underlyings"] = price_table.underlyings(fields["price_table"])
+    fields["underlying_prices"] = _standard_prices(fields["price_table"])
     put("tenor_months", sub(15, 1), r"為(\d+)個月", int)
     for name, n, pattern in [
         ("issue_date", 2, r"發行日[:：]" + D),
@@ -335,7 +356,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     if len(start) == 1 and len(end) == 1:
         a = scenarios.index(ti.lines_for(start[0].start(), start[0].end())[-1]) + 1
         b = scenarios.index(ti.lines_for(end[0].start(), end[0].end())[0])
-        fields["scenario_table"] = tables.price_table("scenario_table", scenarios[a:b])
+        fields["scenario_table"] = _price_table("scenario_table", scenarios[a:b], SCENARIO_TABLE)
     else:
         fields["scenario_table"] = ParsedField.missing("scenario_table", "情境價格表錨點缺漏／重複")
     f = fields.get

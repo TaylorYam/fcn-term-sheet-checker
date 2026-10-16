@@ -12,7 +12,7 @@ import fitz
 import pytest
 
 from fcn_checker.extraction import extract_lines
-from fcn_checker.parsers import gs
+from fcn_checker.parsers import gs, hsbc
 from fcn_checker.parsers.price_table import Column, TableSpec, price_rows, read, split_at_columns
 from fcn_checker.schema import FieldStatus, Line
 
@@ -647,6 +647,110 @@ def test_gs_last_row_overflowing_onto_the_next_page_belongs_to_that_row():
     assert v.currencies == ["美元", "美元"]
     assert v.prices[1]["initial"] == Decimal("186.5500")
     assert any(ln.page == 2 and ln.text == "Equity" for ln in v.rows[1].lines)
+
+
+# ---------------------------------------------------------------- HSBC 真實版面（Issue #252）
+
+# 各欄中心：彭博代號、中文名稱、幣別、交易所、期初股價、執行價、自動提前到期價格、觸及不保本價格（真實樣本第 12 條）
+H = {
+    "code": 80.8,
+    "label": 125.6,
+    "ccy": 167.5,
+    "exch": 198.9,
+    "initial": 264.5,
+    "strike": 354.9,
+    "ko": 445.6,
+    "ki": 531.2,
+}
+HSBC_PCTS = {"strike": "75", "ko": "100", "ki": "70"}
+
+
+def hsbc_header(page: int, y: float, *, pct_page: int | None = None, pct_y: float | None = None) -> list[Line]:
+    """表頭：窄欄的欄名拆兩行（`彭博` / `代號`、`幣` / `別`），價格欄的「(即期初股價的X%)」在欄名下一行；
+    `pct_page` 有給時百分比全在下一頁頁首（情境價格表表頭跨頁）。"""
+    out = [
+        centered(page, H["code"], y, "彭博"),
+        centered(page, H["code"], y + 9, "代號"),
+        centered(page, H["label"], y + 4.5, "中文名稱"),
+        centered(page, H["ccy"], y, "幣"),
+        centered(page, H["ccy"], y + 9, "別"),
+        centered(page, H["exch"], y + 4.5, "交易所"),
+        centered(page, H["initial"], y + 4.5, "期初股價"),
+    ]
+    for key, word in (("strike", "執行價"), ("ko", "自動提前到期價格"), ("ki", "觸及不保本價格")):
+        out.append(centered(page, H[key], y, word))
+        pct = f"(即期初股價的{HSBC_PCTS[key]}%)"
+        out.append(centered(pct_page or page, H[key], y + 9 if pct_y is None else pct_y, pct))
+    return out
+
+
+def hsbc_row(page: int, y: float, code: tuple[str, str], label: str, prices: tuple[str, ...]) -> list[Line]:
+    """一檔標的：代號與交易所碼拆兩行（下面那一行的上緣低於同列價格的中心，真實樣本），幣別（`US` / `D`）與
+    交易所（`NASDA` / `Q`）也拆兩行，價格置中。"""
+    out = [centered(page, H["code"], y, code[0]), centered(page, H["code"], y + 10, code[1])]
+    out += [centered(page, H["label"], y + 4, label)]
+    out += [centered(page, H["ccy"], y, "US"), centered(page, H["ccy"], y + 8, "D")]
+    out += [centered(page, H["exch"], y, "NASDA"), centered(page, H["exch"], y + 8, "Q")]
+    out += [centered(page, H[k], y + 4, p) for k, p in zip(("initial", "strike", "ko", "ki"), prices, strict=True)]
+    return out
+
+
+def test_hsbc_bloomberg_code_wrapped_in_the_middle_of_the_symbol():
+    """第 12 條價格表：第 1 檔 `ZBAB UQ` 寫成 `ZBA` / `B UQ`（代號在字中間換行）也讀得到，列錨點取上面那一行；代號與
+    交易所碼之間換行照舊；中文名稱、幣別、交易所每列讀成文字欄。"""
+    lines = [
+        *hsbc_header(5, 532.7),
+        *hsbc_row(5, 550.5, ("ZBA", "B UQ"), "虛構乙", ("200.0000", "150.0000", "200.0000", "140.0000")),
+        *hsbc_row(5, 567.1, ("ZA", "UQ"), "虛構甲公司", ("100.0000", "75.0000", "100.0000", "70.0000")),
+    ]
+    table = read("price_table", lines, hsbc.PRICE_TABLE)
+    assert table.ok, table.note
+    v = table.value
+    assert v.tickers == ["ZBAB UQ", "ZA UQ"]
+    assert [r.texts for r in v.rows] == [
+        {"label": "虛構乙", "currency": "USD", "exchange": "NASDAQ"},
+        {"label": "虛構甲公司", "currency": "USD", "exchange": "NASDAQ"},
+    ]
+    assert v.pcts == {"strike": Decimal("75"), "ko": Decimal("100"), "ki": Decimal("70")}
+    assert v.prices[0] == {
+        "initial": Decimal("200.0000"),
+        "strike": Decimal("150.0000"),
+        "ko": Decimal("200.0000"),
+        "ki": Decimal("140.0000"),
+    }
+
+
+def test_hsbc_scenario_table_header_split_across_pages():
+    """情境價格表（沒有中文名稱欄）：欄名都在上一頁頁底、「(即期初股價的X%)」都在下一頁頁首；百分比依 x 位置歸到
+    正上方的欄名。"""
+    lines = [
+        *[ln for ln in hsbc_header(7, 770.0, pct_page=8, pct_y=30.0) if ln.text != "中文名稱"],
+        *hsbc_row(8, 45.0, ("ZA", "UN"), "", ("400.0000", "322.4800", "400.0000", "280.0000")),
+    ]
+    table = read("scenario_table", [ln for ln in lines if ln.text], hsbc.SCENARIO_TABLE)
+    assert table.ok, table.note
+    assert table.value.pcts == {"strike": Decimal("75"), "ko": Decimal("100"), "ki": Decimal("70")}
+    [row] = table.value.rows
+    assert row.ticker == "ZA UN" and row.prices["ki"] == Decimal("280.0000")
+    assert row.texts == {"currency": "USD", "exchange": "NASDAQ"}
+
+
+def test_hsbc_first_name_line_right_below_the_header_belongs_to_the_first_row():
+    """第 1 檔中文名稱拆兩行、第一行比代碼高且緊貼表頭「中文名稱」（`輝達公` / `司`）：和第 1 列上下重疊，屬於該列，
+    不併進表頭那一格。"""
+    first = [
+        ln for ln in hsbc_row(5, 552.0, ("ZA", "UQ"), "x", ("1.0000", "0.7500", "1.0000", "0.7000")) if ln.text != "x"
+    ]
+    lines = [
+        *hsbc_header(5, 532.7),
+        centered(5, H["label"], 545.5, "虛構甲公"),
+        centered(5, H["label"], 555.5, "司"),
+        *first,
+    ]
+    table = read("price_table", lines, hsbc.PRICE_TABLE)
+    assert table.ok, table.note
+    assert table.value.rows[0].texts["label"] == "虛構甲公司"
+    assert table.value.heads["initial"] == "期初股價"
 
 
 # ---------------------------------------------------------------- 依字座標切欄

@@ -276,20 +276,36 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
                 marks.append(ln)
         return marks
     codes: list[Line] = []
-    taken: set[int] = set()  # 已配給上一行代號的交易所碼（`UQ` 緊接下一列的兩碼代號 `MU` 時不是代號）
+    taken: set[int] = set()  # 已配給上一行代號的下半行（`UQ` 緊接下一列的兩碼代號 `MU` 時不是代號）
     for ln in ordered:
+        if id(ln) in taken:
+            continue
+        if SYMBOL.fullmatch(ln.text.strip()):
+            # 代碼換成兩行：代號與交易所碼之間（`AVGO` / `UW`）或代號中間（`COH` / `R UN`）。上面那一行是列錨點
+            # （下面那一行的上緣可能低於同列價格的中心）
+            lower = _tail(ln, ordered)
+            if lower is not None:
+                codes.append(ln)
+                taken.add(id(lower))
+                continue
         if _ticker_start(ln.text.strip()):
             codes.append(ln)
-        elif SYMBOL.fullmatch(ln.text.strip()) and id(ln) not in taken:
-            # 代號與交易所碼換成兩行（`AVGO` / `UW`）：代號那一行是列錨點
-            exchange = next((b for b in ordered if EXCHANGE.fullmatch(b.text.strip()) and _adjacent(ln, b)), None)
-            if exchange is not None:
-                codes.append(ln)
-                taken.add(id(exchange))
     if not codes:
         return []
     left = min(codes, key=lambda x: x.x0)
     return [ln for ln in codes if _overlap(ln, left) > 0]
+
+
+def _tail(anchor: Line, lines: list[Line]) -> Line | None:
+    """代號那一行（列錨點）下面緊接的代碼下半行（交易所碼或代號後幾碼加交易所碼）；代碼在同一行時為 None。"""
+    if not SYMBOL.fullmatch(anchor.text.strip()):
+        return None
+    return next((b for b in sorted(lines, key=_page_key) if _adjacent(anchor, b) and _code_tail(b.text.strip())), None)
+
+
+def _code_tail(text: str) -> bool:
+    """代碼換行的下半行：交易所碼（`UW`、`UW Equity`）或代號後幾碼加交易所碼（`R UN`）。"""
+    return EXCHANGE.fullmatch(text) is not None or TICKER_START.match(text) is not None
 
 
 def _ticker_start(text: str) -> bool:
@@ -304,7 +320,7 @@ def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, in
     """第 1 列錨點的上緣以上是表頭，以下是列。第 1 列那一頁的表頭已經有全部必要的關鍵字時，不往上一頁找；表頭從
     第一個兩格並排的列（`_from_first_row`）、也是有關鍵字的那幾格的上緣起，更上面的文字（範圍裡表前的說明、上一頁
     頁底的註腳）不算。從表頭最後一行之下才開始、沒有表頭關鍵字的格（格內垂直置中、比列錨點高的行，例：代碼拆三行）
-    屬於列。"""
+    屬於列；和第 1 列錨點上下重疊的行也屬於列。"""
     top = (first.page, first.y0)
     above = [ln for ln in lines if (ln.page, _yc(ln)) < top]
     below = [ln for ln in lines if (ln.page, _yc(ln)) >= top]
@@ -319,6 +335,14 @@ def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, in
     start = min((ln.page, ln.y0) for c in keyed for ln in c)
     bottom = max((ln.page, ln.y1) for c in keyed for ln in c)
     attached = [ln for c in cells if c not in keyed and (c[0].page, c[0].y0) > bottom for ln in c]
+    # 沒有關鍵字的格裡、和第 1 列錨點上下重疊的行（名稱第一行比代碼高、又緊貼表頭那一格：`中文名` / `稱` / `輝達公`）
+    attached += [
+        ln
+        for c in cells
+        if c not in keyed
+        for ln in c
+        if ln not in attached and ln.page == first.page and ln.y1 - first.y0 > SAME_COLUMN * (ln.y1 - ln.y0)
+    ]
     header = [ln for ln in above if ln not in attached and (ln.page, _yc(ln)) >= start]
     return header, below + attached
 
@@ -532,13 +556,19 @@ def _rows(
 ) -> list[list[Line]]:
     """每行歸到同一頁 y 中心最近的列；所在頁沒有列時，只有緊接最後一列的下一頁算最後一列。價格欄裡換行的值
     （`23,425.0000` / `日圓`、`美元` / `123.4567`、`19,740.000` / `0日圓`）跟著第一行所在的列：列距小時，換下來的
-    那一行可能離下一列一樣近。"""
+    那一行可能離下一列一樣近。代碼拆成兩行時（`AVGO` / `UW`、`COH` / `R UN`），下面那一行跟著它的列錨點，列的中心取
+    兩行合起來的中心。"""
     last = anchors[-1].page
+    tails = {k: t for k, a in enumerate(anchors) if spec.anchor == "ticker" and (t := _tail(a, body)) is not None}
+    centers = [(a.y0 + tails[k].y1) / 2 if k in tails else _yc(a) for k, a in enumerate(anchors)]
+    tail_of = {id(t): k for k, t in tails.items()}
     row_of: dict[int, int] = {}
     for i, ln in enumerate(body):
         same = [k for k, a in enumerate(anchors) if a.page == ln.page]
-        if same:
-            row_of[i] = min(same, key=lambda j: abs(_yc(anchors[j]) - _yc(ln)))
+        if id(ln) in tail_of:
+            row_of[i] = tail_of[id(ln)]
+        elif same:
+            row_of[i] = min(same, key=lambda j: abs(centers[j] - _yc(ln)))
         elif ln.page == last + 1:
             row_of[i] = len(anchors) - 1
         else:

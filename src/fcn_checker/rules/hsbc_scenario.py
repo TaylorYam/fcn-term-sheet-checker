@@ -260,8 +260,8 @@ def run(ctx):
                 m.end(),
             )
         # Stock-specific price references must identify the same row, not merely any equal numeric value.
-        rows = ts.f("price_table").value["rows"]
-        named = [row for row in rows if row["label"] and "（" + row["label"] + "）" in text]
+        rows = ts.f("price_table").value.rows
+        named = [row for row in rows if row.texts.get("label") and "（" + row.texts["label"] + "）" in text]
         row = rows[0] if len(rows) == 1 else named[0] if len(named) == 1 else None
         for label, key in [("執行價", "strike"), ("觸及不保本價格", "ki")]:
             refs = list(segment.finditer(re.escape(label) + ccy + N))
@@ -271,10 +271,10 @@ def run(ctx):
             if (required and not refs) or mentions_count > len(refs):
                 missing(f"s{i + 1}.reference_{key}", name, segment)
             for m in refs:
-                if row is None or key not in row["prices"]:
+                if row is None or key not in row.prices:
                     missing(f"s{i + 1}.reference_{key}", name, segment)
                 else:
-                    table, actual = row["prices"][key], number(m[1])
+                    table, actual = row.prices[key], number(m[1])
                     pct = kit.field_value(ts, f"{key}_pct")
                     compare(
                         "doc.scenario_parameters",
@@ -285,7 +285,7 @@ def run(ctx):
                         segment,
                         m.start(),
                         m.end(),
-                        valid=kit.scenario_price_ok(actual, table, row["prices"].get("initial"), pct),
+                        valid=kit.scenario_price_ok(actual, table, row.prices.get("initial"), pct),
                         tolerance=kit.SCENARIO_PRICE_ROUNDING,
                     )
         if worst:

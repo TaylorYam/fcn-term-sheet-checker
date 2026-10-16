@@ -152,7 +152,7 @@ def price_headers(ctx):
             for rid in ["doc.price_header_pct", "doc.scenario_table"]
         ]
     out = []
-    headers = pf.value["headers"]
+    headers = pf.value.pcts
     for col in ["strike", "ko", "ki"]:
         pct = ctx.ts.f(col + "_pct")
         header = Check("doc.price_header_pct", col, Item.expected(kit.HEADER_PCT_ITEM[col]), ctx.document)
@@ -172,7 +172,15 @@ def price_headers(ctx):
     else:
         # Chinese label is deliberately excluded; currency and exchange are internal consistency only.
         def normalized(table):
-            return [{k: v for k, v in row.items() if k != "label"} for row in table["rows"]]
+            return [
+                {
+                    "ticker": r.ticker,
+                    "currency": r.texts["currency"],
+                    "exchange": r.texts["exchange"],
+                    "prices": r.prices,
+                }
+                for r in table.rows
+            ]
 
         table, header = normalized(pf.value), normalized(scenario.value)
         out.append(
@@ -180,7 +188,7 @@ def price_headers(ctx):
             .needs(pf, scenario)
             .compare(table, header)
         )
-        scenario_headers = scenario.value["headers"]
+        scenario_headers = scenario.value.pcts
         out.append(
             Check(
                 "doc.scenario_header_pct",
