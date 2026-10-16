@@ -25,8 +25,8 @@ from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
 # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：非記憶式要有明確的提前出場事件句（Issue #297）；
-# 4：補讀發行價格金額、申購價金、十五設定參數的變動配息（Issue #303）
-PARSER_VERSION = "4"
+# 4：補讀發行價格金額、申購價金、十五設定參數的變動配息（Issue #303）；5：說明文字與十五情境重複寫出的值（Issue #320）
+PARSER_VERSION = "5"
 SECTIONS = ("商品基本資料", "相關機構事業概況", "商品風險揭露", "投資風險警語", "一般交易事項", "特別記載事項")
 PRODUCT_TYPE = "股權結構型商品"
 OLD_PRODUCT_TYPE = "股權結構型債券"
@@ -45,6 +45,7 @@ PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
 ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"
 AMOUNT = rf"([\d,]+\.\d{{2}})({CCY})"
+SCENARIO_AMOUNT = rf"(?<![\d.,])(\d[\d,]*\.\d{{2}}|0)({CCY})"  # 情境的金額（小數 2 位；股價小數 4 位不算）
 TICKER = re.compile(r"^([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})$")
 # 提前出場觀察日（範本規格 §4.1）
 KO_DAILY = r"為自第(\d{1,2})個配息觀察期間結束日.{0,30}?至期末訂價日.{0,12}?的任一預定交易日"
@@ -236,10 +237,37 @@ def read(lines: Sequence[Line]) -> UbsTermSheet:
     _table_fields(fields)
     _schedule(fields)
     _article15(fields, article(15))
+    scenarios = _scenarios(fields, article(15))
     put("isin", article(25), r"ISIN代碼[:：]([A-Z]{2}[A-Z0-9]{10})")
     _organizations(fields, doc)
     _general(fields, doc, put)
     _occurrences(fields)
+    wording = [  # 說明文字的幣別字（Issue #320，比照 BBVA #305）；ADE 提前贖回「美元價值的美元金額」固定寫美元，不列入
+        *money.currency_words(
+            art8, rf"換算後的({CCY})金額", "residual_conversion_currency", "說明文字幣別", "商品基本資料八剩餘金額定義"
+        ),
+        *money.currency_words(
+            article(15),
+            rf"則以({CCY})支付[（(]",
+            "scenario_residual_currency",
+            "說明文字幣別",
+            "商品基本資料十五情境「則以X支付（“剩餘金額”）」",
+        ),
+        *money.currency_words(
+            article(15),
+            rf"以({CCY})支付的剩餘金額",
+            "scenario_residual_paid_currency",
+            "說明文字幣別",
+            "商品基本資料十五情境「以X支付的剩餘金額」",
+        ),
+    ]
+    if re.search(rf"以每一{CCY}可兌", TextIndex(art8).text):  # 跨幣別商品才有的期末匯率定義
+        wording += money.currency_words(
+            art8, rf"以每一({CCY})可兌", "fx_definition_currency", "說明文字幣別", "商品基本資料八期末匯率定義"
+        )
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [*fields["currency_others"].value, *wording, *scenarios]
+    )
     fields["initial_pricing"] = standard_fields.absent(
         "initial_pricing", "說明書沒有寫期初定價方式（開盤價／收盤價／VWAP）"
     )
@@ -643,6 +671,75 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
     fields["scenario_table"] = price_table.read(
         "scenario_table", table_region(params, r"設定參數[:：]?", "固定配息率"), SCENARIO_TABLE
     )
+
+
+def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurrence]:
+    """十五重複寫出的值（Issue #320）：設定參數「配息觀察日／期間：每月（共N個）」、「提前出場觀察日」（有這句才核）、
+    情境分析一～四算式代入的每單位面額與配息率；回傳各情境金額旁的幣別出處（併入 `currency_others`）。
+
+    情境的金額寫到小數 2 位（或「價值為0X」），股價寫到小數 4 位：小數 4 位的股價跟著標的走（UB3 澳幣連日股、UB6 日圓
+    連美股），不列入；期末匯率、股數、報酬率不讀。"""
+    ti = TextIndex(art15)
+    fields["scenario_coupon_count"] = capture(
+        "scenario_coupon_count", ti, r"配息觀察(?:日|期間)[:：]每月（共(\d+)個）", int, whole_match=True
+    )
+    ko = ko_wording("ko_wording_art15", ti)
+    fields["ko_wording_art15"] = (
+        standard_fields.absent("ko_wording_art15", "十五的提前出場觀察日") if ko.status == FieldStatus.MISSING else ko
+    )
+    marks = [(m.start(), m[1]) for m in ti.finditer(r"情境分析([一二三四五])[:：]")]
+    end = ti.text.find("以上情境分析相關之免責聲明", marks[0][0]) if marks else -1
+    if not marks:
+        note = "商品基本資料十五找不到「情境分析一：」"
+        for name in ("scenario_denomination_mentions", "scenario_coupon_mentions"):
+            fields[name] = ParsedField.missing(name, note)
+        return [
+            Occurrence(
+                "scenario_currency",
+                "情境金額幣別",
+                "商品基本資料十五情境分析",
+                ParsedField.missing("scenario_currency", note),
+            )
+        ]
+    end = len(ti.text) if end < 0 else end
+    lo = marks[0][0]
+    for name, patterns, convert in (
+        # 算式第一個代入值（`=X…`、`=（X/`）與減去的初始投資金額（`-X=`）都是每單位面額
+        (
+            "scenario_denomination_mentions",
+            (rf"=（?([\d,]+\.\d{{2}}){CCY}[xX×/]", rf"-([\d,]+\.\d{{2}}){CCY}="),
+            number,
+        ),
+        ("scenario_coupon_mentions", (rf"[xX×]{PCT}[xX×]",), Decimal),
+    ):
+        hits = sorted(
+            [
+                (m.start(), convert(m[1]), ti.lines_for(m.start(), m.end()))
+                for p in patterns
+                for m in ti.finditer(p)
+                if lo <= m.start() < end
+            ],
+            key=lambda h: h[0],
+        )
+        fields[name] = (
+            ParsedField.present(name, [v for _, v, _ in hits], [ln for *_, lns in hits for ln in lns])
+            if hits
+            else ParsedField.missing(name, "商品基本資料十五情境分析的算式讀不到")
+        )
+    out = []
+    for k, (start, zh) in enumerate(marks):
+        stop = marks[k + 1][0] if k + 1 < len(marks) else end
+        found = money.amounts(ti, SCENARIO_AMOUNT, currency_group=2, skip=lambda _: False, start=start, end=stop)
+        out.append(
+            money.scenario_occurrence(
+                f"scenario{k + 1}_currency",
+                f"情境分析{zh}金額幣別",
+                f"商品基本資料十五情境分析{zh}",
+                found,
+                ti.lines_for(start, start + 1),
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------- 相關機構事業概況、一般交易事項
