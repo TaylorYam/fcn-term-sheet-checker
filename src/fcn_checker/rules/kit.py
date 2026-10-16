@@ -489,6 +489,12 @@ def occurrences_of(
 # ---------------------------------------------------------------- 上手說明書內部規則共用（MS、BNP；Issue #196）
 
 
+def price_cells(rows: list[dict]) -> list[str]:
+    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值，看得出逐格比了哪些價格
+    （BBVA #305、JPM #315）。"""
+    return [f"{v:,}" for row in rows for v in row.values()]
+
+
 def first_bad(deps: Sequence[ParsedField]) -> ParsedField | None:
     """依賴欄位中第一個讀不到、歧義或不合法的；全部可用時為 None。"""
     return next((p for p in deps if not p.ok), None)
