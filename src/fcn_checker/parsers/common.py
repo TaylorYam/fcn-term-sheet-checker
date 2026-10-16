@@ -81,11 +81,17 @@ def one(found: list[Hit[T]]) -> Hit[T] | None:
 
 @dataclass(frozen=True)
 class Mention:
-    """月配息率或年化報酬率的一個出處；值讀不到時為 None。"""
+    """重複寫出的值的一個出處（月配息率、年化報酬率；GS 另有面額、單位數、天期等，Issue #317）；值讀不到時為 None。"""
 
     where: str
-    value: Decimal | None
+    value: Decimal | int | None
     evidence: tuple[Evidence, ...]
+
+    def parsed(self, name: str) -> ParsedField:
+        """當成欄位 `name` 交給規則：讀不到時為缺漏（證據保留出處附近的原文行）。"""
+        if self.value is None:
+            return ParsedField(name, FieldStatus.MISSING, evidence=list(self.evidence), note=f"找不到{self.where}")
+        return ParsedField(name, FieldStatus.PRESENT, self.value, list(self.evidence))
 
     @classmethod
     def of_field(cls, where: str, pf: ParsedField) -> Mention:

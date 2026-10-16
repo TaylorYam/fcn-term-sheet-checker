@@ -66,7 +66,10 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in GS.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    assert len(rule(r, "doc.coupon_mentions")) == 2  # 第 15 項(2) 最低保證收益率、第 17 項情境假設
+    # 第 15 項(2) 最低保證收益率、第 17 項情境假設與情境 1～4 各配息金額算式（情境 2 兩列；Issue #317）
+    assert len(rule(r, "doc.coupon_mentions")) == 2 + 4
+    assert rule(r, "doc.denomination_mentions") and rule(r, "doc.tenor_mentions") and rule(r, "doc.redemption_pct")
+    assert len(rule(r, "doc.tenor_mentions")) == 2
     assert rule(r, "standard.fixed_warning")[0].actual == 3
     assert len(rule(r, "standard.issuer_name")) == 3  # 第 1 頁、第一章（中文部分）、第二章
     skipped = ("standard.guarantor_name", "standard.agent_name", "standard.minimum_issue_size")  # 決定不核對
@@ -147,6 +150,43 @@ def test_unknown_initial_pricing_wording_needs_review(tmp_path):
         (Edit("計價幣別:美元（USD）", "計價幣別:美元（JPY）", "ts.art5"), "doc.currency_consistency"),
         (Edit("ZGB UW Equity", "ZGX UW Equity", "ts.art10"), "doc.underlying_tickers"),
         (Edit("Goldman Sachs International）。截至", "Goldman Sachs Intl）。截至", "ts.art3"), "doc.issuer_name"),
+        # Issue #317：重複寫出的面額、到期買回 %、情境配息率與單位數、初始投資金額、天期、說明文字與情境的幣別字
+        (
+            Edit("計價之每單位面額（10,000 美元）", "計價之每單位面額（20,000 美元）", "ts.art9"),
+            "doc.denomination_mentions",
+        ),
+        (
+            Edit("每單位面額（10,000美元）× 每單位提前", "每單位面額（1,000美元）× 每單位提前", "ts.ch四"),
+            "doc.denomination_mentions",
+        ),
+        (Edit("= 10,000 美元 × 12.00% / 12", "= 1,000 美元 × 12.00% / 12", "ts.art17"), "doc.denomination_mentions"),
+        (
+            Edit("時:每單位面額（10,000 美元）× 100%", "時:每單位面額（10,000 美元）× 99%", "ts.art15"),
+            "doc.redemption_pct",
+        ),
+        (Edit("× 12.00% / 12", "× 12.50% / 12", "ts.art17"), "doc.coupon_mentions"),
+        (Edit("× 5 / 50,000.00", "× 4 / 50,000.00", "ts.art17"), "doc.scenario_params"),
+        (Edit("假設期初本金金額為50,000美元", "假設期初本金金額為40,000美元", "ts.art17"), "doc.scenario_params"),
+        (Edit("包含於6個月後始返還本金", "包含於7個月後始返還本金", "ts.ch三"), "doc.tenor_mentions"),
+        (Edit("通路服務費率於6個月間", "通路服務費率於7個月間", "ts.ch四"), "doc.tenor_mentions"),
+        (Edit("每單位面額（10,000 美元）× 配息率", "每單位面額（10,000 日圓）× 配息率", "ts.art14"), "field.currency"),
+        (Edit("= 100.00 美元", "= 100.00 日圓", "ts.art17"), "field.currency"),
+        (Edit("以美元計價之畸零現金金額", "以日圓計價之畸零現金金額", "ts.art15"), "field.currency"),
+        (Edit("本商品係以美元計價", "本商品係以日圓計價", "ts.ch三"), "field.currency"),
+        (Edit("期初淨值自50,000美元", "期初淨值自50,000日圓", "ts.ch四"), "field.currency"),
+        (Edit("降至48,500美元", "降至48,500日圓", "ts.ch四"), "field.currency"),
+        (Edit("假設申購5單位（50,000美元）", "假設申購5單位（50,000日圓）", "ts.ch四"), "field.currency"),
+        (Edit("之價值將受到計價幣別（美元）", "之價值將受到計價幣別（日圓）", "ts.ch三"), "field.currency"),
+        (
+            Edit("每單位面額（10,000美元）以計價幣別", "每單位面額（20,000美元）以計價幣別", "ts.art16"),
+            "doc.denomination_mentions",
+        ),
+        (
+            Edit("每單位面額（10,000 美元）× 100%；或", "每單位面額（10,000 美元）× 99%；或", "ts.art9"),
+            "doc.redemption_pct",
+        ),
+        (Edit("(每單位面額 × 100.00% +", "(每單位面額 × 99.00% +", "ts.art17"), "doc.redemption_pct"),
+        (Edit("（5單位）= 50,000 美元", "（5單位）= 40,000 美元", "ts.art17"), "doc.scenario_params"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )
@@ -156,6 +196,32 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     bad = {rid for rid, _, _ in problems(r)}
     assert broken in bad, problems(r)
     assert bad <= {broken, "standard.product_name"}, problems(r)
+
+
+def test_payment_currency_wording_of_a_non_usd_product_is_checked(tmp_path):
+    """非美元商品第 9 項「以X支付配息金額及到期買回金額」（Issue #317）：寫錯幣別判不一致；美元商品沒有這句，不核對。"""
+    spec = VARIANTS["日圓日股、價格擠在同一行與拆行"]
+    assert not [x for x in rule(check(tmp_path, Spec()), "field.currency") if x.field == "payment_currency"]
+    (tmp_path / "jpy").mkdir()
+    r = check(tmp_path / "jpy", spec, edits=[Edit("以日圓支付配息金額", "以美元支付配息金額", "ts.art9")])
+    assert [x.status for x in rule(r, "field.currency") if x.field == "payment_currency"] == [S.MISMATCH]
+
+
+@pytest.mark.parametrize(
+    ("edit", "broken"),
+    [
+        (Edit("= 10,000 美元 × 12.00% / 12 × 20 / 20", "", "ts.art17"), "doc.coupon_mentions"),
+        (Edit("包含於6個月後始返還本金", "包含返還本金", "ts.ch三"), "doc.tenor_mentions"),
+        (Edit("本商品係以美元計價", "本商品係以外幣計價", "ts.ch三"), "field.currency"),
+        # 第 9 項 (1)～(3) 應有 3 處面額，只讀到 2 處
+        (Edit("計價之每單位面額（10,000 美元）", "計價之每單位面額", "ts.art9"), "doc.denomination_mentions"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.old[:12],
+)
+def test_unreadable_repeats_need_review(tmp_path, edit, broken):
+    """重複寫出處讀不到（Issue #317）：轉人工覆核。"""
+    r = check(tmp_path, edits=[edit])
+    assert S.REVIEW_REQUIRED in {x.status for x in rule(r, broken)}, problems(r)
 
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):

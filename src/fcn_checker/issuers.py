@@ -53,6 +53,7 @@ from .rules import citi_iis as citi_iis_rules
 from .rules import dbs as dbs_rules
 from .rules import dbs_iis as dbs_iis_rules
 from .rules import gs as gs_rules
+from .rules import gs_iis as gs_iis_rules
 from .rules import hsbc as hsbc_rules
 from .rules import jpm as jpm_rules
 from .rules import jpm_iis as jpm_iis_rules
@@ -296,6 +297,7 @@ GS = Issuer(
         detect=gs_iis.detect,
         read=gs_iis.read,
         not_covered=(_IIS_SAMPLES,),
+        rules=gs_iis_rules.run_all,
     ),
 )
 

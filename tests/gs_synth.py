@@ -263,6 +263,26 @@ def _cover(d: _Doc, s: Spec) -> None:
     d.text(86, f"本中文產品說明書刊印日期:{s.date(s.trade_date)}")
 
 
+def _article9(d: _Doc, s: Spec) -> None:
+    """主要給付項目（Issue #317：重複寫出的面額、到期買回 %，非美元商品另有「以X支付配息金額及到期買回金額」）。"""
+    par = s.money(s.denom, space=True)
+    for x, t in (
+        (86, "(1) 於各付息日依原計價幣別所應付之配息金額如下:"),
+        (208, f"每單位面額（{par}）× 配息率 × 應計基準"),
+        (86, "(2) 於到期日，則本商品之各單位應依下開段落計算之到期買回金額買回:"),
+        (104, "(a) 如已發生最終提前出場事件:"),
+        (242, f"每單位面額（{par}）× 100%；或"),
+        (104, "(b) 其他情形:可交付資產之實物交割"),
+        (86, f"(3) 本商品各單位之自動提前買回金額，應相當於以計價幣別計價之每單位面額（{par}）。"),
+    ):
+        d.text(x, t, 105)
+    if s.ccy != "USD":
+        d.text(
+            85,
+            f"投資人亦應注意，以{s.currency_zh}支付配息金額及到期買回金額係以未發生匯率中斷事件導致須以美元付款為前提。",
+        )
+
+
 def _article10(d: _Doc, s: Spec) -> None:
     d.text(86, "(1) 連結標的資產:")
     d.row(
@@ -310,14 +330,15 @@ def _article13(d: _Doc, s: Spec) -> None:
 
 def _article15(d: _Doc, s: Spec) -> None:
     i = s.i
+    par = s.money(s.denom, space=True)
     worst = "於評價日表現最差之連結標的最終參考價格(i)" if s.basket else "最終參考價格"
     d.text(86, "(1) 到期買回金額:如未發生自動提前出場事件者，則本商品之各單位應依下開各段計算之到期買回金額買回:", 100)
     if s.ki == "D":
-        d.text(100, "(a) 如已發生最終提前出場事件，或未發生下限觸發事件時:每單位面額 × 100%；或")
+        d.text(100, f"(a) 如已發生最終提前出場事件，或未發生下限觸發事件時:每單位面額（{par}）× 100%；或")
         d.text(
             100,
             i(
-                f"(b) 如未發生最終提前出場事件，且已發生下限觸發事件，且{worst}等於或高於其執行價格(i)時:每單位面額 × 100%；或"
+                f"(b) 如未發生最終提前出場事件，且已發生下限觸發事件，且{worst}等於或高於其執行價格(i)時:每單位面額（{par}）× 100%；或"
             ),
         )
         d.text(
@@ -325,12 +346,16 @@ def _article15(d: _Doc, s: Spec) -> None:
             i(f"(c) 如未發生最終提前出場事件，且已發生下限觸發事件，且{worst}低於其執行價格(i)時:可交付資產之實物交割"),
         )
     elif s.ki == "AM":
-        d.text(100, i(f"(a) 如已發生最終提前出場事件，或{worst}等於或高於其下限觸發價格(i)時:每單位面額 × 100%；或"))
+        d.text(
+            100,
+            i(f"(a) 如已發生最終提前出場事件，或{worst}等於或高於其下限觸發價格(i)時:每單位面額（{par}）× 100%；或"),
+        )
         d.text(100, i(f"(b) 如未發生最終提前出場事件，且{worst}低於其下限觸發價格(i)時:可交付資產之實物交割"))
     else:
-        d.text(100, "(a) 如最終參考價格等於或高於執行價格時:每單位面額 × 100%；或")
+        d.text(100, f"(a) 如最終參考價格等於或高於執行價格時:每單位面額（{par}）× 100%；或")
         d.text(100, "(b) 如最終參考價格低於執行價格時:可交付資產之實物交割")
     d.text(86, "本文中:")
+    d.text(86, f"「可交付資產」如計算結果非為整數者，應支付一筆以{s.currency_zh}計價之畸零現金金額。", 100)
     if s.basket:
         d.text(
             86,
@@ -449,6 +474,11 @@ def _article16(d: _Doc, s: Spec) -> None:
             "如於一提前出場觀察日之參考價格等於或高於提前出場價格，則視為已發生「自動提前出場事件」，且發行機構將於自動提前買回日給付自動提前買回金額。",
         )
     d.text(86, "本文中:")
+    d.text(
+        86,
+        f"「自動提前買回金額」就本商品之各單位而言，指相當於每單位面額（{s.money(s.denom)}）以計價幣別計算之金額。",
+        100,
+    )
     if s.basket:
         d.text(
             86,
@@ -470,19 +500,38 @@ def _article17(d: _Doc, s: Spec) -> None:
     one = "(1)" if s.basket else ""
     final = (u.initial / 10).quantize(Q4, ROUND_HALF_UP)
     ccy = QUOTE[s.market]
+    par, zh = s.money(s.denom, space=True), s.currency_zh
+    total = s.denom * s.units
+    cpn = (Decimal(s.denom) * s.annual / 1200).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    coupon = [f"= {par} × {s.annual}% / 12 × 20 / 20", f"= {cpn} {zh}"]
+    ret = [
+        f"= [(每單位面額 × 100.00% + {cpn} {zh}) × {s.units} / {total:,.2f} {zh}] - 1",
+        f"= [({par} + {cpn} {zh}) × {s.units} / {total:,.2f} {zh}] - 1",
+    ]
     for t in (
         "(1) 投資收益計算方法:請參見本章第14項及第15項。",
-        "(3) 最大可能獲利、損失之情境分析解說以及其他狀況下之平均年化報酬率:",
+        f"(3) 最大可能獲利、損失之情境分析解說以及其他狀況下之平均年化報酬率:下列情境分析係以到期買回之計算方法為基礎（假設期初本金金額為{s.money(total)}）。",
         "下列情境假設如下:",
         "(1) 各觀察期間(t)之共同預定交易日日數為20日；",
         f"(2) 配息率:年利率{s.annual}%；及",
-        f"(3) 初始投資金額 每單位面額（{s.money(s.denom, space=True)}）× 最低申購單位數（{s.units}單位）= {s.money(s.denom * s.units, space=True)}",
+        f"(3) 初始投資金額 每單位面額（{par}）× 最低申購單位數（{s.units}單位）= {s.money(total, space=True)}",
         "情境1:",
         f"本情境假設自動提前出場事件已於第一個適用之提前出場觀察日（且落在第{s.first_callable}個觀察期間結束日）發生。",
+        *coupon,
+        *ret,
+        "情境2:",
+        *coupon,
+        *ret,
+        "情境3:",
+        *coupon,
+        *ret,
         "情境4:",
+        *coupon,
         f"初始參考價格{one}: {u.initial:,.4f} {ccy}",
         f"最終參考價格{one}: {final:,.4f} {ccy}（初始參考價格{one}之10.00%）",
         f"執行價格{one}: {price(u.initial, s.strike):,.4f} {ccy}（初始參考價格{one}之{s.strike}%）",
+        f"= [(17 股 × {final:,.4f} {ccy} + 33.06 {zh} + {cpn} {zh}) × {s.units} / {total:,.2f} {zh}] – 1",
+        "情境5:發行機構或保證機構無法履約",
     ):
         d.text(86, t, 100)
 
@@ -503,6 +552,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         4: "本商品之發行評等:本商品未經評等。",
         5: f"計價幣別:{s.currency_zh}（{s.iso_text}）",
         6: f"每單位面額:{s.money(s.denom, space=True)}",
+        9: "主要給付項目及其計算方式:",
         10: "連結標的資產及其相對權重與投資績效的關連情形:",
         13: "本商品年期、發行日、到期日及其他依本商品性質而定之日期:",
         14: "配息資料及其計算公式:",
@@ -512,12 +562,15 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     }
     for n in range(1, 37):
         d.article(n, titles.get(n, f"第{n}項說明（不核對）"))
-        if n == 10:
+        if n == 9:
+            _article9(d, s)
+        elif n == 10:
             _article10(d, s)
         elif n == 13:
             _article13(d, s)
         elif n == 14:
             d.text(86, "本商品每單位於任一付息日應付之配息金額，應依相關觀察期間(t)按以下公式計算:")
+            d.text(199, f"每單位面額（{s.money(s.denom, space=True)}）× 配息率 × 應計基準")
             d.text(86, f"「配息率」就每個觀察期間而言，指年利率{s.annual}% / 12（約為{s.monthly}%）。")
         elif n == 15:
             _article15(d, s)
@@ -557,6 +610,15 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         (5, "本商品之投資風險警語:"),
     ):
         d.text(72, f"{n}. {title}", 86)
+        if n == 1:  # Issue #317：說明文字的幣別字與天期
+            zh = s.currency_zh
+            d.text(86, f"1.3 利率風險:本商品存續期間之價值將受到計價幣別（{zh}）利率變動之影響。", 100)
+            d.text(
+                86,
+                f"1.6 匯兌風險:若投資人係以非本商品計價幣別（{zh}）之外幣資金投資本商品者，轉換回新臺幣或計價幣別（{zh}）"
+                f"以外幣別資產時將可能產生匯兌風險。換言之，本商品係以{zh}計價，應考量匯率變動風險，包含於{s.tenor}個月後始返還本金。",
+                100,
+            )
         if n == 5:
             for k, t in enumerate(_warnings(s), 1):
                 d.text(86, f"({k}) {t}", 100)
@@ -585,6 +647,12 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         [(73, "其他費用"), (160, "無"), (271, "不適用")],
     ):
         d.row(cells, gap=14, size=9)
+    total = s.denom * s.units
+    d.text(
+        72,
+        f"例如，假設申購{s.units}單位（{s.money(total)}）且其他條件相同，通路服務費率於{s.tenor}個月間假設為3%，"
+        f"本商品期初淨值自{s.money(total)}降至{s.money(total * 97 // 100)}，投資人不須額外給付通路服務費。",
+    )
     d.text(72, "3. 商品交易架構:請參閱上述第二章第4項。")
     d.text(
         72,
@@ -598,7 +666,9 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     )
     d.text(72, "8. 最低買回/贖回金額或單位數:")
     d.text(86, "(2) 投資人提前贖回：每筆交易之最低贖回單位數為1單位，後續為一單位之倍數，且須經發行機構同意。", 100)
-    for n in range(9, 19):
+    d.text(72, "9. 買回/贖回價金之計算:")
+    d.text(104, f"(i) 投資人要求提前贖回: 贖回單位數 × 每單位面額（{s.money(s.denom)}）× 每單位提前贖回價格", 123)
+    for n in range(10, 19):
         d.text(72, f"{n}. 第{n}項說明（不核對）")
 
     d.chapter("五", "特別記載事項")
@@ -700,7 +770,9 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
         maturity = "(a)如最終參考價格等於或高於執行價格時:每單位面額 × 100%;(b)如最終參考價格低於執行價格時:可交付資產之實物交割。"
     d.text(
         15,
-        "(1)到期買回：如未發生自動提前出場事件者，則本商品之各單位應依下開各段計算之到期買回金額後買回:" + maturity,
+        "(1)到期買回：如未發生自動提前出場事件者，則本商品之各單位應依下開各段計算之到期買回金額後買回:"
+        + maturity
+        + f"如計算結果非為整數者，應支付一筆以{s.currency_zh}計價之畸零現金金額。",
         gap=11,
     )
     scope = (
@@ -723,11 +795,21 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     w.line(15, "三. 主要投資風險", gap=11)
     d.text(
         15,
-        f"1. 基本風險資訊:(1) 最低收益風險：於最壞之情況，投資人有可能將損失所有未付{li}息及原始投資本金金額。",
+        f"1. 基本風險資訊:(1) 最低收益風險：於最壞之情況，投資人有可能將損失所有未付{li}息及原始投資本金金額。"
+        f"(3) {li}率風險：本商品之價值將受到計價幣別（{s.currency_zh}）{li}率變動之影響。(6) 匯兌風險：以非本商品計價幣別"
+        f"（{s.currency_zh}）之外幣資金投資者，轉換回計價幣別（{s.currency_zh}）以外幣別時可能產生匯兌風險。換言之，本商品係以"
+        f"{s.currency_zh}計價，包含於{s.tenor}個月後始返還本金。",
         gap=11,
     )
     d.section = "fees"
     w.line(15, "四. 費用", gap=11)
+    total = s.denom * s.units
+    d.text(
+        15,
+        f"例如，假設申購{s.units}單位({s.money(total)})且其他條件相同，通路服務費率於{s.tenor}個月間假設為3%，本商品期初淨值自"
+        f"{s.money(total)}降至{s.money(total * 97 // 100)}。",
+        gap=11,
+    )
     for cells in (
         [(15, "費用項目"), (128, "費率（百"), (185, "收取時點"), (298, "收取方式"), (511, "收取人")],
         [(128, "分比）")],
