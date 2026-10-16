@@ -1,7 +1,7 @@
 """提前出場期始日用一籃子預定交易日：跳過週末與標的交易所休市日（Issue #208）。
 
 測試切點：交易所假日表（`load_exchange_holidays`、`TradingCalendar.next_trading_day`），以及經公開批量入口的
-BARC／HSBC 期始日規則。合成說明書的日期在 2030 年；要測假日時另給一個加了休市日的核對設定。
+共用日期表規則的期始日（`schedule.period_start`，BARC、HSBC）。合成說明書的日期在 2030 年；要測假日時另給一個加了休市日的核對設定。
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def report(tmp_path: Path, spec, *, edits=(), config=CONFIG, builder=build_pdf):
 
 
 def starts(r):
-    return [x for x in r.results if x.rule_id == "schedule.autocall_dates" and x.field in ("start", "daily")]
+    return [x for x in r.results if x.rule_id == "schedule.period_start"]
 
 
 def problems(r):
@@ -144,10 +144,10 @@ def test_barc_start_that_skips_a_trading_day_or_lands_on_a_holiday_is_mismatch(t
     late = report(tmp_path, Spec(), edits=[START])
     (result,) = starts(late)
     assert result.status == S.MISMATCH and result.actual == "第 3 期"
-    assert "第 3 期應為 2030-03-11" in result.message
+    assert "第 3 期期始日應為 2030-03-11" in result.message
     on_holiday = report(tmp_path / "h", Spec(), config=with_holidays(D(2030, 3, 11)))
     assert [(x.status, x.actual) for x in starts(on_holiday)] == [(S.MISMATCH, "第 3 期")]
-    assert "第 3 期應為 2030-03-12" in starts(on_holiday)[0].message
+    assert "第 3 期期始日應為 2030-03-12" in starts(on_holiday)[0].message
 
 
 HK = Spec(underlyings=(UL("甲乙丙控股", "香港交易所", "ABC HK", Decimal("50.0000")),))
@@ -157,7 +157,7 @@ def test_barc_start_with_an_unknown_exchange_requires_review_only_when_later(tmp
     assert [x.status for x in starts(report(tmp_path, HK))] == [S.PASS], "剛好是下一個平日：照舊通過"
     (result,) = starts(report(tmp_path / "s", HK, edits=[START]))
     assert result.status == S.REVIEW_REQUIRED and result.reason_code == "trading_calendar_uncertain"
-    assert "ABC HK" in result.message and "第 3 期應為 2030-03-11" in result.message
+    assert "ABC HK" in result.message and "第 3 期期始日應為 2030-03-11" in result.message
 
 
 @pytest.mark.parametrize(
@@ -168,7 +168,7 @@ def test_barc_start_with_an_unknown_exchange_requires_review_only_when_later(tmp
 def test_barc_start_that_cannot_be_a_holiday_shift_is_mismatch_even_when_uncertain(tmp_path, new):
     """假日只會讓期始日往後延：比推算結果早、或落在週末，不論假日表確不確定都是不一致。"""
     (result,) = starts(report(tmp_path, HK, edits=[Edit("2030 年3 月11 日", new, "ts.art13.ko.3.start")]))
-    assert result.status == S.MISMATCH and "第 3 期應為 2030-03-11" in result.message
+    assert result.status == S.MISMATCH and "第 3 期期始日應為 2030-03-11" in result.message
 
 
 def test_barc_mixed_basket_skips_known_holidays_and_reviews_the_rest(tmp_path):
@@ -178,7 +178,7 @@ def test_barc_mixed_basket_skips_known_holidays_and_reviews_the_rest(tmp_path):
     shifted = report(tmp_path, mixed, edits=[START], config=config)
     assert [x.status for x in starts(shifted)] == [S.PASS], "跳過美股休市日：期始日 = 推算結果"
     (on_holiday,) = starts(report(tmp_path / "h", mixed, config=config))
-    assert on_holiday.status == S.MISMATCH and "第 3 期應為 2030-03-12" in on_holiday.message
+    assert on_holiday.status == S.MISMATCH and "第 3 期期始日應為 2030-03-12" in on_holiday.message
     later = Edit("2030 年3 月11 日", "2030 年3 月13 日", "ts.art13.ko.3.start")
     (unsure,) = starts(report(tmp_path / "l", mixed, edits=[later], config=config))
     assert unsure.status == S.REVIEW_REQUIRED and "ABC HK" in unsure.message

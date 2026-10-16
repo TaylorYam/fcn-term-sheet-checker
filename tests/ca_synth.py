@@ -349,11 +349,18 @@ def _article9(d: _Doc, s: Spec) -> None:
         "(c) 「到期贖回金額」：若商品並無提前贖回、買回或註銷，或未發生自動提前出場事件，本商品到期日將依下列方式贖回：",
     )
     if s.ki == "none":
-        d.text(36, "(i) 若最差表現之連結標的期末訂價低於執行價：投資人將會收到發行機構交付最差表現之連結標的單位數。")
+        d.text(
+            36,
+            "(i) 若最差表現之連結標的期末訂價低於執行價：投資人將會收到發行機構交付最差表現之連結標的單位數，"
+            f"及以{s.currency_zh}支付剩餘金額（如有）。",
+        )
         d.text(36, "(ii) 若最差表現之連結標的期末訂價高於或等於執行價：每單位（張）商品面額x 100%。")
     else:
         d.text(36, "(i) 若未發生界限事件，則到期贖回金額為：每單位（張）商品面額x 100%。")
-        d.text(36, "(ii) 若發生界限事件：投資人將會收到發行機構交付最差表現之連結標的單位數。")
+        d.text(
+            36,
+            f"(ii) 若發生界限事件：投資人將會收到發行機構交付最差表現之連結標的單位數，及以{s.currency_zh}支付剩餘金額（如有）。",
+        )
     d.text(36, "(2) 連結標的：")
     d.section = "art9.table"
     _price_table(d, s, index=True)
@@ -396,12 +403,37 @@ def _article16(d: _Doc, s: Spec) -> None:
     _price_table(d, s, index=False)
     d.section = "art16"
     months = "1" if s.first_callable == 1 else f"1~{s.first_callable}"
+    coupon = (Decimal(s.denom) * s.monthly / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    denom, ccy = f"{s.denom:,}", s.currency_zh
+
+    def coupons(months: str, n: int) -> None:  # 配息金額行與累積配息（Issue #319：配息率、面額、幣別是重複寫出的值）
+        d.text(36, f"• 第 {months} 個月配息金額 ＝每單位面額 × {s.monthly}%＝{denom} × {s.monthly}%＝{coupon:,} {ccy}")
+        d.text(36, f"• 累積配息金額 ＝{coupon * n:,} {ccy}")
+
     d.text(36, "情境分析一：較佳情況")
     d.text(36, "假設於第1 個自動提前出場觀察日發生自動提前出場事件。")
-    d.text(36, f"• 第 {months} 個月配息金額 ＝每單位面額 × {s.monthly}%")
-    cumulative = (Decimal(s.denom) * s.monthly / 100 * s.first_callable).quantize(Decimal("0.01"), ROUND_HALF_UP)
-    d.text(36, f"• 累積配息金額 ＝{cumulative:,} {s.currency_zh}")
+    coupons(months, s.first_callable)
+    d.text(36, f"• 自動提前出場贖回金額＝每單位面額 × 100% ＝{denom} × 100% ＝{denom} {ccy}")
+    d.text(36, "• 總報酬率 ＝[(自動提前出場贖回金額+累積配息金額) / 總投資金額] - 100% ＝0.75%")
     d.text(36, "情境分析二：一般情況")
+    d.text(36, "假設不曾發生任何自動提前出場事件，於到期日以現金結算收益。")
+    coupons(f"1~{s.tenor}", s.tenor)
+    d.text(36, f"• 到期贖回金額＝每單位面額 × 100% ＝{denom} × 100% ＝{denom} {ccy}")
+    d.text(36, "情境分析三：較差情況")
+    worst = s.underlyings[0]
+    d.text(
+        36,
+        f"假設於期末訂價日表現最差的連結標的為{worst.name}，收盤價為50.00 {s.quote}，低於其執行價。"
+        f"投資人將會收到最差表現之連結標的單位數，及以{ccy}支付剩餘金額（如有）。",
+    )
+    coupons(f"1~{s.tenor}", s.tenor)
+    d.text(
+        36,
+        f"• 到期給付最差表現之連結標的單位數為：每單位面額/表現最差連結標的的執行價* = {denom} / 70.3150 = 142.217 股",
+    )
+    d.text(36, f"整數股數＝142 股，畸零股數＝0.217 股，剩餘金額＝50.00 x 0.217＝10.85 {s.quote}")
+    d.text(36, "*在必要時，依期末匯率轉換為計價貨幣。")
+    d.text(36, "※ 請注意：情境分析之結果不保證未來績效，亦不代表連結標的未來表現。")
 
 
 ARTICLE_TITLES = {
@@ -465,6 +497,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         elif n == 15:
             d.article(n, title)
             d.text(36, "(1)到期贖回計算公式：請參見上述第一章第9 項。")
+            d.text(36, f"(3)提前贖回金額即為公平市值贖回金額，此公平市值贖回金額可能低於100%{s.currency_zh}投資本金。")
             d.text(36, f"(4)最低保證配息率：{guaranteed}配息 {s.monthly}%。")
         elif n == 16:
             d.article(n, title)
@@ -494,11 +527,32 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         "(6) 保管機構：不適用。",
     ):
         d.text(36, t)
-    d.text(36, "4. 交易架構說明：依境外結構型商品管理規則受託投資或受託銷售時：本商品由發行機構發行。")
+    d.text(
+        36,
+        "4. 交易架構說明：依OSU相關規定辦理受託投資或受託買賣時：本商品由發行機構發行，"
+        f"投資人透過與{DIST['name']}之受託買賣關係投資本商品。",
+    )
+    d.text(
+        36,
+        "依境外結構型商品管理規則受託投資或受託銷售時：本商品由發行機構發行，總代理人為發行機構之總代理人。"
+        f"投資人透過與{DIST['name']}之受託買賣關係投資本商品。",
+    )
     d.text(36, "5. 利害關係人揭露：發行機構與保證機構有關係人之情事。")
 
     d.chapter("三", "商品風險揭露")
     d.text(36, "1. 基本風險資訊")
+    ccy = s.currency_zh
+    d.text(
+        36,
+        f"(3) 利率風險：本商品之市場價格將受{ccy}利率變動所影響，例如當{ccy}利率上漲時，本商品之市場價格有可能下跌；"
+        f"當{ccy}利率下跌時，本商品之市場價格有可能上漲。",
+    )
+    d.text(36, "2. 個別商品風險資訊")
+    d.text(36, f"3. 投資本商品因利率、匯率或其他指標之變動，有直接導致{ccy}投資本金損失之虞：投資人須承擔市場風險。")
+    d.text(
+        36, f"4. 投資本商品因發行機構之業務或財產狀況之變化，有直接導致{ccy}投資本金損失之虞：投資人須承擔信用風險。"
+    )
+    d.text(36, "5. 投資本商品因其他重要事項，有直接導致本金損失之虞：不核對。")
     d.text(36, "6. 本商品之投資風險警語：")
     for k, t in enumerate(_warnings(s), 1):
         if k == 7:
@@ -551,7 +605,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.text(36, "6. 申購手續及資金給付方式：不核對。")
     d.text(36, "7. 發行不成立之情形：本商品有效申購金額至少達等值三十萬美元之總申購價值。")
     d.text(36, f"8. 最低贖回金額或單位(張)數：不得小於{m}(相當於一單位(張)商品)，以每次贖回計算)。")
-    for n in range(9, 18):
+    d.text(36, f"9. 贖回價金之計算：此公平市值贖回金額可能低於100%{s.currency_zh}投資本金。")
+    for n in range(10, 18):
         d.text(36, f"{n}. 第{n}項說明（不核對）")
 
     d.chapter("五", "特別記載事項")
@@ -656,14 +711,22 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
             30,
             f"(i) 若最差表現之連結標的期末訂價低於執行價：交付連結標的單位數，及以{s.currency_zh}支付剩餘金額（如有）。",
         )
+        d.text(30, "(ii) 若最差表現之連結標的期末訂價高於或等於執行價：每單位（張）商品面額x 100%。")
     else:
         d.text(30, "(i) 若未發生界限事件，則到期贖回金額為：每單位（張）商品面額x 100%。")
         d.text(30, f"(ii) 若發生界限事件：交付連結標的單位數，及以{s.currency_zh}支付剩餘金額（如有）。")
     d.text(30, "3. 贖回價金之計算：請參見中文產品說明書第一章第9 項。")
+    d.text(30, f"(4) 提前贖回金額即為公平市值贖回金額，此公平市值贖回金額可能低於100%{s.currency_zh}投資本金。")
     d.text(30, "4. 發行不成立之情形：本商品有效申購金額至少達等值三十萬美元之總申購金額。")
     d.section = "rest"
     d.text(30, "三、 投資風險")
     d.text(30, "(1) 最低收益風險：於最壞之情況，投資人有可能損失所有原始投資本金。")
+    ccy = s.currency_zh
+    d.text(
+        30,
+        f"(3) 利率風險：本商品之市場價格將受{ccy}利率變動所影響，例如當{ccy}利率上漲時，本商品之市場價格有可能下跌；"
+        f"當{ccy}利率下跌時，本商品之市場價格有可能上漲。",
+    )
     d.section = "fees"
     d.text(30, "四、 費用：受託或銷售機構(即受託人)向投資人(即委託人)收取之費用：")
     w.need(40)

@@ -1,4 +1,4 @@
-"""CA 投資人須知專屬規則（docs/rules/iis-check-rules.md §3 D35）：有無 KI 要等於同商品說明書。
+"""CA 投資人須知專屬規則（docs/rules/iis-check-rules.md §3 D35）：有無 KI、贖回 % 要等於同商品說明書。
 
 投資人須知只寫到期贖回「若未發生界限事件」，沒有界限事件定義，分不出 AM／D：只核有無 KI（2026-10-15 確認）。
 同商品說明書的 KI 型態已和參考條件表比過，這裡和說明書比即可（三方一致）。只用投資人須知與同商品 CA 說明書的讀出結果，
@@ -35,5 +35,33 @@ def has_ki(ctx: IisIssuerContext) -> CheckResult:
     )
 
 
+def redemption(ctx: IisIssuerContext) -> list[CheckResult]:
+    """二、2.(b)、(c) 贖回金額「商品面額x N%」的 N = 同商品說明書第 9 項 (b)、(c)（Issue #319）。"""
+    rid = "iis.redemption_pct"
+    pf = read_iis(ctx.sheet, "redemption_pcts")
+    if not pf.ok:
+        return [Check(rid, "redemption_pcts", Item.term_sheet("贖回 %"), ctx.document).review(pf)]
+    out = []
+    for occ in pf.value:
+        check = Check(rid, occ.field, Item.term_sheet(occ.name), ctx.document).needs(occ.value)
+        if (problem := check.blocked) is not None:
+            out.append(problem)
+            continue
+        ts = ctx.term_sheet.f(occ.field) if ctx.term_sheet is not None else None
+        if ts is None or not ts.ok:
+            why = NO_TERM_SHEET if ts is None else "同商品說明書讀不到第 9 項贖回 %，無法比對"
+            out.append(ts_unavailable(rid, occ.field, occ.name, why, f"{occ.value.value}%", document=ctx.document))
+            continue
+        out.append(
+            check.compare(
+                f"{ts.value}%",
+                f"{occ.value.value}%",
+                ok=ts.value == occ.value.value,
+                message=f"說明書第一章第 9 項（{occ.where}）",
+            )
+        )
+    return out
+
+
 def run_all(ctx: IisIssuerContext) -> list[CheckResult]:
-    return [has_ki(ctx)]
+    return [has_ki(ctx), *redemption(ctx)]

@@ -11,11 +11,12 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
 from . import hsbc_tables as tables
-from . import money, price_table
+from . import money, price_table, schedule
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "3"
 # 條號自成一行（`9.`），也可能與標題同一行（`10. 發行價格：`，真實樣本第 10 條起是這種版面，Issue #185）
 LAYOUT = LayoutSpec(
     r"第{zh}章\s*{name}", re.compile(r"^(\d{1,2})\.(?:\s+\S.*)?$"), 100, re.compile(r"^\((\d{1,2})\)\s*(.*)$"), 110
@@ -364,9 +365,10 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
         fields["scenario_table"] = ParsedField.missing("scenario_table", "情境價格表錨點缺漏／重複")
     f = fields.get
     fields["first_callable_period"] = first_callable(lambda k: f(k, ParsedField.missing(k)))
-    fields["autocall_schedule"] = autocall_schedule(
-        lambda k: f(k, ParsedField.missing(k)), fields["first_callable_period"]
-    )
+    fields["schedule_table"] = schedule_table(lambda k: f(k, ParsedField.missing(k)), fields["first_callable_period"])
+    fields["autocall_schedule"] = schedule.autocall_schedule(
+        fields["ko_observation"], fields["first_callable_period"], fields["schedule_table"]
+    )["autocall_schedule"]
     return HsbcTermSheet(fields, TextIndex(doc.lines), doc, scenarios, ScenarioIndex(scenarios))
 
 
@@ -397,27 +399,39 @@ def first_callable(f: Callable[[str], ParsedField]) -> ParsedField:
     return ParsedField("first_callable_period", FieldStatus.PRESENT, periods[0], ev)
 
 
-def autocall_schedule(f: Callable[[str], ParsedField], first: ParsedField) -> ParsedField:
-    """標準欄位 `autocall_schedule`：期別與比價日；比價日填法由共用回填規則決定。"""
+SCHEDULE_WHERE = "第一章第 11 條日期表"
+
+
+def schedule_table(f: Callable[[str], ParsedField], first: ParsedField) -> ParsedField:
+    """標準欄位 `schedule_table`：配息表每期一列。
+
+    期間每日觀察（D）：期始日、期末日、配息日，觀察日 = 期末日；第 1～k 期期始日為「-」，之後為前一期期末日後的下一個
+    一籃子預定交易日（讀不到 k 時無法確認）。定期觀察（P）：配息日，觀察日為定期 KO 表付款日對到的那一期的決定日
+    （對不到唯一期別的列不放，由 HSBC 規則 `schedule.autocall_dates` 檢查）；沒有期始日欄。
+    """
+    name = "schedule_table"
     obs, coupons = f("ko_observation"), f("coupon_table")
-    bad = next((p for p in [first, obs, coupons] if not p.ok), None)
+    bad = next((p for p in (obs, coupons) if not p.ok), None)
     if bad is not None:
-        return ParsedField("autocall_schedule", bad.status, evidence=bad.evidence, note=bad.note)
+        return ParsedField(name, bad.status, evidence=bad.evidence, note=bad.note)
     if obs.value == "D":
-        dates = {row["period"]: row["end"] for row in coupons.value if row["period"] >= first.value}
-    else:
-        ko = f("ko_table")
-        if not ko.ok:
-            return ParsedField("autocall_schedule", ko.status, evidence=ko.evidence, note=ko.note)
-        dates = {}
-        for row in ko.value:
-            periods = [c["period"] for c in coupons.value if c["payment"] == row["payment"]]
-            if len(periods) != 1:
-                return ParsedField.invalid("autocall_schedule", [], "KO 付款日無法唯一對應期別")
-            dates[periods[0]] = row["decision"]
-    return ParsedField(
-        "autocall_schedule",
-        FieldStatus.PRESENT,
-        standard_fields.AutocallSchedule(obs.value, first.value, len(coupons.value), dates),
-        [e for p in [first, obs, coupons] for e in p.evidence],
+        rows = tuple(
+            standard_fields.DateRow(r["period"], r["start"], r["end"], r["end"], r["payment"]) for r in coupons.value
+        )
+        start = standard_fields.PeriodStart("next_trading_day", None, first.value if first.ok else None)
+        table = standard_fields.DateTable(SCHEDULE_WHERE, rows, start)
+        return ParsedField(name, FieldStatus.PRESENT, table, list(coupons.evidence))
+    ko = f("ko_table")
+    if not ko.ok:
+        return ParsedField(name, ko.status, evidence=ko.evidence, note=ko.note)
+    decisions = {}
+    for row in ko.value:
+        periods = [c["period"] for c in coupons.value if c["payment"] == row["payment"]]
+        if len(periods) == 1:
+            decisions[periods[0]] = row["decision"]
+    rows = tuple(
+        standard_fields.DateRow(r["period"], observation=decisions.get(r["period"]), payment=r["payment"])
+        for r in coupons.value
     )
+    table = standard_fields.DateTable(SCHEDULE_WHERE, rows)
+    return ParsedField(name, FieldStatus.PRESENT, table, list(coupons.evidence) + list(ko.evidence))

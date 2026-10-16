@@ -1,4 +1,4 @@
-"""配息表、提前出場表、Non-Call、比價日、日期規則 B／C、§16 重印表、最低申購／贖回金額。
+"""日期表（共用檢查 rules/schedule.py）、提前出場表、Non-Call、比價日、日期規則 C1–C3、§16 重印表、最低申購／贖回金額。
 
 透過批量核對入口驗證（見 test_check_barc.check），資料皆為合成。
 """
@@ -17,8 +17,11 @@ from synth import Spec, check
 SCHEDULE_RULES = (
     "field.first_callable_period",
     "backfill.compare_dates",
-    "schedule.coupon_dates",
-    "schedule.final_period",
+    "schedule.period_count",
+    "schedule.payment_order",
+    "schedule.observation_order",
+    "schedule.last_observation",
+    "schedule.last_payment",
     "schedule.autocall_dates",
     "doc.autocall_trigger_per_period",
     "doc.scenario_price_table",
@@ -43,9 +46,13 @@ def test_schedule_variants_pass(tmp_path, spec, non_call):
     report = check(tmp_path, spec)
     assert problems(report) == set()
     for rule_id in SCHEDULE_RULES:
-        assert {r.status for r in results(report, rule_id)} <= {PASS, CheckStatus.NOT_APPLICABLE}
+        found = [r for r in report.results if r.rule_id == rule_id]
+        assert found or rule_id == "schedule.autocall_dates", rule_id  # 觀察期合併表沒有另一張表可比（C1–C3）
+        assert {r.status for r in found} <= {PASS, CheckStatus.NOT_APPLICABLE}
     r = results(report, "field.first_callable_period")[0]
     assert r.status == PASS and r.actual == non_call and r.document_evidence
+    starts = [r for r in report.results if r.rule_id == "schedule.period_start"]  # 只有期間型提前出場表有期始日欄
+    assert [r.status for r in starts] == ([PASS] if spec.ko_obs == "D" else [])
 
 
 def test_daily_observation_from_first_day_requires_review(tmp_path):
@@ -78,16 +85,23 @@ def test_guaranteed_periods_text_disagrees_with_table(tmp_path):
 
 def test_coupon_payment_before_valuation(tmp_path):
     report = check(tmp_path, edits=[Edit("2030 年4 月11 日", "2030 年3 月1 日", "ts.art13.coupon.3.payment")])
-    assert problems(report) == {("schedule.coupon_dates", MISMATCH)}
-    bad = [r for r in results(report, "schedule.coupon_dates") if r.status == MISMATCH][0]
-    assert "第 3 期" in bad.actual
+    assert problems(report) == {("schedule.payment_order", MISMATCH), ("schedule.observation_order", MISMATCH)}
+    bad = results(report, "schedule.observation_order")[0]
+    assert bad.actual == "第 3 期" and bad.item.name == "第 13 條日期表觀察日與配息日"
+
+
+def test_coupon_row_without_a_valuation_date_requires_review(tmp_path):
+    spec = Spec(ko_obs="P", memory=False)
+    report = check(tmp_path, spec, edits=[Edit("2030 年4 月8 日", "N/A", "ts.art13.coupon.3.valuation")])
+    r = results(report, "schedule.observation_order")[0]
+    assert r.status == REVIEW and "第 3 期" in r.message
 
 
 def test_last_valuation_must_equal_final_valuation_date(tmp_path):
     spec = Spec(ko_obs="P", memory=False)
     report = check(tmp_path, spec, edits=[Edit("2030 年7 月8 日", "2030 年7 月5 日", "ts.art13.coupon.6.valuation")])
     # 最晚的比價日也不等於最終比價日 → 回填規則轉人工覆核
-    assert problems(report) == {("schedule.final_period", MISMATCH), ("backfill.compare_dates", REVIEW)}
+    assert problems(report) == {("schedule.last_observation", MISMATCH), ("backfill.compare_dates", REVIEW)}
 
 
 def test_fixed_autocall_redemption_date_must_match_payment(tmp_path):
@@ -107,8 +121,8 @@ def test_period_end_date_must_match_coupon_valuation(tmp_path):
 
 def test_period_start_must_follow_previous_end(tmp_path):
     report = check(tmp_path, edits=[Edit("2030 年3 月11 日", "2030 年3 月20 日", "ts.art13.ko.3.start")])
-    assert problems(report) == {("schedule.autocall_dates", MISMATCH)}
-    assert results(report, "schedule.autocall_dates", "start")[0].status == MISMATCH
+    assert problems(report) == {("schedule.period_start", MISMATCH)}
+    assert "第 3 期期始日應為" in results(report, "schedule.period_start")[0].message
 
 
 def test_trigger_per_period(tmp_path):

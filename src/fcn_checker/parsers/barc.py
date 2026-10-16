@@ -20,7 +20,8 @@ from . import money, price_table
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "barc-zh-pd"
-PARSER_VERSION = "3"  # 3：價格表改由 parsers/price_table.py 讀（Issue #288）
+# 3：價格表改由 parsers/price_table.py 讀（Issue #288）；4：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "4"
 
 # 章名「第一章 商品基本資料」、條號「1.」、子項「(1)」（範本規格 §3）
 LAYOUT = LayoutSpec(
@@ -795,6 +796,9 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["guaranteed_periods"] = schedule.guaranteed_periods(flds["ko_table"])
     flds["guaranteed_periods_text"] = schedule.guaranteed_periods_text(doc, arts.get(13))
     flds["observation_t_ranges"] = schedule.observation_t_ranges(doc, arts.get(13))
+    flds["schedule_table"] = schedule.date_table(
+        flds["coupon_table"], flds["ko_table"], flds["ko_observation"], flds["guaranteed_periods"]
+    )
     flds["autocall_schedule"] = schedule.autocall_schedule(flds.__getitem__)
 
     s16 = TextIndex(doc.span_lines(arts.get(16)))

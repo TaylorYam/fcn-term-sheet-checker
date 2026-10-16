@@ -49,7 +49,11 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in CA.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    assert len(rule(r, "doc.coupon_mentions")) == 2  # 最低保證配息率、情境基本假設配息率
+    # 最低保證配息率、情境基本假設配息率、第 9 項 (a) 舉例的月配息率、情境一～三配息金額行各 2 處（Issue #319）
+    assert len(rule(r, "doc.coupon_mentions")) == 9
+    assert len(rule(r, "doc.redemption_pct")) == 6  # 第 9 項 (b)、(c)；情境一、二贖回金額行各 2 處
+    assert len(rule(r, "doc.scenario_params")) == 5  # 情境配息金額行 3 處、贖回金額行 2 處代入的面額
+    assert len(rule(r, "doc.coupon_periods")) == 6  # 配息表、名稱 2 處、基本假設天期、情境二／三配息月數
     assert len(rule(r, "doc.autocall_terms")) == 2  # 最低保證配息率月數、情境一配息月數
     assert len(rule(r, "doc.isin_consistency")) == 2
     assert rule(r, "standard.fixed_warning")[0].actual == 3  # 封面、第一章第 2 項（去【】）、第三章
@@ -58,7 +62,16 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     skipped = ("standard.guarantor_name", "standard.agent_name", "standard.minimum_issue_size")  # 決定不核對
     assert not [x for x in r.results if x.rule_id in skipped]
     assert len(rule(r, "field.min_amounts")) == 3
-    assert len(rule(r, "field.currency")) == 9  # 封面計價幣別＋金額旁的幣別字 8 處
+    # 封面計價幣別＋金額旁的幣別字 7 處＋情境一～三金額 3 處＋說明文字 9 處（Issue #319）
+    assert len(rule(r, "field.currency")) == 20
+    names = {x.field for x in rule(r, "standard.distributor")}
+    assert {f for f in names if f.startswith("distributor_name_")} == {
+        "distributor_name_cover",
+        "distributor_name_ch2",
+        *(f"distributor_name_{x}" for x in ("w4a", "w4b", "w4c", "w5", "w6", "ch3_w4a", "ch3_w4b", "ch3_w5")),
+        "distributor_name_structure_osu",
+        "distributor_name_structure",
+    }
     assert rule(r, "field.initial_pricing")[0].status == S.PASS  # 說明書沒寫：只檢查表上是允許值
     assert rule(r, "field.ki_type")[0].status == S.PASS
 
@@ -100,6 +113,15 @@ def test_ki_type_is_compared_with_the_sheet(tmp_path):
         (Edit("配息率：0.7500%(年化", "配息率：0.7600%(年化", "ts.art16"), "doc.coupon_mentions"),
         (Edit("第一個月配息", "前二個月配息", "ts.art15"), "doc.autocall_terms"),
         (Edit("• 第 1 個月配息金額", "• 第 1~2 個月配息金額", "ts.art16"), "doc.autocall_terms"),
+        # Issue #319：情境與第 9 項重複寫出的值
+        (Edit("月配息率為0.7500%", "月配息率為0.7600%", "ts.art9"), "doc.coupon_mentions"),
+        (Edit("每單位面額 × 0.7500%＝", "每單位面額 × 0.7600%＝", "ts.art16"), "doc.coupon_mentions"),
+        (Edit("＝10,000 × 0.7500%", "＝10,000 × 0.7600%", "ts.art16"), "doc.coupon_mentions"),
+        (Edit("＝10,000 × 0.7500%", "＝1,000 × 0.7500%", "ts.art16"), "doc.scenario_params"),
+        (Edit("＝10,000 × 100%", "＝1,000 × 100%", "ts.art16"), "doc.scenario_params"),
+        (Edit("• 第 1~6 個月配息金額", "• 第 1~5 個月配息金額", "ts.art16"), "doc.coupon_periods"),
+        (Edit("出場贖回金額＝每單位面額 × 100%", "出場贖回金額＝每單位面額 × 99%", "ts.art16"), "doc.redemption_pct"),
+        (Edit("到期贖回金額＝每單位面額 × 100%", "到期贖回金額＝每單位面額 × 99%", "ts.art16"), "doc.redemption_pct"),
         (Edit("天期：6 個月", "天期：7 個月", "ts.art16"), "doc.coupon_periods"),
         (Edit("70.3150 美元", "70.3151 美元", "ts.art16.table"), "doc.scenario_table"),
         (Edit("70.00% )", "75.00% )", "ts.art16.table"), "doc.scenario_table"),
@@ -134,10 +156,101 @@ def test_annual_coupon_must_match_the_coupon_table(tmp_path):
     assert rule(r, "field.coupon_pa_pct")[0].status == S.MISMATCH
 
 
-def test_scenario_coupon_amount_is_in_the_product_currency(tmp_path):
-    """情境一累積配息金額的幣別 = 承作幣別（2026-10-15 確認：配息金額仍 = 承作幣別）。"""
-    r = check(tmp_path, edits=[Edit("累積配息金額 ＝75.00 美元", "累積配息金額 ＝75.00 日圓", "ts.art16")])
-    assert rule(r, "field.currency", "scenario_coupon_currency")[0].status == S.MISMATCH
+@pytest.mark.parametrize(
+    ("edit", "rid", "field"),
+    [
+        (
+            Edit("累積配息金額 ＝75.00 美元", "累積配息金額 ＝75.00 日圓", "ts.art16"),
+            "field.currency",
+            "scenario1_currency",
+        ),
+        (Edit("＝10,000 美元", "＝10,000 日圓", "ts.art16"), "field.currency", "scenario2_currency"),
+        (
+            Edit("及以美元支付剩餘金額", "及以日圓支付剩餘金額", "ts.art16"),
+            "field.currency",
+            "scenario3_remainder_currency",
+        ),
+        (Edit("及以美元支付剩餘金額", "及以日圓支付剩餘金額", "ts.art9"), "field.currency", "redemption_currency"),
+        (
+            Edit("低於100%美元投資本金", "低於100%日圓投資本金", "ts.art15"),
+            "field.currency",
+            "principal_currency_art15",
+        ),
+        (Edit("低於100%美元投資本金", "低於100%日圓投資本金", "ts.ch四"), "field.currency", "principal_currency_ch4"),
+        (Edit("受美元利率", "受日圓利率", "ts.ch三"), "field.currency", "interest_rate_currency_1"),
+        (Edit("導致美元投資本金", "導致日圓投資本金", "ts.ch三"), "field.currency", "risk_principal_currency_1"),
+        (
+            Edit(f"而非由{DIST['name']}所保證", "而非由虛構證券股份有限公司所保證", "ts.warn"),
+            "standard.distributor",
+            "distributor_name_w5",
+        ),
+        (
+            Edit(f"價值，{DIST['name']}不負", "價值，虛構證券股份有限公司不負", "ts.ch三"),
+            "standard.distributor",
+            "distributor_name_ch3_w4b",
+        ),
+        (
+            Edit(f"投資人透過與{DIST['name']}", "投資人透過與虛構證券股份有限公司", "ts.ch二"),
+            "standard.distributor",
+            "distributor_name_structure",
+        ),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
+)
+def test_repeated_wording_must_match(tmp_path, edit, rid, field):
+    """說明文字與情境重複寫出的幣別字、受託機構名稱（Issue #319）：只有重複處錯，判不一致。"""
+    r = check(tmp_path, edits=[edit])
+    assert rule(r, rid, field)[0].status == S.MISMATCH
+    assert {x for x, _, _ in problems(r)} == {rid}, problems(r)
+
+
+def test_redemption_pct_must_be_100(tmp_path):
+    """第 9 項 (b) 贖回 % 不是 100%：正式條款判不一致，情境一贖回金額行（仍寫 100%）也和它不一致。"""
+    r = check(tmp_path, edits=[Edit("商品面額x100%", "商品面額x99%", "ts.art9")])
+    assert rule(r, "doc.redemption_pct", "ko_redemption_pct")[0].status == S.MISMATCH
+    assert {x for x, _, _ in problems(r)} == {"doc.redemption_pct"}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("edit", "rid", "field"),
+    [
+        (
+            Edit("出場贖回金額＝每單位面額 × 100% ＝", "出場贖回金額＝每單位面額＝", "ts.art16"),
+            "doc.redemption_pct",
+            "scenario1_redemption_pct",
+        ),
+        (
+            Edit("• 第 1~6 個月配息金額 ＝每單位面額", "• 第 1~6 個月配息金額 ＝面額", "ts.art16"),
+            "doc.coupon_periods",
+            "scenario2_months",
+        ),
+        (Edit("低於100%美元投資本金", "低於投資本金", "ts.ch四"), "field.currency", "principal_currency_ch4"),
+        (Edit("而非由", "並非由", "ts.ch三"), "standard.distributor", "distributor_name_ch3_w5"),
+        (Edit("商品面額x100%", "商品面額", "ts.art9"), "doc.redemption_pct", "ko_redemption_pct"),
+        (Edit("月配息率為0.7500%", "月配息率約略", "ts.art9"), "doc.coupon_mentions", "coupon_note_pct"),
+        (Edit("及以美元支付剩餘金額", "及支付剩餘金額", "ts.art9"), "field.currency", "redemption_currency"),
+        (Edit("及以美元支付剩餘金額", "及支付剩餘金額", "ts.art16"), "field.currency", "scenario3_remainder_currency"),
+        (Edit("低於100%美元投資本金", "低於投資本金", "ts.art15"), "field.currency", "principal_currency_art15"),
+        (Edit("利率", "利息", "ts.ch三"), "field.currency", "interest_rate_currency"),
+        (Edit("導致美元投資本金", "導致投資本金", "ts.ch三"), "field.currency", "risk_principal_currency"),
+        (Edit("本商品雖經", "本商品經", "ts.warn"), "standard.distributor", "distributor_name_w4a"),
+        (Edit("投資人透過與", "投資人經由", "ts.ch二"), "standard.distributor", "distributor_name_structure"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
+)
+def test_unreadable_repeated_mentions_need_review(tmp_path, edit, rid, field):
+    """重複寫出處讀不到（Issue #319）：轉人工覆核。"""
+    r = check(tmp_path, edits=[edit])
+    assert rule(r, rid, field)[0].status == S.REVIEW_REQUIRED, problems(r)
+
+
+def test_scenario_table_result_lists_every_cell(tmp_path):
+    """情境價格表結果的預期值／實際值帶出各格與面額（Issue #319，比照 BBVA #305）。"""
+    r = check(tmp_path)
+    result = rule(r, "doc.scenario_table")[0]
+    assert result.status == S.PASS
+    assert "70.3150" in result.expected and result.expected == result.actual
+    assert result.expected[-1] == "10,000"
 
 
 def test_last_payment_date_must_be_the_maturity_date(tmp_path):

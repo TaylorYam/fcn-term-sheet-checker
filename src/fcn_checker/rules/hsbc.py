@@ -12,7 +12,7 @@ from dataclasses import replace
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
 from ..text import full_brackets, squash
-from . import hsbc_scenario, kit
+from . import hsbc_scenario, kit, schedule
 from .kit import Check, IssuerContext
 
 ISSUER = "HSBC"
@@ -32,113 +32,60 @@ PRICE_TABLE = Item.expected("價格表")
 
 
 def schedules(ctx):
-    c, obs, first = ctx.ts.f("coupon_table"), ctx.ts.f("ko_observation"), ctx.ts.f("first_callable_period")
-    deps = [c, obs, first]
-    out = []
-    if any(not p.ok for p in deps):
-        bad = next(p for p in deps if not p.ok)
-        return [
-            Check(rid, "schedule", Item.expected("配息表與提前出場表"), ctx.document).review(bad)
-            for rid in [
-                "schedule.coupon_dates",
-                "schedule.autocall_dates",
-                "doc.coupon_periods",
-            ]
-        ]
-    rows = c.value
-    periods = [r["period"] for r in rows]
-    payments = [r["payment"] for r in rows]
-    tenor = ctx.ts.f("tenor_months")
-    n = ctx.ts.f("coupon_periods")
-    maturity = ctx.ts.f("maturity_date")
-    final = ctx.ts.f("final_valuation_date")
-    out.append(
+    """HSBC 獨有的日期表交叉驗證；期數、配息日與觀察日順序、末期日期、期始日由共用規則（rules/schedule.py）檢查。
+
+    - 第 11 條(1)「配息期數=n」= 天期。
+    - D：第 1～k 期 Nt 為「-」，之後每期都有 Nt。
+    - P：定期 KO 表每列的付款日依序對到第 k～n 期的配息日（各對到唯一一期）。
+    """
+    f = ctx.ts.f
+    c, obs, first, tenor, n = (
+        f(x) for x in ("coupon_table", "ko_observation", "first_callable_period", "tenor_months", "coupon_periods")
+    )
+    out = [
         Check("doc.coupon_periods", "coupon_periods", Item.expected("配息期數"), ctx.document, expected=tenor.value)
-        .needs(c, tenor, n)
-        .compare(
-            tenor.value,
-            [n.value, len(rows)],
-            ok=n.ok and tenor.ok and n.value == tenor.value == len(rows) and periods == list(range(1, len(rows) + 1)),
-        )
-    )
-    out.append(
-        Check("schedule.coupon_dates", "payment", Item.expected("配息支付日"), ctx.document, expected=maturity.value)
-        .needs(c, maturity)
-        .compare(
-            maturity.value,
-            payments[-1],
-            ok=maturity.ok
-            and payments[-1] == maturity.value
-            and all(a < b for a, b in zip(payments, payments[1:], strict=False)),
-        )
-    )
+        .needs(tenor, n)
+        .compare(tenor.value, n.value, message="第 11 條(1)「配息期數」須等於天期")
+    ]
+    if not obs.ok:
+        out.append(Check("schedule.autocall_dates", "schedule", Item.expected("提前出場表"), ctx.document).review(obs))
+        return out
     if obs.value == "D":
-        k = first.value
-        valid = all(a["end"] < b["end"] for a, b in zip(rows, rows[1:], strict=False))
-        notes: list[str] = []  # 期始日對不上的說明（應為哪一天；無法確認時附原因，Issue #208）
-        unsure = False
-        for i, row in enumerate(rows):
-            valid &= row["end"] < row["payment"]
-            if row["period"] <= k:
-                valid &= row["start"] is None and row["nt"] is None
-                continue
-            valid &= row["nt"] is not None and row["start"] is not None
-            if row["start"] is None:
-                continue
-            valid &= row["start"] <= row["end"]
-            verdict = kit.period_start(ctx, rows[i - 1]["end"], row["start"])
-            if verdict.status != S.PASS:
-                notes.append(f"第 {row['period']} 期期始日{verdict.note}")
-                valid &= verdict.status != S.MISMATCH
-                unsure |= verdict.status == S.REVIEW_REQUIRED
-        daily = Check(
-            "schedule.autocall_dates",
-            "daily",
-            Item.expected("期間每日觀察的提前出場表"),
-            ctx.document,
-            expected=final.value,
-        ).needs(c, first, final)
-        ok = valid and final.ok and rows[-1]["end"] == final.value
-        if ok and unsure and daily.blocked is None:
-            out.append(kit.uncertain_start(daily, notes, expected=final.value, actual=rows[-1]["end"]))
-        else:
-            out.append(
-                daily.compare(
-                    final.value,
-                    rows[-1]["end"],
-                    ok=ok,
-                    tolerance=kit.TRADING_DAY_TOLERANCE,
-                    fail_message="；".join(notes),
-                )
-            )
-    else:
-        ko = ctx.ts.f("ko_table")
-        autocall = Check(
-            "schedule.autocall_dates",
-            "periodic",
-            Item.expected("定期觀察的提前出場表"),
-            ctx.document,
-            expected=final.value,
-        ).needs(c, ko, first, final)
-        if autocall.blocked is not None:
-            out.append(autocall.blocked)
+        nt = Check("schedule.autocall_dates", "nt", Item.expected("第一章第 11 條日期表 Nt 欄"), ctx.document).needs(
+            c, first
+        )
+        if (problem := nt.blocked) is not None:
+            out.append(problem)
             return out
-        mapped = []
-        valid = True
-        for row in ko.value:
-            hits = [r["period"] for r in rows if r["payment"] == row["payment"]]
-            if len(hits) != 1:
-                valid = False
-            else:
-                mapped.append(hits[0])
-            valid &= row["decision"] < row["payment"]
-        valid &= mapped == list(range(first.value, len(rows) + 1))
-        valid &= all(a["decision"] < b["decision"] for a, b in zip(ko.value, ko.value[1:], strict=False))
+        bad = [r["period"] for r in c.value if (r["nt"] is None) != (r["period"] <= first.value)]
         out.append(
-            autocall.compare(
-                final.value, ko.value[-1]["decision"], ok=valid and final.ok and ko.value[-1]["decision"] == final.value
+            nt.compare(
+                None,
+                "、".join(f"第 {p} 期" for p in bad) or None,
+                ok=not bad,
+                message=f"第 1～{first.value} 期 Nt 為「-」，之後每期都有 Nt",
             )
         )
+        return out
+    ko = f("ko_table")
+    autocall = Check("schedule.autocall_dates", "periodic", Item.expected("定期觀察的提前出場表"), ctx.document).needs(
+        c, ko, first
+    )
+    if (problem := autocall.blocked) is not None:
+        out.append(problem)
+        return out
+    mapped = []
+    for row in ko.value:
+        hits = [r["period"] for r in c.value if r["payment"] == row["payment"]]
+        mapped.append(hits[0] if len(hits) == 1 else None)
+    expected = list(range(first.value, len(c.value) + 1))
+    out.append(
+        autocall.compare(
+            expected,
+            mapped,
+            message="定期 KO 表每列的付款日須依序對到第 k～n 期的配息日",
+        )
+    )
     return out
 
 
@@ -243,6 +190,7 @@ def document_info(ctx):
 def run_all(ctx: IssuerContext) -> list:
     """說明書內部規則：只用讀出結果與審查標準，不碰參考條件表。"""
     out = price_headers(ctx)
+    out.extend(schedule.run(ctx))  # 日期表共用檢查（Issue #289）；其餘上手切換後改由單份核對呼叫
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
     out.extend(hsbc_scenario.run(ctx))

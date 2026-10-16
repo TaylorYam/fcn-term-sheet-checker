@@ -163,15 +163,104 @@ def test_blank_sheet_pricing_with_an_unknown_header_requires_review(tmp_path):
         (Edit("期初評價日：", "期初評價日：2029 年1 月1 日，原訂", "ts.art12"), "doc.initial_valuation_date"),
         (Edit("計價幣別：美元(USD)", "計價幣別：美元(JPY)", "ts.art5"), "doc.currency_consistency"),
         (Edit("商品名稱：CGMHI 6 個月", "商品名稱：CGMHI 7 個月", "ts.art1"), "doc.name_consistency"),
+        # Issue #314：重複寫出的值（說明文字幣別、情境、其他條、第五章）
+        (
+            Edit("配息金額 = 每單位商品面額 × 0.8233%", "配息金額 = 每單位商品面額 × 0.8333%", "ts.art15"),
+            "derive.monthly_coupon",
+        ),
+        (Edit("m/M × 0.8233%", "m/M × 0.8333%", "ts.art15"), "derive.monthly_coupon"),
+        (Edit("0.8233% (等同年息為9.88%)", "0.8233% (等同年息為9.89%)", "ts.art15"), "derive.coupon_pa_mentions"),
+        (
+            Edit("界限 (期初股價的95.00%)(假設) 最終", "界限 (期初股價的96.00%)(假設) 最終", "ts.art15"),
+            "doc.scenario_header_pct",
+        ),
+        (
+            Edit("下限價 (期初股價的55.00%)(假設) 最終", "下限價 (期初股價的50.00%)(假設) 最終", "ts.art15"),
+            "doc.scenario_header_pct",
+        ),
+        (
+            Edit("執行價 (期初股價的65.00%)(假設) 最終", "執行價 (期初股價的60.00%)(假設) 最終", "ts.art15"),
+            "doc.scenario_header_pct",
+        ),
+        (
+            Edit("m ÷ M × 0.8233% (等同年息為9.88%)", "m ÷ M × 0.8233% (等同年息為9.89%)", "ts.art13"),
+            "derive.coupon_pa_mentions",
+        ),
+        (Edit("投資單位數 × 100%", "投資單位數 × 101%", "ts.art15"), "doc.redemption_pct"),
+        (Edit("每單位商品面額 × 100% =", "每單位商品面額 × 90% =", "ts.art15"), "doc.redemption_pct"),
+        (Edit("股數如下：每單位商品面額的100%", "股數如下：每單位商品面額的90%", "ts.art8"), "doc.redemption_pct"),
+        (Edit("相當於每單位商品面額100%之金額", "相當於每單位商品面額99%之金額", "ts.art8"), "doc.redemption_pct"),
+        (Edit("面額的100%之金額以及", "面額的99%之金額以及", "ts.art13"), "doc.redemption_pct"),
+        (Edit("面額的100%之金額（簡稱", "面額的99%之金額（簡稱", "ts.art17"), "doc.redemption_pct"),
+        (Edit("關於每10,000 美元", "關於每1,000 美元", "ts.art8"), "doc.denomination_mentions"),
+        (Edit("關於每10,000 美元", "關於每10,000 日圓", "ts.art8"), "field.currency"),
+        (Edit("投資人之美元實際投資淨額", "投資人之日圓實際投資淨額", "ts.art7"), "field.currency"),
+        (Edit("係以美元計算", "係以日圓計算", "ts.art7"), "field.currency"),
+        (Edit("以非美元之其他貨幣", "以非日圓之其他貨幣", "ts.art7"), "field.currency"),
+        (Edit("本商品係以美元計價", "本商品係以日圓計價", "ts.ch三"), "field.currency"),
+        (Edit("轉換成美元進行投資", "轉換成日圓進行投資", "ts.ch三"), "field.currency"),
+        (Edit("現金金額406.80美元", "現金金額406.80日圓", "ts.art15"), None),  # 實物交割那一行不列入幣別出處
+        (Edit("= 82.33 美元", "= 82.33 日圓", "ts.art15"), "field.currency"),
+        (Edit("在本商品發行日2030 年", "在本商品發行日2031 年", "ts.ch五"), "doc.date_mentions"),
+        (Edit("本商品在2030 年", "本商品在2029 年", "ts.ch五"), "doc.date_mentions"),
     ],
-    ids=lambda x: x if isinstance(x, str) else x.where,
+    ids=lambda x: x if isinstance(x, str) or x is None else x.where,
 )
 def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     """正式條款正確、但重複出現處錯誤：只有該規則不通過。"""
     r = check(tmp_path, edits=[edit])
     bad = {rid for rid, _, _ in problems(r)}
+    if broken is None:
+        assert not bad, problems(r)
+        return
     assert broken in bad, problems(r)
     assert bad <= {broken, "field.final_valuation_date", "doc.coupon_periods"}, problems(r)
+    assert {st for rid, _, st in problems(r) if rid == broken} == {S.MISMATCH}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("edit", "broken"),
+    [
+        (Edit("係以美元計算", "係以美金計算", "ts.art7"), {"field.currency"}),
+        (Edit("本商品係以美元計價", "本商品係以外幣計價", "ts.ch三"), {"field.currency"}),
+        (Edit("關於每10,000 美元", "關於每單位", "ts.art8"), {"doc.denomination_mentions", "field.currency"}),
+        (Edit("股數如下：每單位商品面額的100%", "股數如下：每單位商品面額", "ts.art8"), {"doc.redemption_pct"}),
+        (Edit("面額的100%之金額（簡稱", "面額之金額（簡稱", "ts.art17"), {"doc.redemption_pct"}),
+        (
+            Edit("配息金額 = 每單位商品面額 ×", "配息金額 = 每單位商品面額 × 年利率 ÷ 12，即", "ts.art15"),
+            {"derive.monthly_coupon"},
+        ),
+        (Edit("界限 (期初股價的95.00%)(假設) 最終", "界限(假設) 最終", "ts.art15"), {"doc.scenario_header_pct"}),
+        (Edit("(一) 配息說明", "配息說明", "ts.art15"), {"field.currency"}),
+        (Edit("在本商品發行日2030 年", "在本商品發行日（暫定）2030 年", "ts.ch五"), {"doc.date_mentions"}),
+    ],
+    ids=lambda x: x.where if isinstance(x, Edit) else "-".join(sorted(x)),
+)
+def test_unreadable_repeat_requires_review(tmp_path, edit, broken):
+    """重複寫出處讀不到：轉人工覆核（Issue #314），不是略過。"""
+    r = check(tmp_path, edits=[edit])
+    assert {rid for rid, _, _ in problems(r)} == broken, problems(r)
+    assert {st for _, _, st in problems(r)} == {S.REVIEW_REQUIRED}, problems(r)
+
+
+def test_unknown_scenario_header_requires_review(tmp_path):
+    """情境小表表頭「(期初股價的X%)」前面認不出欄名：轉人工覆核（Issue #314）。"""
+    edit = Edit("期初股價 自動提前出場界限 (期初股價的", "期初股價 出場價 (期初股價的", "ts.art15")
+    r = check(tmp_path, edits=[edit])
+    assert {(rid, st) for rid, _, st in problems(r)} == {("doc.scenario_header_pct", S.REVIEW_REQUIRED)}, problems(r)
+
+
+def test_repeated_values_are_read(tmp_path):
+    """重複寫出處都有結果（Issue #314）：情境價格表帶出各格、情境幣別每個情境一筆。"""
+    r = check(tmp_path, Spec())
+    scen = rule(r, "doc.scenario_table")[0]
+    assert scen.status == S.PASS and scen.expected and scen.expected == scen.actual
+    assert len(rule(r, "doc.table_header_pct")) == 3  # §9 三欄
+    assert len(rule(r, "doc.scenario_header_pct")) == 3  # 三個情境小表
+    assert len(rule(r, "doc.redemption_pct")) == 1 + 2 + 1 + 3 + 1  # §8(a)；§8(b)(4)；§13；情境；§17(C)
+    assert len(rule(r, "doc.date_mentions")) == 2
+    currencies = {x.field for x in rule(r, "field.currency")}
+    assert {"note7_net_currency", "risk_currency", "delivery_unit_currency", "scenario_currency_2"} <= currencies
 
 
 def test_ko_observation_start_must_agree_between_articles_12_and_13(tmp_path):
