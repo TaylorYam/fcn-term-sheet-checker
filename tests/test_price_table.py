@@ -606,6 +606,40 @@ def test_ubs_two_header_cells_in_one_line_with_percentages_on_the_next_page():
     }
 
 
+def test_gs_header_at_the_page_bottom_and_a_ticker_above_the_first_row_on_the_next_page():
+    """表頭在上一頁頁底（代碼欄「彭博代 / 碼(i)」比價格欄的格高），下一頁頁首是第 1 列比列號高的代碼 `ZAAA`：代碼屬於
+    第 1 列，不接到上一頁代碼欄的表頭（只有百分比的續行才接上一頁該欄最下面的一行；OOS 回歸，Issue #295）。"""
+    lines = [
+        cell(9, 660.5, (104, "連結標")),
+        cell(9, 673.9, (104, "的(i)")),
+        cell(9, 660.5, (144, "連結標的股份發")),
+        cell(9, 673.9, (144, "行人(i)")),
+        cell(9, 660.5, (232, "彭博代")),
+        cell(9, 673.9, (232, "碼(i)")),
+        cell(9, 660.5, (274, "參考幣")),
+        cell(9, 673.9, (274, "別(i)")),
+        cell(9, 660.5, (315, "初始參考")),
+        cell(9, 673.9, (315, "價格(i)")),
+        *(cell(9, y, (366, t)) for y, t in ((646.2, "執行價格(i)"), (660.5, "(初始參考價"), (674.9, "格(i)之75.0"), (688.2, "0%)"))),
+        *(cell(9, y, (429, t)) for y, t in ((646.2, "提前出場價"), (660.5, "格(i)(初始"), (674.9, "參考價格(i)"), (688.2, "之100.00%)"))),
+        *(cell(9, y, (491, t)) for y, t in ((646.2, "下限觸發價"), (660.5, "格(i)(初始"), (674.9, "參考價格(i)"), (688.2, "之70.00%)"))),
+        cell(10, 110.5, (104, "1")),
+        cell(10, 110.5, (144, "虛構甲公司")),
+        cell(10, 98.4, (232, "ZAAA")),
+        cell(10, 110.6, (232, "UW")),
+        cell(10, 122.8, (232, "Equity")),
+        cell(10, 110.5, (274, "美元")),
+        cell(10, 110.5, (315, "121.5700")),
+        cell(10, 110.5, (366, "91.1775")),
+        cell(10, 110.5, (429, "121.5700")),
+        cell(10, 110.5, (491, "85.0990")),
+    ]  # fmt: skip
+    table = read("underlying_table", lines, gs.PRICE_TABLE)
+    assert table.ok, table.note
+    assert table.value.tickers == ["ZAAA UW"]
+    assert table.value.pcts == {"strike": Decimal("75.00"), "ko": Decimal("100.00"), "ki": Decimal("70.00")}
+
+
 def test_ubs_scenario_last_row_with_a_lower_cell_beside_a_vertical_name():
     """UBS 情境價格表的標的名稱直書（一字一行）、一列很高，下限價那格比同列其他格低約 27pt；最後一列的這一格不是
     表後說明（OOS 真實樣本，Issue #295）。名稱溢到下一頁的字照收。"""
