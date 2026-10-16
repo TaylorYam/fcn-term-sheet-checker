@@ -3,7 +3,7 @@
 斷言與探勘結論一致（docs/rules/natixis-check-rules.md §5）：8 份說明書與 8 份投資人須知都辨識為 Natixis 範本（新舊兩版）；
 差異只有一組舊版文件「受託機構商品代號為」空白（兩份都轉人工覆核）、一份投資人須知 5 頁、一份投資人須知 KO 定義沒寫 %
 （都判不一致）、單一標的那組參考條件表沒有列；其餘 4 組通過並回填（含 2024 年那份，審查日期補了 2024-03-20）。
-參考條件表用 data/核對表格式..xlsx（含 7 列 Natixis）。
+參考條件表用 data/orders/核對表格式..xlsx（含 7 列 Natixis）。
 """
 
 from collections import Counter

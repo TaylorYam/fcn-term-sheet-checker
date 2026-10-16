@@ -1,14 +1,14 @@
 """本機真實樣本測試（批量）：只在本機 data/ 有說明書與參考條件表時執行，CI 自動略過。
 
-測試碼不含任何真實商品代號或數值；只驗證結果與 2026-10-02 討論的結論一致（Issue #43）。
+測試碼不含任何真實商品代號或數值；只驗證樣本內（IS）整批核對的結果（Issue #43）。
 說明書與投資人須知一起核對（ADR 0007，Issue #124）：兩份都通過或放行的商品才回填。
+參考條件表的回填欄位空白，回填值等於作業人員確認值的驗證在 OOS（`orders/OOS/`），不在這裡。
 """
 
 from __future__ import annotations
 
 import shutil
 from collections import Counter
-from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import openpyxl
@@ -18,16 +18,14 @@ from fcn_checker.batch import DocKind
 from fcn_checker.saving import run_batch
 from fcn_checker.schema import CheckStatus
 from harness import CONFIG
-from real_data import REFERENCE, TERM_SHEETS, TO_FILL, pdfs, requires
+from real_data import CHECK_FORMAT, TERM_SHEETS, pdfs, requires
 
 PDFS = pdfs()  # 說明書與投資人須知
-BACKFILL_COLUMNS = ("ISIN Code", "發行日", *(f"比價日_{i}" for i in range(1, 13)))
-CHECKED_COLUMNS = ("TS", "IIS")  # 兩份都通過或放行才打 V（Issue #127）
 PROBLEMS = (CheckStatus.MISMATCH, CheckStatus.REVIEW_REQUIRED, CheckStatus.ERROR)
 
 pytestmark = [
     pytest.mark.real_samples,
-    requires(TERM_SHEETS / "*.pdf", REFERENCE),
+    requires(TERM_SHEETS / "*.pdf", CHECK_FORMAT),
 ]
 
 
@@ -35,7 +33,7 @@ pytestmark = [
 def saved(tmp_path_factory):
     """整批核對並儲存一次：(批量核對結果, 儲存收據)。"""
     tmp = tmp_path_factory.mktemp("real_batch")
-    sheet = shutil.copy(REFERENCE, tmp / REFERENCE.name)  # 不在 data/ 產生檔案
+    sheet = shutil.copy(CHECK_FORMAT, tmp / CHECK_FORMAT.name)  # 不在 data/ 產生檔案
     return run_batch(CONFIG, Path(sheet), PDFS, tmp / "reports", root=tmp)
 
 
@@ -48,23 +46,18 @@ def outcome(saved):
     return saved[0]
 
 
-def test_other_issuers_are_unsupported(saved):
-    outcome, receipt = saved
-    others = [i for i in outcome.items if not i.term_sheet.name.startswith(("029", "325", "147", "082", "037"))]
-    assert others and all(i.unsupported and not receipt.filled(i) for i in others)
-    # BNP、SG 說明書已有範本、投資人須知沒有：說明書照常核對，但 BNP、SG 商品不回填（ADR 0007；test_real_bnp.py、test_real_sg.py）
-    for prefix in ("082", "037"):
-        issuer = [i for i in outcome.items if i.term_sheet.name.startswith(prefix)]
-        assert issuer and not any(receipt.filled(i) for i in issuer)
-        assert all(i.unsupported == (i.kind == DocKind.IIS) for i in issuer)
-    # MS 說明書與投資人須知都通過的 3 檔才回填（docs/templates/ms-zh-iis.md §7、test_real_ms.py）
-    ms = [i for i in outcome.items if i.kind == DocKind.TERM_SHEET and i.term_sheet.name.startswith("147")]
-    filled = [i for i in ms if receipt.filled(i)]
-    assert len(filled) == 3 and all(i.partner is not None and not i.partner.unsupported for i in filled)
-
-
 def term_sheets(outcome):
     return [i for i in outcome.items if i.kind == DocKind.TERM_SHEET]
+
+
+def test_every_issuer_is_supported_and_only_pairs_that_both_pass_are_filled(saved):
+    outcome, receipt = saved
+    assert not [i.term_sheet.name for i in outcome.items if i.unsupported]
+    assert len({i.issuer for i in outcome.items}) == 14
+    for item in term_sheets(outcome):
+        assert receipt.filled(item) == item.fills_sheet, item.term_sheet.name
+        if item.fills_sheet:
+            assert item.report.status == CheckStatus.PASS and item.partner.report.status == CheckStatus.PASS
 
 
 def test_barc_rows_match_every_prefilled_field(outcome):
@@ -74,7 +67,7 @@ def test_barc_rows_match_every_prefilled_field(outcome):
         if i.issuer == "BARC"
         and any(r.rule_id == "batch.pairing" and r.status == CheckStatus.PASS for r in i.report.results)
     ]
-    assert len(paired) == 8, "參考條件表有 8 列 BARC"
+    assert len(paired) == 6, "參考條件表有 6 列 BARC"
     allowed = {
         ("standard.product_name", "value_mismatch"),  # 較早的中文名稱沒有「（不保本）」
     }
@@ -92,14 +85,11 @@ def test_every_compare_date_on_the_sheet_matches_the_fill_rule(outcome):
 def test_passing_barc_rows_are_marked_filled(saved):
     outcome, receipt = saved
     passed = [i for i in term_sheets(outcome) if i.issuer == "BARC" and i.report.status == CheckStatus.PASS]
-    assert len(passed) == 5, "3 列 P 型＋2 列審查日期與名稱樣板都是新版的 D 型"
+    assert len(passed) == 3, "中文名稱是新版的 3 份"
     assert all(receipt.filled(i) for i in passed), "同商品投資人須知也都通過"
-    # 表上已確認的回填值都相同；期初定價 VWAP 的價格欄一律以說明書覆寫（表上有未四捨五入的值，Issue #122）；
-    # TS、IIS 表上空白或已是 V（Issue #127）
+    # 表上空白的回填欄位照說明書填入；表上已有的值都相同；期初定價 VWAP 的價格欄一律以說明書覆寫（Issue #122）
     assert all(
-        d.action == "match"
-        or (d.column.startswith("UL_") and d.action == "overwrite")
-        or (d.column in CHECKED_COLUMNS and d.action == "fill")
+        d.action in ("match", "fill") or (d.column.startswith("UL_") and d.action == "overwrite")
         for i in passed
         for d in i.report.backfill
     )
@@ -110,89 +100,60 @@ def vwap_codes(path: Path) -> set[str]:
 
 
 def test_vwap_rows_skip_price_comparison_and_take_the_document_prices(outcome):
-    vwap = [i for i in term_sheets(outcome) if i.product_code in vwap_codes(REFERENCE)]
-    assert len(vwap) == 3, "表上有 3 列期初定價 VWAP（BARC、HSBC、BNP 各 1）"
+    vwap = [i for i in term_sheets(outcome) if i.product_code in vwap_codes(CHECK_FORMAT)]
+    assert len(vwap) == 12, "表上有 12 列期初定價 VWAP"
+    # 1 份 Nomura 另有其他差異（見 test_real_nomura.py），其餘都通過
+    assert Counter(i.report.status for i in vwap) == Counter({CheckStatus.PASS: 11, CheckStatus.MISMATCH: 1})
     for item in vwap:
-        assert item.report.status == CheckStatus.PASS, (item.term_sheet.name, problems(item))
         assert not [r for r in item.report.results if r.rule_id == "field.underlying_prices"]
         prices = [d for d in item.report.backfill if d.column.startswith("UL_")]
-        assert prices and all(d.action in ("match", "overwrite") for d in prices)
+        assert prices and all(d.action in ("match", "fill", "overwrite") for d in prices)
 
 
-def rows_by_code(path: Path, sheet: str = "樣本清單") -> dict[str, dict]:
-    """TDCC Code → 該列；「回填後」是匯入格式（第 2 列表頭），真實 樣本清單 是第 3 列表頭。"""
-    ws = openpyxl.load_workbook(path, data_only=True)[sheet]
-    header_row = 2 if sheet == "回填後" else 3
-    headers = [c.value for c in ws[header_row]]
-    rows = (dict(zip(headers, r, strict=False)) for r in ws.iter_rows(min_row=header_row + 1, values_only=True))
-    return {str(d["TDCC Code"]): d for d in rows if d.get("TDCC Code")}
+def rows_by_code(path: Path) -> dict[str, dict]:
+    """TDCC Code → 該列；第一張工作表，表頭是前 10 列裡有 `TDCC Code` 的那一列。"""
+    rows = list(openpyxl.load_workbook(path, read_only=True, data_only=True).worksheets[0].iter_rows(values_only=True))
+    header = next(r for r in rows[:10] if "TDCC Code" in r)
+    records = (dict(zip(header, r, strict=False)) for r in rows[rows.index(header) + 1 :])
+    return {str(d["TDCC Code"]): d for d in records if d.get("TDCC Code")}
 
 
 def test_the_result_is_the_import_format(saved):
-    """真實 樣本清單 核對後，「回填後」是匯入格式（第 2 列表頭，Issue #203），不是 樣本清單 的欄位。"""
+    """核對後「回填後」是匯入格式（第 2 列表頭，Issue #203），不是參考條件表的欄位。"""
     imp = CONFIG.reference_format.import_format
     out = [c.value for c in openpyxl.load_workbook(saved[1].output)["回填後"][imp.header_row]]
     assert out == list(imp.columns)
 
 
-@requires(TO_FILL)  # 回填欄位與 VWAP 商品的價格欄空白（Issue #69、#122）
-def test_back_filled_rows_equal_the_confirmed_sheet(tmp_path):
-    sheet = shutil.copy(TO_FILL, tmp_path / TO_FILL.name)
-    filled, receipt = run_batch(CONFIG, Path(sheet), PDFS, tmp_path / "reports", root=tmp_path)
-    codes = [i.product_code for i in filled.items if receipt.filled(i)]
-    both = [i.product_code for i in filled.items if i.fills_sheet]
-    assert codes == both and len(codes) >= 5, "說明書與投資人須知都通過的商品才回填（BARC 5 份）"
-    got, want = rows_by_code(receipt.output, "回填後"), rows_by_code(REFERENCE)
-    assert set(got) == set(codes), "「回填後」只有通過且回填的列"
-    for code in codes:
-        assert {c: got[code][c] for c in BACKFILL_COLUMNS} == {c: want[code][c] for c in BACKFILL_COLUMNS}, code
-        assert got[code]["TS/IIS完成檢核"] == "V", code
-    # 期初定價 VWAP：價格欄在待回補表上空白，回填後等於已確認表上的價格（四捨五入到 4 位，Issue #122）
-    vwap = vwap_codes(TO_FILL) & set(codes)
-    assert len(vwap) >= 1, "BARC 的期初定價 VWAP 那列有回填"
-    for code in vwap:
-        for c in (f"UL_{n}_{p}" for n in range(1, 6) for p in ("進場價", "執行價", "下限價", "KO價")):
-            assert rounded(got[code][c]) == rounded(want[code][c]), (code, c)
-
-
-def rounded(v):
-    """表上價格先清掉浮點尾數（9 位）再四捨五入（half-up）到 4 位，與核對時相同。"""
-    if isinstance(v, float | int):
-        return Decimal(repr(round(v, 9))).quantize(Decimal("0.0001"), ROUND_HALF_UP)
-    return v
-
-
 # ---------------------------------------------------------------- 投資人須知（Issue #124）
 
 
-def investor_sheets(outcome, prefix: str):
+def investor_sheets(outcome, prefix: str = ""):
     return [i for i in outcome.items if i.kind == DocKind.IIS and i.term_sheet.name.startswith(prefix)]
 
 
 def test_barc_investor_sheets_all_pass_with_their_term_sheets(outcome):
     sheets = investor_sheets(outcome, "029")
-    assert len(sheets) >= 8
+    assert len(sheets) == 6
     for item in sheets:
         assert item.report.status == CheckStatus.PASS, (item.term_sheet.name, problems(item))
         assert item.partner is not None and item.report.metadata["inputs"]["term_sheet"]["pages"] == 4
 
 
-def test_hsbc_investor_sheets_only_differ_by_the_forbidden_wording(outcome):
-    # 2026-10-08 使用者決定：第七節「受託投資本商品」兩處判不一致（docs/rules/iis-check-rules.md §5）
+def test_hsbc_investor_sheets_only_differ_where_their_term_sheets_do(outcome):
     sheets = investor_sheets(outcome, "325")
-    assert len(sheets) >= 8
-    forbidden = Counter({("standard.forbidden_wording", "forbidden_wording"): 1})
-    for item in sheets:
-        assert problems(item) >= forbidden, item.term_sheet.name
-        assert item.partner is not None and not item.partner.fills_sheet
-    # 另外各 1 份（2026-10-13 使用者確認）：參考條件表到期日填成最後評價日；刊印日期晚於交易日 5 天（文件問題，#183）
-    others = sum((problems(i) - forbidden for i in sheets), Counter())
-    assert others == Counter({("field.maturity_date", "value_mismatch"): 1, ("doc.print_date", "value_mismatch"): 1})
+    assert len(sheets) == 7
+    # 第七節「受託投資本商品」：交易日在審查標準 wording.exempt_until 以前，特例通過（Issue #247）
+    wording = [r for i in sheets for r in i.report.results if r.rule_id == "standard.forbidden_wording"]
+    assert len(wording) == 7 and all(r.status == CheckStatus.PASS and "特例通過" in r.tolerance for r in wording)
+    # 和同商品說明書相同的那 1 處標的代碼差異（test_real_hsbc.py，待查 #310）
+    assert sum((problems(i) for i in sheets), Counter()) == Counter({("field.underlyings", "value_mismatch"): 1})
 
 
-def test_every_local_investor_sheet_belongs_to_an_issuer_with_an_iis_template(outcome):
-    """本機投資人須知：BARC、HSBC、MS 都有範本（MS：Issue #137）；BNP（Issue #191）與其他上手尚無範本，是未支援上手；
-    其他未支援上手的投資人須知另見合成測試 test_iis.py。"""
-    sheets = [i for i in outcome.items if i.kind == DocKind.IIS]
-    assert len(sheets) >= 24
-    assert all(i.unsupported == (not i.term_sheet.name.startswith(("029", "325", "147"))) for i in sheets)
+def test_every_local_investor_sheet_has_an_iis_template(outcome):
+    """樣本內 14 家上手的投資人須知都有範本；未支援上手的投資人須知另見合成測試 test_iis.py。"""
+    sheets = investor_sheets(outcome)
+    assert len(sheets) == len(term_sheets(outcome)) and not [i for i in sheets if i.unsupported]
+    # 只支援新版範本的上手，舊版辨識失敗、轉人工覆核：UBS 舊版 1 份（test_real_ubs.py）
+    unknown = [i for i in sheets if not i.report.template]
+    assert [i.issuer for i in unknown] == ["UBS"]

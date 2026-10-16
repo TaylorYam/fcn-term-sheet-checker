@@ -12,15 +12,15 @@ import pytest
 from fcn_checker.issuers import CA
 from fcn_checker.schema import CheckStatus as S
 from harness import check_all
-from real_data import ORDERS_CHECK_FORMAT, TERM_SHEETS, pdfs, requires
+from real_data import CHECK_FORMAT, TERM_SHEETS, pdfs, requires
 
-pytestmark = [pytest.mark.real_samples, requires(TERM_SHEETS / "086*_TS.pdf", ORDERS_CHECK_FORMAT)]
+pytestmark = [pytest.mark.real_samples, requires(TERM_SHEETS / "086*_TS.pdf", CHECK_FORMAT)]
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
 
 
 @pytest.fixture(scope="module")
 def items():
-    outcome = check_all(ORDERS_CHECK_FORMAT, pdfs("086*.pdf"))
+    outcome = check_all(CHECK_FORMAT, pdfs("086*.pdf"))
     return [i for i in outcome.items if i.term_sheet.name.endswith("_TS.pdf")], [
         i for i in outcome.items if i.term_sheet.name.endswith("_IIS.pdf")
     ]

@@ -2,8 +2,7 @@
 
 斷言與探勘結論一致（docs/rules/sg-check-rules.md §5）：6 份（含 2 份舊版面）都辨識為 SG 範本；只有 §5 列出的差異
 （舊範本的「受託投資」、舊負責人、交易日早於審查標準最早日期的審查通過日期、一檔標的除權息同比例轉人工覆核；
-沿用舊字的 2026 年文件也有「受託投資」，交易日在 2026-10-15 以前特例通過，#247）。參考條件表用含 SG 列的 data/核對表格式..xlsx（2026-10-14 起
-orders/FCN參考條件.xlsx 沒有 SG 的列）；表上沒有 SG 的列時，依賴參考條件表的斷言略過。
+沿用舊字的 2026 年文件也有「受託投資」，交易日在 2026-10-15 以前特例通過，#247）。參考條件表用含 SG 列的 data/orders/核對表格式..xlsx。
 投資人須知（Issue #213，docs/templates/sg-zh-iis.md）：6 份都辨識為 SG 投資人須知、每個範本欄位都讀得到，和同商品說明書
 讀出的值一致；只有探勘結論的差異（舊範本固定警語 0 次、舊範本一檔標的除權息的 4 個價格；6 份警語七「受託投資」特例通過）。
 說明書通過的 4 份連同投資人須知都通過，回填並打 V。
@@ -23,13 +22,11 @@ from fcn_checker.schema import CheckStatus as S
 from fcn_checker.standard_fields import Occurrence
 from fcn_checker.text import squash
 from harness import REVIEW_STANDARD, ROOT, STANDARD, check_all
-from real_data import CHECK_FORMAT, REFERENCE, TERM_SHEETS, pdfs, requires
-
-SHEET = CHECK_FORMAT if CHECK_FORMAT.is_file() else REFERENCE  # 含 SG 列的參考條件表
+from real_data import CHECK_FORMAT, TERM_SHEETS, pdfs, requires
 
 pytestmark = [
     pytest.mark.real_samples,
-    requires(TERM_SHEETS / "037*_TS.pdf", SHEET),
+    requires(TERM_SHEETS / "037*_TS.pdf", CHECK_FORMAT),
 ]
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
 WARNING = squash(STANDARD["risk"]["fixed_warning_by_issuer"]["sg"])
@@ -37,7 +34,7 @@ WARNING = squash(STANDARD["risk"]["fixed_warning_by_issuer"]["sg"])
 
 @pytest.fixture(scope="module")
 def items():
-    outcome = check_all(SHEET, pdfs("037*.pdf"))
+    outcome = check_all(CHECK_FORMAT, pdfs("037*.pdf"))
     return [i for i in outcome.items if i.term_sheet.name.endswith("_TS.pdf")], [
         i for i in outcome.items if i.term_sheet.name.endswith("_IIS.pdf")
     ]
@@ -49,17 +46,7 @@ def test_every_sample_is_recognised_as_sg(items):
     assert all(i.report.template == SG.template_id for i in term_sheets)
 
 
-def _no_reference_rows(items) -> bool:
-    term_sheets, _ = items
-    return all(
-        any(r.rule_id == "batch.pairing" and r.reason_code == "reference_row_missing" for r in i.report.results)
-        for i in term_sheets
-    )
-
-
 def test_samples_only_differ_where_the_exploration_said(items):
-    if _no_reference_rows(items):
-        pytest.skip("本機參考條件表沒有 SG 的列，無法核對參考條件表欄位")
     term_sheets, _ = items
     bad = Counter((r.rule_id, r.reason_code) for i in term_sheets for r in i.report.results if r.status in PROBLEMS)
     assert bad == Counter(
@@ -106,8 +93,6 @@ def test_sg_investor_sheets_are_recognised(items):
     _, investor_sheets = items
     assert len(investor_sheets) == 6
     assert all(i.report.template == SG.iis.template_id and not i.unsupported for i in investor_sheets)
-    if _no_reference_rows(items):
-        pytest.skip("本機參考條件表沒有 SG 的列，無法核對參考條件表欄位")
     bad = Counter((r.rule_id, r.status) for i in investor_sheets for r in i.report.results if r.status in PROBLEMS)
     assert bad == Counter(
         {
@@ -121,10 +106,8 @@ def test_sg_investor_sheets_are_recognised(items):
 def test_term_sheets_that_pass_are_filled_with_their_investor_sheets(tmp_path, items):
     """說明書通過的 5 份：投資人須知的「受託投資」特例通過（#247）後也都通過，直接回填並打 V；
     另 1 檔（舊範本，分割調整等）的說明書與投資人須知進錯誤清單。"""
-    if _no_reference_rows(items):
-        pytest.skip("本機參考條件表沒有 SG 的列，無法回填")
     session = PanelSession(REVIEW_STANDARD, ROOT / "config", install_root=tmp_path)
-    session.select(SHEET, pdfs("037*.pdf"))
+    session.select(CHECK_FORMAT, pdfs("037*.pdf"))
     session.load_preview()
     batch = session.start_check().batch.items
     pairs = {i.term_sheet.name[:12]: i for i in batch if i.term_sheet.name.endswith("_IIS.pdf")}
