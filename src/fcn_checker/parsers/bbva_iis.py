@@ -22,7 +22,7 @@ from .common import RawText, compat_normalized, fee_rates
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "bbva-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：警語裡的受託機構全名、說明文字幣別字（Issue #305）
 SECTIONS = (
     "商品之投資風險警語：",
     "一、相關機構事業概況",
@@ -37,6 +37,28 @@ PRODUCT = ("二、本商品事項", "風險揭露")  # KO／KI 寫法所在的�
 D = bbva.D
 PCT = bbva.PCT
 KO_EVENT = r"「自動提前贖回事件」：(.+?)大於或等於" + PCT + "。"
+# 警語裡寫受託機構全名的地方（Issue #305：每處都算受託機構名稱出處）：(欄位, 位置, pattern)
+WARNING_NAMES = (
+    ("distributor_name_w4_1", "警語 4.「本商品雖經…審查」", r"4\.本商品雖經(.+?)審查"),
+    (
+        "distributor_name_w4_2",
+        "警語 4.「…不負本商品投資盈虧之責」",
+        r"並不代表證實申請事項或保證該境外結構型商品之價值，且(.+?)不負本商品",
+    ),
+    ("distributor_name_w4_3", "警語 4.「…依法不得承諾擔保」", r"不負本商品投資盈虧之責。(.+?)依法不得承諾擔保"),
+    ("distributor_name_w5", "警語 5.「而非由…保證」", r"而非由(.+?)保證。"),
+    ("distributor_name_w6", "警語 6.「係由…負責」", r"另行訂定者，係由(.+?)負責外"),
+    (
+        "distributor_name_w9",
+        "警語 9.「…應提供專業投資人相關契約審閱期間」",
+        r"9\.([^。]+?)應提供專業投資人相關契約審閱期間",
+    ),
+)
+# 說明文字的幣別字（Issue #305）：(欄位, 位置, pattern)；次級市場確定價格的最低總額只核對幣別、不核對金額
+CURRENCY_WORDS = (
+    ("payment_currency", "二、 2. 收益分配「以X為計價單位」", rf"以({bbva.CCY})為計價單位"),
+    ("secondary_market_currency", "二、 3.(3) 次級市場確定價格最低總額", rf"其最低總額為[\d,]+({bbva.CCY})"),
+)
 PROVIDED = frozenset(
     {
         "page_totals",
@@ -46,6 +68,7 @@ PROVIDED = frozenset(
         "name_en",
         "product_type",
         "currency_zh",
+        "currency_others",
         "underlyings",
         "tenor_months",
         "issue_date",
@@ -247,6 +270,26 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         fields[container] = standard_fields.occurrences(
             container, [standard_fields.Occurrence(field, label, where, raw.capture(field, pattern))]
         )
+    warnings = iis.section(ti, ("商品之投資風險警語：", "一、相關機構事業概況"))
+    wt = TextIndex(warnings or [])
+    fields["distributor_names"] = standard_fields.occurrences(
+        "distributor_names",
+        [
+            *fields["distributor_names"].value,
+            *(
+                standard_fields.Occurrence(field, "受託機構名稱（警語）", where, iis.capture(field, wt, pattern))
+                for field, where, pattern in WARNING_NAMES
+            ),
+        ],
+    )
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others",
+        [
+            occ
+            for field, where, pattern in CURRENCY_WORDS
+            for occ in bbva.currency_words(text_lines, pattern, field, "說明文字幣別", where)
+        ],
+    )
     fees = iis.section(ti, ("四、費用", "五、"))
     if fees is None:
         fields.update(

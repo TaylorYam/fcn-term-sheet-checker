@@ -2,8 +2,9 @@
 每期兩種）、價格表表頭、情境假設與情境價格表、記憶式與下限值寫法的一致性。
 
 參考條件表欄位、價格推算、審查標準（含 BBVA 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
-規則。說明書有年利率（KO 每期型在第 16 項情境假設），不讀參考條件表（REFERENCE_FIELDS 為空）。保證機構、總代理人名稱、
-第 1 頁受託機構明細與期初定價依作業人員決定不核對。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
+規則。說明書有年利率（KO 每期型在第 16 項情境假設），不讀參考條件表（REFERENCE_FIELDS 為空）。保證機構、總代理人名稱
+與期初定價依作業人員決定不核對；第 1 頁受託機構明細、第 14 項最佳表現值起算日、第 16 項情境與第 18 項重複寫出的值
+（Issue #305）要等於正式條款。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from ..schema import CheckStatus as S
 from ..text import squash
 from . import kit
 from .kit import Check, IssuerContext
+from .review_standard import chairman_text, distributor_text
 
 ISSUER = "BBVA"
 REFERENCE_FIELDS: tuple[str, ...] = ()
@@ -32,8 +34,8 @@ NOT_COVERED = [
     {"rule_id": "doc.initial_prices", "description": "期初價格本身的外部正確性（沒有權威來源）"},
     {
         "rule_id": "doc.guarantor_and_agent",
-        "description": "保證機構（西班牙對外銀行）與總代理人（臺北分公司）的名稱、地址電話，第 1 頁受託機構明細 (i)～(iv) 不核對"
-        "（2026-10-15 作業人員決定）",
+        "description": "保證機構（西班牙對外銀行）與總代理人（臺北分公司）的名稱、地址電話，第 1 頁受託機構明細 (ii) 設立日期"
+        "不核對（2026-10-15 作業人員決定；(i)、(iii)、(iv) 依 Issue #305 有就核對）",
     },
     {
         "rule_id": "doc.initial_pricing",
@@ -42,8 +44,9 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 16 項情境只核對假設的年期、面額、利率、情境價格表與情境一第 1 期配息率；配息金額、股數、剩餘金額、"
-        "報酬率不重算，情境一提前出場期別與情境二～四不核對（2026-10-15 確認）",
+        "description": "第 16 項情境只核對假設的年期、面額、利率、情境價格表、情境一第 1 期配息率與重複寫出的值（第 1 期配息率、"
+        "下限值 %、出場值 %、觀察起算日、金額幣別；Issue #305）；配息金額、股數、剩餘金額、報酬率不重算，情境一提前出場期別"
+        "不核對（2026-10-15 確認）",
     },
     {
         "rule_id": "doc.coupon_accrual",
@@ -301,8 +304,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             issues.append(f"情境假設總投資金額 {amount.value} 不等於 {units.value} 單位 × 每單位面額 {denom.value}")
         out.append(
             check.compare(
-                None,
-                None,
+                _cells(own),
+                _cells(rows),
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於第 14 項價格表與每單位面額",
@@ -310,6 +313,95 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         )
     else:
         out.append(check.compare(None, None))
+    return out
+
+
+def _cells(rows: list[dict]) -> list[str]:
+    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值（Issue #305：看得出逐格比了哪些價格）。"""
+    return [f"{v:,}" for row in rows for v in row.values()]
+
+
+# ---------------------------------------------------------------- 重複寫出的值（Issue #305）
+
+
+def cover_details(ctx: IssuerContext) -> list[CheckResult]:
+    """第 1 頁 13. 後的受託機構明細：(i) 事業名稱、(iii) 營業所在地、(iv) 負責人 = 審查標準（共用比對）；範本沒有這段
+    （不適用）時不核對、不報缺漏。"""
+    f, std = ctx.ts.f, ctx.issuer_std
+    name, address, chairman = f("distributor_name_detail"), f("distributor_address_detail"), f("chairman_detail")
+    if all(pf.status == FieldStatus.NOT_APPLICABLE for pf in (name, address, chairman)):
+        return []
+    rid = "standard.distributor"
+    return [
+        distributor_text(
+            ctx,
+            rid,
+            "distributor_name_detail",
+            name,
+            std.distributor_name,
+            "第 1 頁受託機構明細 (i) 事業名稱",
+            "第 1 頁明細受託或銷售機構名稱",
+            kind="name",
+        ),
+        distributor_text(
+            ctx,
+            rid,
+            "distributor_address_detail",
+            address,
+            std.distributor_address,
+            "第 1 頁受託機構明細 (iii) 營業所在地",
+            "第 1 頁明細受託或銷售機構地址",
+            kind="address",
+        ),
+        chairman_text(ctx, "chairman_detail", chairman, "第 1 頁明細受託機構負責人"),
+    ]
+
+
+def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
+    """重複寫出的值 = 正式條款：第 14 項最佳表現值的觀察起算日（記憶式才有）與情境觀察起算日 = 第 12 項 (10) 觀察期間
+    起日；情境二～四第 1 期配息率 = 情境一（KO 每日型）；情境下限值 % = KI %（無 KI 時 = 轉換比例）；情境出場值 % = KO %；
+    第 18 項 (1) 的 % = KO %。"""
+    f = ctx.ts.f
+    period, memory, best = f("ko_period"), f("ko_memory"), f("best_value_start")
+    start = ParsedField(
+        "ko_period_start",
+        period.status,
+        period.value["start"] if period.ok else None,
+        list(period.evidence),
+        note=period.note,
+    )
+    out = []
+    if best.status != FieldStatus.MISSING or (memory.ok and memory.value):
+        out.append(
+            kit.doc_check(
+                ctx, "doc.ko_period_mentions", "best_value_start", "第 14 項最佳表現值的觀察起算日", start, best
+            ).compare(start.value, best.value, fail_message="須等於第 12 項 (10) 自動提前贖回觀察期間起日")
+        )
+    ki = kit.doc_ki(f("ki_type"))
+    barrier = f("strike_def_pct") if ki == "none" else f("ki_def_pct")
+    barrier_name = "轉換比例（無 KI 的到期門檻）" if ki == "none" else "第 14 項下限值 %"
+    for container, rid, expected, what in (
+        ("scenario_start_mentions", "doc.ko_period_mentions", start, "第 12 項 (10) 自動提前贖回觀察期間起日"),
+        ("scenario_coupon_mentions", "doc.coupon_mentions", f("scenario_first_coupon_pct"), "情境一第 1 期配息率"),
+        ("scenario_barrier_mentions", "doc.ki_consistency", barrier, barrier_name),
+        ("scenario_ko_mentions", "doc.ko_mentions", f("ko_def_pct"), "第 15 項 KO %"),
+    ):
+        pf = f(container)
+        if not pf.ok:
+            out.append(Check(rid, container, Item.expected(what), ctx.document).review(pf))
+            continue
+        for occ in pf.value:
+            out.append(
+                kit.doc_check(ctx, rid, occ.field, f"{occ.where}{occ.name}", expected, occ.value).compare(
+                    expected.value, occ.value.value, fail_message=f"須等於{what}"
+                )
+            )
+    ko, art18 = f("ko_def_pct"), f("art18_ko_pct")
+    out.append(
+        kit.doc_check(ctx, "doc.ko_mentions", "art18_ko_pct", "第 18 項 (1) 自動提前贖回事件的 %", ko, art18).compare(
+            ko.value, art18.value, fail_message="須等於第 15 項 KO %"
+        )
+    )
     return out
 
 
@@ -376,4 +468,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *schedule(ctx),
+        *cover_details(ctx),
+        *repeated_terms(ctx),
     ]

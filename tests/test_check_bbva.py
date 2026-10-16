@@ -58,6 +58,17 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert [x.status for x in rule(r, "doc.underlying_list")] == [S.PASS]
     monthly = [x.status for x in r.results if x.rule_id == "derive.monthly_coupon"]  # 只有 KO 每期型有每期配息率
     assert monthly == ([S.PASS] if spec.ko_obs == "P" else [])
+    # Issue #305：重複寫出的值都有核對
+    details = {"distributor_name_detail", "distributor_address_detail", "chairman_detail"}
+    fields = {x.field for x in r.results}
+    assert (details <= fields) == spec.trustee_detail and not (details & fields) == spec.trustee_detail
+    assert {"payment_currency_1", "payment_currency_2", "payment_currency_3", "autocall_currency"} <= fields
+    assert {"risk_currency", "risk_conversion_currency"} | {f"scenario{n}_currency" for n in range(1, 5)} <= fields
+    assert ("best_value_start" in fields) == spec.memory
+    assert ("scenario_ko_mentions_3_1" in fields) == spec.memory
+    assert ("scenario_coupon_mentions_2_1" in fields) == (spec.ko_obs == "D")
+    assert "scenario_barrier_mentions_2_1" in fields and "art18_ko_pct" in fields
+    assert rule(r, "doc.scenario_table")[0].actual  # 情境價格表各格放進實際值，看得出逐格比了哪些價格
 
 
 def test_underlyings_are_paired_by_ticker(tmp_path):
@@ -197,6 +208,99 @@ def test_forbidden_wording_in_chapter_four_follows_the_trade_date_exemption(tmp_
             ),
             ("schedule.coupon_dates", "coupon_dates"),
             id="每期觀察期間迄日",
+        ),
+        # Issue #305：重複寫出的值，只有這一處錯
+        pytest.param(
+            Spec(),
+            Edit("(i) 事業名稱:玉山綜合證券股份有限公司", "(i) 事業名稱:玉山證券股份有限公司", "ts.cover"),
+            ("standard.distributor", "distributor_name_detail"),
+            id="第 1 頁明細名稱",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("(iii) 營業所在地:台北市", "(iii) 營業所在地:新北市", "ts.cover"),
+            ("standard.distributor", "distributor_address_detail"),
+            id="第 1 頁明細地址",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("(iv) 負責人:", "(iv) 負責人:王", "ts.cover"),
+            ("standard.chairman", "chairman_detail"),
+            id="第 1 頁明細負責人",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("以美元為計價單位的配息金額", "以日圓為計價單位的配息金額", "ts.art8"),
+            ("field.currency", "payment_currency_1"),
+            id="第 8 項幣別",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("以美元為計價單位的自動提前贖回金額", "以日圓為計價單位的自動提前贖回金額", "ts.art15"),
+            ("field.currency", "autocall_currency"),
+            id="第 15 項幣別",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("本商品屬美元計價之產品", "本商品屬日圓計價之產品", "ts.ch三"),
+            ("field.currency", "risk_currency"),
+            id="第三章幣別",
+        ),
+        pytest.param(
+            Spec(),
+            Edit(
+                "到期贖回金額＝10 單位面額X 100%＝10 x 10,000 美元",
+                "到期贖回金額＝10 單位面額X 100%＝10 x 10,000 日圓",
+                "ts.art16",
+            ),
+            ("field.currency", "scenario2_currency"),
+            id="情境金額幣別",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("為自2030 年2 月11 日（含）", "為自2030 年2 月12 日（含）", "ts.art14"),
+            ("doc.ko_period_mentions", "best_value_start"),
+            id="第 14 項最佳表現值起算日",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("於2030 年2 月11 日（含）至贖回評價日", "於2030 年2 月12 日（含）至贖回評價日", "ts.art16"),
+            ("doc.ko_period_mentions", "scenario_start_mentions_3_1"),
+            id="情境觀察起算日",
+        ),
+        pytest.param(
+            Spec(),
+            Edit(
+                "第1～6 個配息觀察期間之配息金額＝10 單位面額X 配息率＝10 X 10,000 美元 X 1.5000%",
+                "第1～6 個配息觀察期間之配息金額＝10 單位面額X 配息率＝10 X 10,000 美元 X 1.6000%",
+                "ts.art16",
+            ),
+            ("doc.coupon_mentions", "scenario_coupon_mentions_2_1"),
+            id="情境二～四配息率",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("期初價格的60.00%（下限值）。", "期初價格的65.00%（下限值）。", "ts.art16"),
+            ("doc.ki_consistency", "scenario_barrier_mentions_2_1"),
+            id="情境下限值",
+        ),
+        pytest.param(
+            Spec(ki="none"),
+            Edit("期初價格的75.00%。", "期初價格的70.00%。", "ts.art16"),
+            ("doc.ki_consistency", "scenario_barrier_mentions_2_1"),
+            id="情境無 KI 門檻",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("小於100.00%（出場值）", "小於105.00%（出場值）", "ts.art16"),
+            ("doc.ko_mentions", "scenario_ko_mentions_3_1"),
+            id="情境出場值",
+        ),
+        pytest.param(
+            Spec(),
+            Edit("大於或等於100.00%，則視為", "大於或等於105.00%，則視為", "ts.art18"),
+            ("doc.ko_mentions", "art18_ko_pct"),
+            id="第 18 項 KO",
         ),
     ],
 )

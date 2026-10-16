@@ -23,7 +23,7 @@ from .common import RawText, capture_group, compat_normalized, derived, fee_rate
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "bbva-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
+PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #305）
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -82,6 +82,24 @@ KI_DEF = r"若於贖回評價日之最差表現值大於或等於" + PCT + r"（
 NO_KI_BARRIER = r"若於贖回評價日之最差表現值大於或等於" + PCT + r"：100%"
 KO_AT_MATURITY = r"最佳表現值大於或等於" + PCT + r"（出場值）：100%"
 STRIKE_DEF = r"轉換比例\(PutStrikePercentage\)：" + PCT
+# 重複寫出的值（Issue #305）：第 14 項最佳表現值的觀察起算日、第 18 項 (1) 自動提前贖回事件的 %
+BEST_VALUE_START = r"最佳表現值\(HighestRIValue\)：[^*]*?為自" + D + "（含）"
+ART18_KO = r"\(1\)自動提前贖回事件：.*?大於或等於" + PCT + r"，則視為發生自動提前贖回事件"
+# 第 1 頁 13. 後的受託機構明細（有些商品沒有這段；(ii) 設立日期不核對）
+COVER_DETAILS = (
+    ("distributor_name_detail", r"\(i\)\s*事業名稱\s*[:：]\s*(.+?)\s*\(ii\)"),
+    ("distributor_address_detail", r"\(iii\)\s*營業所在地\s*[:：]\s*(.+?)\s*\(iv\)"),
+    ("chairman_detail", r"\(iv\)\s*負責人\s*[:：]\s*(.+?)\s*\d+\.\s*商品之投資風險警語"),
+)
+# 第 16 項情境裡重複寫出的值（情境一的配息率另由 scenario_first_coupon_pct 核對）
+SCENARIOS = ("情境一", "情境二", "情境三", "情境四")
+SCENARIO_COUPON = r"配息金額＝\d+單位面額X配息率＝\d+X[\d,.]+" + CCY + "X" + PCT
+SCENARIO_BARRIER = r"期初價格的" + PCT  # 有 KI 時接「（下限值）」= KI %；無 KI 時 = 轉換比例
+SCENARIO_KO = PCT + r"（出場值）"
+SCENARIO_START = r"於" + D + r"（含）至贖回評價日"
+# 情境金額旁的幣別字：只收配息、累積配息、贖回金額與現金；股價、期初價格、剩餘金額（股價 × 零股）、
+# 除法算式（權益數額、以現金結算的報酬率）的金額跟著標的走（日圓商品連結美股時寫美元），不算承作幣別的出處
+SCENARIO_PRICE_WORDS = ("收盤價", "期初價格", "剩餘金額", "轉換匯率", "／")
 
 
 def clean(lines: Sequence[Line]) -> list[Line]:
@@ -188,17 +206,40 @@ def read(lines: Sequence[Line]) -> BbvaTermSheet:
         "price_table", table_region(art14, "交割營業日", "最低保證收益率"), PRICE_TABLE
     )
     fields["ki_type"] = ki_type(fields, art14)
+    fields["best_value_start"] = capture("best_value_start", TextIndex(art14), BEST_VALUE_START, parse_date)
     art15 = article(15)
     fields["ko_memory"], fields["ko_def_pct"] = ko_event(TextIndex(art15), art15)
     _table_fields(fields, fields["price_table"])
     # 年利率：KO 每日型在第 13 項；KO 每期型第 13 項只有每期配息率，由 _article16 改取第 16 項「年利率相當於約y%」
     fields["coupon_pa_pct"] = fields["coupon_annual_art13"]
     _schedule(fields)
-    _article16(fields, article(16))
+    art16 = article(16)
+    _article16(fields, art16)
+    scenario_currencies = _scenarios(fields, art16)
+    fields["art18_ko_pct"] = capture("art18_ko_pct", TextIndex(article(18)), ART18_KO, Decimal, whole_match=True)
 
     _chapter2(fields, doc)
     _chapter4(fields, doc, put)
     _occurrences(fields)
+    wording = (  # 「以X為計價單位」等說明文字的幣別字（Issue #305）
+        *currency_words(
+            article(8), rf"以({CCY})為計價單位", "payment_currency", "說明文字幣別", "第一章第 8 項主要給付項目"
+        ),
+        *currency_words(article(15), rf"以({CCY})為計價單位", "autocall_currency", "說明文字幣別", "第一章第 15 項"),
+        *currency_words(
+            doc.chapter_lines(3), rf"本商品屬({CCY})計價之產品", "risk_currency", "說明文字幣別", "第三章匯率風險"
+        ),
+        *currency_words(
+            doc.chapter_lines(3),
+            rf"轉換成({CCY})來投資本商品",
+            "risk_conversion_currency",
+            "說明文字幣別",
+            "第三章匯率風險",
+        ),
+    )
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [*fields["currency_others"].value, *wording, *scenario_currencies]
+    )
     fields["initial_pricing"] = standard_fields.absent(
         "initial_pricing", "說明書沒有寫期初定價方式（開盤價／收盤價／VWAP）"
     )
@@ -224,6 +265,12 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line], put: Callable) -> 
     put("approval_date", cover, r"受託機構審查通過之日期及文號：" + D, parse_date)
     put("print_date", cover, r"(?<!中文)產品說明書刊印日期" + D, parse_date)
     fields["issuer_name_cover"] = standard_fields.absent("issuer_name_cover", "第 1 頁發行機構名稱欄")
+    # 13. 後的受託機構明細 (i)～(iv)：有這段才核對，沒有不報缺漏（Issue #305）
+    has_details = re.search(r"\(i\)\s*事業名稱", raw.text) is not None
+    for name, pattern in COVER_DETAILS:
+        fields[name] = (
+            raw.capture(name, pattern) if has_details else standard_fields.absent(name, "第 1 頁受託機構明細")
+        )
 
 
 def _issuer_ch1(raw: RawText) -> ParsedField:
@@ -480,6 +527,87 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     fields["scenario_table"] = price_table.read(
         "scenario_table", table_region(art16, "假設：", "情境一"), SCENARIO_TABLE
     )
+
+
+def scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
+    """情境一～四在 `ti.text` 的範圍（到下一個情境或「免責聲明」為止）；找不到或順序不對時為空。"""
+    starts = [ti.text.find(name + "：") for name in SCENARIOS]
+    end = ti.text.find("免責聲明", max(starts))
+    if min(starts) < 0 or starts != sorted(starts) or end < 0:
+        return []
+    return [(name, a, b) for name, a, b in zip(SCENARIOS, starts, [*starts[1:], end], strict=True)]
+
+
+def mentions(name: str, ti: TextIndex, spans, pattern: str, convert: Callable, label: str) -> ParsedField:
+    """情境裡每一處重複寫出的值（Issue #305）：出處清單，每處一筆（欄位 `<name>_<情境>_<第幾處>`）；沒有任何一處時為空清單
+    （這個值不是每種型態都會寫，例：非記憶式沒有出場值）。"""
+    items = []
+    for case, a, b in spans:
+        for n, m in enumerate((m for m in ti.finditer(pattern) if a <= m.start() < b), start=1):
+            field = f"{name}_{SCENARIOS.index(case) + 1}_{n}"
+            pf = ParsedField.present(field, convert(m[1]), ti.lines_for(m.start(), m.end()))
+            items.append(Occurrence(field, label, f"第 16 項{case}", pf))
+    return standard_fields.occurrences(name, items)
+
+
+def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurrence]:
+    """第 16 項情境一～四重複寫出的值（Issue #305）：第 1 期配息率（KO 每日型的情境二～四）、下限值／門檻 %、出場值 %、
+    觀察起算日；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
+    ti = TextIndex(art16)
+    spans = scenario_spans(ti)
+    names = ("scenario_coupon_mentions", "scenario_barrier_mentions", "scenario_ko_mentions", "scenario_start_mentions")
+    if not spans:
+        for name in names:
+            fields[name] = ParsedField.missing(name, "第 16 項找不到情境一～四（到「免責聲明」為止）")
+        return [
+            Occurrence(
+                "scenario_currency",
+                "情境金額幣別",
+                "第 16 項情境",
+                ParsedField.missing("scenario_currency", "第 16 項找不到情境一～四"),
+            )
+        ]
+    daily = fields["date_table"].ok and fields["date_table"].value["kind"] == "D"
+    fields["scenario_coupon_mentions"] = mentions(
+        "scenario_coupon_mentions", ti, spans[1:] if daily else [], SCENARIO_COUPON, Decimal, "第 1 期配息率"
+    )
+    fields["scenario_barrier_mentions"] = mentions(
+        "scenario_barrier_mentions", ti, spans, SCENARIO_BARRIER, Decimal, "下限值 %"
+    )
+    fields["scenario_ko_mentions"] = mentions("scenario_ko_mentions", ti, spans, SCENARIO_KO, Decimal, "出場值 %")
+    fields["scenario_start_mentions"] = mentions(
+        "scenario_start_mentions", ti, spans, SCENARIO_START, parse_date, "觀察起算日"
+    )
+
+    def skip(text: str) -> bool:
+        return any(w in text for w in SCENARIO_PRICE_WORDS)
+
+    out = []
+    for n, (case, a, b) in enumerate(spans, start=1):
+        found = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=skip, start=a, end=b)
+        out.append(
+            money.scenario_occurrence(
+                f"scenario{n}_currency", f"{case}金額幣別", f"第 16 項{case}", found, ti.lines_for(a, a + 1)
+            )
+        )
+    return out
+
+
+def currency_words(lns: list[Line], pattern: str, field: str, name: str, where: str) -> list[Occurrence]:
+    """說明文字裡每一處幣別字（`pattern` 第 1 組；Issue #305）：每處一筆，沒有任何一處時一筆缺漏。"""
+    ti = TextIndex(lns)
+    hits = list(ti.finditer(pattern))
+    if not hits:
+        return [Occurrence(field, name, where, ParsedField.missing(field, f"{where}找不到幣別說明文字"))]
+    return [
+        Occurrence(
+            f"{field}_{n}" if len(hits) > 1 else field,
+            name,
+            where,
+            ParsedField.present(field, m[1], ti.lines_for(m.start(), m.end())),
+        )
+        for n, m in enumerate(hits, start=1)
+    ]
 
 
 # ---------------------------------------------------------------- 第二章、第四章
