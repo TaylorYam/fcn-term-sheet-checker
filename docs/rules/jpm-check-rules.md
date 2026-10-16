@@ -3,7 +3,7 @@
 - 文件側：[JPM 範本規格](../templates/jpm-zh-product-description.md)；投資人須知見 [JPM 投資人須知範本規格](../templates/jpm-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [JPM 下單資料格式](../order-formats/jpm-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.10（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額）；§3.4 `derive.prices`（共用）、`doc.scenario_table`（假設價格表、假設本金）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額、情境每次配息金額）；§3.4 `derive.prices`（共用）、`doc.scenario_table`（假設價格表、假設本金、情境重複寫出的本金與執行價，Issue #315）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi 核對規則](citi-check-rules.md)不同或 JPM 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
@@ -18,10 +18,10 @@
 - 連結標的中文名稱、交易所（第 9、15 項；只核對彭博代碼）。
 - 發行機構、總代理人、保證機構的**地址與電話**（三者名稱要核對，§3.6）；總代理人、計算代理機構負責人。
 - 固定警語 2.～10. 的全文（只保留全文禁用語檢查）。
-- 第 15 項情境分析的算式、情境假設收盤價、適用匯率、交割股數、平均年化報酬率（只核對假設價格表 = 第 9 項、假設本金 = 面額，§3.4；2026-10-15 確認）。
+- 第 15 項情境分析的配息金額、情境假設收盤價、適用匯率、交割股數、剩餘金額、平均年化報酬率（不重算；核對假設價格表 = 第 9 項、假設本金 = 面額，§3.4，2026-10-15 確認；情境重複寫出的年利率、本金、執行價與幣別，§3.7，Issue #315）。
 - 參考條件表「期初定價」欄（說明書沒有寫期初定價方式；2026-10-15 確認，同 SG）。
 - 發行不成立門檻（範本沒有金額門檻，`minimum_issue_size` 交 `absent`）。
-- 封面 `公會審查通過之日期及文號`、第 I 部分第 4、6、7、10、11、13、14、16–26 項、第 12 項 (5)、第 II 部分 1.(2)–(9)、2.(1)(3)–(9)、3.(2)、4.、5.、第 III 部分（6.(1) 固定警語以外）、第 IV 部分 3.、6.、7.、9.–17.、第 V 部分全部。
+- 封面 `公會審查通過之日期及文號`、第 I 部分第 4、6、7、10、11、13、14、16–26 項（Issue #315 盤點：第 14 項只參照第 8 項並寫固定 `0%`，第 16～26 項沒有重複寫出 KO／KI %、觀察日或商品幣別）、第 12 項 (5)、第 II 部分 1.(2)–(9)、2.(1)(3)–(9)、3.(2)、4.、5.、第 III 部分（6.(1) 固定警語以外）、第 IV 部分 3.、6.、7.、9.–17.、第 V 部分全部。
 - 開始受理贖回日期（說明書與投資人須知都只有文字 `發行日後第一個預定交易日`；比照 BNP、SG 不核對，2026-10-15 確認）。
 - 實物交割的適用匯率條款；商品註冊地（盧森堡）與準據法。
 - 發行日 − 交易日、到期日 − 最後評價日的天數（只作參考）。
@@ -38,7 +38,7 @@
 | 標的 `underlyings`、各標的價格 | 共用 `field.underlyings`、價格規則 | **JPM 不看順序**（2026-10-15 確認，比照 Citi）：加入 `[underlyings] any_order_issuers`，依彭博代號配對後比各價格；回填（VWAP 覆寫）依代號寫入對應格。JPM 說明書依英文公司名稱字母順序排列標的，表上依交易順序，4 份多標的樣本都不同 |
 | 期初定價 `initial_pricing` | 共用 `field.initial_pricing` | 說明書沒有出處 → 交 `absent`，不核對（同 SG） |
 | 最低金額 `min_amounts` | 共用 `field.min_amounts` | 第 IV 部分 4. 最低申購、最低加購、8. 最低贖回 = 單位面額 × 1（所有幣別；不需要 `min_amount_multiples.jpm`） |
-| 金額旁的幣別 `currency_others` | 共用 `field.currency`（Issue #170） | 第 5 項面額、第 15 項假設本金、第 IV 部分 4. 兩處、8. 各一筆。第 9、15 項標的價格（JP1 日股標的寫 `日圓`）與情境算式金額不列入 |
+| 金額旁的幣別 `currency_others` | 共用 `field.currency`（Issue #170） | 第 5 項面額、第 15 項假設本金、第 IV 部分 4. 兩處、8. 各一筆；第 15 項情境 (i)～(iii) 各一筆（配息、本金、到期贖回、剩餘金額旁的幣別，Issue #315）。第 9、15 項標的價格（JP1 日股標的寫 `日圓`）與情境裡的收盤價、執行價、含「股」的交割算式行不列入。說明文字沒有商品幣別字：全文兩處「轉換成美元」（修正條款「轉換成美元，歐元或其他主要貨幣」、付款中斷「美元等值金額」）與付款日「若為澳幣，則為雪梨」是一般條款，不列入 |
 | 期初定價 `VWAP` 的價格 | 共用（Issue #122） | 價格欄不比對、通過後依代號覆寫（JP4） |
 
 ### 3.2 審查標準規則（共用 `rules/review_standard.py`）
@@ -67,9 +67,9 @@
 | 檢查 | 規則 |
 |---|---|
 | 年利率 | 第 8 項 `配息金額：每單位面額 x Y% x 1/12` 的 Y = 參考條件表 `Coupon p.a. (%)`（共用 `field.coupon_pa_pct`） |
-| 年利率其他出處 | D 型第 8 項 `自動提前出場配息金額：每單位面額 x Y% x 1/12 x n/N` 的 Y = 年利率（5 份中 3 份 D 型成立）；P 型沒有這處 |
+| 年利率其他出處 | D 型第 8 項 `自動提前出場配息金額：每單位面額 x Y% x 1/12 x n/N` 的 Y = 年利率（5 份中 3 份 D 型成立）；P 型沒有這處。第 15 項情境 (i)～(iii) `每次配息金額 = 本金 x Y% x 1/12` 的 Y 每處 = 年利率（D、P 型都有，Issue #315） |
 
-說明書沒有寫出月配息率（只有 `x 1/12` 公式），不做月配息率推算（沒有 `derive.monthly_coupon` 的對象）。第 15 項情境的配息算式不核對（§2）。年利率其他出處的比對建議沿用 `derive.coupon_pa_mentions`（讀參考條件表年利率時同 Citi 宣告 `reference_fields`）。
+說明書沒有寫出月配息率（只有 `x 1/12` 公式），不做月配息率推算（沒有 `derive.monthly_coupon` 的對象）。第 15 項情境的配息金額不重算，只核對算式裡的年利率與本金（§3.7）。年利率其他出處的比對建議沿用 `derive.coupon_pa_mentions`（讀參考條件表年利率時同 Citi 宣告 `reference_fields`）。
 
 ### 3.4 價格
 
@@ -120,7 +120,18 @@
 
 ### 3.7 情境分析（第 15 項）
 
-2026-10-15 確認只核對**假設價格表 = 第 9 項標的表**與**假設本金 = 面額**（§3.4），不重算配息、交割股數、剩餘金額與平均年化報酬率；情境假設收盤價、適用匯率不核對。假設表找不到或欄數不符時轉人工覆核。
+2026-10-15 確認核對**假設價格表 = 第 9 項標的表**與**假設本金 = 面額**（§3.4），不重算配息、交割股數、剩餘金額與平均年化報酬率；情境假設收盤價、適用匯率不核對。假設表找不到或欄數不符時轉人工覆核。
+
+Issue #315（比照 BBVA #305、UBS #303）起，情境 (i)～(iii) 重複寫出的值逐處 = 正式條款（`doc.scenario_table`，年利率併入 `derive.coupon_pa_mentions`）：
+
+| 出處 | 規則 |
+|---|---|
+| 每個情境 `每次配息金額 = 本金 x Y% x 1/12` | Y = 參考條件表年利率；本金 = 面額 |
+| (i)、(ii) `到期贖回金額 = 本金`；(iii) `每單位面額/執行價 x 適用匯率 = 本金/…` | 本金 = 面額 |
+| (iii) 交割股數算式的執行價 | = 第 9 項價格表 `此假設最差表現連結標的為連結標的n` 那檔的執行價（單一標的取第 1 檔），數值相等；多標的沒寫 n 轉人工覆核 |
+| 每個情境金額旁的幣別 | = 承作幣別（`field.currency`，`scenario1_currency`～`scenario3_currency`）；收盤價、執行價與含「股」的交割算式行跟著標的走，不列入 |
+
+找不到情境 (i)～(iii)（到 `請注意：情境分析結果不保證本商品未來績效` 為止）或某情境沒有每次配息金額：轉人工覆核。假設價格表結果的預期值／實際值帶出每一格。
 
 ### 3.8 核對範圍決定（2026-10-15，Issue #233）
 
@@ -193,3 +204,4 @@
 | 2026-10-15 | 保證機構、總代理人名稱固定值核對，地址電話不核對；商品種類固定值；最低申購／加購／贖回 = 面額；沒有發行不成立門檻不核對；情境只核對假設價格表與假設本金；期初定價欄不核對；投資人須知費用表前一句不核對 |
 | 2026-10-15 | 發行主體只有 J.P. Morgan Structured Products B.V.；參考條件表 `發行機構` 欄 JPM 寫 `JPM` |
 | 2026-10-15 | 開始受理贖回日期（說明書與投資人須知都只有文字）比照 BNP、SG 不核對（PR #236 提問） |
+| 2026-10-16 | 重複寫出的值逐處 = 正式條款（Issue #315，比照 BBVA #305、UBS #303，不逐題詢問，決定表在 Issue 留言）：情境 (i)～(iii) 的年利率、本金、執行價與幣別納入；平均年化報酬率、配息金額、股數、剩餘金額不重算；第 14、16～26 項與投資人須知沒有新出處 |

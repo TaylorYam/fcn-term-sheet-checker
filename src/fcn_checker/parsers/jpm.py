@@ -22,7 +22,7 @@ from .common import NUM, Mention, derived, number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "jpm-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
+PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #315）
 CHAPTER_NAMES = {
     1: ("I", "商品基本資料"),
     2: ("II", "相關機構事業概況"),
@@ -115,6 +115,17 @@ KI_CLAUSES = {  # 有 KI 的到期贖回款（範本規格 §4.4）
 PRO_RATA = "自動提前出場配息金額："  # D 型才有的按日計息配息
 PRO_RATA_RATE = r"自動提前出場配息金額：每單位面額x" + PCT + r"x1/12xn/N"  # 其中的年利率 Y
 WORST_DEFINITION = "最差表現連結標的："  # 多標的才有的定義句
+# 第 15 項情境 (i)～(iii) 裡重複寫出的值（Issue #315；去空白比對）：情境到「請注意：情境分析結果不保證」為止
+SCENARIOS = (("(i)最佳情境", "情境 (i)"), ("(ii)一般情境", "情境 (ii)"), ("(iii)最差情境", "情境 (iii)"))
+SCENARIO_END = "請注意：情境分析結果不保證"
+SCENARIO_COUPON = r"每次配息金額=" + money.NUMBER + CCY + "x" + PCT + "x1/12="  # 年利率 Y
+SCENARIO_PRINCIPAL = {  # 情境裡重複寫出的本金（= 每單位面額）
+    "每次配息金額的本金": r"每次配息金額=(" + money.NUMBER + ")" + CCY,
+    "到期贖回金額": r"到期贖回金額=(" + money.NUMBER + ")" + CCY,
+    "交割股數算式的每單位面額": r"每單位面額/執行價x適用匯率=(" + money.NUMBER + ")" + CCY,
+}
+SCENARIO_STRIKE = r"每單位面額/執行價x適用匯率=" + money.NUMBER + CCY + "/(" + money.NUMBER + ")" + CCY
+SCENARIO_WORST = r"此假設最差表現連結標的為連結標的(\d)"
 
 
 class KoWording(NamedTuple):
@@ -196,7 +207,7 @@ class JpmTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
-    annual_mentions: list[Mention]  # 年利率的其他出處（D 型第 8 項自動提前出場配息金額）
+    annual_mentions: list[Mention]  # 年利率的其他出處（D 型第 8 項自動提前出場配息金額、第 15 項情境每次配息金額）
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -376,6 +387,7 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
     fields["scenario_table"] = price_table.read(
         "scenario_table", table_region(art15, "假設原計價幣別本金為", "(i)"), SCENARIO_TABLE
     )
+    scenario_currencies = _scenarios(fields, annual, art15)
 
     # 第 II 部分
     ch2 = doc.articles(2)
@@ -475,6 +487,7 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
                 "第 IV 部分第 8 項最低贖回金額",
                 fields["minimum_redemption_currency"],
             ),
+            *scenario_currencies,
         ],
     )
     return JpmTermSheet(fields, TextIndex(doc.lines), doc, annual)
@@ -569,6 +582,86 @@ def price_rows(table: ParsedField) -> ParsedField:
     """第 9 項價格表 → 標準欄位 `underlying_prices`（順序同 `underlyings`；列名「第 n 檔」）。"""
     names = [f"第 {i} 檔" for i in range(1, len(table.value.rows) + 1)] if table.ok else None
     return price_table.price_rows(table, names=names)
+
+
+# ---------------------------------------------------------------- 第 15 項情境裡重複寫出的值（Issue #315）
+
+
+def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
+    """情境 (i)～(iii) 在 `ti.text` 的範圍（到下一個情境或「請注意：情境分析結果不保證」為止）；找不到或順序不對時為空。"""
+    starts = [ti.text.find(head) for head, _ in SCENARIOS]
+    end = ti.text.find(SCENARIO_END, max(starts))
+    if min(starts) < 0 or starts != sorted(starts) or end < 0:
+        return []
+    return [(case, a, b) for (_, case), a, b in zip(SCENARIOS, starts, [*starts[1:], end], strict=True)]
+
+
+def _scenarios(fields: dict[str, ParsedField], annual: list[Mention], art15: list[Line]) -> list[Occurrence]:
+    """第 15 項情境 (i)～(iii) 重複寫出的值：每次配息金額算式的年利率（併入 `annual`，同 D 型自動提前出場配息金額）、
+    本金（`scenario_principal_mentions`）、情境 (iii) 交割股數算式的執行價（`scenario_strike`）；回傳各情境金額旁的
+    幣別出處（併入 `currency_others`）。報酬率、配息金額、收盤價、適用匯率與股數不重算。"""
+    ti = TextIndex(art15)
+    spans = _scenario_spans(ti)
+    if not spans:
+        note = "第 15 項找不到情境 (i)～(iii)（到「請注意：情境分析結果不保證」為止）"
+        annual.append(Mention("第 15 項情境每次配息金額", None, tuple(Evidence.of(x) for x in art15[:1])))
+        for name in ("scenario_principal_mentions", "scenario_strike"):
+            fields[name] = ParsedField.missing(name, note)
+        return [
+            Occurrence(
+                "scenario_currency", "情境金額幣別", "第 15 項情境", ParsedField.missing("scenario_currency", note)
+            )
+        ]
+    principals = []
+    for i, (case, a, b) in enumerate(spans, start=1):
+        where = f"第 15 項{case}每次配息金額"
+        coupons = [m for m in ti.finditer(SCENARIO_COUPON) if a <= m.start() < b]
+        if not coupons:
+            annual.append(Mention(where, None, tuple(Evidence.of(x) for x in ti.lines_for(a, a + 1))))
+        for m in coupons:
+            ev = tuple(Evidence.of(x) for x in ti.lines_for(m.start(), m.end()))
+            annual.append(Mention(where, Decimal(m[1]), ev))
+        hits = sorted(
+            (m.start(), label, m)
+            for label, pattern in SCENARIO_PRINCIPAL.items()
+            for m in ti.finditer(pattern)
+            if a <= m.start() < b
+        )
+        for n, (_, label, m) in enumerate(hits, start=1):
+            field = f"scenario_principal_{i}_{n}"
+            pf = ParsedField.present(field, number(m[1]), ti.lines_for(m.start(), m.end()))
+            principals.append(Occurrence(field, label, f"第 15 項{case}", pf))
+    fields["scenario_principal_mentions"] = (
+        standard_fields.occurrences("scenario_principal_mentions", principals)
+        if principals
+        else ParsedField.missing("scenario_principal_mentions", "第 15 項情境找不到本金")
+    )
+    fields["scenario_strike"] = _scenario_strike(ti, spans[-1])
+    out = []
+    for n, (case, a, b) in enumerate(spans, start=1):
+        found = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=a, end=b)
+        out.append(
+            money.scenario_occurrence(
+                f"scenario{n}_currency", f"{case}金額幣別", f"第 15 項{case}", found, ti.lines_for(a, a + 1)
+            )
+        )
+    return out
+
+
+def _scenario_strike(ti: TextIndex, span: tuple[str, int, int]) -> ParsedField:
+    """情境 (iii) 交割股數算式「每單位面額/執行價 x 適用匯率 = 面額/執行價 x …」的執行價：值為（假設的最差表現連結標的
+    是第幾檔，執行價）；單一標的沒有「此假設最差表現連結標的為連結標的n」時第幾檔為 None（規則依價格表檔數判斷）。"""
+    name = "scenario_strike"
+    _, a, b = span
+    found = [m for m in ti.finditer(SCENARIO_STRIKE) if a <= m.start() < b]
+    if len(found) != 1:
+        return ParsedField.missing(name, "第 15 項情境 (iii) 找不到交割股數算式的執行價或出現多次")
+    worst = [m for m in ti.finditer(SCENARIO_WORST) if a <= m.start() < b]
+    m = found[0]
+    lns = ti.lines_for(m.start(), m.end())
+    if len(worst) > 1:
+        return ParsedField.invalid(name, lns, "第 15 項情境 (iii) 假設的最差表現連結標的出現多次")
+    return ParsedField.present(name, (int(worst[0][1]) if worst else None, Decimal(m[1].replace(",", ""))), lns)
 
 
 # ---------------------------------------------------------------- 第 12 項日期表

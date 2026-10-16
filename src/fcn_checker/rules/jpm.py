@@ -34,8 +34,9 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表、假設本金 = 面額；情境算式、假設收盤價、適用匯率、"
-        "交割股數與平均年化報酬率不核對（2026-10-15 確認）",
+        "description": "第 15 項情境分析核對假設價格表 = 第 9 項價格表、假設本金與各情境重複寫出的本金 = 面額、配息算式的"
+        "年利率、情境 (iii) 交割股數算式的執行價 = 第 9 項、金額旁的幣別（Issue #315）；配息金額、假設收盤價、適用匯率、"
+        "交割股數、剩餘金額與平均年化報酬率不重算（2026-10-15 確認）",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -59,7 +60,8 @@ def _norm_name(value: str) -> str:
 
 
 def annual_mentions(ctx: IssuerContext) -> list[CheckResult]:
-    """D 型第 8 項自動提前出場配息金額「x Y% x 1/12 x n/N」的 Y = 參考條件表年利率（P 型沒有這處）。"""
+    """D 型第 8 項自動提前出場配息金額「x Y% x 1/12 x n/N」（P 型沒有這處）與第 15 項情境 (i)～(iii) 每次配息金額
+    「本金 x Y% x 1/12」（Issue #315）的 Y = 參考條件表年利率。"""
     if not ctx.ts.annual_mentions:
         return []
     return kit.rate_mentions(
@@ -70,7 +72,7 @@ def annual_mentions(ctx: IssuerContext) -> list[CheckResult]:
         ctx.ts.annual_mentions,
         kit.cmp_pct,
         "依說明書顯示位數四捨五入後比對",
-        lambda annual: "自動提前出場配息金額的年利率應等於年利率",
+        lambda annual: "配息算式的年利率應等於年利率",
     )
 
 
@@ -184,7 +186,8 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def scenario(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項假設價格表逐格 = 第 9 項價格表（同順序）；假設原計價幣別本金 = 每單位面額（核對規則 §3.4、§3.7）。"""
+    """第 15 項假設價格表逐格 = 第 9 項價格表（同順序）；假設原計價幣別本金與各情境重複寫出的本金 = 每單位面額；
+    情境 (iii) 交割股數算式的執行價 = 第 9 項假設的最差表現連結標的那檔執行價（核對規則 §3.4、§3.7；Issue #315）。"""
     f = ctx.ts.f
     table, scen = f("underlying_table"), f("scenario_table")
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 15 項假設價格表", table, scen)
@@ -208,18 +211,73 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
             for i, (a, b) in enumerate(zip(scen.value.prices, table.value.prices, strict=True), start=1)
             if (diff := [c for c in b if a.get(c) != b[c]])
         ]
-        result = check.compare(
-            None, None, ok=not issues, reason="value_mismatch", message="；".join(issues) or "逐格等於第 9 項價格表"
+        result = check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #315，比照 BBVA #305）
+            _cells(table.value.prices),
+            _cells(scen.value.prices),
+            ok=not issues,
+            reason="value_mismatch",
+            message="；".join(issues) or "逐格等於第 9 項價格表",
         )
     else:
         result = check.compare(None, None)
     denom, principal = f("denomination"), f("scenario_principal")
-    return [
+    out = [
         result,
         kit.doc_check(ctx, "doc.scenario_table", "scenario_principal", "第 15 項假設本金", denom, principal).compare(
             denom.value, principal.value, fail_message="第 15 項假設原計價幣別本金須等於每單位面額"
         ),
     ]
+    mentions = f("scenario_principal_mentions")
+    if not mentions.ok:
+        out.append(
+            Check(
+                "doc.scenario_table", "scenario_principal_mentions", Item.expected("第 15 項情境本金"), ctx.document
+            ).review(mentions)
+        )
+    else:
+        for occ in mentions.value:
+            out.append(
+                kit.doc_check(ctx, "doc.scenario_table", occ.field, f"{occ.where}{occ.name}", denom, occ.value).compare(
+                    denom.value, occ.value.value, fail_message="情境裡重複寫出的本金須等於每單位面額（Issue #315）"
+                )
+            )
+    out.append(scenario_strike(ctx))
+    return out
+
+
+def scenario_strike(ctx: IssuerContext) -> CheckResult:
+    """情境 (iii) 交割股數算式的執行價 = 第 9 項價格表裡假設的最差表現連結標的（「此假設最差表現連結標的為連結標的n」，
+    單一標的為第 1 檔）那一列的執行價；數值相等（說明書顯示位數不同不算錯）。"""
+    f = ctx.ts.f
+    table, strike = f("underlying_table"), f("scenario_strike")
+    check = kit.doc_check(
+        ctx, "doc.scenario_table", "scenario_strike", "第 15 項情境 (iii) 交割股數算式的執行價", table, strike
+    )
+    if (problem := check.blocked) is not None:
+        return problem
+    n, value = strike.value
+    rows = table.value.prices
+    if n is None and len(rows) == 1:
+        n = 1
+    if n is None or not 1 <= n <= len(rows) or "strike" not in rows[n - 1]:
+        return check.result(
+            S.REVIEW_REQUIRED,
+            reason="document_inconsistent",
+            message="情境 (iii) 假設的最差表現連結標的不在第 9 項價格表上（多標的須寫「此假設最差表現連結標的為連結標的n」）",
+        )
+    expected = rows[n - 1]["strike"]
+    return check.compare(
+        f"{expected:,}",
+        f"{value:,}",
+        ok=value == expected,
+        tolerance="數值相等",
+        fail_message=f"須等於第 9 項價格表第 {n} 檔執行價",
+    )
+
+
+def _cells(rows: list[dict]) -> list[str]:
+    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值（同 BBVA，Issue #305）。"""
+    return [f"{v:,}" for row in rows for v in row.values()]
 
 
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）
