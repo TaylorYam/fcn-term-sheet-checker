@@ -624,7 +624,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             d.text(
                 71,
                 f"本商品係以{s.currency_zh}計價，當投資人以新台幣或其他貨幣轉換成{s.currency_zh}進行投資時，"
-                "本金加利息轉換回新台幣或其他幣別可能產生匯兌風險。",
+                f"本金加利息轉換回新台幣或其他幣別可能產生匯兌風險。例如若{s.currency_zh}利率上漲，商品價格可能下跌。",
                 95,
             )
         if n == 6:
