@@ -268,7 +268,6 @@ NOMURA = Issuer(
     detect=nomura_parser.detect,
     read=nomura_parser.read,
     rules=nomura_rules.run_all,
-    reference_fields=nomura_rules.REFERENCE_FIELDS,
     iis=IisTemplate(
         template_id=nomura_iis.TEMPLATE_ID,
         label="Nomura 中文投資人須知",

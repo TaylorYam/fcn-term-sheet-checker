@@ -129,7 +129,7 @@
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
 | `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作；範本本身沒有的欄位（例：MS 沒有年利率、受理申購日）要明確交出 `standard_fields.absent(name, 說明)`（不適用），共用規則不核對、不報缺漏 |
 | `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構；價格推算已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
-| `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位：只有說明書印的值是由參考條件表才有的條件推算出來時才宣告（ADR 0009；BARC 為年利率與天期，MS、BNP、SG、Citi、JPM、Nomura 為年利率）；讀未宣告的欄位是開發期錯誤 |
+| `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位：只有說明書印的值是由參考條件表才有的條件推算出來時才宣告（ADR 0009；BARC 為年利率與天期，MS、BNP、SG、Citi、JPM 為年利率）；讀未宣告的欄位是開發期錯誤 |
 
 自動沿用（不必再寫）：
 
@@ -152,6 +152,16 @@
 
 - 規則式、不使用 LLM（[ADR 0001](adr/0001-deterministic-runtime.md)）；PDF 擷取沿用 PyMuPDF（[ADR 0002](adr/0002-python-cli-pymupdf.md)）。新增依賴或改擷取方式需另立 ADR。
 - 每個欄位帶狀態：present／missing／ambiguous／invalid／not_applicable，並保留證據（頁碼、bbox、原文）。
+- **值必須由明確的句子判定**（Issue #297）：沒看到範本規格寫的句子時，不從「沒有某段文字」推定 `False`、`none` 或不適用，一律交出需人工覆核的狀態。例：無 KI 要看到無 KI 的到期條款（Nomura 到期贖回第 (2) 款「低於執行價時」、Natixis 情況二只有實物交割），非記憶式要看到非記憶式的提前出場事件句（UBS）。parser 交出欄位的狀態約定：
+
+  | 情況 | 狀態 | 錯訊 |
+  |---|---|---|
+  | 整段（章、項、表）找不到 | `missing` | 「找不到<位置><什麼>」 |
+  | 句子或值缺漏、重複、寫法不在範本規格內 | `invalid` | 「<位置><什麼>的寫法缺漏、重複或不在範本規格內」，或寫明是哪一種 |
+  | 同一個值在多處讀到不同結果 | `ambiguous` | 寫出是哪幾處不同 |
+  | 範本本身沒有的欄位 | `absent`（`standard_fields.absent`，不適用） | 寫明範本沒有什麼 |
+
+  證據不可為空：至少附上找值的那段文字。投資人須知的 `provides` 也一樣：KI % 這類條件式欄位只有「確定這一份沒有 KI，且也沒讀到 KI %」時才不列，其他情況都列入、讀不到就轉人工覆核（[ADR 0007](adr/0007-iis-paired-with-term-sheet.md)）。現有不合約定的寫法（例：JPM、UBS 的 `ko_wording` 用 `missing`，BARC、BNP 用 `ambiguous`）之後改到該檔時順手修；對作業人員來說都是需人工覆核，結果不受影響。
 - 每條規則有 `rule_id`，只接收標準化欄位、下單欄位與審查標準；不讀檔、不改來源值。
 - 會隨時間改變的基準放設定檔，不寫死在程式。
 - 數值一律 Decimal；Excel 值先四捨五入到 9 位清除浮點尾數；日期不猜日月順序。

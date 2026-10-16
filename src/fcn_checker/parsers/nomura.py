@@ -21,7 +21,8 @@ from .common import Hit, Mention, RawText, capture_group, derived, hits, number,
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "nomura-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：年利率取自情境、無 KI 要有明確到期贖回款（Issue #297）
+PARSER_VERSION = "3"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -102,6 +103,8 @@ KI_DAYS = {
     r"各下限觸發決定日即(?:下述|中文產品說明書第一章)第11項\(6\)「下限觸發決定日」之表格所示": "P",
 }
 MATURITY_CASE = r"\((\d)\)如於最終評價日，"  # 第 7 項到期贖回各款
+# 無 KI 的到期贖回第 (2) 款：低於執行價就股票交割（有 KI 時寫「低於執行價但下限觸發事件未有發生時」）；投資人須知第四同句
+NO_KI_CASE = r"\(2\)如於最終評價日，(?:表現最差之)?連結標的之最終價格低於(?:個別)?執行價時"
 
 
 # ---------------------------------------------------------------- 原文合併文字
@@ -219,7 +222,6 @@ class NomuraTermSheet:
     full_text: TextIndex
     document: Document
     coupon_mentions: list[Mention]  # 每期配息率主來源（第 7 項）以外的出處（第 14 項設定參數、第 15 項(1)）
-    annualized_mentions: list[Mention]  # 第 14 項情境一、二的年化報酬率
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -282,7 +284,7 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     fields["date_table"], fields["ki_table"] = tables
     _schedule(fields)
 
-    annualized = _article14(fields, article(14), put)
+    _article14(fields, article(14), put)
     put("coupon_art15", article(15), r"\(1\)固定配息率：就每配息日而言，" + PCT, Decimal)
     art16 = article(16)
     early = rf"最低金額為{AMOUNT}，並以{AMOUNT}為增加贖回之單位"
@@ -334,7 +336,7 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
         Mention.of_field("第 14 項設定參數固定配息率", fields["coupon_art14"]),
         Mention.of_field("第 15 項(1) 固定配息率", fields["coupon_art15"]),
     ]
-    return NomuraTermSheet(fields, TextIndex(doc.lines), doc, coupons, annualized)
+    return NomuraTermSheet(fields, TextIndex(doc.lines), doc, coupons)
 
 
 def _cover(fields: dict[str, ParsedField], items: dict[str, CoverItem], cover: list[Line]) -> None:
@@ -378,9 +380,6 @@ def _article7(fields: dict[str, ParsedField], art7: list[Line], put: Callable) -
     fields["denomination_currency"] = capture_group(art7, denomination, 2, "denomination_currency")
     put("issue_price_pct", art7, r"發行價格每單位商品面額的(\d+(?:\.\d+)?)[％%]", Decimal)
     put("coupon_period_pct", art7, r"固定配息率：就每配息日而言，" + PCT, Decimal)
-    fields["coupon_pa_pct"] = standard_fields.absent(
-        "coupon_pa_pct", "年利率（Nomura 改核對每期配息率 × 12 與情境年化報酬率）"
-    )
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價方式（價格表表頭只寫「期初價格」）")
     fields["ko_wording"] = _ko_wording(t7, art7)
     fields["ko_memory"], fields["memory_style"] = memory_terms(t7, art7)
@@ -451,10 +450,12 @@ def memory_terms(t7: TextIndex, art7: list[Line], where: str = "第 7 項") -> t
     return ParsedField.present("ko_memory", style == "memory", lns), ParsedField.present("memory_style", style, lns)
 
 
-def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項") -> ParsedField:
-    """「下限觸發事件：」與「下限觸發決定日：」的寫法 → KI 型態（範本規格 §4.4）；無 KI 以 present「none」交出。
+def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項", redemption: TextIndex | None = None) -> ParsedField:
+    """「下限觸發事件：」與「下限觸發決定日：」的寫法 → KI 型態（範本規格 §4.4）；無 KI 以 present「none」交出，
+    但要看到無 KI 的到期贖回第 (2) 款（`NO_KI_CASE`）才判定。
 
-    投資人須知收益分配事項的句型相同（標籤加「」，parsers/nomura_iis.py 先把「」移開再交進來）；`where` 是錯訊裡的出處。"""
+    投資人須知收益分配事項的句型相同（標籤加「」，parsers/nomura_iis.py 先把「」移開再交進來），到期贖回款在另一段
+    （`redemption`；說明書同在第 7 項，預設用 `ti`）；`where` 是錯訊裡的出處。"""
     name = "ki_type"
     text = ti.text
     event = re.search(KI_EVENT, text)
@@ -462,7 +463,15 @@ def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項") -> ParsedF
     if event is None and days is None:
         if "下限觸發" in text:
             return ParsedField.invalid(name, lns, f"{where}有「下限觸發」字樣，但找不到下限觸發事件與決定日")
-        return ParsedField.present(name, "none", lns[:1])
+        red = ti if redemption is None else redemption
+        case = re.search(NO_KI_CASE, red.text)
+        if case is None:
+            return ParsedField.invalid(
+                name,
+                lns,
+                f"{where}沒有下限觸發事件，也找不到無下限觸發時的到期贖回款「(2) 如於最終評價日，…低於執行價時」",
+            )
+        return ParsedField.present(name, "none", red.lines_for(case.start(), case.end()))
     if event is None or days is None:
         return ParsedField.invalid(name, lns, f"{where}下限觸發事件與下限觸發決定日要同時出現")
     found = next(((m, v) for k, v in KI_DAYS.items() if (m := re.compile(k).match(text, days.end()))), None)
@@ -720,8 +729,9 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 # ---------------------------------------------------------------- 第 14 項情境分析
 
 
-def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable) -> list[Mention]:
-    """設定參數（年期、面額、發行價格、固定配息率）、百分比表、情境一／二年化報酬率（範本規格 §5.2、核對規則 §3.7）。"""
+def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable) -> None:
+    """設定參數（年期、面額、發行價格、固定配息率）、百分比表；情境一、二的年化報酬率 = 說明書的年利率
+    `coupon_pa_pct`（範本規格 §4.6、§5.2，核對規則 §3.3）：兩處不同為歧義，任一處讀不到為不合法。"""
     t14 = TextIndex(art14)
     a = re.search(r"設定參數[:：]", t14.text)
     b = t14.text.find("情境一（")
@@ -736,12 +746,21 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
     fields["scenario_table"] = _pct_table(params)
     sections = {k: t14.text.find(f"情境{k}（") for k in ("一", "二", "三")}
     found = hits(t14, r"本情境中年化報酬率為(?:\[[^\]]*\][^=]*=)?" + PCT, lambda m: Decimal(m[1]))
-    out = []
+    picked = []
     for k, nxt in (("一", "二"), ("二", "三")):
         lo, hi = sections[k], sections[nxt] if sections[nxt] >= 0 else len(t14.text)
-        mine = _in_section(t14, found, lo, hi)
-        out.append(Mention.of_optional_hit(f"第 14 項情境{k}年化報酬率", one(mine), lambda v: v, art14[:1]))
-    return out
+        hit = one(_in_section(t14, found, lo, hi))
+        if hit is None:
+            fields["coupon_pa_pct"] = ParsedField.invalid(
+                "coupon_pa_pct", art14, f"第 14 項情境{k}「本情境中年化報酬率為Y%」缺漏、重複或不在範本規格內"
+            )
+            return
+        picked.append(hit)
+    fields["coupon_pa_pct"] = ParsedField.from_hits(
+        "coupon_pa_pct",
+        [(h.value, h.lines) for h in picked],
+        ambiguous_note="第 14 項情境一、二的年化報酬率不同",
+    )
 
 
 def _in_section(ti: TextIndex, found: list[Hit], lo: int, hi: int) -> list[Hit]:

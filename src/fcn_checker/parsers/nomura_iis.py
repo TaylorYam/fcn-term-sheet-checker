@@ -18,7 +18,7 @@ from . import iis, nomura
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "nomura-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：無 KI 要有第四的明確到期贖回款（Issue #297）
 TITLE = "中文投資人須知"
 SECTIONS = (
     "本商品之投資風險警語",
@@ -34,6 +34,7 @@ SECTIONS = (
     "第十發行機構、總代理人或受託機構與投資人爭議之處理方式",
 )
 COUPON = ("第三收益分配事項", "第四贖回價金之計算")  # 每期配息率、KO／KI 寫法所在的段落
+REDEMPTION = ("第四贖回價金之計算", "第五受託不成立之處理")  # 到期贖回各款（無 KI 的判定依據）
 ISSUER = squash(nomura.ISSUER_EN)
 # 收益分配事項的標籤加「」：去掉後就是說明書第 7 項的句型
 LABELS = re.compile(
@@ -147,7 +148,10 @@ def _coupon_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
             "ko_observation_start", "每期觀察的自動提前出場決定日（寫「詳見中文產品說明書第11項(6)」）"
         )
     fields["ko_memory"], _ = nomura.memory_terms(sec_ti, sec, where="收益分配事項")
-    fields["ki_type"] = nomura.ki_type(sec_ti, sec, where="收益分配事項")
+    red = iis.section(ti, REDEMPTION)
+    fields["ki_type"] = nomura.ki_type(
+        sec_ti, sec, where="收益分配事項", redemption=TextIndex(red) if red is not None else TextIndex([])
+    )
 
 
 def _underlying_names(ti: TextIndex) -> ParsedField:
