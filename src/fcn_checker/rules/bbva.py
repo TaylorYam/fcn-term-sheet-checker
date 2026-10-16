@@ -303,8 +303,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             issues.append(f"情境假設總投資金額 {amount.value} 不等於 {units.value} 單位 × 每單位面額 {denom.value}")
         out.append(
             check.compare(
-                kit.cells(own),
-                kit.cells(rows),
+                kit.price_cells(own),
+                kit.price_cells(rows),
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於第 14 項價格表與每單位面額",

@@ -246,8 +246,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         issues.append(f"基本假設發行價格 {scen_price.value}% 不等於 {price.value}%")
     return [
         check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #321，比照 BBVA #305）
-            kit.cells(own),
-            kit.cells(rows),
+            kit.price_cells(own),
+            kit.price_cells(rows),
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "等於表1 與商品面額、發行價格",
@@ -302,8 +302,8 @@ def scenario3(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(
             ctx, "doc.scenario_table", "scenario3_initial", "情境三最終價格表的期初價格", table, initial
         ).compare(  # compare 的引數先算，依賴欄位有問題時不能取 value
-            kit.cells([{"initial": r["initial"]} for r in table.value.prices]) if table.ok else None,
-            kit.cells([{"initial": v} for v in initial.value]) if initial.ok else None,
+            kit.price_cells([{"initial": r["initial"]} for r in table.value.prices]) if table.ok else None,
+            kit.price_cells([{"initial": v} for v in initial.value]) if initial.ok else None,
             ok=table.ok and initial.ok and [r["initial"] for r in table.value.prices] == initial.value,
             fail_message="須等於表1 各列期初價格",
         )
