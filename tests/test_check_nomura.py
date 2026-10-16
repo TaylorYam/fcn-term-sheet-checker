@@ -166,6 +166,10 @@ def test_non_monthly_coupon_needs_review(tmp_path):
         (Edit("本商品係以美元計價", "本商品係以日圓計價", "ts.ch三"), "field.currency"),
         (Edit("支付30.00美元", "支付30.00日圓", "ts.art14"), "field.currency"),
         (Edit("x 100% x 1 = 10,000美元", "x 100% x 1 = 20,000美元", "ts.art14.table"), "doc.scenario_params"),
+        (Edit("x 100% x 1 = 10,000美元", "x 99% x 1 = 10,000美元", "ts.art14.table"), "doc.scenario_params"),
+        (Edit("x 100% x 1 = 10,000美元", "x 100% x 1 = 10,000日圓", "ts.art14.table"), "field.currency"),
+        (Edit("轉換成美元進行投資", "轉換成日圓進行投資", "ts.ch三"), "field.currency"),
+        (Edit("若美元利率上漲", "若日圓利率上漲", "ts.ch三"), "field.currency"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where,
 )
