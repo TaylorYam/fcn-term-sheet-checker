@@ -214,6 +214,7 @@ def test_name_without_memory_wording_is_a_mismatch(tmp_path):
         (Edit("則以美元支付", "則以日圓支付", "ts.art15"), "field.currency"),
         (Edit("以美元支付的剩餘金額", "以日圓支付的剩餘金額", "ts.art15"), "field.currency"),
         (Edit("價值為0美元", "價值為0日圓", "ts.art15"), "field.currency"),
+        (Edit("=10,000.00 美元+100.00 美元-", "=10,000.00 美元+100.00 日圓-", "ts.art15"), "field.currency"),
         (Edit("=-4,400.00 美元。", "=-4,400.00 日圓。", "ts.art15"), "field.currency"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:12],
@@ -233,6 +234,15 @@ def test_scenario_autocall_clause_must_match_article_8(tmp_path):
     assert {(rid, f, st) for rid, f, st in problems(r)} == {("doc.autocall_terms", "ko_wording_art15", S.MISMATCH)}
 
 
+def test_unreadable_scenario_autocall_clause_needs_review(tmp_path):
+    """十五寫了「提前出場觀察日：為自…」但不是已知寫法：轉人工覆核，不當成沒寫（Issue #320）。"""
+    edit = Edit("為自第1 個配息觀察的每個配息觀察日。", "為自第1 個配息觀察的某些日子。", "ts.art15")
+    r = check(tmp_path, Spec(ko_obs="P"), edits=[edit])
+    assert {(rid, f, st) for rid, f, st in problems(r)} == {
+        ("doc.autocall_terms", "ko_wording_art15", S.REVIEW_REQUIRED)
+    }
+
+
 def test_cross_currency_wording_must_be_the_deal_currency(tmp_path):
     """跨幣別（澳幣連日股）：期末匯率定義的幣別錯判不一致；小數 4 位的日股股價不列入（Issue #320）。"""
     spec = VARIANTS["KO 每期非記憶式、2 檔日股澳幣計價、KO 條款寫 %、發行價格沒有金額、受託機構/銷售機構標籤"]
@@ -247,8 +257,23 @@ def test_cross_currency_wording_must_be_the_deal_currency(tmp_path):
         (Edit("每月（共6 個）", "每月", "ts.art15"), {("doc.coupon_periods", "scenario_coupon_count")}),
         (Edit("換算後的美元金額", "換算後的金額", "ts.art8"), {("field.currency", "residual_conversion_currency")}),
         (Edit("則以美元支付", "則支付", "ts.art15"), {("field.currency", "scenario_residual_currency")}),
+        (
+            Edit("以美元支付的剩餘金額", "支付的剩餘金額", "ts.art15"),
+            {("field.currency", "scenario_residual_paid_currency")},
+        ),
+        (
+            Edit("以上情境分析相關之免責聲明", "情境分析四：假設情境。以上情境分析相關之免責聲明", "ts.art15"),
+            {("field.currency", "scenario4_currency")},
+        ),
     ],
-    ids=["情境算式讀不到配息率", "沒有配息觀察次數", "剩餘金額定義沒有幣別", "情境剩餘金額沒有幣別"],
+    ids=[
+        "情境算式讀不到配息率",
+        "沒有配息觀察次數",
+        "剩餘金額定義沒有幣別",
+        "情境剩餘金額沒有幣別",
+        "情境剩餘金額句沒有幣別",
+        "情境沒有金額",
+    ],
 )
 def test_unreadable_repeats_need_review(tmp_path, edit, found):
     """十五情境與說明文字的重複出處讀不到：轉人工覆核（Issue #320）。"""

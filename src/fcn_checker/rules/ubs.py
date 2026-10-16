@@ -102,13 +102,15 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             "商品基本資料十五情境算式代入的配息率",
             monthly,
             f("scenario_coupon_mentions"),
-            "每一處須等於商品基本資料八的固定配息率（Issue #320）",
+            "須等於商品基本資料八的固定配息率（Issue #320）",
         )
     )
     return out
 
 
-def _each(ctx: IssuerContext, rid: str, field: str, name: str, base: ParsedField, pf: ParsedField, fail: str):
+def _each(
+    ctx: IssuerContext, rid: str, field: str, name: str, base: ParsedField, pf: ParsedField, fail: str
+) -> CheckResult:
     """十五情境算式重複寫出的值（`pf.value` 每一處）都等於 `base`；預期值／實際值帶出每一處（Issue #320）。"""
     check = kit.doc_check(ctx, rid, field, name, base, pf)
     if (problem := check.blocked) is not None:
@@ -240,7 +242,6 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
             kit.doc_check(ctx, rid, "ko_wording_art15", "商品基本資料十五「提前出場觀察日」", art8, art15).compare(
                 _ko_text(art8.value) if art8.ok else None,
                 _ko_text(art15.value) if art15.ok else None,
-                ok=art8.ok and art15.ok and art8.value == art15.value,
                 fail_message="提前出場觀察方式與起始期須等於商品基本資料八",
             )
         )

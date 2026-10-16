@@ -684,9 +684,9 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         "scenario_coupon_count", ti, r"配息觀察(?:日|期間)[:：]每月（共(\d+)個）", int, whole_match=True
     )
     ko = ko_wording("ko_wording_art15", ti)
-    fields["ko_wording_art15"] = (
-        standard_fields.absent("ko_wording_art15", "十五的提前出場觀察日") if ko.status == FieldStatus.MISSING else ko
-    )
+    if ko.status == FieldStatus.MISSING and re.search(r"提前出場觀察日[:：]?(?:每日觀察，)?為自", ti.text) is None:
+        ko = standard_fields.absent("ko_wording_art15", "十五的提前出場觀察日")  # 依型態可有可無：沒有這句不核對
+    fields["ko_wording_art15"] = ko
     marks = [(m.start(), m[1]) for m in ti.finditer(r"情境分析([一二三四五])[:：]")]
     end = ti.text.find("以上情境分析相關之免責聲明", marks[0][0]) if marks else -1
     if not marks:
@@ -710,7 +710,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
             (rf"=（?([\d,]+\.\d{{2}}){CCY}[xX×/]", rf"-([\d,]+\.\d{{2}}){CCY}="),
             number,
         ),
-        ("scenario_coupon_mentions", (rf"[xX×]{PCT}[xX×]",), Decimal),
+        ("scenario_coupon_mentions", (r"[xX×](\d+\.\d+)%[xX×]",), Decimal),  # 配息率有小數；100% 等整數 % 不算
     ):
         hits = sorted(
             [
