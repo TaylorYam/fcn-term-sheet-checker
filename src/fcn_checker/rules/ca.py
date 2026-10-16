@@ -16,7 +16,7 @@ from decimal import Decimal
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, scenario
+from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "CA"
@@ -234,6 +234,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *periods(ctx),
         *autocall_terms(ctx),
         *memory(ctx),
-        *scenario.run(ctx),  # 第 16 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *repeated_terms(ctx),
     ]

@@ -12,7 +12,7 @@ import re
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, scenario, sg_scenario
+from . import kit, sg_scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "SG"
@@ -348,6 +348,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *redemption(ctx),
         *schedule(ctx),
-        *scenario.run(ctx),  # 第 15 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *sg_scenario.run(ctx),
     ]

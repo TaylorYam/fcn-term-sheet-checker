@@ -238,7 +238,7 @@ def _redemption(c: _Case, item: Item) -> CheckResult:
 
 
 def _profit_return(c: _Case, item: Item) -> CheckResult:
-    """獲利情境總報酬率 = [(面額 + 累積) ÷ 面額] − 1，依說明書顯示位數四捨五入；年化報酬率另由 derive.annualized_return 核對。"""
+    """獲利情境總報酬率 = [(面額 + 累積) ÷ 面額] − 1，依說明書顯示位數四捨五入；年化報酬率另由共用情境規則 scenario.params 核對。"""
     s = c.s
     if s.total_return is None:
         return c.unread("return", item, "找不到總報酬率算式")

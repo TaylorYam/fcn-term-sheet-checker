@@ -14,7 +14,7 @@ from dataclasses import replace
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
 from ..text import full_brackets, squash
-from . import hsbc_scenario, kit, scenario
+from . import hsbc_scenario, kit
 from .kit import Check, IssuerContext
 
 ISSUER = "HSBC"
@@ -175,6 +175,5 @@ def run_all(ctx: IssuerContext) -> list:
     out = price_headers(ctx)
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
-    out.extend(scenario.run(ctx))  # 第 18 條情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
     out.extend(hsbc_scenario.run(ctx))
     return out

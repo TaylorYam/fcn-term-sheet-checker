@@ -16,7 +16,6 @@ from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import scenario
 from .kit import (
     HEADER_PCT_ITEM,
     Q4,
@@ -460,7 +459,6 @@ def document_rules(ctx: IssuerContext) -> list[CheckResult]:
         *coupon_consistency(ctx),
         *autocall_dates(ctx),
         trigger_per_period(ctx),
-        *scenario.run(ctx),  # §16 情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *name_consistency(ctx),
         distributor_product_code(ctx),
         currency_consistency(ctx),

@@ -13,7 +13,7 @@ from ..parsers.ms_wording import MEMORY_NAME
 from ..schema import CheckResult, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import kit, ms_scenario, scenario
+from . import kit, ms_scenario
 from .kit import IssuerContext
 
 ISSUER = "MS"
@@ -234,6 +234,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ko_terms(ctx),
         autocall_dates(ctx),
         redemption_start(ctx),
-        *scenario.run(ctx),  # 第 18 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *ms_scenario.run(ctx),
     ]

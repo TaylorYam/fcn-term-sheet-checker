@@ -93,6 +93,21 @@ def test_reprint_header_pct_and_ticker_must_match_when_both_sides_have_them():
     assert r.status == PASS
 
 
+def test_reprint_with_a_percentage_per_underlying_compares_each_one():
+    """BNP、SG 的標的表每檔各寫一個百分比（`pcts` 為依檔序的 tuple）：每一檔都要相同，錯訊列出兩邊各檔的值。"""
+    own = {"strike": (D("70.00"), D("70.00")), "ko": (D("100.00"), D("100.00")), "ki": (D("60.00"), D("60.00"))}
+    main = TableAt(MAIN, price_table(pcts=own))
+    [r] = by_rule(
+        run(main_price_table=main, scenario_reprint_table=TableAt(REPRINT, price_table(pcts=own))), "scenario.reprint"
+    )
+    assert r.status == PASS
+    wrong = {**own, "strike": (D("70.00"), D("71.00"))}
+    [r] = by_rule(
+        run(main_price_table=main, scenario_reprint_table=TableAt(REPRINT, price_table(pcts=wrong))), "scenario.reprint"
+    )
+    assert r.status == MISMATCH and "70.00%、71.00%" in r.message
+
+
 def test_reprint_with_other_columns_or_row_count_is_review():
     [r] = reprint(rows=ROWS[:1], tickers=("AAPL UW",))
     assert r.status == REVIEW and "列數" in r.message
@@ -158,6 +173,17 @@ def test_unreadable_param_official_value_or_list_is_review():
     assert r.status == REVIEW
     [r] = by_rule(run(scenario_params=missing("scenario_params")), "scenario.params")
     assert r.status == REVIEW
+
+
+def test_annualized_return_is_compared_after_rounding_the_annual_rate_to_its_digits():
+    """獲利情境的年化報酬率常比年利率少寫位數：年利率依它的位數四捨五入後比（BARC 原本的比法，Issue #294 PR B）。"""
+    item = ScenarioParam("scenario_annualized_return", "情境 2 平均", present(D("9.13")))
+    [r] = params(item, coupon_pa_pct=D("9.125"))
+    assert r.status == PASS and r.expected == D("9.13") and r.tolerance
+    [r] = params(
+        ScenarioParam("scenario_annualized_return", "情境 2 平均", present(D("9.12"))), coupon_pa_pct=D("9.125")
+    )
+    assert r.status == MISMATCH
 
 
 def test_template_without_the_official_value_compares_with_the_reference_sheet():

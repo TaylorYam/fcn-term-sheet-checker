@@ -211,7 +211,7 @@ def _redemption(out, rid, tag, item, s, denom, units) -> None:
 
 
 def _profit_return(out, rid, tag, item, s) -> None:
-    """獲利情境總報酬率 = (贖回金額 + 累積) ÷ 總投資金額 − 1，依說明書顯示位數四捨五入；平均年化另由 derive.annualized_return 核對。"""
+    """獲利情境總報酬率 = (贖回金額 + 累積) ÷ 總投資金額 − 1，依說明書顯示位數四捨五入；平均年化另由共用情境規則 scenario.params 核對。"""
     field = f"{tag}_return"
     if s.total_return is None:
         out.append(kit.calc_result(rid, field, item, ["找不到總報酬率算式"], kit.evidence(s.lines[:1]), review=True))

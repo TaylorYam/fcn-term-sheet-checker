@@ -15,7 +15,7 @@ from decimal import ROUND_CEILING, Decimal
 
 from ..schema import CheckResult, ParsedField
 from ..text import full_brackets, squash
-from . import kit, scenario
+from . import kit
 from .kit import Q4, IssuerContext
 
 ISSUER = "DBS"
@@ -237,7 +237,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *document_info(ctx),
         *periods(ctx),
-        *scenario.run(ctx),  # 情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *scenario_investment(ctx),
         *scenario3(ctx),
     ]

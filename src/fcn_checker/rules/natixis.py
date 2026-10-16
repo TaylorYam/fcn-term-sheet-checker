@@ -14,7 +14,7 @@ import re
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, scenario
+from . import kit
 from .iis import IisIssuerContext
 from .kit import Check, IssuerContext
 
@@ -306,6 +306,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
-        *scenario.run(ctx),  # 第 16 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *repeated_terms(ctx),
     ]

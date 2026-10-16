@@ -12,7 +12,7 @@ import re
 from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import bnp_scenario, kit, scenario
+from . import bnp_scenario, kit
 from .kit import Check, IssuerContext
 
 ISSUER = "BNP"
@@ -263,6 +263,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         autocall_dates(ctx),
         base_prospectus(ctx),
         page_count(ctx),
-        *scenario.run(ctx),  # 第 18 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *bnp_scenario.run(ctx),
     ]

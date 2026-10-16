@@ -13,7 +13,7 @@ from __future__ import annotations
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import kit, scenario
+from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "UBS"
@@ -243,5 +243,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *denomination_mentions(ctx),
         *autocall_terms(ctx),
         *ko_pct_mentions(ctx),
-        *scenario.run(ctx),  # 十五情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
     ]
