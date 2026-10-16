@@ -19,12 +19,13 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import full_brackets, squash
-from . import money, price_table
+from . import money, price_table, schedule
 from .common import RawText, capture_group, compat_normalized, derived, fee_rates, number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "dbs-zh-pd"
-PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #321）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #321）；4：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "4"
 TITLE = "中文產品說明書(最終版本)"
 SECTIONS = (
     "商品基本資料",
@@ -385,29 +386,31 @@ def _table_fields(fields: dict[str, ParsedField]) -> None:
         fields["ki_pct"] = derived("ki_pct", bad or table, None if bad else table.value.pcts["ki"])
 
 
+SCHEDULE_WHERE = "商品基本資料日期表"
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式（D）、第一個可提前出場期與提前出場排程：比價日為表A 第 k 期與末期的觀察期間結束日。"""
+    """日期表（表A，觀察日 = 觀察期間結束日；沒有開始日欄，不查期始日）與提前出場排程（`parsers/schedule.py`）：
+    KO 只有每日觀察，k 須早於最後一期，比價日為表A 第 k 期與末期的觀察期間結束日。"""
     wording, table = fields["ko_wording"], fields["coupon_table"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = schedule.table_field(
+        table, lambda v: standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(v["rows"], "end"))
+    )
     bad = next((p for p in (wording, table) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(schedule.failed(bad))
         return
-    k, rows = wording.value, table.value["rows"]
-    n = len(rows)
+    k, n = wording.value, len(table.value["rows"])
     ev = list(wording.evidence) + list(table.evidence)
     if not 1 <= k < n:
-        for key in keys:
-            note = f"自動提前出場決定日的起始期（第 {k} 個觀察期間）不在表A（{n} 期）內或等於最後一期"
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
+        note = f"自動提前出場決定日的起始期（第 {k} 個觀察期間）不在表A（{n} 期）內或等於最後一期"
+        fields.update(
+            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in schedule.SCHEDULE_KEYS}
+        )
         return
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, "D", list(wording.evidence))
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule("D", k, n, dates), ev
-    )
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, "D", list(wording.evidence))
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"], "end"))
 
 
 # ---------------------------------------------------------------- 情境分析

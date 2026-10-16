@@ -215,12 +215,12 @@ def test_annual_coupon_must_match_the_max_rate(tmp_path):
 def test_last_table_a_row_must_be_the_final_valuation_date(tmp_path):
     spec = Spec()
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030年07月19日", "ts.basic.dates.table")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_table_a_rows_must_equal_the_tenor(tmp_path):
     r = check(tmp_path, edits=[Edit("商品年期： 6個月。", "商品年期： 7個月。", "ts.basic.dates")])
-    assert rule(r, "doc.coupon_periods", "coupon_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
