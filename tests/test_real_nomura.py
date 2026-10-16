@@ -37,14 +37,17 @@ def test_every_sample_is_recognised_as_nomura(items):
 
 def test_samples_only_differ_where_the_exploration_said(items):
     term_sheets, investor_sheets = items
-    for docs in (term_sheets, investor_sheets):
+    maturity = {("field.maturity_date", "value_mismatch"): 1}  # 表上到期日少算一個美國假日（表填錯）
+    # 日股標的的觀察期間開始日跳過日本假日：交易所假日表沒有日本，無法確認（Issue #289 起核對開始日）
+    unsure_start = {("schedule.period_start", "trading_calendar_uncertain"): 1}
+    for docs, want in ((term_sheets, maturity | unsure_start), (investor_sheets, maturity)):
         bad = Counter((r.rule_id, r.reason_code) for i in docs for r in i.report.results if r.status in PROBLEMS)
-        assert bad == Counter({("field.maturity_date", "value_mismatch"): 1})  # 表上到期日少算一個美國假日（表填錯）
+        assert bad == Counter(want)
 
 
 def test_products_whose_two_documents_pass_are_filled(items):
     term_sheets, _ = items
-    assert sum(i.fills_sheet for i in term_sheets) == 7
+    assert sum(i.fills_sheet for i in term_sheets) == 6  # 開始日無法確認的那份轉人工覆核，不回填
 
 
 def test_template_variants_match_the_sample_table(items):

@@ -255,8 +255,8 @@
 | 情境配息金額、贖回金額行代入的面額 = 商品面額（Issue #319） | `doc.scenario_params` |
 | 情境二、三配息月數 = 天期（Issue #319） | `doc.coupon_periods` |
 | 第 9 項 (b)、(c) 贖回 % = 100；情境一、二贖回金額行的 % = 第 9 項（Issue #319） | `doc.redemption_pct` |
-| 配息表（列數、期別、末列 = 到期日；D 末列結束日 = 期末訂價日） | `schedule.coupon_dates` |
-| P 型 KO 觀察日表（末列 = 期末訂價日／到期日、觀察日早於出場日；出場日在配息日表且期別連續由 parser 檢查） | `schedule.coupon_dates` |
+| 配息表（列數、期別、末列 = 到期日；D 末列結束日 = 期末訂價日；沒有開始日欄，不查期始日） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
+| P 型 KO 觀察日表（末列 = 期末訂價日／到期日、觀察日早於出場日；出場日在配息日表且期別連續由 parser 檢查；觀察日依自動提前出場日對到配息日表的期別） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 
 KO 型態與配息表種類不一致、P 型觀察日表的出場日不在配息日表或期別不連續時，parser 交出不合法，`field.ko_observation`、`field.first_callable_period` 與比價日轉人工覆核。價格表依座標讀：表頭各行依 x 中心分欄（欄序依關鍵字順序），以價格行的 y 切列，幣別字拆行接回，名稱另依 y 對到最近的列。費用表沿用 GS 的座標讀法（`gs.fee_rates`）。
 

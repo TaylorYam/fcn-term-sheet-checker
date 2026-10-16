@@ -38,6 +38,7 @@ TABLE_CHECKS = tuple(rid for rid in NAMES if rid != "schedule.period_start")  # 
 RULE_TEXT = {
     "previous_end": "期始日 = 前一期期末日",
     "next_trading_day": "期始日 = 前一期期末日後的下一個一籃子預定交易日",
+    "after_previous_end": "期始日晚於前一期期末日",
 }
 
 
@@ -74,7 +75,7 @@ def run(ctx: IssuerContext) -> list[CheckResult]:
 
 def period_count(ctx: IssuerContext, table: ParsedField) -> CheckResult:
     t: DateTable = table.value
-    tenor = ctx.ts.f("tenor_months")
+    tenor = read_standard(ctx.ts, "tenor_months")
     check = _check(ctx, "schedule.period_count", t.where).needs(table, tenor)
     labels = [r.period for r in t.rows]
     in_order = labels == list(range(1, len(labels) + 1))
@@ -148,8 +149,12 @@ def observation_order(ctx: IssuerContext, table: ParsedField) -> CheckResult:
 def last_date(ctx: IssuerContext, table: ParsedField, rid: str, key: str, field: str, what: str) -> CheckResult:
     """末列的 `key` 日期 = 標準欄位 `field`（最終評價日／到期日）。"""
     t: DateTable = table.value
-    pf = ctx.ts.f(field)
+    pf = read_standard(ctx.ts, field)
     last = t.rows[-1]
+    if all(getattr(r, key) is None for r in t.rows):  # 表上沒有這一欄（例：Citi 無自動提前出場只有配息日）
+        return _check(ctx, rid, t.where).result(
+            S.NOT_APPLICABLE, evidence=list(table.evidence), message=f"{t.where}沒有這一欄，不核對"
+        )
     return (
         _check(ctx, rid, t.where)
         .needs(table, pf)
@@ -165,6 +170,8 @@ def last_date(ctx: IssuerContext, table: ParsedField, rid: str, key: str, field:
 def _verdict(ctx: IssuerContext, rule: str, prev: dt.date, start: dt.date) -> StartVerdict:
     if rule == "next_trading_day":
         return period_start(ctx, prev, start)
+    if rule == "after_previous_end":
+        return StartVerdict(S.PASS) if start > prev else StartVerdict(S.MISMATCH, f"應晚於 {prev}")
     return StartVerdict(S.PASS) if start == prev else StartVerdict(S.MISMATCH, f"應為 {prev}")
 
 
@@ -190,7 +197,7 @@ def period_starts(ctx: IssuerContext, table: ParsedField, decl: PeriodStart) -> 
             reason="schedule_blank_unknown",
             message="第一個可提前出場期讀不到，無法確認開頭哪幾期的期始日應為空白",
         )
-    issue = ctx.ts.f("issue_date")
+    issue = read_standard(ctx.ts, "issue_date")
     flagged: list[DateRow] = []
     notes: list[str] = []
     sure = False  # 有確定不一致的期別（其他都只是無法確認是否因交易所假日順延）

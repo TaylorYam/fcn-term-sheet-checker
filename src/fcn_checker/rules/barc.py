@@ -15,7 +15,6 @@ from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import schedule
 from .kit import (
     HEADER_PCT_ITEM,
     PRICE_LABEL,
@@ -508,7 +507,6 @@ def document_rules(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：不使用參考條件表的值。"""
     return [
         *coupon_consistency(ctx),
-        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）；其餘上手切換後改由單份核對呼叫
         *autocall_dates(ctx),
         trigger_per_period(ctx),
         scenario_price_table(ctx),

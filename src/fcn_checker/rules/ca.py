@@ -137,9 +137,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 配息表列數 = 中英文名稱月數 = 情境基本假設天期。"""
+    """天期 = 中英文名稱月數 = 情境基本假設天期（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("coupon_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -151,9 +151,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)-Month", "商品英文名稱")
     scen = f("scenario_tenor")
     return [
-        kit.doc_check(ctx, rid, "coupon_table", "第 9 項配息表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="配息表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -276,42 +273,6 @@ def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 配息表與 KO 觀察日表（核對規則 §3.5）
-
-
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """配息日遞增、末列配息日 = 到期日；D：末列配息期結束日 = 期末訂價日、結束日早於同列配息日；
-    P：觀察日表末列 = 期末訂價日／到期日、觀察日早於同列自動提前出場日（出場日都在配息日表內由 parser 檢查）。"""
-    f = ctx.ts.f
-    table, ko, final, maturity = f("coupon_table"), f("ko_wording"), f("final_valuation_date"), f("maturity_date")
-    name = "配息表與自動提前出場觀察日表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "coupon_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    pays = [r["payment"] for r in rows]
-    if any(b <= a for a, b in zip(pays, pays[1:], strict=False)):
-        issues.append("配息日沒有逐期遞增")
-    if maturity.ok and pays[-1] != maturity.value:
-        issues.append(f"末列配息日 {pays[-1]} 不等於到期日 {maturity.value}")
-    if table.value["kind"] == "D":
-        late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-        if late:
-            issues.append(f"第 {'、'.join(map(str, late))} 期配息期結束日沒有早於配息日")
-        if final.ok and rows[-1]["end"] != final.value:
-            issues.append(f"末列配息期結束日 {rows[-1]['end']} 不等於期末訂價日 {final.value}")
-    elif ko.ok and ko.value[0] == "P":
-        ko_rows = ko.value[2]
-        late = [r["i"] for r in ko_rows if r["observation"] >= r["autocall"]]
-        if late:
-            issues.append(f"自動提前出場觀察日表第 {'、'.join(map(str, late))} 列觀察日沒有早於自動提前出場日")
-        if final.ok and ko_rows[-1]["observation"] != final.value:
-            issues.append(f"自動提前出場觀察日表末列 {ko_rows[-1]['observation']} 不等於期末訂價日 {final.value}")
-        if maturity.ok and ko_rows[-1]["autocall"] != maturity.value:
-            issues.append(f"自動提前出場觀察日表末列出場日 {ko_rows[-1]['autocall']} 不等於到期日 {maturity.value}")
-    return [kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity], issues)]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
@@ -322,5 +283,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *memory(ctx),
         *tables(ctx),
         *repeated_terms(ctx),
-        *schedule(ctx),
     ]

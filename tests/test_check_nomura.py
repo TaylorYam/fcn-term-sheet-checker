@@ -272,7 +272,7 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
         spec,
         edits=[Edit(f"(4) 預定到期日：{spec.date(spec.maturity_date)}", "(4) 預定到期日：2031年1月20日", "ts.art11")],
     )
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_periodic_non_call_rows_must_be_blank_only_before_the_first_callable_period(tmp_path):

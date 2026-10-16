@@ -12,7 +12,7 @@ from dataclasses import replace
 from ..schema import CheckStatus as S
 from ..schema import FieldStatus, Item
 from ..text import full_brackets, squash
-from . import hsbc_scenario, kit, schedule
+from . import hsbc_scenario, kit
 from .kit import Check, IssuerContext
 
 ISSUER = "HSBC"
@@ -190,7 +190,6 @@ def document_info(ctx):
 def run_all(ctx: IssuerContext) -> list:
     """說明書內部規則：只用讀出結果與審查標準，不碰參考條件表。"""
     out = price_headers(ctx)
-    out.extend(schedule.run(ctx))  # 日期表共用檢查（Issue #289）；其餘上手切換後改由單份核對呼叫
     out.extend(schedules(ctx))
     out.extend(document_info(ctx))
     out.extend(hsbc_scenario.run(ctx))

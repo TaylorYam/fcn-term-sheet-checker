@@ -18,14 +18,14 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table
+from . import money, price_table, schedule
 from .common import RawText, capture_group, derived, fee_rates, number
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
 # 2：第一章條號中途重編、新版受託機構標籤（Issue #270）；3：價格表改由 parsers/price_table.py 讀（Issue #287）；
-# 4：無 KI 要有到期贖回情況二只有實物交割的寫法（Issue #297）；5：重複寫出處（Issue #318）
-PARSER_VERSION = "5"
+# 4：無 KI 要有到期贖回情況二只有實物交割的寫法（Issue #297）；5：重複寫出處（Issue #318）；6：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "6"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -622,47 +622,56 @@ def _article12(fields: dict[str, ParsedField], art12: list[Line]) -> None:
         fields["date_table"] = ParsedField.invalid("date_table", art12, note)
 
 
+SCHEDULE_WHERE = "第 12 項日期表"
+# 配息觀察期間「始於開始日(不含)」：開始日 = 前一期結束日；第 1 期開始日 = 發行日（範本規格 §4.4）
+SCHEDULE_START = standard_fields.PeriodStart("previous_end", "issue_date")
+
+
+def _schedule_table(value: dict) -> standard_fields.DateTable:
+    """日期表：D 為配息觀察期間表（觀察日 = 結束日）；P 為配息日表，觀察日取自動提前到期觀察日表裡自動提前到期日 = 該期
+    配息日的那一列（對不到的期別沒有觀察日），沒有開始日欄。"""
+    if value["kind"] == "D":
+        return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
+    return standard_fields.DateTable(SCHEDULE_WHERE, schedule.mapped_rows(value["rows"], value["ko_rows"]))
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前到期期與提前到期排程（範本規格 §4.1）。
+    """日期表與提前到期排程（`parsers/schedule.py`，範本規格 §4.1）。
 
     D：k = 第 12 項「從第k個配息觀察期間結束日」，比價日為第 k 期與末期的配息觀察期間結束日。
-    P：k = 觀察日表第 1 列自動提前到期日在配息日表的期別（觀察日表的 t 不是期別）；比價日為每列的自動提前到期觀察日。"""
+    P：k = 觀察日表第 1 列自動提前到期日在配息日表的期別（觀察日表的 t 不是期別），各列須依序對到第 k～n 期；
+    比價日為每期的自動提前到期觀察日。"""
     wording, table = fields["ko_wording"], fields["date_table"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     bad = next((p for p in (wording, table) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(schedule.failed(bad))
         return
     kind, k = wording.value
-    rows = table.value["rows"]
-    n = len(rows)
     ev = list(wording.evidence) + list(table.evidence)
-
-    def invalid(note: str) -> None:
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
-    if kind == "D":
-        if k is None or not 1 <= k <= n:
-            invalid(f"自動提前到期觀察日的起始期不在配息觀察期間表（{n} 期）內")
-            return
-        dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
-    else:
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    if kind == "D" and k is None:
+        first = ParsedField(
+            "first_callable_period", FieldStatus.INVALID, None, ev, note="自動提前到期觀察日的起始期讀不到"
+        )
+    elif kind == "P":
+        rows = table.value["rows"]
         period_of = {r["payment"]: r["period"] for r in rows}
-        mapped = [(period_of.get(r["autocall"]), r["observation"]) for r in table.value["ko_rows"]]
-        if any(p is None for p, _ in mapped):
-            invalid("自動提前到期觀察日表的自動提前到期日不在配息日表內")
-            return
-        k = mapped[0][0]
-        if [p for p, _ in mapped] != list(range(k, n + 1)):
-            invalid(f"自動提前到期觀察日表的期別不是第 {k} 期到第 {n} 期連續")
-            return
-        dates = {p: d for p, d in mapped}
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(kind, k, n, dates), ev
+        mapped = [period_of.get(r["autocall"]) for r in table.value["ko_rows"]]
+        if any(p is None for p in mapped):
+            note = "自動提前到期觀察日表的自動提前到期日不在配息日表內"
+        elif mapped != list(range(mapped[0], len(rows) + 1)):
+            note = f"自動提前到期觀察日表的期別不是第 {mapped[0]} 期到第 {len(rows)} 期連續"
+        else:
+            note = ""
+        first = (
+            ParsedField("first_callable_period", FieldStatus.INVALID, None, ev, note=note)
+            if note
+            else ParsedField("first_callable_period", FieldStatus.PRESENT, mapped[0], ev)
+        )
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
+    fields.update(
+        schedule.autocall_schedule(obs, first, fields["schedule_table"], "end" if kind == "D" else "observation")
     )
 
 

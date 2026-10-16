@@ -290,8 +290,8 @@ def test_scenario_results_show_each_cell(tmp_path):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("觀察日：從第二個配息觀察期間", "觀察日：從第九個配息觀察期間", "ts.art12")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_ki_period_must_match_the_judgement_day(tmp_path):
@@ -327,18 +327,18 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     old = f"即{spec.date(spec.maturity_date)}"
     r = check(tmp_path, spec, edits=[Edit(old, "即2031 年01 月20 日", "ts.art12")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     r = check(tmp_path, edits=[Edit("商品年期：6 個月", "商品年期：7 個月", "ts.art12")])
-    assert rule(r, "doc.coupon_periods", "date_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_periodic_last_observation_must_be_the_final_valuation_date(tmp_path):
     spec = VARIANTS["KO 每期記憶式、日股整數期初價、Non-Call 1"]
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030 年07 月10 日", "ts.art12.table")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_periodic_table_must_cover_non_call_to_the_last_period(tmp_path):

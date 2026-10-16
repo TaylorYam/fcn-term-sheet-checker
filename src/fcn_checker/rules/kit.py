@@ -155,7 +155,7 @@ def period_start(ctx: IssuerContext, prev_end: dt.date, start: dt.date) -> Start
 
     相等 → 通過。假日只會讓期始日往後延，所以比推算結果早、或落在週末或已知休市日，一定不一致；
     比推算結果晚、而推算結果無法確定（讀不到標的、標的交易所不在假日表、超出涵蓋範圍）時轉人工覆核。"""
-    u = ctx.ts.f("underlyings")
+    u = read_standard(ctx.ts, "underlyings")
     tickers = u.value if u.ok else None
     following = ctx.calendar.next_trading_day(prev_end, tickers)
     if start == following.day:

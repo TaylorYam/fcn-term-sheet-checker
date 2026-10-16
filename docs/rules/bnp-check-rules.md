@@ -84,7 +84,7 @@
 | KO 觀察方式 | §14(6)(7)(8) 寫法與日期表表頭一致（範本規格 §4.1） |
 | 記憶式 | §16 定義句 = §20(1) 定義句（範本規格 §4.2） |
 | KI | §17 有無觸及生效事件與 §11 有無下限價格列一致（共用 `derive.prices`）；情境數依 KI 型態：無 KI 與到期觀察五個、每日／每期觀察六個（以標題判斷） |
-| D 型日期表 | 第 1 期開始日 = 發行日；前期結束日 < 開始日 ≤ 前期結束日 + 4 個日曆天；結束日 < 配息日；末期結束日 = 期末評價日；末期配息日 = 到期日；配息日遞增 |
+| D 型日期表 | 第 1 期開始日 = 發行日；開始日 = 前期結束日後的下一個一籃子預定交易日（交易所假日表；Issue #289 前是「≤ 前期結束日 + 4 個日曆天」）；結束日 < 配息日；末期結束日 = 期末評價日；末期配息日 = 到期日；配息日遞增 |
 | P 型日期表 | 評價日 < 配息日；末列評價日 = 期末評價日；末期配息日 = 到期日；配息日遞增；`不適用` 列 = 第 1～Non-Call−1 期 |
 | 贖回金額 | §16 `自動提前贖回金額 = 商品面額 × 100%`、§17 `商品面額 × 100%` 固定（2026-10-13 作業人員標記納入） |
 | 基本公開說明書日期 | 封面警語 (7) = 第三章 §6(7) = 第五章 §2(1)（只做文件內一致） |
@@ -225,6 +225,6 @@
 | §3.3 年利率與月配息率 | `field.coupon_pa_pct`、`derive.monthly_coupon`、`derive.annualized_return`、`doc.min_coupon_rate` | `rules/bnp.py` |
 | §3.4 價格推算、分割轉人工 | `derive.prices`、`field.underlying_prices`、投資人須知 `iis.underlying_prices`（`split_suspected`，Issue #222） | 共用 `rules/reference.py` 的 `compare_sheet_prices` |
 | §3.4 重印表、較差情境執行價 | `doc.scenario_table`、`doc.scenario_header_pct`、`doc.scenario_strike`（表現最差標的 = 假設句「(假設為X)」對到 §11 名稱列的那一檔；單一標的就是那一檔；對不到轉人工覆核） | `rules/bnp_scenario.py` |
-| §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.coupon_dates`、`schedule.period_starts`、`schedule.autocall_dates` | `rules/bnp.py` |
+| §3.5 內部交叉驗證 | `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.ko_observation`、`doc.ko_memory`、`doc.redemption_pct`、`doc.base_prospectus_date`、`doc.page_count`（頁首「共M頁」= PDF 頁數，含沒有文字層的附件頁）、`schedule.autocall_dates` | `rules/bnp.py`（日期表結構為共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）） |
 | §3.6 保證機構名稱 | `standard.guarantor_name`（`guarantor_name.bnp` 三處） | 共用 `rules/review_standard.py` |
 | §3.7 情境分析 | `doc.scenario_parameters`（假設、情境種類）、`doc.scenario_calculations`（`情境一_assumed` 假設句期別、`情境X_coupon`／`_cumulative`／`_redemption`／`_return`／`_shares`／`_remainder`） | `rules/bnp_scenario.py` |

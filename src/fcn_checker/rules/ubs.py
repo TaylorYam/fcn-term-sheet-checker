@@ -211,15 +211,12 @@ def issuing_branch(check: Check, pf: ParsedField) -> CheckResult:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 配息表列數 = 情境設定參數天期 = 情境設定參數配息觀察次數。"""
+    """天期 = 情境設定參數天期 = 情境設定參數配息觀察次數（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, scen = f("tenor_months"), f("coupon_table"), f("scenario_tenor")
+    tenor, scen = f("tenor_months"), f("scenario_tenor")
     count = f("scenario_coupon_count")
     rid = "doc.coupon_periods"
     return [
-        kit.doc_check(ctx, rid, "coupon_table", "商品基本資料八配息表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="配息表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "scenario_tenor", "商品基本資料十五設定參數天期", tenor, scen).compare(
             tenor.value, scen.value
         ),
@@ -353,48 +350,6 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     ]
 
 
-# ---------------------------------------------------------------- 配息表（核對規則 §3.5）
-
-
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """給付日遞增、末列給付日 = 到期日；P：末列配息觀察日 = 期末訂價日、觀察日早於給付日；D：末列結束日 = 期末訂價日、
-    開始日 ≤ 結束日 < 給付日、第 1 期開始日晚於發行日。"""
-    f = ctx.ts.f
-    table, final, maturity, issue = (
-        f("coupon_table"),
-        f("final_valuation_date"),
-        f("maturity_date"),
-        f("issue_date"),
-    )
-    name = "配息表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "coupon_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    pays = [r["payment"] for r in rows]
-    if any(b <= a for a, b in zip(pays, pays[1:], strict=False)):
-        issues.append("配息給付日沒有逐期遞增")
-    if maturity.ok and pays[-1] != maturity.value:
-        issues.append(f"末列配息給付日 {pays[-1]} 不等於到期日 {maturity.value}")
-    if table.value["kind"] == "D":
-        bad = [r["period"] for r in rows if not (r["start"] <= r["end"] < r["payment"])]
-        if bad:
-            issues.append(f"第 {'、'.join(map(str, bad))} 期的開始日、結束日、給付日先後不對")
-        if final.ok and rows[-1]["end"] != final.value:
-            issues.append(f"末列配息觀察期間結束日 {rows[-1]['end']} 不等於期末訂價日 {final.value}")
-        if issue.ok and rows[0]["start"] <= issue.value:
-            issues.append(f"第 1 期配息觀察期間開始日 {rows[0]['start']} 沒有晚於發行日 {issue.value}")
-    else:
-        bad = [r["period"] for r in rows if r["observation"] >= r["payment"]]
-        if bad:
-            issues.append(f"第 {'、'.join(map(str, bad))} 期配息觀察日沒有早於給付日")
-        if final.ok and rows[-1]["observation"] != final.value:
-            issues.append(f"末列配息觀察日 {rows[-1]['observation']} 不等於期末訂價日 {final.value}")
-    return [
-        kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity, issue], issues)
-    ]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
@@ -405,5 +360,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *ko_pct_mentions(ctx),
         *tables(ctx),
-        *schedule(ctx),
     ]

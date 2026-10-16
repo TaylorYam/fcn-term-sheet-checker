@@ -124,10 +124,10 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
         (("cover", "發行4個月期", "發行5個月期"), "doc.coupon_periods", S.MISMATCH),
         (("art16.table", "ZZ2 UW", "ZZ3 UW"), "doc.underlying_tickers", S.MISMATCH),
         # 日期表與提前出場
-        (("art14.table", zh_date(S0.starts[1]), "2030 年2 月21 日"), "schedule.period_starts", S.MISMATCH),
-        (("art14.table", zh_date(S0.starts[0]), "2030 年1 月15 日"), "schedule.period_starts", S.MISMATCH),
-        (("art14.table", zh_date(S0.payments[-1]), "2030 年6 月20 日"), "schedule.coupon_dates", S.MISMATCH),
-        (("art14.table", zh_date(S0.payments[1]), "2030 年3 月13 日"), "schedule.coupon_dates", S.MISMATCH),
+        (("art14.table", zh_date(S0.starts[1]), "2030 年2 月21 日"), "schedule.period_start", S.MISMATCH),
+        (("art14.table", zh_date(S0.starts[0]), "2030 年1 月15 日"), "schedule.period_start", S.MISMATCH),
+        (("art14.table", zh_date(S0.payments[-1]), "2030 年6 月20 日"), "schedule.last_payment", S.MISMATCH),
+        (("art14.table", zh_date(S0.payments[1]), "2030 年3 月13 日"), "schedule.observation_order", S.MISMATCH),
         (
             ("art17", f"終止日（{zh_date(S0.ends[0])}）", f"終止日（{zh_date(S0.ends[1])}）"),
             "schedule.autocall_dates",

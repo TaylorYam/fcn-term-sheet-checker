@@ -3,7 +3,7 @@
 - 文件側：[JPM 範本規格](../templates/jpm-zh-product-description.md)；投資人須知見 [JPM 投資人須知範本規格](../templates/jpm-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [JPM 下單資料格式](../order-formats/jpm-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.10（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額、情境每次配息金額）；§3.4 `derive.prices`（共用）、`doc.scenario_table`（假設價格表、假設本金、情境重複寫出的本金與執行價，Issue #315）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額、情境每次配息金額）；§3.4 `derive.prices`（共用）、`doc.scenario_table`（假設價格表、假設本金、情境重複寫出的本金與執行價，Issue #315）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（Issue #289）、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi 核對規則](citi-check-rules.md)不同或 JPM 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
@@ -91,7 +91,7 @@
 | 記憶式 | 第 8 項 `自動提前出場事件：` 句型（範本規格 §4.2）：多標的記憶式句型、多標的非記憶式句型、單一標的句型三選一；不在範本內 → 轉人工覆核。JPM 名稱不分記憶式，沒有名稱交叉驗證 |
 | KI | 第 8 項有無 `觸碰價：`、`觸碰事件：` 寫法、到期贖回款（範本規格 §4.4）、第 9 項有無 `觸碰價(i)` 欄一致 |
 | 標的數 | 第 8 項單一標的寫法（`連結標的之股票收盤價`，沒有 `最差表現連結標的：` 定義）／多標的寫法（`最差表現連結標的`、`所有連結標的(i)`）與第 9 項列數一致（1 檔／2 檔以上）；名稱不分標的數 |
-| 日期表 | 末列配息支付日 = 到期日；末列評價日（D-4、P）／觀察期間終止日（D-3）= 最後評價日；配息支付日遞增；評價日／觀察期間終止日 < 同列配息支付日 |
+| 日期表 | 末列配息支付日 = 到期日；末列評價日（D-4、P）／觀察期間終止日（D-3）= 最後評價日；配息支付日遞增；評價日／觀察期間終止日 < 同列配息支付日；觀察期間起始日 = 前一期終止日後的下一個一籃子預定交易日（Issue #289 起核對）。共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | 到期贖回 | 第 8 項 `每單位面額 x 100%` 固定（無 KI：(1) 款；有 KI：觸碰事件未發生款） |
 
 ### 3.6 固定警語、名稱、保證機構與總代理人（審查標準 JPM 版本）

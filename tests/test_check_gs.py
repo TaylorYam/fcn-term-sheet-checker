@@ -226,8 +226,8 @@ def test_unreadable_repeats_need_review(tmp_path, edit, broken):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("自第3個觀察期間結束日開始", "自第9個觀察期間結束日開始", "ts.art16")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_memory_wording_in_the_name_must_match_article_16(tmp_path):
@@ -254,13 +254,13 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     old = f"現預定為{spec.date(spec.maturity_date)}"
     r = check(tmp_path, spec, edits=[Edit(old, "現預定為2031年1月20日", "ts.art13")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     """年期寫 7 個月、觀察時程表 6 列：期數不符。"""
     r = check(tmp_path, edits=[Edit("則為6個月", "則為7個月", "ts.art13")])
-    assert rule(r, "doc.coupon_periods", "date_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_single_wording_with_a_basket_table_needs_review(tmp_path):

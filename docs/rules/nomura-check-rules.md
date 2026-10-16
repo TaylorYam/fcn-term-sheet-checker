@@ -208,7 +208,8 @@
 | KI 條款 ⇔ 標的表下限觸發價欄 ⇔ 到期贖回款數；KI P 決定日表 = 自動提前出場決定日 | `doc.ki_consistency` |
 | 到期贖回 100% | `doc.redemption_pct` |
 | 第 14 項設定參數面額、投資金額；百分比表 = 標的表表頭（結果帶出每一格） | `doc.scenario_params`、`doc.scenario_table` |
-| 日期表末列、遞增、早於配息日；P 型「不適用」期別 | `schedule.coupon_dates`、`schedule.autocall_dates` |
+| 日期表末列、遞增、早於配息日；D 型開始日 = 前一期終止日後的下一個一籃子預定交易日、第 1 期 = 發行日（Issue #289 起核對） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
+| P 型「不適用」期別 | `schedule.autocall_dates` |
 
 第 7 項 KO 寫法與日期表排法的一致、D 型 KO 起日對到日期表期別由 parser 判定：不一致時 KO 觀察方式、Non-Call 與比價日轉人工覆核。標的表與費用表依座標讀（表頭與費率欄分欄後由上到下接起來），不依擷取順序。
 

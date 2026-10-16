@@ -280,7 +280,9 @@ def _dates(d: _Doc, s: Spec) -> None:
         d.cell(100, h)
     for j in range(1, s.tenor + 1):
         d.cell(50, str(j))
-        start = "N.A" if (j == 1 if s.d4 else j <= k) else jdate(vals[j - 2] + dt.timedelta(days=1))
+        start = (
+            "N.A" if (j == 1 if s.d4 else j <= k) else jdate(weekday_on_or_after(vals[j - 2] + dt.timedelta(days=1)))
+        )
         end = "N.A" if s.d4 and j == 1 else jdate(vals[j - 1])
         cells = {
             "評價日(t)": jdate(vals[j - 1]),

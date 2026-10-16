@@ -182,9 +182,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 表A 列數 = 中英文名稱月數 = 情境基本假設商品年期。"""
+    """天期 = 中英文名稱月數 = 情境基本假設商品年期（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("coupon_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -196,9 +196,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     zh_months, en_months = months(zh, r"(\d+)個月期", "商品中文名稱"), months(en, r"(\d+)-Month", "商品英文名稱")
     scen = f("scenario_tenor")
     return [
-        kit.doc_check(ctx, rid, "coupon_table", "表A 觀察期間數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="表A 列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -329,28 +326,6 @@ def scenario3(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """表A：結束日遞增、結束日早於同列利息支付日、末列結束日 = 定價日、末列支付日 = 到期日（期別連續由 parser 檢查）。"""
-    f = ctx.ts.f
-    table, final, maturity = f("coupon_table"), f("final_valuation_date"), f("maturity_date")
-    name = "表A 觀察期間表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "coupon_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    ends = [r["end"] for r in rows]
-    if any(b <= a for a, b in zip(ends, ends[1:], strict=False)):
-        issues.append("觀察期間結束日沒有逐期遞增")
-    late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-    if late:
-        issues.append(f"第 {'、'.join(map(str, late))} 期觀察期間結束日沒有早於利息支付日")
-    if final.ok and ends[-1] != final.value:
-        issues.append(f"末列觀察期間結束日 {ends[-1]} 不等於定價日 {final.value}")
-    if maturity.ok and rows[-1]["payment"] != maturity.value:
-        issues.append(f"末列利息支付日 {rows[-1]['payment']} 不等於到期日 {maturity.value}")
-    return [kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity], issues)]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
@@ -361,5 +336,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *tables(ctx),
         *scenario_investment(ctx),
         *scenario3(ctx),
-        *schedule(ctx),
     ]

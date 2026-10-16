@@ -165,9 +165,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 中英文名稱月數 = 情境假設商品年期。"""
+    """天期 = 中英文名稱月數 = 情境假設商品年期（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -179,9 +179,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     zh_months, en_months = months(zh, r"(\d+)個月期", "商品中文名稱"), months(en, r"(\d+)-month", "商品英文名稱")
     scen = f("scenario_tenor")
     return [
-        kit.doc_check(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -362,54 +359,28 @@ def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）
 
 
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """D：第 1 期起始日 = 發行日、下一期起始日晚於前一期終止日、終止日早於同列配息日、末列終止日 = 贖回評價日。
-    P：配息日遞增；自動提前贖回表的觀察日兩欄相同、觀察日早於同列自動提前贖回日、觀察期間起訖 = 表首末觀察日。
-    兩型的末列配息日 = 到期日。"""
+def autocall_table(ctx: IssuerContext) -> list[CheckResult]:
+    """P：自動提前贖回觀察日表的「觀察日」與「自動提前贖回觀察日」兩欄相同、觀察期間起訖 = 表首末列觀察日。
+    日期表的期數、順序與末期日期由共用規則（rules/schedule.py）檢查；D 型沒有這張表。"""
     f = ctx.ts.f
-    table, final, maturity, issue = f("date_table"), f("final_valuation_date"), f("maturity_date"), f("issue_date")
-    period = f("ko_period")
-    name = "日期表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "date_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    if table.value["kind"] == "D":
-        if issue.ok and rows[0]["start"] != issue.value:
-            issues.append(f"第 1 期配息觀察期間起始日 {rows[0]['start']} 不等於發行日 {issue.value}")
-        early = [b["period"] for a, b in zip(rows, rows[1:], strict=False) if b["start"] <= a["end"]]
-        if early:
-            issues.append(f"第 {'、'.join(map(str, early))} 期起始日沒有晚於前一期終止日")
-        late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-        if late:
-            issues.append(f"第 {'、'.join(map(str, late))} 期配息觀察期間終止日沒有早於配息日")
-        if final.ok and rows[-1]["end"] != final.value:
-            issues.append(f"末列配息觀察期間終止日 {rows[-1]['end']} 不等於贖回評價日 {final.value}")
-    else:
-        pays = [r["payment"] for r in rows]
-        if any(b <= a for a, b in zip(pays, pays[1:], strict=False)):
-            issues.append("配息日沒有逐期遞增")
-        ko = table.value["ko_rows"]
-        same = [r["t"] for r in ko if r["observation_j"] != r["observation"]]
-        if same:
-            issues.append(
-                f"自動提前贖回觀察日表第 {'、'.join(map(str, same))} 列的「觀察日」和「自動提前贖回觀察日」不同"
-            )
-        late = [r["t"] for r in ko if r["observation"] >= r["autocall"]]
-        if late:
-            issues.append(f"自動提前贖回觀察日表第 {'、'.join(map(str, late))} 列觀察日沒有早於自動提前贖回日")
-        if period.ok and (period.value["start"], period.value["end"]) != (ko[0]["observation"], ko[-1]["observation"]):
-            issues.append(
-                f"自動提前贖回觀察期間 {period.value['start']}～{period.value['end']} 不等於觀察日表首末列"
-                f" {ko[0]['observation']}～{ko[-1]['observation']}"
-            )
-    if maturity.ok and rows[-1]["payment"] != maturity.value:
-        issues.append(f"末列配息日 {rows[-1]['payment']} 不等於到期日 {maturity.value}")
-    return [
-        kit.structure_check(
-            ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity, issue, period], issues
+    table, period = f("date_table"), f("ko_period")
+    check = Check("schedule.autocall_dates", "ko_rows", Item.expected("自動提前贖回觀察日表"), ctx.document).needs(
+        table, period
+    )
+    if table.ok and table.value["kind"] == "D":
+        return []
+    if (problem := check.blocked) is not None:
+        return [problem]
+    ko, issues = table.value["ko_rows"], []
+    same = [r["t"] for r in ko if r["observation_j"] != r["observation"]]
+    if same:
+        issues.append(f"第 {'、'.join(map(str, same))} 列的「觀察日」和「自動提前贖回觀察日」不同")
+    if (period.value["start"], period.value["end"]) != (ko[0]["observation"], ko[-1]["observation"]):
+        issues.append(
+            f"自動提前贖回觀察期間 {period.value['start']}～{period.value['end']} 不等於觀察日表首末列"
+            f" {ko[0]['observation']}～{ko[-1]['observation']}"
         )
-    ]
+    return [check.compare(None, None, ok=not issues, reason="schedule_inconsistent", message="；".join(issues))]
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
@@ -421,6 +392,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *memory_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
-        *schedule(ctx),
+        *autocall_table(ctx),
         *repeated_terms(ctx),
     ]

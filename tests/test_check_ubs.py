@@ -82,11 +82,8 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2) + 1
     variable = spec.ko_obs == "D"  # 八與十五的變動配息率與年化
     assert len(rule(r, "doc.coupon_mentions")) == 2 + (4 if variable else 0) + 1
-    assert {x.field for x in rule(r, "doc.coupon_periods")} == {
-        "coupon_table",
-        "scenario_tenor",
-        "scenario_coupon_count",
-    }
+    assert {x.field for x in rule(r, "doc.coupon_periods")} == {"scenario_tenor", "scenario_coupon_count"}
+    assert rule(r, "schedule.period_count")[0].status == S.PASS  # 配息表期數是共用檢查（Issue #289）
     currency = {x.field for x in rule(r, "field.currency")}  # 說明文字與情境的幣別字（Issue #320）
     words = {"residual_conversion_currency", "scenario_residual_currency", "scenario_residual_paid_currency"}
     scenarios = {"scenario1_currency", "scenario2_currency", "scenario3_currency"}
@@ -305,7 +302,7 @@ def test_coupon_rate_must_be_annual_over_twelve(tmp_path):
 def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.maturity_date), "2031 年1 月20 日", "ts.art12")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_two_different_maturity_dates_need_review(tmp_path):
@@ -317,14 +314,14 @@ def test_two_different_maturity_dates_need_review(tmp_path):
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     r = check(tmp_path, edits=[Edit("天期/年期：6 個月", "天期/年期：7 個月", "ts.art12")])
-    assert rule(r, "doc.coupon_periods", "coupon_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 @pytest.mark.parametrize("ko_obs", ["D", "P"])
 def test_last_period_must_end_on_the_final_valuation_date(tmp_path, ko_obs):
     spec = Spec(ko_obs=ko_obs)
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030 年7 月10 日", "ts.art8.coupon")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_ko_observation_must_agree_between_items_eight_and_twelve(tmp_path):
