@@ -90,7 +90,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             period.value,
             evidence=list(period.evidence),
             tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位後比數值",
-            fail_message="第 7 項固定配息率須等於第 14 項情境一、二年化報酬率（年利率）÷ 12 四捨五入到 4 位",
+            fail_message="第 7 項每期配息率須等於第 14 項情境一、二年化報酬率（年利率）÷ 12 四捨五入到 4 位",
         )
     ]
 

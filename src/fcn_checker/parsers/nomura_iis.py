@@ -148,9 +148,8 @@ def _coupon_terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
             "ko_observation_start", "每期觀察的自動提前出場決定日（寫「詳見中文產品說明書第11項(6)」）"
         )
     fields["ko_memory"], _ = nomura.memory_terms(sec_ti, sec, where="收益分配事項")
-    red = iis.section(ti, REDEMPTION)
     fields["ki_type"] = nomura.ki_type(
-        sec_ti, sec, where="收益分配事項", redemption=TextIndex(red) if red is not None else TextIndex([])
+        sec_ti, sec, where="收益分配事項", redemption=("第四 贖回價金之計算", iis.section(ti, REDEMPTION))
     )
 
 

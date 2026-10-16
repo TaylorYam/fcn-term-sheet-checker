@@ -110,8 +110,16 @@ def test_different_scenario_annual_rates_need_review(tmp_path):
     assert rule(r, "derive.monthly_coupon")[0].status == S.REVIEW_REQUIRED
 
 
-def test_missing_scenario_annual_rate_needs_review(tmp_path):
-    r = check(tmp_path, edits=[Edit("本情境中年化報酬率為10.00%", "本情境中年化報酬率約為10.00%", "ts.art14")])
+@pytest.mark.parametrize(
+    "edit",
+    [
+        Edit("本情境中年化報酬率為10.00%", "本情境中年化報酬率約為10.00%", "ts.art14"),
+        Edit("情境一（自動提前出場）", "情境1（自動提前出場）", "ts.art14"),
+    ],
+    ids=["年化報酬率寫法不在範本規格內", "找不到情境一"],
+)
+def test_missing_scenario_annual_rate_needs_review(tmp_path, edit):
+    r = check(tmp_path, edits=[edit])
     assert rule(r, "field.coupon_pa_pct")[0].status == S.REVIEW_REQUIRED
 
 

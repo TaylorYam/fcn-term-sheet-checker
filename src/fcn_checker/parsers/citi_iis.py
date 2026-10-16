@@ -240,6 +240,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     provided = set(PROVIDED)
     ki_type = fields["ki_type"]
     if ki.status != FieldStatus.MISSING or not (ki_type.ok and ki_type.value == "none"):  # 有下限價或讀不出無 KI
+        if ki.status == FieldStatus.MISSING:  # 句子缺漏是寫法問題（不是整段找不到）
+            red = iis.section(ti, REDEMPTION)
+            ki = ParsedField.invalid(
+                "ki_pct",
+                red or ti.lines,
+                "贖回價金之計算「下限價：係指相關連結標的之期初股價的X%」的寫法缺漏或不在範本規格內",
+            )
         fields["ki_pct"] = ki
         provided.add("ki_pct")
     if fields["has_autocall"].ok and fields["has_autocall"].value:

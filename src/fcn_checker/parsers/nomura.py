@@ -450,12 +450,14 @@ def memory_terms(t7: TextIndex, art7: list[Line], where: str = "第 7 項") -> t
     return ParsedField.present("ko_memory", style == "memory", lns), ParsedField.present("memory_style", style, lns)
 
 
-def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項", redemption: TextIndex | None = None) -> ParsedField:
+def ki_type(
+    ti: TextIndex, lns: list[Line], where: str = "第 7 項", redemption: tuple[str, list[Line] | None] | None = None
+) -> ParsedField:
     """「下限觸發事件：」與「下限觸發決定日：」的寫法 → KI 型態（範本規格 §4.4）；無 KI 以 present「none」交出，
     但要看到無 KI 的到期贖回第 (2) 款（`NO_KI_CASE`）才判定。
 
     投資人須知收益分配事項的句型相同（標籤加「」，parsers/nomura_iis.py 先把「」移開再交進來），到期贖回款在另一段
-    （`redemption`；說明書同在第 7 項，預設用 `ti`）；`where` 是錯訊裡的出處。"""
+    （`redemption` =（出處, 原文行；找不到這段為 None）；說明書同在第 7 項，預設用 `ti`）；`where` 是錯訊裡的出處。"""
     name = "ki_type"
     text = ti.text
     event = re.search(KI_EVENT, text)
@@ -463,13 +465,16 @@ def ki_type(ti: TextIndex, lns: list[Line], where: str = "第 7 項", redemption
     if event is None and days is None:
         if "下限觸發" in text:
             return ParsedField.invalid(name, lns, f"{where}有「下限觸發」字樣，但找不到下限觸發事件與決定日")
-        red = ti if redemption is None else redemption
+        red_where, red_lns = (where, lns) if redemption is None else redemption
+        if red_lns is None:
+            return ParsedField.missing(name, f"{where}沒有下限觸發事件，且找不到「{red_where}」段落，無法確認無 KI")
+        red = ti if redemption is None else TextIndex(red_lns)
         case = re.search(NO_KI_CASE, red.text)
         if case is None:
             return ParsedField.invalid(
                 name,
-                lns,
-                f"{where}沒有下限觸發事件，也找不到無下限觸發時的到期贖回款「(2) 如於最終評價日，…低於執行價時」",
+                red_lns,
+                f"{where}沒有下限觸發事件，{'' if redemption is None else red_where}也找不到無下限觸發時的到期贖回款「(2) 如於最終評價日，…低於執行價時」",
             )
         return ParsedField.present(name, "none", red.lines_for(case.start(), case.end()))
     if event is None or days is None:
@@ -749,6 +754,9 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
     picked = []
     for k, nxt in (("一", "二"), ("二", "三")):
         lo, hi = sections[k], sections[nxt] if sections[nxt] >= 0 else len(t14.text)
+        if lo < 0:
+            fields["coupon_pa_pct"] = ParsedField.missing("coupon_pa_pct", f"找不到第 14 項「情境{k}（」段落")
+            return
         hit = one(_in_section(t14, found, lo, hi))
         if hit is None:
             fields["coupon_pa_pct"] = ParsedField.invalid(
