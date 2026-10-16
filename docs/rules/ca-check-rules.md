@@ -145,6 +145,8 @@
 
 不重算配息金額、累積配息、股數、剩餘金額、總報酬率、平均年化報酬率；情境三股數算式的執行價與假設收盤價、假設匯率不核對；情境二、三的條件句沒有 % 或日期，不核對。找不到基本假設、情境價格表或上面的句型 → 轉人工覆核。
 
+2026-10-16 起情境價格表、基本假設天期、面額、配息率與情境重複寫出的配息率、面額、配息月數改由共用情境規則核對（`scenario.reprint`、`scenario.params`，[共用核對規則](shared-check-rules.md) §7，Issue #294）；核對的項目與預期值不變。情境價格表列數或價格欄不同時轉人工覆核（原本列數不同判不一致）。
+
 ### 3.8 最低申購與贖回（2026-10-15 確認）
 
 - 第四章 4. `最低申購金額： X幣別(相當於一單位(張)商品)`、`最低累加申購金額：商品面額X幣別(相當於一單位(張)商品)`：最低申購、最低加購 = X。
@@ -241,19 +243,18 @@
 | 規則 | rule_id |
 |---|---|
 | 配息表每列配息率相同且 = 年利率 ÷ 12（4 位） | `derive.monthly_coupon` |
-| 第 15 項 (4) 最低保證配息率、第 16 項基本假設配息率 = 配息表配息率 | `doc.coupon_mentions` |
+| 第 15 項 (4) 最低保證配息率 = 配息表配息率 | `doc.coupon_mentions` |
 | 第 15 項 (4) 月數、情境一配息月數 = Non-Call | `doc.autocall_terms` |
 | 第一章第 1 項中文名稱 = 封面 | `doc.name_consistency` |
 | 三個 `(ISIN：…)` 相同 | `doc.isin_consistency` |
 | 第一章第 5 項中文幣別、ISO 代碼；封面幣別 ISO 代碼 | `doc.currency_consistency` |
-| 期數（配息表列數、中英文名稱月數、情境基本假設天期；不同判不一致） | `doc.coupon_periods` |
+| 期數（中英文名稱月數；不同判不一致） | `doc.coupon_periods` |
 | 多標的沒有記憶式句型 → 轉人工覆核（只有一句時 parser 交出不合法，`field.ko_memory` 轉人工覆核） | `doc.ko_memory` |
 | `(c)` 界限事件寫法 ⇔ 價格表下限價欄 ⇔ `界限事件：` 定義：不一致時 parser 交出不合法（`field.ki_type` 轉人工覆核） | （parser） |
 | 價格表列數 = 第 10 項標的數：不同時 parser 交出不合法（`field.underlyings` 與價格欄轉人工覆核） | （parser） |
-| 情境價格表逐格與表頭 % = 第 9 項價格表；基本假設面額 = 商品面額 | `doc.scenario_table` |
-| 第 9 項 (a) 舉例月配息率、情境配息金額行的配息率 = 配息表配息率（Issue #319） | `doc.coupon_mentions` |
-| 情境配息金額、贖回金額行代入的面額 = 商品面額（Issue #319） | `doc.scenario_params` |
-| 情境二、三配息月數 = 天期（Issue #319） | `doc.coupon_periods` |
+| 情境價格表逐格與表頭 % = 第 9 項價格表 | 共用 `scenario.reprint`（[共用核對規則](shared-check-rules.md) §7，Issue #294） |
+| 第 16 項基本假設天期、面額、配息率；情境配息金額行的配息率 = 配息表配息率、配息金額與贖回金額行代入的面額 = 商品面額、情境二、三配息月數 = 天期（Issue #319） | 共用 `scenario.params`（Issue #294） |
+| 第 9 項 (a) 舉例月配息率 = 配息表配息率（Issue #319） | `doc.coupon_mentions` |
 | 第 9 項 (b)、(c) 贖回 % = 100；情境一、二贖回金額行的 % = 第 9 項（Issue #319） | `doc.redemption_pct` |
 | 配息表（列數、期別、末列 = 到期日；D 末列結束日 = 期末訂價日；沒有開始日欄，不查期始日） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | P 型 KO 觀察日表（末列 = 期末訂價日／到期日、觀察日早於出場日；出場日在配息日表且期別連續由 parser 檢查；觀察日依自動提前出場日對到配息日表的期別） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |

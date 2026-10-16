@@ -57,9 +57,10 @@ def test_supported_types_pass(tmp_path, spec):
     assert rule(r, "field.initial_pricing")[0].status == S.PASS  # 說明書沒有期初定價（absent），只看表上允許值
     assert not [x for x in r.results if x.rule_id == "standard.minimum_issue_size"]  # 範本沒有發行不成立門檻
     mentions = [x for x in r.results if x.rule_id == "derive.coupon_pa_mentions"]
-    assert len(mentions) == 3 + (spec.ko_obs == "D")  # 情境 (i)～(iii) 各一處；D 型另有自動提前出場配息金額
-    scenario = {x.field for x in rule(r, "doc.scenario_table")}
-    assert {"scenario_principal_1_1", "scenario_principal_3_2", "scenario_strike"} <= scenario  # Issue #315
+    assert len(mentions) == (spec.ko_obs == "D")  # D 型自動提前出場配息金額；情境的年利率由共用情境規則核對
+    params = [x.field for x in rule(r, "scenario.params")]  # 假設本金、情境本金 6 處、年利率 3 處（Issue #315、#294）
+    assert params.count("scenario_coupon_pa_3") == 1 and len(params) == 10
+    assert len(rule(r, "scenario.reprint")) == len(rule(r, "scenario.strike")) == 1
     assert {f"scenario{n}_currency" for n in (1, 2, 3)} <= {x.field for x in rule(r, "field.currency")}
 
 
@@ -122,16 +123,16 @@ def test_compare_dates_are_backfilled_from_the_date_table(tmp_path, spec, dates)
 @pytest.mark.parametrize(
     ("spec", "edit", "broken"),
     [
-        (Spec(), Edit("100.5000美元", "100.4000美元", "ts.art15.table"), "doc.scenario_table"),
-        (Spec(), Edit("假設原計價幣別本金為10,000美元", "假設原計價幣別本金為20,000美元", "ts.art15"), "doc.scenario_table"),
+        (Spec(), Edit("100.5000美元", "100.4000美元", "ts.art15.table"), "scenario.reprint"),
+        (Spec(), Edit("假設原計價幣別本金為10,000美元", "假設原計價幣別本金為20,000美元", "ts.art15"), "scenario.params"),
         (Spec(), Edit("x 12.34% x 1/12 x n/N", "x 12.43% x 1/12 x n/N", "ts.art8"), "derive.coupon_pa_mentions"),
-        (Spec(), Edit("x 12.34% x 1/12 =", "x 12.43% x 1/12 =", "ts.art15"), "derive.coupon_pa_mentions"),
-        (Spec(ko_obs="P"), Edit("x 12.34% x 1/12 =", "x 12.43% x 1/12 =", "ts.art15"), "derive.coupon_pa_mentions"),
-        (Spec(), Edit("每次配息金額 = 10,000美元", "每次配息金額 = 20,000美元", "ts.art15"), "doc.scenario_table"),
-        (Spec(), Edit("到期贖回金額 = 10,000美元", "到期贖回金額 = 20,000美元", "ts.art15"), "doc.scenario_table"),
-        (Spec(), Edit("適用匯率 = 10,000美元/", "適用匯率 = 20,000美元/", "ts.art15"), "doc.scenario_table"),
-        (Spec(), Edit("/70.3500美元", "/70.4000美元", "ts.art15"), "doc.scenario_table"),
-        (Spec(count=1), Edit("/70.3500美元", "/70.4000美元", "ts.art15"), "doc.scenario_table"),
+        (Spec(), Edit("x 12.34% x 1/12 =", "x 12.43% x 1/12 =", "ts.art15"), "scenario.params"),
+        (Spec(ko_obs="P"), Edit("x 12.34% x 1/12 =", "x 12.43% x 1/12 =", "ts.art15"), "scenario.params"),
+        (Spec(), Edit("每次配息金額 = 10,000美元", "每次配息金額 = 20,000美元", "ts.art15"), "scenario.params"),
+        (Spec(), Edit("到期贖回金額 = 10,000美元", "到期贖回金額 = 20,000美元", "ts.art15"), "scenario.params"),
+        (Spec(), Edit("適用匯率 = 10,000美元/", "適用匯率 = 20,000美元/", "ts.art15"), "scenario.params"),
+        (Spec(), Edit("/70.3500美元", "/70.4000美元", "ts.art15"), "scenario.strike"),
+        (Spec(count=1), Edit("/70.3500美元", "/70.4000美元", "ts.art15"), "scenario.strike"),
         (Spec(), Edit("= 7.04美元", "= 7.04日圓", "ts.art15"), "field.currency"),
         (Spec(), Edit("商品名稱：摩根大通6個月", "商品名稱：摩根大通7個月", "ts.art1"), "doc.name_consistency"),
         (Spec(), Edit("計價幣別：美元", "計價幣別：日圓", "ts.art5"), "doc.currency_consistency"),
@@ -222,7 +223,7 @@ def test_pro_rata_coupon_in_an_unknown_formula_requires_review(tmp_path):
 
 def test_scenario_cells_are_shown_as_expected_and_actual(tmp_path):
     """假設價格表結果的預期值／實際值帶出每一格（Issue #315）。"""
-    found = [x for x in rule(check(tmp_path), "doc.scenario_table") if x.field == "scenario_table"]
+    found = rule(check(tmp_path), "scenario.reprint")
     assert found[0].status == S.PASS and found[0].expected == found[0].actual
     assert len(found[0].expected) == 9 and found[0].expected[0] == "100.5000"
 
@@ -237,9 +238,8 @@ def test_unreadable_scenarios_require_review(tmp_path):
     """情境 (i)～(iii) 找不到（結尾句改寫）：配息算式年利率、本金、執行價、幣別都轉人工覆核，不會默默通過。"""
     r = check(tmp_path, edits=[Edit("請注意：情境分析結果不保證本商品未來績效", "以上為範例", "ts.art15")])
     bad = set(problems(r))
-    assert ("derive.coupon_pa_mentions", "coupon_pa_pct", S.REVIEW_REQUIRED) in bad
-    assert {
-        ("doc.scenario_table", f, S.REVIEW_REQUIRED) for f in ("scenario_principal_mentions", "scenario_strike")
+    assert {("scenario.params", f, S.REVIEW_REQUIRED) for f in ("scenario_coupon_pa_1", "scenario_principal_2")} | {
+        ("scenario.strike", "scenario_prices", S.REVIEW_REQUIRED)
     } <= bad
     assert ("field.currency", "scenario_currency", S.REVIEW_REQUIRED) in bad
 
@@ -247,20 +247,20 @@ def test_unreadable_scenarios_require_review(tmp_path):
 def test_reworded_scenario_principal_requires_review(tmp_path):
     """情境 (i)、(ii) 一定寫的到期贖回金額讀不到：轉人工覆核，不會默默略過。"""
     r = check(tmp_path, edits=[Edit("到期贖回金額 = 10,000美元", "到期時贖回本金", "ts.art15")])
-    assert {(rid, s) for rid, _, s in problems(r)} == {("doc.scenario_table", S.REVIEW_REQUIRED)}
-    assert {f for _, f, _ in problems(r)} == {"scenario_principal_1_到期贖回金額", "scenario_principal_2_到期贖回金額"}
+    assert {(rid, s) for rid, _, s in problems(r)} == {("scenario.params", S.REVIEW_REQUIRED)}
+    names = {x.item.name for x in rule(r, "scenario.params") if x.status == S.REVIEW_REQUIRED}
+    assert names == {"第 15 項情境 (i)到期贖回金額的本金", "第 15 項情境 (ii)到期贖回金額的本金"}
 
 
 def test_scenario_without_the_assumed_worst_underlying_requires_review(tmp_path):
     """多標的情境 (iii) 沒寫假設的最差表現連結標的：不知道比哪一檔執行價，轉人工覆核。"""
     r = check(tmp_path, edits=[Edit("(此假設最差表現連結標的為連結標的1)", "", "ts.art15")])
-    assert problems(r) == [("doc.scenario_table", "scenario_strike", S.REVIEW_REQUIRED)]
+    assert problems(r) == [("scenario.strike", "scenario_price_1", S.REVIEW_REQUIRED)]
 
 
 def test_scenario_table_with_a_missing_column_requires_review(tmp_path):
     r = check(tmp_path, edits=[Edit("自動提前出場價", "", "ts.art15.table")])
-    found = [x for x in rule(r, "doc.scenario_table") if x.field == "scenario_table"]
-    assert found[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "scenario.reprint")[0].status == S.REVIEW_REQUIRED
 
 
 def test_ki_line_without_a_touch_event_requires_review(tmp_path):

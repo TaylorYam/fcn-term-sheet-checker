@@ -3,7 +3,7 @@
 - 文件側：[JPM 範本規格](../templates/jpm-zh-product-description.md)；投資人須知見 [JPM 投資人須知範本規格](../templates/jpm-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [JPM 下單資料格式](../order-formats/jpm-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.10（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額、情境每次配息金額）；§3.4 `derive.prices`（共用）、`doc.scenario_table`（假設價格表、假設本金、情境重複寫出的本金與執行價，Issue #315）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（Issue #289）、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-15，Issue #233）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 JPM 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.coupon_pa_mentions`（D 型自動提前出場配息金額）；§3.4 `derive.prices`（共用）；§3.7 共用情境規則 `scenario.reprint`（假設價格表）、`scenario.params`（假設本金、情境重複寫出的本金與每次配息金額的年利率）、`scenario.strike`（情境 (iii) 執行價）（Issue #315、#294）；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`、`doc.coupon_periods`、`doc.underlying_count`、`doc.ki_consistency`、`doc.redemption_pct`、共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（Issue #289）、`schedule.autocall_dates`（D 3 欄的 N.A 期別）；§3.6 共用 `standard.*`（JPM 分節）。第 8 項 KO 評價日寫法、日期表排法與 D 型按日計息條款不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG](sg-check-rules.md)、[Citi 核對規則](citi-check-rules.md)不同或 JPM 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
@@ -122,13 +122,13 @@
 
 2026-10-15 確認核對**假設價格表 = 第 9 項標的表**與**假設本金 = 面額**（§3.4），不重算配息、交割股數、剩餘金額與平均年化報酬率；情境假設收盤價、適用匯率不核對。假設表找不到或欄數不符時轉人工覆核。
 
-Issue #315（比照 BBVA #305、UBS #303）起，情境 (i)～(iii) 重複寫出的值逐處 = 正式條款（`doc.scenario_table`，年利率併入 `derive.coupon_pa_mentions`）：
+Issue #315（比照 BBVA #305、UBS #303）起，情境 (i)～(iii) 重複寫出的值逐處 = 正式條款。Issue #294 起由共用情境規則核對（[共用核對規則](shared-check-rules.md) §7）：假設價格表 `scenario.reprint`；假設本金、情境本金與年利率 `scenario.params`（年利率改和說明書第 8 項年利率比，第 8 項年利率本身已和參考條件表比過）；(iii) 執行價 `scenario.strike`（接受期初價格 × % 依位數四捨五入或無條件捨去，Issue #259）：
 
 | 出處 | 規則 |
 |---|---|
-| 每個情境 `每次配息金額 = 本金 x Y% x 1/12` | Y = 參考條件表年利率；本金 = 面額 |
+| 每個情境 `每次配息金額 = 本金 x Y% x 1/12` | Y = 年利率；本金 = 面額 |
 | (i)、(ii) `到期贖回金額 = 本金`；(iii) `每單位面額/執行價 x 適用匯率 = 本金/…` | 本金 = 面額 |
-| (iii) 交割股數算式的執行價 | = 第 9 項價格表 `此假設最差表現連結標的為連結標的n` 那檔的執行價（單一標的取第 1 檔），數值相等；多標的沒寫 n 轉人工覆核 |
+| (iii) 交割股數算式的執行價 | = 第 9 項價格表 `此假設最差表現連結標的為連結標的n` 那檔的執行價（單一標的取第 1 檔）；多標的沒寫 n 轉人工覆核 |
 | 每個情境金額旁的幣別 | = 承作幣別（`field.currency`，`scenario1_currency`～`scenario3_currency`）；收盤價、執行價與含「股」的交割算式行跟著標的走，不列入 |
 
 找不到情境 (i)～(iii)（到 `請注意：情境分析結果不保證本商品未來績效` 為止），或某情境少了一定有的句子（每個情境的每次配息金額；(i)、(ii) 到期贖回金額；(iii) 交割股數算式）：轉人工覆核。(iii) `(a)+(b)之價值` 那一行含交割股數（`股`），整行不列入幣別出處。受託機構名稱、地址、負責人在說明書沒有封面與第 II 部分以外的出處，`distributor_*_others` 維持 `absent`（Issue #315 盤點）。假設價格表結果的預期值／實際值帶出每一格。
