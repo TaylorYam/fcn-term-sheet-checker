@@ -69,7 +69,7 @@
 
 - 固定警語：有 `risk.fixed_warning_by_issuer.<上手>` 就用，否則用 `risk.fixed_warning`。
 - 商品名稱樣板 `product_name.<上手>`、發行機構全名 `issuer_name.<上手>`：缺該上手的值時轉人工覆核（`standard_missing`）。
-- 受託機構名稱、電話（含 `phone_equivalents`）、地址（含 `address_equivalents`）：所有上手共用。範本另有名稱、地址、負責人的出處時，adapter 交出出處清單 `distributor_names_others`、`distributor_addresses_others`、`chairman_others`（每處各一筆，規則同封面與第二章；範本沒有時交 `absent`，Issue #305；目前只有 BBVA 第 1 頁明細）。
+- 受託機構名稱、電話（含 `phone_equivalents`）、地址（含 `address_equivalents`）：所有上手共用。範本另有名稱、地址、負責人的出處時，adapter 交出出處清單 `distributor_names_others`、`distributor_addresses_others`、`chairman_others`（每處各一筆，規則同封面與第二章；範本沒有時交 `absent`，Issue #305；目前有 BBVA 第 1 頁明細，與 Natixis 封面、第三章警語、第四章 10.、14. 的受託機構名稱，Issue #318）。
 
 商品名稱樣板的佔位符一律由說明書欄位填入，不依上手分支：
 

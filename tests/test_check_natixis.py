@@ -149,6 +149,126 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     assert bad <= {broken, "standard.product_name", *also}, problems(r)
 
 
+@pytest.mark.parametrize(
+    ("spec", "edit", "expected"),
+    [
+        # 情境與第 15 項重複寫出的贖回 %、面額、執行價格、配息列數
+        (
+            Spec(),
+            Edit("自動提前到期贖回金額為原始投資本金乘以100%", "自動提前到期贖回金額為原始投資本金乘以99%", "ts.art16"),
+            ("doc.redemption_pct", "scenario_autocall_pct_1"),
+        ),
+        (
+            Spec(),
+            Edit(
+                "高於其執行價格，到期贖回金額為原始投資本金乘以100%",
+                "高於其執行價格，到期贖回金額為原始投資本金乘以99%",
+            ),
+            ("doc.redemption_pct", "scenario_maturity_pct_2"),
+        ),
+        (
+            Spec(),
+            Edit("則本商品將以每單位商品面額之100%贖回", "則本商品將以每單位商品面額之99%贖回", "ts.art15"),
+            ("doc.redemption_pct", "art15_case2a_1"),
+        ),
+        (
+            Spec(),
+            Edit("每單位商品面額 x 100%", "每單位商品面額 x 99%", "ts.art15"),
+            ("doc.redemption_pct", "art15_formula_2"),
+        ),
+        (
+            Spec(),
+            Edit("10,000 美元 x (18.00%/12)", "1,000 美元 x (18.00%/12)", "ts.art16.s3.r4"),
+            ("doc.scenario_params", "scenario_coupon_denomination_3"),
+        ),
+        (
+            Spec(),
+            Edit("自動提前到期日收到10,000 美元", "自動提前到期日收到1,000 美元", "ts.art16"),
+            ("doc.scenario_params", "scenario_principal_1"),
+        ),
+        (
+            Spec(),
+            Edit("執行價格 = 10,000 美元/", "執行價格 = 1,000 美元/", "ts.art16"),
+            ("doc.scenario_params", "scenario_physical_denomination_4"),
+        ),
+        (Spec(), Edit("/ 75.3375 美元", "/ 75.3376 美元", "ts.art16"), ("doc.scenario_table", "scenario_worst_strike")),
+        (
+            Spec(),
+            Edit("10,000 美元 x (18.00%/12) = 150.00 美元", "", "ts.art16.s2.r6"),
+            ("doc.coupon_periods", "scenario2_rows"),
+        ),
+        # 說明文字與情境的幣別字 = 承作幣別
+        (
+            Spec(),
+            Edit("條款以美元計算及支付配息", "條款以日圓計算及支付配息", "ts.art8"),
+            ("field.currency", "payment_currency_1"),
+        ),
+        (Spec(), Edit("100% 美元投資本金", "100% 日圓投資本金", "ts.art6"), ("field.currency", "principal_currency")),
+        (Spec(), Edit("所得之美元金額", "所得之日圓金額", "ts.art15"), ("field.currency", "cash_remainder_currency")),
+        (
+            VARIANTS["KO 每期記憶式、日股整數期初價、Non-Call 1"],
+            Edit("整數位之日圓金額", "整數位之美元金額", "ts.art13"),
+            ("field.currency", "coupon_rounding_currency"),
+        ),
+        (Spec(), Edit("美元之累積配息", "日圓之累積配息", "ts.art16.s2"), ("field.currency", "scenario2_currency")),
+        # 受託機構名稱的其他出處
+        (
+            Spec(),
+            Edit("股份有限公司)所保證", "股份有限公司X)所保證", "ts.ch三"),
+            ("standard.distributor", "distributor_name_ch3_w5"),
+        ),
+        (
+            Spec(),
+            Edit("股份有限公司)負責外", "股份有限公司X)負責外", "ts.warn"),
+            ("standard.distributor", "distributor_name_cover_w6b"),
+        ),
+        (
+            Spec(),
+            Edit("股份有限公司)提出贖回指示", "股份有限公司X)提出贖回指示", "ts.ch四"),
+            ("standard.distributor", "distributor_name_ch4_10a"),
+        ),
+    ],
+    ids=lambda x: x[1] if isinstance(x, tuple) else "",
+)
+def test_repeated_values_must_equal_the_terms(tmp_path, spec, edit, expected):
+    """重複寫出的值（Issue #318）：正式條款正確、只有重複處錯，判不一致，其他規則不受影響。"""
+    r = check(tmp_path, spec, edits=[edit])
+    bad = {(rid, f): st for rid, f, st in problems(r)}
+    assert bad.get(expected) == S.MISMATCH, problems(r)
+    assert {rid for rid, _ in bad} <= {expected[0], "standard.product_name"}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("edit", "expected"),
+    [
+        (Edit("100% 美元投資本金", "100%投資本金", "ts.art6"), ("field.currency", "principal_currency")),
+        (Edit("執行價格 = 10,000", "執行價格約 10,000", "ts.art16"), ("doc.scenario_table", "scenario_worst_strike")),
+        (Edit("10,000 美元 x (18.00%/12) = 150.00 美元", "", "ts.art16.s2"), ("doc.coupon_periods", "scenario2_rows")),
+        (
+            Edit(f"受託或銷售機構({DIST['name']})提出", "受託或銷售機構提出", "ts.ch四"),
+            ("standard.distributor", "distributor_name_ch4_10a"),
+        ),
+    ],
+    ids=lambda x: x[1] if isinstance(x, tuple) else "",
+)
+def test_unreadable_repeated_values_need_review(tmp_path, edit, expected):
+    """重複寫出處讀不到（Issue #318）：轉人工覆核。"""
+    r = check(tmp_path, edits=[edit])
+    assert {(rid, f): st for rid, f, st in problems(r)}.get(expected) == S.REVIEW_REQUIRED, problems(r)
+
+
+def test_scenario_results_show_each_cell(tmp_path):
+    """情境價格表、贖回 %、面額的結果帶出每一格／每一處（Issue #318）。"""
+    r = check(tmp_path)
+    table = rule(r, "doc.scenario_table")[0]
+    assert table.status == S.PASS and len(table.actual) == 12 and table.actual == table.expected  # 3 檔 x 4 欄
+    assert {x.field for x in rule(r, "doc.scenario_params")} >= {
+        "scenario_coupon_denomination_1",
+        "scenario_principal_1",
+        "scenario_physical_denomination_4",
+    }
+
+
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("觀察日：從第二個配息觀察期間", "觀察日：從第九個配息觀察期間", "ts.art12")])
     assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
