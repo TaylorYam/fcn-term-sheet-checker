@@ -6,8 +6,8 @@ y 座標、跨頁、換行、擠格都在這裡處理（Issue #287）。
 
 1. 相鄰幾格擷取成同一行時，先依字座標切回各欄（`split_at_columns`）；表頭同一行有兩個價格欄名、又對不到欄的左緣時，
    在第二個欄名切開（一格不會有兩個欄名）。
-2. 找列錨點（`TableSpec.anchor`）：左欄列號（`number`）、彭博代碼（`ticker`，代號與交易所碼換成兩行時取代號那一行）
-   或執行價格欄的價格（`price`）。
+2. 找列錨點（`TableSpec.anchor`）：左欄列號（`number`，`1` 或 `k=1`）、彭博代碼（`ticker`，代號與交易所碼換成兩行時取代號
+   那一行）或執行價格欄的價格（`price`）。
 3. 第 1 列錨點以上是表頭；表頭的格是同一欄上下相接的行（可跨到下一頁：上一頁頁底接下一頁頁首，百分比的續行也接
    上一頁該欄最下面的一行；橫跨兩格以上的說明文字不算；只有表頭百分比的那一格歸到正上方的欄名）。表頭從第一個兩格
    並排的列、有關鍵字的格的上緣起，更上面的文字不算；第 1 列那一頁的表頭已齊全時不往上一頁找。從表頭最後一行之下
@@ -17,7 +17,8 @@ y 座標、跨頁、換行、擠格都在這裡處理（Issue #287）。
    所在頁沒有列錨點時，只有緊接最後一列的下一頁算最後一列溢過來的部分，隔更遠就讀不出（轉人工覆核，不悄悄丟掉或
    接上）。表頭同樣只接到緊接的下一頁。
 5. 每行依空白切成詞、逐詞依 x 歸到表頭的欄；同一格裡換行接下來的部分（數字或幣別字）接回，其他上下或並排的都是
-   不同的值。一列的價格依欄序排成一串，個數須等於價格欄數（相鄰幾格擠成一行、切不開時仍依序對到各欄）。
+   不同的值。一列的價格依欄序排成一串，個數須等於價格欄數（相鄰幾格擠成一行、切不開時仍依序對到各欄）。彭博代碼
+   在代號中間換行（`QCO` / `M UQ`）時接回不加空白。其他文字欄（`TableSpec.texts`）每列讀出該欄去空白的文字。
 
 錯訊一律稱「價格表」、句型固定；表在文件的位置（`TableSpec.where`）與表頭百分比的寫法（`TableSpec.pct_label`）由上手交出。
 代碼從哪裡來、百分比從表頭或定義句讀、沒有 KO 欄時 KO 價等於期初價格、列名、期初定價、`PriceRow.currency` 都留在各上手。
@@ -46,7 +47,8 @@ SUFFIXED = re.compile(rf"({NUMBER})\s*({CURRENCY})?")
 VALUE = re.compile(rf"(?:{CURRENCY})?{NUMBER}(?:{CURRENCY})?")  # 一格剛好一個值（去空白後）
 COMPLETE = re.compile(rf"{CURRENCY}{NUMBER}|{NUMBER}{CURRENCY}")  # 帶幣別字的完整一格
 PRICE_START = re.compile(r"^\d[\d,]*\.\d+(?!\d|\s*%)")  # 以價格開頭的行（表頭的「60.00% )」不算）
-ROW_NUMBER = re.compile(r"^(\d{1,2})(?:\s|$)")  # 左欄列號（可能和名稱同一行：`2 KAWASAKI`）
+ROW_NUMBER = re.compile(r"^(?:k=)?(\d{1,2})(?:\s|$)")  # 左欄列號（`1`、`k=1`；可能和名稱同一行：`2 KAWASAKI`）
+ROW_LABEL = re.compile(r"(?:k=)?\d{1,2}")  # 單獨一行的列號
 SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9./-]*")
 EXCHANGE = re.compile(r"[A-Z]{2}(?:\s+(?:Equity|EQUITY))?")
 TICKER_START = re.compile(r"^[A-Z0-9][A-Z0-9./-]*\s+[A-Z]{2}(?![A-Za-z0-9])")
@@ -62,11 +64,13 @@ ANCHOR_WORDS = {"number": "列號", "ticker": "彭博代碼", "price": "執行�
 
 @dataclass(frozen=True)
 class Column:
-    """價格欄：`key`（strike／ko／ki）與表頭關鍵字；`required` 的欄表頭沒有時讀不出。"""
+    """價格欄：`key`（strike／ko／ki）與表頭關鍵字；`required` 的欄表頭沒有時讀不出；`pct_optional` 的欄表頭可以沒寫
+    百分比（`PriceTable.pcts` 就不含該欄）。也用來宣告其他文字欄（`TableSpec.texts`，不看 `pct_optional`）。"""
 
     key: str
     word: str
     required: bool = True
+    pct_optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ class TableSpec:
     anchor：列錨點，`number` 左欄列號、`ticker` 彭博代碼、`price` 執行價格欄的價格（表內沒有列號與代碼時）。
     pct：表頭百分比的寫法（regex，第 1 組為數字）；None 表示表頭沒有百分比。pct_label 是錯訊裡的寫法。
     code：彭博代碼欄的表頭關鍵字；None 表示表內沒有代碼。
+    texts：其他要讀出文字的欄（例：HSBC 的幣別、交易所），每列讀成 `TableRow.texts`。
     """
 
     where: str
@@ -88,6 +93,7 @@ class TableSpec:
     pct: str | None = None
     pct_label: str = ""
     code: str | None = None
+    texts: tuple[Column, ...] = ()
 
     def __post_init__(self) -> None:
         if self.anchor == "ticker" and self.code is None:
@@ -96,25 +102,28 @@ class TableSpec:
 
 @dataclass(frozen=True)
 class TableRow:
-    """價格表的一列：各欄價格（含 initial）、彭博代碼（表內沒有代碼時為 None）、名稱、價格旁的幣別字、原文行。"""
+    """價格表的一列：各欄價格（含 initial）、彭博代碼（表內沒有代碼時為 None）、名稱、價格旁的幣別字、原文行、
+    其他文字欄去空白的文字（`TableSpec.texts` 表頭有的欄 → 文字，該列沒有字時為空字串）。"""
 
     prices: dict[str, Decimal]
     ticker: str | None
     name: str
     currency: str | None
     lines: tuple[Line, ...]
+    texts: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class PriceTable:
     """讀出的價格表：`columns` 為價格欄（含 initial）依表頭 x 位置的順序，`pcts` 為表頭百分比（沒有寫時不含該欄），
-    `heads` 為各欄（價格欄與代碼欄）表頭去空白的文字。"""
+    `heads` 為各欄（價格欄與代碼欄）表頭去空白的文字，`head_lines` 為各欄表頭的原文行。"""
 
     columns: tuple[str, ...]
     pcts: dict[str, Decimal]
     rows: tuple[TableRow, ...]
     heads: dict[str, str]
     header_lines: tuple[Line, ...] = field(repr=False)
+    head_lines: dict[str, tuple[Line, ...]] = field(default_factory=dict, repr=False)
 
     @property
     def prices(self) -> list[dict[str, Decimal]]:
@@ -231,7 +240,7 @@ def _read(lines: list[Line], spec: TableSpec, origin: dict[int, int]) -> PriceTa
     if _page_key(min(_keyword_lines(cells, spec), key=_page_key)) < (anchors[0].page - 1, 0):
         raise _Unreadable(header, f"{spec.where}跨頁時讀不到該頁的列")
     used = {id(x) for col in cols.values() for x in col.cell}
-    others = [c for c in cells if not any(id(x) in used for x in c)]  # 表頭的其他欄（名稱、交易所…）
+    others = _others([c for c in cells if not any(id(x) in used for x in c)], header, spec)
     rows_lines = _rows(body, anchors, cols, others, spec)
     order = sorted(cols, key=lambda k: cols[k].x0)
     rows = [_row(k, lns, anchors[k - 1], others, cols, order, spec) for k, lns in enumerate(rows_lines, start=1)]
@@ -241,6 +250,7 @@ def _read(lines: list[Line], spec: TableSpec, origin: dict[int, int]) -> PriceTa
         rows=tuple(rows),
         heads=heads,
         header_lines=tuple(header),
+        head_lines={k: tuple(c.cell) for k, c in cols.items()},
     )
 
 
@@ -290,19 +300,37 @@ def _candidates(lines: list[Line], spec: TableSpec) -> list[Line]:
             if m and int(m[1]) == len(marks) + 1 and abs(ln.x0 - left.x0) < 10:
                 marks.append(ln)
         return marks
-    codes = [
-        ln
-        for ln in ordered
-        if _ticker_start(ln.text.strip())
-        or (  # 代號與交易所碼換成兩行（`AVGO` / `UW`）：代號那一行是列錨點
-            SYMBOL.fullmatch(ln.text.strip())
-            and any(EXCHANGE.fullmatch(b.text.strip()) and _adjacent(ln, b) for b in lines)
-        )
-    ]
+    codes: list[Line] = []
+    taken: set[int] = set()  # 已配給上一行代號的下半行（`UQ` 緊接下一列的兩碼代號 `MU` 時不是代號）
+    for ln in ordered:
+        if id(ln) in taken:
+            continue
+        if SYMBOL.fullmatch(ln.text.strip()):
+            # 代碼換成兩行：代號與交易所碼之間（`AVGO` / `UW`）或代號中間（`COH` / `R UN`）。上面那一行是列錨點
+            # （下面那一行的上緣可能低於同列價格的中心）
+            lower = _tail(ln, ordered)
+            if lower is not None:
+                codes.append(ln)
+                taken.add(id(lower))
+                continue
+        if _ticker_start(ln.text.strip()):
+            codes.append(ln)
     if not codes:
         return []
     left = min(codes, key=lambda x: x.x0)
     return [ln for ln in codes if _overlap(ln, left) > 0]
+
+
+def _tail(anchor: Line, lines: list[Line]) -> Line | None:
+    """代號那一行（列錨點）下面緊接的代碼下半行（交易所碼或代號後幾碼加交易所碼）；代碼在同一行時為 None。"""
+    if not SYMBOL.fullmatch(anchor.text.strip()):
+        return None
+    return next((b for b in sorted(lines, key=_page_key) if _adjacent(anchor, b) and _code_tail(b.text.strip())), None)
+
+
+def _code_tail(text: str) -> bool:
+    """代碼換行的下半行：交易所碼（`UW`、`UW Equity`）或代號後幾碼加交易所碼（`R UN`）。"""
+    return EXCHANGE.fullmatch(text) is not None or TICKER_START.match(text) is not None
 
 
 def _ticker_start(text: str) -> bool:
@@ -317,7 +345,7 @@ def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, in
     """第 1 列錨點的上緣以上是表頭，以下是列。第 1 列那一頁的表頭已經有全部必要的關鍵字時，不往上一頁找；表頭從
     第一個兩格並排的列（`_from_first_row`）、也是有關鍵字的那幾格的上緣起，更上面的文字（範圍裡表前的說明、上一頁
     頁底的註腳）不算。從表頭最後一行之下才開始、沒有表頭關鍵字的格（格內垂直置中、比列錨點高的行，例：代碼拆三行）
-    屬於列。"""
+    屬於列；和第 1 列錨點上下重疊的行也屬於列。"""
     top = (first.page, first.y0)
     above = [ln for ln in lines if (ln.page, _yc(ln)) < top]
     below = [ln for ln in lines if (ln.page, _yc(ln)) >= top]
@@ -331,9 +359,28 @@ def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, in
         return above, below
     start = min((ln.page, ln.y0) for c in keyed for ln in c)
     bottom = max((ln.page, ln.y1) for c in keyed for ln in c)
-    attached = [ln for c in cells if c not in keyed and (c[0].page, c[0].y0) > bottom for ln in c]
+    attached = [
+        ln
+        for c in cells
+        if c not in keyed and (c[0].page, c[0].y0) > bottom and (c[0].page == bottom[0] or _touches(c, below))
+        for ln in c
+    ]
+    # 沒有關鍵字的格裡、和第 1 列錨點上下重疊的行（名稱第一行比代碼高、又緊貼表頭那一格：`中文名` / `稱` / `輝達公`）
+    attached += [
+        ln
+        for c in cells
+        if c not in keyed
+        for ln in c
+        if ln not in attached and ln.page == first.page and ln.y1 - first.y0 > SAME_COLUMN * (ln.y1 - ln.y0)
+    ]
     header = [ln for ln in above if ln not in attached and (ln.page, _yc(ln)) >= start]
     return header, below + attached
+
+
+def _touches(cell: list[Line], below: list[Line]) -> bool:
+    """表頭下一頁的格接到第 1 列錨點以下的某一行（例：代碼拆三行、上面那一行比列錨點高）：屬於列。接不到的是表頭
+    跨頁的續行（某欄在上一頁的最後一行比隔壁欄高、其餘在下一頁頁首），留在表頭。"""
+    return any(_adjacent(ln, b) for ln in cell for b in below)
 
 
 def _adjacent(upper: Line, lower: Line) -> bool:
@@ -481,9 +528,10 @@ def _columns(
             if m is None and len(below) == 1:  # 百分比和欄名分開：歸到正上方的欄名
                 out[col.key] = sorted(out[col.key] + below[0], key=_reading)
                 m = re.search(spec.pct, _text(out[col.key]))
-            if m is None:
+            if m is not None:
+                pcts[col.key] = Decimal(m[1])
+            elif not col.pct_optional:
                 raise _Unreadable(out[col.key], f"{spec.where}表頭「{col.word}」讀不到「{spec.pct_label}」")
-            pcts[col.key] = Decimal(m[1])
     words = [c.word for c in spec.columns]
     out["initial"] = _one(
         [
@@ -514,6 +562,19 @@ def _below(cell: list[Line], head: list[Line], cells: list[list[Line]], spec: Ta
     return best is head and overlap(head) > 0
 
 
+Other = tuple[str | None, list[Line]]  # 表頭的其他欄：文字欄的 key（不讀的欄為 None）與表頭的格
+
+
+def _others(cells: list[list[Line]], header: list[Line], spec: TableSpec) -> list[Other]:
+    """價格欄、代碼欄以外的表頭格；`TableSpec.texts` 宣告的欄標上它的 key。"""
+    keyed: dict[int, str] = {}
+    for col in spec.texts:
+        hit = [c for c in cells if col.word in _text(c)]
+        if hit or col.required:
+            keyed[id(_one(hit, col.word, header, spec))] = col.key
+    return [(keyed.get(id(c)), c) for c in cells]
+
+
 def _one(hit: list[list[Line]], word: str, header: list[Line], spec: TableSpec) -> list[Line]:
     if len(hit) > 1:
         raise _Unreadable(header, f"{spec.where}表頭「{word}」出現多欄")
@@ -538,17 +599,23 @@ def _anchors(lines: list[Line], body: list[Line], cols: dict[str, _Col], spec: T
 
 
 def _rows(
-    body: list[Line], anchors: list[Line], cols: dict[str, _Col], others: list[list[Line]], spec: TableSpec
+    body: list[Line], anchors: list[Line], cols: dict[str, _Col], others: list[Other], spec: TableSpec
 ) -> list[list[Line]]:
     """每行歸到同一頁 y 中心最近的列；所在頁沒有列時，只有緊接最後一列的下一頁算最後一列。價格欄裡換行的值
     （`23,425.0000` / `日圓`、`美元` / `123.4567`、`19,740.000` / `0日圓`）跟著第一行所在的列：列距小時，換下來的
-    那一行可能離下一列一樣近。"""
+    那一行可能離下一列一樣近。代碼拆成兩行時（`AVGO` / `UW`、`COH` / `R UN`），下面那一行跟著它的列錨點，列的中心取
+    兩行合起來的中心。"""
     last = anchors[-1].page
+    tails = {k: t for k, a in enumerate(anchors) if spec.anchor == "ticker" and (t := _tail(a, body)) is not None}
+    centers = [(a.y0 + tails[k].y1) / 2 if k in tails else _yc(a) for k, a in enumerate(anchors)]
+    tail_of = {id(t): k for k, t in tails.items()}
     row_of: dict[int, int] = {}
     for i, ln in enumerate(body):
         same = [k for k, a in enumerate(anchors) if a.page == ln.page]
-        if same:
-            row_of[i] = min(same, key=lambda j: abs(_yc(anchors[j]) - _yc(ln)))
+        if id(ln) in tail_of:
+            row_of[i] = tail_of[id(ln)]
+        elif same:
+            row_of[i] = min(same, key=lambda j: abs(centers[j] - _yc(ln)))
         elif ln.page == last + 1:
             row_of[i] = len(anchors) - 1
         else:
@@ -608,11 +675,11 @@ def _continues(upper: str, lower: str) -> bool:
     return m is not None and tail is not None and len(m[1]) < 4 and len(m[1]) + len(tail[0]) <= 4 and "." not in lower
 
 
-def _column_of(ln: Line, cols: dict[str, _Col], others: list[list[Line]]) -> str | None:
-    """這一行屬於哪一欄（價格欄、期初價格欄、代碼欄；其他表頭欄與表頭沒有的欄為 None）：x 重疊最多的表頭格；
+def _column_of(ln: Line, cols: dict[str, _Col], others: list[Other]) -> str | None:
+    """這一行屬於哪一欄（價格欄、期初價格欄、代碼欄、文字欄；其他表頭欄與表頭沒有的欄為 None）：x 重疊最多的表頭格；
     都不重疊時取 `NEAR` pt 內最近的表頭格（例：表頭沒有欄名的列號、情境表的「連結標的1」不算到期初價格欄）。"""
     spans: list[tuple[str | None, float, float]] = [(k, c.x0, c.x1) for k, c in cols.items()]
-    spans += [(None, min(x.x0 for x in c), max(x.x1 for x in c)) for c in others]
+    spans += [(key, min(x.x0 for x in c), max(x.x1 for x in c)) for key, c in others]
     best = max(spans, key=lambda s: _span_overlap(ln, s[1], s[2]))
     if _span_overlap(ln, best[1], best[2]) > 0:
         return best[0]
@@ -623,7 +690,7 @@ def _row(
     k: int,
     lns: list[Line],
     anchor: Line,
-    others: list[list[Line]],
+    others: list[Other],
     cols: dict[str, _Col],
     order: list[str],
     spec: TableSpec,
@@ -643,21 +710,39 @@ def _row(
         raise _Unreadable(ordered, f"{spec.where}第 {k} 列各格的幣別字不同")
     ticker = None
     if spec.code is not None:
-        text = join_text(sorted(by_col.get("code", []), key=_reading))
-        hits = TICKER.findall(text)
+        hits = TICKER.findall(_code_text(sorted(by_col.get("code", []), key=_reading)))
         if len(hits) != 1:
             raise _Unreadable(ordered, f"{spec.where}第 {k} 列讀不到彭博代碼")
         ticker = f"{hits[0][0]} {hits[0][1]}"
     left = min(c.x0 for key, c in cols.items() if key in ("code", "initial"))
-    label = [ln for ln in lns if ln.xc < left and ln is not anchor and not re.fullmatch(r"\d{1,2}", ln.text.strip())]
-    name = re.sub(r"^\d{1,2}\s+", "", join_text(sorted(label, key=_reading))).strip()
+    label = [ln for ln in lns if ln.xc < left and ln is not anchor and not ROW_LABEL.fullmatch(ln.text.strip())]
+    name = re.sub(r"^(?:k=)?\d{1,2}\s+", "", join_text(sorted(label, key=_reading))).strip()
+    texts = {
+        key: "".join(squash(x.text) for x in sorted(by_col.get(key, []), key=_reading)) for key, _ in others if key
+    }
     return TableRow(
         prices=dict(zip(keys, (v for v, _ in found), strict=True)),
         ticker=ticker,
         name=name,
         currency=currencies.pop(),
         lines=tuple(ordered),
+        texts=texts,
     )
+
+
+def _code_text(words: list[Line]) -> str:
+    """代碼欄的文字；代號在字中間換行（上一行只有代號的前幾碼、下一行是其餘幾碼＋交易所碼：`QCO` / `M UQ`）時接回
+    不加空白，代號與交易所碼之間換行（`AVGO` / `UW`）照舊加空白。"""
+    lines: list[list[Line]] = []
+    for w in words:  # 依空白切開的詞先併回各行
+        if lines and lines[-1][0].page == w.page and abs(_yc(lines[-1][0]) - _yc(w)) < (w.y1 - w.y0) / 2:
+            lines[-1].append(w)
+        else:
+            lines.append([w])
+    texts = [" ".join(x.text for x in ln) for ln in lines]
+    if len(texts) >= 2 and SYMBOL.fullmatch(texts[0]) and TICKER_START.match(texts[1]):
+        lines, texts = lines[1:], [texts[0] + texts[1], *texts[2:]]
+    return join_text([replace(ln[0], text=t) for ln, t in zip(lines, texts, strict=True)])
 
 
 def _split_words(ln: Line) -> list[Line]:

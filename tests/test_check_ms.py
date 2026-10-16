@@ -262,6 +262,14 @@ def test_ko_column_missing_before_maturity_requires_review(tmp_path):
     assert rule(r, "doc.ko_column")[0].status == S.REVIEW_REQUIRED
 
 
+def test_price_table_title_listing_other_columns_than_the_header_requires_review(tmp_path):
+    """第 16 項表上方標題列出的欄（少了下限價格）和表頭不一致：價格表轉人工覆核（Issue #288 保留的檢查）。"""
+    r = check(tmp_path, S0, edits=[Edit("、下限價格及", "及", "ts.art16")])
+    x = rule(r, "field.underlying_prices")[0]
+    assert x.status == S.REVIEW_REQUIRED
+    assert "第一章第 16 項價格表標題列出的欄與表頭不一致" in x.message
+
+
 def test_vwap_without_ko_column_overwrites_ko_prices_with_the_initial_price(tmp_path):
     """期初定價 VWAP 的價格欄一律以說明書覆寫；說明書沒有 KO 欄（Non-Call = 天期）時 KO 價 = 期初價格（Issue #202）。"""
     r = check(tmp_path, NON_CALL_AT_TENOR, **{"期初定價": "VWAP", "UL_1_KO價": 150})

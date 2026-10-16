@@ -168,7 +168,7 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
     out.append(
         kit.doc_check(ctx, "doc.ko_column", "ko_column", "價格表自動提前出場價欄", pt, k, tenor).compare(
             "有" if k.ok and tenor.ok and k.value < tenor.value else "無",
-            "有" if pt.ok and "ko" in pt.value["columns"] else "無",
+            "有" if pt.ok and "ko" in pt.value.columns else "無",
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="第一個可提前出場期早於到期時價格表要有自動提前出場價欄，Non-Call = 天期時不會有",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..schema import CheckResult, Item
+from ..schema import CheckResult, Item, ParsedField
 from . import kit
 from .kit import Check, IssuerContext
 
@@ -19,13 +19,18 @@ def monthly_rate(annual: Decimal) -> Decimal:
     return (annual / 12).quantize(kit.Q4, ROUND_HALF_UP)
 
 
+def _cells(table: ParsedField) -> list[dict]:
+    """價格表逐格比對的值：各列的彭博代碼與價格。"""
+    return [{"ticker": r.ticker, "prices": r.prices} for r in table.value.rows]
+
+
 def reprint(ctx: IssuerContext) -> list[CheckResult]:
     """第 18 項重印價格表的彭博代碼、各價格與表頭百分比逐格 = 第 16 項。"""
     pt, st = ctx.ts.f("price_table"), ctx.ts.scenarios.table
     out = []
     for rid, field, name, value in (
-        ("doc.scenario_table", "scenario_table", "第 18 項重印價格表", lambda t: t.value["rows"]),
-        ("doc.scenario_header_pct", "scenario_headers", "第 18 項重印價格表欄頭百分比", lambda t: t.value["headers"]),
+        ("doc.scenario_table", "scenario_table", "第 18 項重印價格表", _cells),
+        ("doc.scenario_header_pct", "scenario_headers", "第 18 項重印價格表欄頭百分比", lambda t: t.value.pcts),
     ):
         check = Check(rid, field, Item.expected(name), ctx.document).needs(pt, st)
         if (problem := check.blocked) is not None:
@@ -100,7 +105,7 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
             )
             continue
         ticker, strike = s.strike[0].value.ticker, s.strike[0].value.strike
-        rows = [r for r in pt.value["rows"] if r["ticker"].replace(" ", "") == ticker]
+        rows = [r for r in pt.value.rows if r.ticker.replace(" ", "") == ticker]
         if len(rows) != 1:
             out.append(
                 kit.calc_result(
@@ -112,9 +117,9 @@ def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
                 )
             )
             continue
-        expected = rows[0]["prices"]["strike"]
+        expected = rows[0].prices["strike"]
         pct = kit.field_value(ctx.ts, "strike_pct")
-        ok = kit.scenario_price_ok(strike, expected, rows[0]["prices"].get("initial"), pct)  # 兩種進位都接受（#259）
+        ok = kit.scenario_price_ok(strike, expected, rows[0].prices.get("initial"), pct)  # 兩種進位都接受（#259）
         issues = [] if ok else ["與第 16 項價格表的執行價不同"]
         out.append(
             kit.calc_result(

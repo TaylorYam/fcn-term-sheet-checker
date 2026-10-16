@@ -168,6 +168,34 @@ class PdfWriter:
             self.put(x, self.y, t, size, section[0] if section else None)
         self.y += gap
 
+    def grid(
+        self,
+        header: Sequence[tuple[float, Sequence[str]]],
+        rows: Sequence[Sequence[tuple[float, Sequence[str]]]],
+        size: float = 8,
+        gap: float = 10,
+        space: float = 4,
+        breaks: Sequence[int] = (),
+    ) -> None:
+        """一張表畫成真實欄列版面（價格表，Issue #288）：`header` 為表頭各格、`rows` 為每列各格，每格是（左緣 x、由上到下
+        的幾行字）；同一列各格從同一個 y 起，一格拆幾行就往下幾行，列與列之間空 `space`。表頭與各列的格左緣對齊各欄，
+        依座標讀表的 parser 才分得出欄。`breaks` 為在第幾列（1 起算）之前換頁。"""
+        height = max(len(t) for _, t in header) * gap
+        self.need(height + space + (max(len(t) for _, t in rows[0]) * gap if rows else 0))
+        for x, texts in header:
+            for i, t in enumerate(texts):
+                self.put(x, self.y + i * gap, t, size)
+        self.y += height + space
+        for k, cells in enumerate(rows, start=1):
+            height = max(len(t) for _, t in cells) * gap
+            if k in breaks:
+                self.new_page()
+            self.need(height)
+            for x, texts in cells:
+                for i, t in enumerate(texts):
+                    self.put(x, self.y + i * gap, t, size)
+            self.y += height + space
+
     def para(self, x: float, text: str, width: int = 40, size: float = 10, gap: float = 13) -> None:
         text = self.edit(text)
         with self.verbatim():

@@ -40,8 +40,8 @@ def reprint(ctx: IssuerContext) -> list[CheckResult]:
     else:
         out.append(
             check.compare(
-                [r["prices"] for r in pt.value["rows"]],
-                [r["prices"] for r in st.value["rows"]],
+                pt.value.prices,
+                st.value.prices,
                 evidence=list(st.evidence),
                 fail_message="第 15 項重印的標的表須與第 8 項逐格相同",
             )
@@ -54,7 +54,7 @@ def reprint(ctx: IssuerContext) -> list[CheckResult]:
         out.append(problem)
         return out
     expected = {}
-    for col in st.value["columns"]:
+    for col in st.value.columns:
         if col == "initial":
             continue
         pf = pcts[col]
@@ -64,7 +64,7 @@ def reprint(ctx: IssuerContext) -> list[CheckResult]:
         expected[col] = pf.value
     out.append(
         check.compare(
-            expected, st.value["pcts"], evidence=list(st.evidence), fail_message="重印表表頭的百分比須與第 8 項相同"
+            expected, st.value.pcts, evidence=list(st.evidence), fail_message="重印表表頭的百分比須與第 8 項相同"
         )
     )
     return out

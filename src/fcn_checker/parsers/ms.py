@@ -14,12 +14,12 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
-from . import money, ms_scenario, ms_tables, ms_wording
+from . import money, ms_scenario, ms_tables, ms_wording, price_table
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -246,7 +246,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     fields["ki_type"] = _ki_type(art16)
     region = ms_tables.price_region(art16, ("（1）最低保證贖回率",))
     fields["price_table"] = (
-        ms_tables.price_table("price_table", region[1], region[0])
+        ms_tables.price_table("price_table", region[1], ms_tables.PRICE_TABLE, title=region[0])
         if region
         else ParsedField.missing("price_table", "找不到第 16 項價格表（標題「…：依下表所示」到「(1) 最低保證贖回率」）")
     )
@@ -417,27 +417,17 @@ def _prices(fields: dict[str, ParsedField]) -> None:
         for key in ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct"):
             fields[key] = derived(key, pt)
         return
-    tickers = [r["ticker"] for r in pt.value["rows"]]
+    tickers = list(pt.value.tickers)
     fields["underlyings"] = derived("underlyings", pt, tickers)
     # 標的名稱取第 11 項標的表（代碼須依序相同才對得上列；投資人須知的標的名稱和它比）
     art11, names = fields["underlyings_art11"], fields["underlying_names_art11"]
     aligned = art11.ok and names.ok and art11.value == tickers and len(names.value) == len(tickers)
-    headers, ev = pt.value["headers"], list(pt.evidence)
+    headers, ev = pt.value.pcts, list(pt.evidence)
     no_ko_column_at_tenor = "ko" not in headers and k.ok and tenor.ok and k.value == tenor.value
-    fields["underlying_prices"] = ParsedField(
-        "underlying_prices",
-        FieldStatus.PRESENT,
-        tuple(
-            standard_fields.PriceRow(
-                r["ticker"],
-                ko_at_initial(r["prices"]) if no_ko_column_at_tenor else dict(r["prices"]),
-                tuple(Evidence.of(ln) for ln in lns),
-                names.value[i] if aligned else None,
-            )
-            for i, (r, lns) in enumerate(zip(pt.value["rows"], pt.value["row_lines"], strict=True))
-        ),
-        ev,
-    )
+    rows = price_table.price_rows(pt, names=list(names.value) if aligned else [None] * len(tickers))
+    if no_ko_column_at_tenor:
+        rows.value = tuple(replace(r, prices=ko_at_initial(r.prices)) for r in rows.value)
+    fields["underlying_prices"] = rows
     fields["strike_pct"] = ParsedField("strike_pct", FieldStatus.PRESENT, headers["strike"], ev)
     if ki.ok and ki.value == "none":
         fields["ki_pct"] = ParsedField("ki_pct", FieldStatus.NOT_APPLICABLE, evidence=list(ki.evidence))

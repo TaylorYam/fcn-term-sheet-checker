@@ -9,19 +9,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, sg_scenario, sg_tables
+from . import money, price_table, sg_scenario, sg_tables
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "sg-zh-pd"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -330,7 +330,7 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
     tickers = _tickers(doc.span_lines(doc.subitems(arts.get(9)).get(1)))
     fields["underlyings"] = tickers
     n = len(tickers.value) if tickers.ok else None
-    table = sg_tables.price_table("underlying_table", _table_region(art8), n, reprint=False)
+    table = sg_tables.price_table("underlying_table", _table_region(art8), sg_tables.PRICE_TABLE, n)
     fields["underlying_table"] = table
     _prices(fields, table, tickers, has_autocall)
 
@@ -522,22 +522,12 @@ def _prices(fields: dict[str, ParsedField], table: ParsedField, tickers: ParsedF
     if not table.ok:
         fields["underlying_prices"] = derived("underlying_prices", table)
         return
-    rows = table.value["rows"]
-    names = tickers.value if tickers.ok and len(tickers.value) == len(rows) else [None] * len(rows)
-    fields["underlying_prices"] = ParsedField(
-        "underlying_prices",
-        FieldStatus.PRESENT,
-        tuple(
-            standard_fields.PriceRow(
-                ticker,
-                dict(row["prices"]) if has_autocall else ko_at_initial(row["prices"]),
-                tuple(Evidence.of(ln) for ln in lns),
-                name=f"k={i}",
-            )
-            for i, (ticker, row, lns) in enumerate(zip(names, rows, table.value["row_lines"], strict=True), start=1)
-        ),
-        list(table.evidence),
-    )
+    n = len(table.value.rows)
+    codes = tickers.value if tickers.ok and len(tickers.value) == n else [None] * n
+    rows = price_table.price_rows(table, codes, names=[f"k={i}" for i in range(1, n + 1)])
+    if not has_autocall:
+        rows.value = tuple(replace(r, prices=ko_at_initial(r.prices)) for r in rows.value)
+    fields["underlying_prices"] = rows
 
 
 # ---------------------------------------------------------------- 第 12 項

@@ -1,4 +1,4 @@
-"""MS 表格解析：日期表（第一章第 14 項(6)）、價格表（第 16 項與第 18 項重印）、標的表（第 11 項）、費用表（第四章第 2 項）。
+"""MS 表格解析：日期表（第一章第 14 項(6)）、價格表（第 16 項與第 18 項重印；以 parsers/price_table.py 讀）、標的表（第 11 項）、費用表（第四章第 2 項）。
 
 擷取文字為「一格一行」的順序（由左到右、由上到下）；以表頭文字與結束錨點定位，不用頁碼（docs/templates/ms-zh-product-description.md §5）。
 """
@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from dataclasses import replace
 
 from ..schema import Line, ParsedField
 from ..text import full_brackets, squash
+from . import price_table as price_table_module
 from .layout import DATE_RE, TextIndex, join_text, parse_date
 
 # 日期表：標題 → 表型；表頭（去空白、括號統一全形）
@@ -25,11 +26,22 @@ DATE_KEYS = {"D": ("start", "end", "payment"), "P": ("pricing", "payment", "auto
 DATE_TABLE_END = "如配息日非營業日"
 NONE = "無"  # P 型自動提前出場日「無」
 
-PRICE_COLUMNS = {"期初價格": "initial", "執行價": "strike", "下限價格": "ki", "自動提前出場價": "ko"}
-PRICE_ORDER = ("initial", "strike", "ki", "ko")
+PRICE_COLUMNS = {"期初價格": "initial", "執行價": "strike", "下限價格": "ki", "自動提前出場價": "ko"}  # 標題列出的欄
+PRICE_TABLE = price_table_module.TableSpec(
+    where="第一章第 16 項價格表",
+    initial="期初價格",
+    columns=(
+        price_table_module.Column("strike", "執行價"),
+        price_table_module.Column("ki", "下限價格", required=False),
+        price_table_module.Column("ko", "自動提前出場價", required=False),
+    ),
+    anchor="ticker",
+    pct=r"[（(]期初價格的([\d.]+)%[）)]",
+    pct_label="（期初價格的X%）",
+    code="彭博代碼",
+)
+SCENARIO_TABLE = replace(PRICE_TABLE, where="第一章第 18 項重印價格表")
 TICKER = re.compile(r"^[A-Z0-9][A-Z0-9./-]*\s+[A-Z]{2}$")
-PRICE = re.compile(r"^[\d,]+\.\d{4}$")
-ROW_LABEL = re.compile(r"^k=(\d+)$")
 
 
 def _norm(text: str) -> str:
@@ -90,60 +102,19 @@ def date_table(lines: list[Line]) -> ParsedField:
     return ParsedField.present(name, {"type": kind, "rows": out, "row_lines": row_lines}, lines[first:end])
 
 
-def price_table(name: str, lines: list[Line], title: str | None) -> ParsedField:
-    """價格表：表頭依序為期初價格、執行價、（下限價格）、（自動提前出場價），百分比取「（期初價格的X%）」；
-    `title` 為表上方的標題（例：期初價格、執行價及自動提前出場價），列出的欄須與表頭一致（第 18 項重印表沒有標題，
-    為 None）。每列 k=n、彭博代碼、各價格。
-
-    值：{"columns": [...], "headers": {欄: 百分比}, "rows": [{"ticker", "prices"}], "row_lines": [...]}。
-    """
-    first = next((i for i, ln in enumerate(lines) if ROW_LABEL.fullmatch(squash(ln.text))), None)
-    if first is None:
-        return ParsedField.invalid(name, lines, "價格表沒有資料列（k=1）")
-    header = _norm("".join(ln.text for ln in lines[:first]))
-    found = list(re.finditer(r"(期初價格|執行價|下限價格|自動提前出場價)(?:（期初價格的([\d.]+)%）)?", header))
-    columns = [PRICE_COLUMNS[m[1]] for m in found]
-    expected = [c for c in PRICE_ORDER if c in columns]
-    if columns != expected or columns[:2] != ["initial", "strike"]:
-        return ParsedField.invalid(name, lines[:first], "價格表表頭欄位或順序不符範本")
-    if found[0][2] is not None or any(m[2] is None for m in found[1:]):
-        return ParsedField.invalid(name, lines[:first], "價格表表頭百分比缺漏或格式未知")
-    titled = [PRICE_COLUMNS[k] for k in PRICE_COLUMNS if title is not None and k in squash(title)]
-    if title is not None and titled != columns:
-        return ParsedField.invalid(name, lines[:first], "價格表標題列出的欄與表頭不一致")
-    headers = {PRICE_COLUMNS[m[1]]: Decimal(m[2]) for m in found[1:]}
-    rows: list[dict] = []
-    row_lines: list[list[Line]] = []
-    for ln in lines[first:]:
-        t = squash(ln.text)
-        label = ROW_LABEL.fullmatch(t)
-        if label:
-            if rows and len(rows[-1]["cells"]) != len(columns) + 1:
-                return ParsedField.invalid(name, row_lines[-1], "價格表列不完整")
-            if int(label[1]) != len(rows) + 1:
-                return ParsedField.invalid(name, [ln], "價格表列標籤 k 不連續")
-            rows.append({"cells": []})
-            row_lines.append([ln])
-            continue
-        if not rows:
-            return ParsedField.invalid(name, [ln], "價格表出現無法辨識的儲存格")
-        cells = rows[-1]["cells"]
-        if not cells and TICKER.fullmatch(ln.text.strip()):
-            cells.append(re.sub(r"\s+", " ", ln.text.strip()))
-        elif cells and PRICE.fullmatch(t) and len(cells) <= len(columns):
-            cells.append(Decimal(t.replace(",", "")))
-        else:
-            return ParsedField.invalid(name, [ln], "價格表彭博代碼或價格無法辨識")
-        row_lines[-1].append(ln)
-    if not rows or len(rows[-1]["cells"]) != len(columns) + 1:
-        return ParsedField.invalid(name, lines[first:], "價格表列不完整")
-    value = {
-        "columns": columns,
-        "headers": headers,
-        "rows": [{"ticker": r["cells"][0], "prices": dict(zip(columns, r["cells"][1:], strict=True))} for r in rows],
-        "row_lines": row_lines,
-    }
-    return ParsedField.present(name, value, lines[first:])
+def price_table(
+    name: str, lines: list[Line], spec: price_table_module.TableSpec, title: str | None = None
+) -> ParsedField:
+    """價格表（`parsers/price_table.py` 讀）：每列 k=n、彭博代碼、期初價格、執行價、（下限價格）、（自動提前出場價），
+    表頭百分比取「（期初價格的X%）」。`title` 為表上方的標題（例：期初價格、執行價及自動提前出場價），列出的欄須與
+    表頭一致（第 18 項重印表沒有標題，為 None）。"""
+    table = price_table_module.read(name, lines, spec)
+    if not table.ok or title is None:
+        return table
+    titled = [PRICE_COLUMNS[k] for k in PRICE_COLUMNS if k in squash(title)]
+    if sorted(titled) != sorted(table.value.columns):
+        return ParsedField.invalid(name, list(table.value.header_lines), f"{spec.where}標題列出的欄與表頭不一致")
+    return table
 
 
 def price_region(lines: list[Line], end_prefixes: tuple[str, ...]) -> tuple[str, list[Line]] | None:

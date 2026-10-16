@@ -1,7 +1,7 @@
-"""BARC 中文投資人須知（docs/templates/barc-zh-iis.md）：段落標題＋點號＋標籤定位，價格表依座標拆欄。
+"""BARC 中文投資人須知（docs/templates/barc-zh-iis.md）：段落標題＋點號＋標籤定位，價格表以 parsers/price_table.py 讀。
 
-依 8 份真實樣本建立（單一／多標的、有無 KI、記憶式與否、USD／CNH）：價格表出現樣本以外的欄頭或文字時
-整張表轉人工覆核，不猜欄位。記憶式商品的 KO 欄頭不寫百分比（「為最初價格乘以自動提前出場觸發百分比」），
+依 8 份真實樣本建立（單一／多標的、有無 KI、記憶式與否、USD／CNH）：價格表只讀認得的欄（樣本以外的欄頭或文字
+不再整張轉人工覆核，Issue #288）；價格個數不符、必要欄缺漏仍轉人工覆核。記憶式商品的 KO 欄頭不寫百分比（「為最初價格乘以自動提前出場觸發百分比」），
 那份就沒有 KO %；有 KI 的商品多一欄「觸及生效價格」，那份另有 KI %。
 """
 
@@ -9,28 +9,22 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
-from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import PriceRow
+from ..schema import DetectionResult, Evidence, Line, ParsedField
 from ..text import squash
-from . import iis, money
+from . import barc, iis, money, price_table
+from .common import derived
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "barc-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
 SECTIONS = ("警語：", "相關機構事業概況：", "商品簡介：", "收益分配事項：", "本商品之費用明細表：")
-PRICE_HEADERS = (  # 欄、欄頭第一行開頭的寫法、是否必有（最初價格欄頭須整行相等，避免和 KI 欄頭的續行混淆）
-    ("initial", ("最初價格",), True),
-    ("strike", ("執行價格",), True),
-    ("ko", ("觸發水準", "自動提前出場觸發"), True),
-    ("ki", ("觸及生效價",), False),
-)
+PRICE_TABLE = replace(barc.PRICE_TABLE, where="收益分配事項價格表")  # 同說明書第 15 條價格表
 PCT_FIELDS = (("strike", "strike_pct"), ("ko", "ko_pct"), ("ki", "ki_pct"))
 KO_BY_PERIOD = "乘以自動提前出場觸發百分比"  # 記憶式商品 KO 欄頭：各期百分比不同，沒有單一 KO %
-NUMBER = re.compile(r"[\d,]+\.\d+")
 TABLE_CELL_WIDTH = 300  # 表格儲存格的寬度上限（pt）；更寬的是表格外的段落
-COLUMN_REACH = 70  # 欄頭或數字離欄中心超過此距離（pt）視為範本以外的欄位
 
 PROVIDED = frozenset(
     {
@@ -93,86 +87,46 @@ def _bad(note: str, lns: Sequence[Line]) -> dict[str, ParsedField]:
     }
 
 
-def _price_table(lines: Sequence[Line]) -> dict[str, ParsedField]:
-    """收益分配事項的價格表：欄頭（最初價格、執行價格、觸發水準）依座標拆欄，每列一檔標的。"""
+def _region(lines: Sequence[Line]) -> list[Line] | None:
+    """收益分配事項的價格表範圍：「標的資產」欄頭那一行起，到表格下方的整行段落、下一個子項「(N)」或下一段「N.」之前
+    （可跨到下一頁）。"""
     start = next((i for i, ln in enumerate(lines) if squash(ln.text) == "標的資產"), None)
     if start is None:
+        return None
+    region = [lines[start]]
+    for ln in lines[start + 1 :]:
+        if ln.x1 - ln.x0 > TABLE_CELL_WIDTH or re.match(r"\(\d+\)|\d+\.(?!\d)", squash(ln.text)):
+            break
+        region.append(ln)
+    return region
+
+
+def _price_table(lines: Sequence[Line]) -> dict[str, ParsedField]:
+    """收益分配事項的價格表（`parsers/price_table.py` 讀，以執行價格欄的價格切列）：每列一檔標的、名稱在左欄。
+    記憶式商品 KO 欄頭不寫百分比，那份就沒有 KO %；有 KI 欄才有 KI %。"""
+    region = _region(lines)
+    if region is None:
         return {
             n: ParsedField.missing(n, "找不到價格表")
             for n in ("underlying_prices", "underlying_names", "strike_pct", "ko_pct")
         }
-    head = lines[start]
-    region = [head]
-    for ln in lines[start + 1 :]:
-        if ln.page != head.page or ln.x1 - ln.x0 > TABLE_CELL_WIDTH or re.match(r"\(\d+\)", squash(ln.text)):
-            break  # 表格下方的整行段落或下一個子項
-        region.append(ln)
-    nums = [ln for ln in region if NUMBER.fullmatch(squash(ln.text))]
-    if not nums:
-        return _bad("價格表沒有價格", region)
-    top = min(ln.y0 for ln in nums)
-    header = [ln for ln in region[1:] if ln.y0 < top - 2]
-    body = [ln for ln in region if ln.y0 >= top - 2]
-    centers: dict[str, float] = {}
-    for key, labels, required in PRICE_HEADERS:
-        if key == "initial":
-            hits = [ln for ln in header if squash(ln.text) == labels[0]]
-        else:
-            hits = [ln for ln in header if squash(ln.text).startswith(labels)]
-        hits.sort(key=lambda ln: ln.y0)  # 欄頭換行後的續行也可能以同樣的字開頭（例：自動提前出場觸發百分比）
-        if (required and not hits) or any(abs(ln.xc - hits[0].xc) > COLUMN_REACH for ln in hits):
-            return _bad(f"價格表欄頭找不到或有多個「{labels[0]}」", region)
-        if hits:
-            centers[key] = hits[0].xc
-    name_edge = min(centers.values()) - COLUMN_REACH
-
-    def column(ln: Line) -> str | None:
-        key = min(centers, key=lambda k: abs(centers[k] - ln.xc))
-        return key if abs(centers[key] - ln.xc) <= COLUMN_REACH else None
-
-    heads = {k: "" for k in centers}
-    for ln in header:
-        key = column(ln)
-        if key is None:
-            return _bad(f"價格表有範本以外的欄頭「{ln.text}」", region)
-        heads[key] += squash(ln.text)
-    rows: list[tuple[float, dict[str, Decimal], list[Line], list[str]]] = []  # 列首 y、價格、原文行、名稱
-    for ln in sorted((x for x in body if NUMBER.fullmatch(squash(x.text))), key=lambda x: (x.y0, x.x0)):
-        key = column(ln)
-        if key is None:
-            return _bad(f"價格表有範本以外的欄位「{ln.text}」", region)
-        if not rows or abs(rows[-1][0] - ln.y0) > 3:
-            rows.append((ln.y0, {}, [], []))
-        if key in rows[-1][1]:
-            return _bad("價格表同一列同一欄有兩個價格", region)
-        rows[-1][1][key] = iis.number(squash(ln.text))
-        rows[-1][2].append(ln)
-    for ln in sorted((x for x in body if not NUMBER.fullmatch(squash(x.text))), key=lambda x: (x.y0, x.x0)):
-        row = next((r for r in reversed(rows) if r[0] <= ln.y0 + 3), None)  # 標的名稱可能換行，屬於上方最近的一列
-        if ln.xc >= name_edge or row is None:
-            return _bad(f"價格表有範本以外的文字「{ln.text}」", region)
-        row[3].append(squash(ln.text))
-        row[2].append(ln)
-    if any(set(prices) != set(centers) for _, prices, _, _ in rows):
-        return _bad("價格表有一列缺少價格", region)
+    table = price_table.read("underlying_prices", region, barc.table_spec(region, PRICE_TABLE.where))
+    if not table.ok:
+        return {n: derived(n, table) for n in ("underlying_prices", "underlying_names", "strike_pct", "ko_pct")}
+    t: price_table.PriceTable = table.value
     out: dict[str, ParsedField] = {}
     for key, field in PCT_FIELDS:
-        if key not in heads or (key == "ko" and KO_BY_PERIOD in heads[key]):
+        if key not in t.columns or (key == "ko" and KO_BY_PERIOD in t.heads[key]):
             continue  # 這份沒有 KI 欄，或記憶式商品 KO 欄頭沒有單一百分比：不核對該百分比
-        m = re.search(r"為最初價格的([\d.]+)%", heads[key])
+        head = list(t.head_lines[key])
         out[field] = (
-            ParsedField.present(field, Decimal(m[1]), header)
-            if m
-            else ParsedField.invalid(field, header, f"價格表欄頭沒有百分比：{heads[key]}")
+            ParsedField.present(field, t.pcts[key], head)
+            if key in t.pcts
+            else ParsedField.invalid(field, head, f"價格表欄頭沒有百分比：{t.heads[key]}")
         )
-    price_rows = tuple(
-        PriceRow(None, prices, tuple(Evidence.of(x) for x in lns), "".join(names) or None)
-        for _, prices, lns, names in rows
-    )
-    out["underlying_prices"] = ParsedField(
-        "underlying_prices", FieldStatus.PRESENT, price_rows, [Evidence.of(x) for x in region]
-    )
-    names = [r.name for r in price_rows]
+    out["underlying_prices"] = price_table.price_rows(table)
+    names = [squash(n) for n in t.names]
+    body = [ln for r in t.rows for ln in r.lines]
     out["underlying_names"] = (
         ParsedField.present("underlying_names", names, body)
         if all(names)

@@ -1,24 +1,38 @@
 """SG 表格解析：封面兩欄表、標的表（第一章 §8 末與 §15 重印）、日期表（§12）、費用表（第四章 §2）。
 
-擷取文字為「一格一行」；新版面長數字會拆成兩行（`12,345.0` / `000日圓`），去空白後串接的全文把它接回。
-價格表以表頭文字決定欄位、在去空白全文上讀值（docs/templates/sg-zh-product-description.md §5）。
+擷取文字為「一格一行」；新版面長數字會拆成兩行（`12,345.0` / `000日圓`）。價格表以 parsers/price_table.py 讀
+（docs/templates/sg-zh-product-description.md §5）。
 """
 
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from dataclasses import replace
 
 from ..schema import Line, ParsedField
 from ..text import squash
 from . import money
+from . import price_table as price_table_module
 from .layout import DATE_RE, TextIndex, capture, parse_date
 
 CCY = money.CURRENCY
-PRICE = r"([\d,]+\.\d{4})"
-PRICE_CELL = PRICE + "(" + CCY + ")"
-HEADERS = (("initial", "期初價格"), ("ko", "自動提前出場價"), ("ki", "下限價"), ("strike", "執行價"))
-PCT_HEADER = r"[(（]期初價格的(\d+(?:\.\d+)?)%[)）]"  # §15 重印表表頭的百分比
+# 第 8 項價格表（表頭沒有百分比）與第 15 項重印價格表（表頭帶「(期初價格的X%)」）
+PRICE_TABLE = price_table_module.TableSpec(
+    where="第一章第 8 項價格表",
+    initial="期初價格",
+    columns=(
+        price_table_module.Column("ko", "自動提前出場價", required=False),
+        price_table_module.Column("ki", "下限價", required=False),
+        price_table_module.Column("strike", "執行價"),
+    ),
+    anchor="price",
+)
+REPRINT_TABLE = replace(
+    PRICE_TABLE,
+    where="第一章第 15 項重印價格表",
+    pct=r"[(（]期初價格的(\d+(?:\.\d+)?)%[)）]",
+    pct_label="(期初價格的X%)",
+)
 VALUE_X = 200.0  # 封面兩欄表：標籤在左欄（x < 200）、值在右欄
 COVER_LABELS = (
     "商品中文名稱",
@@ -41,10 +55,6 @@ FEE_PATTERNS = {  # 第四章 §2 費用表（去空白）：費用項目 → �
     "提前贖回費用": r"提前贖回費用投資人提前贖回價金的(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)",
     "分銷費用": r"分銷費用[(（][^)）]*[)）]申購價金的(\d+(?:\.\d+)?%[~～]\d+(?:\.\d+)?%)",
 }
-
-
-def _dec(s: str) -> Decimal:
-    return Decimal(s.replace(",", ""))
 
 
 # ---------------------------------------------------------------- 封面兩欄表
@@ -72,65 +82,19 @@ def cover_items(lines: list[Line]) -> dict[str, list[Line]]:
 # ---------------------------------------------------------------- 標的表
 
 
-def price_table(name: str, lines: list[Line], count: int | None, *, reprint: bool) -> ParsedField:
-    """標的表：表頭決定欄位（期初價格、自動提前出場價（有自動提前出場時）、下限價（有 KI 時）、執行價），每檔一列。
-
-    `count` 為標的數（§8 表由 §9(1) 的代碼數決定；重印表由 §8 表的列數決定）。值：{"columns": [...],
-    "rows": [{"prices": {欄: Decimal}}], "row_lines": [...], "currencies": {幣別字}, "pcts": {欄: Decimal}（重印表表頭的百分比）}。
-    """
+def price_table(name: str, lines: list[Line], spec: price_table_module.TableSpec, count: int | None) -> ParsedField:
+    """價格表（`parsers/price_table.py` 讀，以執行價格欄的價格切列：單一標的的表沒有 k 欄）：表頭決定欄位（期初價格、
+    自動提前出場價（有自動提前出場時）、下限價（有 KI 時）、執行價），每檔一列。`count` 為標的數（§9(1) 的代碼數），
+    列數不同時讀不出。"""
     if not lines:
-        return ParsedField.missing(name, "找不到標的表")
-    ti = TextIndex(lines)
-    chars = list(ti.text)
-    for i, ln in enumerate(ti.lines):  # 列首「k=1」獨立一行，去空白串接後會黏到下一格的價格：遮掉（位置不變）
-        s = squash(ln.text)
-        if re.fullmatch(r"k=\d{1,2}", s):
-            a = ti.line_start(i)
-            chars[a : a + len(s)] = "#" * len(s)
-    text = "".join(chars)
-    first = re.search(PRICE_CELL, text)
-    if first is None:
-        return ParsedField.invalid(name, lines, "標的表沒有「價格 幣別」格")
-    head = text[: first.start()]
-    columns = [col for col, label in HEADERS if label in head]
-    if "initial" not in columns or "strike" not in columns:
-        return ParsedField.invalid(name, lines, "標的表表頭缺少期初價格或執行價")
-    cells = list(re.finditer(PRICE_CELL, text))
-    stray = re.sub(PRICE_CELL, "", text[first.start() :])
-    if re.search(r"\d[\d,]*\.\d{4}", stray):
-        return ParsedField.invalid(name, lines, "標的表有無法辨識的價格格")
-    ncol = len(columns)
-    if count is None:
-        count = len(cells) // ncol if cells and len(cells) % ncol == 0 else None
-    if count is None or len(cells) != count * ncol:
-        return ParsedField.invalid(name, lines, f"標的表有 {len(cells)} 個價格格，與 {count or '?'} 檔 × {ncol} 欄不符")
-    rows, row_lines = [], []
-    for i in range(count):
-        prices: dict[str, Decimal] = {}
-        lns: list[Line] = []
-        for j, col in enumerate(columns):
-            m = cells[i * ncol + j]
-            prices[col] = _dec(m[1])
-            for ln in ti.lines_for(m.start(), m.end()):
-                if ln not in lns:
-                    lns.append(ln)
-        rows.append({"prices": prices})
-        row_lines.append(lns)
-    pcts: dict[str, Decimal] = {}
-    if reprint:
-        found = [Decimal(x) for x in re.findall(PCT_HEADER, head)]
-        pct_cols = [c for c in columns if c != "initial"]
-        if len(found) != len(pct_cols):
-            return ParsedField.invalid(name, lines, "重印表表頭的百分比數與欄位數不符")
-        pcts = dict(zip(pct_cols, found, strict=True))
-    value = {
-        "columns": columns,
-        "rows": rows,
-        "row_lines": row_lines,
-        "currencies": {m[2] for m in cells},
-        "pcts": pcts,
-    }
-    return ParsedField.present(name, value, ti.lines_for(first.start(), cells[-1].end()))
+        return ParsedField.missing(name, f"找不到{spec.where}")
+    table = price_table_module.read(name, lines, spec)
+    if table.ok and count is not None and len(table.value.rows) != count:
+        rows = len(table.value.rows)
+        return ParsedField.invalid(
+            name, list(table.evidence), f"{spec.where}有 {rows} 列，與第 9 項(1) 的 {count} 檔不符"
+        )
+    return table
 
 
 # ---------------------------------------------------------------- 日期表

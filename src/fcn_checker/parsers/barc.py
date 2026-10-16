@@ -8,19 +8,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from typing import Any
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
 from . import barc_schedule as schedule
-from . import money
+from . import money, price_table
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "barc-zh-pd"
-PARSER_VERSION = "2"
+PARSER_VERSION = "3"  # 3：價格表改由 parsers/price_table.py 讀（Issue #288）
 
 # 章名「第一章 商品基本資料」、條號「1.」、子項「(1)」（範本規格 §3）
 LAYOUT = LayoutSpec(
@@ -46,24 +46,24 @@ S13_LABELS = (
 
 _COVER_LABEL_MAX_X = 100.0
 _COVER_VALUE_MIN_X = 250.0
-_NUM_RE = re.compile(r"^[\d,]+\.\d+$")
 _PCT_RE = re.compile(r"為最初價格的([\d.]+)%")
 _TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9./-]* [A-Z0-9]{2}$")
 
-# 價格表欄位：表頭第一行 → 欄位鍵（範本規格 §5.4）
-PRICE_COLUMNS = (
-    ("initial", re.compile(r"^最初價格$")),
-    ("strike", re.compile(r"^執行價格（")),
-    ("ko", re.compile(r"^(自動提前出場觸發價|觸發水準（)")),
-    ("ki", re.compile(r"^觸及生效價格（")),
+# 第 15 條價格表與第 16 條(3) 情境分析重印價格表（範本規格 §5.4）：沒有代碼與列號，以執行價格欄的價格切列。
+# 表頭百分比可省略（記憶式 KO 欄頭「為最初價格乘以自動提前出場觸發百分比」），寫了就與定義句比對（`header_pcts`）
+PRICE_TABLE = price_table.TableSpec(
+    where="第一章第 15 條價格表",
+    initial="最初價格",
+    columns=(
+        price_table.Column("strike", "執行價格", pct_optional=True),
+        price_table.Column("ko", "自動提前出場觸發價", pct_optional=True),
+        price_table.Column("ki", "觸及生效價格", required=False, pct_optional=True),
+    ),
+    anchor="price",
+    pct=r"為最初價格的([\d.]+)%",
+    pct_label="（為最初價格的X%）",
 )
-
-
-@dataclass
-class PriceRow:
-    name: str
-    values: dict[str, Decimal]
-    lines: list[Line]
+KO_LEVEL = "觸發水準"  # KO 欄頭的另一種寫法：「觸發水準（為最初價格的N%）」
 
 
 @dataclass
@@ -86,11 +86,9 @@ class HeaderPct:
 @dataclass
 class BarcTermSheet:
     fields: dict[str, ParsedField]
-    price_rows: list[PriceRow]
     coupon_mentions: dict[str, list[Mention]]  # monthly / annual / repeat（§9(3)、§16 重複出現的月配息率）
     full_text: TextIndex
     document: Document
-    scenario_rows: list[PriceRow] = field(default_factory=list)
     header_pcts: list[HeaderPct] = field(default_factory=list)
 
     def f(self, name: str) -> ParsedField:
@@ -335,83 +333,34 @@ _SCENARIO_START = r"本商品標的資產之相關資訊"
 _SCENARIO_END = r"^情境分析結果不保證"
 
 
-def _price_table(
-    lines: list[Line], name: str = "price_table", start: str = _PRICE_START, end_pat: str = _PRICE_END
-) -> tuple[ParsedField, list[PriceRow]]:
-    """各標的價格表（§15；§16(3) 情境分析重印）。表格可能跨頁；欄位依表頭第一行的 x 中心指派。"""
+def _table_region(lines: list[Line], start: str, end_pat: str) -> range | list[Line] | None:
+    """價格表所在的範圍（開始錨點之後到結束錨點之前的行號）；開始錨點出現多次時交出那幾行，找不到錨點時為 None。"""
     starts = [i for i, ln in enumerate(lines) if re.search(start, ln.text)]
-    if len(starts) != 1:
-        if not starts:
-            return ParsedField.missing(name, "找不到價格表開始錨點"), []
-        return ParsedField.ambiguous(name, [], [lines[i] for i in starts], "價格表開始錨點出現多次"), []
-    s = starts[0]
-    end = next((i for i in range(s + 1, len(lines)) if re.match(end_pat, lines[i].text)), None)
-    if end is None:
-        return ParsedField.missing(name, "找不到價格表結束錨點"), []
-    seg = lines[s:end]
-    cols: dict[str, Line] = {}
-    for ln in seg:
-        if ln.text.startswith("「"):
-            continue
-        for key, pat in PRICE_COLUMNS:
-            if pat.match(ln.text):
-                if key in cols:
-                    return ParsedField.ambiguous(name, [], [cols[key], ln], f"價格表表頭「{key}」出現多次"), []
-                cols[key] = ln
-    if "initial" not in cols or "strike" not in cols or "ko" not in cols:
-        return ParsedField.missing(name, "價格表表頭不完整"), []
-    header_y = {(c.page, c.y0) for c in cols.values()}
-    nums = [ln for ln in seg if _NUM_RE.match(ln.text)]
-    groups: list[list[Line]] = []
-    for ln in nums:
-        for g in groups:
-            if g[0].page == ln.page and abs(g[0].y0 - ln.y0) < 3:
-                g.append(ln)
-                break
-        else:
-            groups.append([ln])
-    if not groups:
-        return ParsedField.missing(name, "價格表沒有數值"), []
-    rows: list[PriceRow] = []
-    name_limit = cols["initial"].x0 - 5
-    for g in groups:
-        vals: dict[str, Decimal] = {}
-        for c in g:
-            key, hdr = min(cols.items(), key=lambda kv: abs(kv[1].xc - c.xc))
-            if abs(hdr.xc - c.xc) > 60 or key in vals:
-                return ParsedField.invalid(name, g, "價格表數值無法對應到唯一欄位"), []
-            try:
-                vals[key] = Decimal(c.text.replace(",", ""))
-            except InvalidOperation:
-                return ParsedField.invalid(name, [c], "價格表數值無法辨識"), []
-        if set(vals) != set(cols):
-            return ParsedField.invalid(name, g, "價格表某列缺少欄位"), []
-        y = g[0].y0
-        name_lines = [
-            ln
-            for ln in seg
-            if ln.page == g[0].page
-            and ln.x1 <= name_limit
-            and -3 <= ln.y0 - y <= 16
-            and not _NUM_RE.match(ln.text)
-            and (ln.page, ln.y0) not in header_y
-            and ln.text != "標的資產"
-        ]
-        rows.append(PriceRow(join_text(name_lines), vals, sorted(g, key=lambda x: x.x0)))
-    field_ = ParsedField.present(name, len(rows), [cols[k] for k in cols] + [ln for r in rows for ln in r.lines])
-    return field_, rows
+    if len(starts) > 1:
+        return [lines[i] for i in starts]
+    if not starts:
+        return None
+    end = next((i for i in range(starts[0] + 1, len(lines)) if re.match(end_pat, lines[i].text)), None)
+    return range(starts[0] + 1, end) if end is not None else None
 
 
-def _standard_prices(table: ParsedField, rows: list[PriceRow]) -> ParsedField:
-    """標準欄位 `underlying_prices`：§15 價格表各列（表上沒有代號，以 `underlyings` 同順序為準）。"""
-    name = "underlying_prices"
-    if not table.ok:
-        return ParsedField(name, table.status, None, list(table.evidence), list(table.candidates), table.note)
-    value = tuple(
-        standard_fields.PriceRow(None, dict(r.values), tuple(Evidence.of(ln) for ln in r.lines), r.name or None)
-        for r in rows
-    )
-    return ParsedField(name, FieldStatus.PRESENT, value, list(table.evidence))
+def _price_table(lines: list[Line], name: str, where: str, start: str, end_pat: str) -> ParsedField:
+    """各標的價格表（§15；§16(3) 情境分析重印）：開始錨點之後到結束錨點之前（範圍內表前的定義句不算表頭）。"""
+    region = _table_region(lines, start, end_pat)
+    if isinstance(region, list):
+        return ParsedField.ambiguous(name, [], region, f"{where}開始錨點出現多次")
+    if region is None:
+        return ParsedField.missing(name, f"找不到{where}的開始或結束錨點")
+    seg = [lines[i] for i in region]
+    return price_table.read(name, seg, table_spec(seg, where))
+
+
+def table_spec(region: list[Line], where: str) -> price_table.TableSpec:
+    """這張價格表的宣告：KO 欄頭寫「觸發水準（…）」時 KO 欄的關鍵字換成它（說明書與投資人須知共用）。"""
+    spec = replace(PRICE_TABLE, where=where)
+    if any(squash(ln.text).startswith(KO_LEVEL) for ln in region):
+        spec = replace(spec, columns=tuple(replace(c, word=KO_LEVEL) if c.key == "ko" else c for c in spec.columns))
+    return spec
 
 
 _MONTHLY_PATTERNS = {
@@ -686,14 +635,32 @@ def _currency_occurrences(
     return out
 
 
-_HEADER_PCT = re.compile(r"(執行價格|觸及生效價格|觸發水準)（為最初價格的([\d.]+)%")
-_HEADER_FIELD = {"執行價格": "strike_pct", "觸及生效價格": "ki_pct", "觸發水準": "ko_pct"}
+_COLUMN_FIELD = {"strike": "strike_pct", "ko": "ko_pct", "ki": "ki_pct"}  # 價格欄 → 定義欄位
 
 
-def _header_pcts(ti: TextIndex, article: str) -> list[HeaderPct]:
-    """價格表欄頭的百分比（定義句「X」詳見下表所示（…）不符合此寫法，不會被重複計入）。"""
+def _header_pcts(table: ParsedField, article: str) -> list[HeaderPct]:
+    """價格表欄頭的百分比（欄頭有寫的才有；證據為該欄表頭的原文行）。"""
+    if not table.ok:
+        return []
+    t: price_table.PriceTable = table.value
     return [
-        HeaderPct(_HEADER_FIELD[m.group(1)], Mention(article, Decimal(m.group(2)), ti.lines_for(m.start(), m.end())))
+        HeaderPct(_COLUMN_FIELD[c], Mention(article, t.pcts[c], list(t.head_lines[c])))
+        for c in t.columns
+        if c in t.pcts
+    ]
+
+
+_HEADER_PCT = re.compile(r"(執行價格|觸及生效價格|觸發水準)（為最初價格的([\d.]+)%")
+_HEADER_TERM = {"執行價格": "strike_pct", "觸及生效價格": "ki_pct", "觸發水準": "ko_pct"}  # 情境表欄頭用語 → 定義欄位
+
+
+def _scenario_header_pcts(s16: list[Line]) -> list[HeaderPct]:
+    """§16 各情境表欄頭「X（為最初價格的N%）」（§16(3) 重印價格表以外；定義句「X」詳見下表所示（…）不符合此寫法）。"""
+    region = _table_region(s16, _SCENARIO_START, _SCENARIO_END)
+    table = set(region) if isinstance(region, range) else set()
+    ti = TextIndex([ln for i, ln in enumerate(s16) if i not in table])
+    return [
+        HeaderPct(_HEADER_TERM[m[1]], Mention("第16條", Decimal(m[2]), ti.lines_for(m.start(), m.end())))
         for m in ti.finditer(_HEADER_PCT)
     ]
 
@@ -812,10 +779,14 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["ko_pct"], flds["ko_memory"] = _ko_pct_and_memory(s15, flds["name_zh"])
     flds["ki_pct"] = _definition_pct("ki_pct", s15, "觸及生效價格")
     flds["ki_type"] = _ki_type(s15, flds["ki_pct"], flds["strike_pct"])
-    flds["price_table"], rows = _price_table(s15)
-    flds["underlying_prices"] = _standard_prices(flds["price_table"], rows)
-    flds["scenario_price_table"], scenario_rows = _price_table(
-        doc.span_lines(arts.get(16)), "scenario_price_table", _SCENARIO_START, _SCENARIO_END
+    flds["price_table"] = _price_table(s15, "price_table", PRICE_TABLE.where, _PRICE_START, _PRICE_END)
+    flds["underlying_prices"] = price_table.price_rows(flds["price_table"])  # 表上沒有代號，以 `underlyings` 同順序為準
+    flds["scenario_price_table"] = _price_table(
+        doc.span_lines(arts.get(16)),
+        "scenario_price_table",
+        "第一章第 16 條情境分析價格表",
+        _SCENARIO_START,
+        _SCENARIO_END,
     )
 
     tables = schedule.find_tables(doc, arts.get(13))
@@ -829,7 +800,11 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     s16 = TextIndex(doc.span_lines(arts.get(16)))
     flds["scenario_notional"] = _scenario_notional(s16)
     flds.update(_scenario_returns(s16))
-    header_pcts = _header_pcts(TextIndex(s15), "第15條") + _header_pcts(s16, "第16條")
+    header_pcts = (
+        _header_pcts(flds["price_table"], "第15條")
+        + _header_pcts(flds["scenario_price_table"], "第16條")
+        + _scenario_header_pcts(doc.span_lines(arts.get(16)))
+    )
 
     flds["subscription_start_date"] = _labelled_date(
         doc.chapter_lines(4), r"^商品開始受理申購日期[:：]", "subscription_start_date", "第四章「商品開始受理申購日期」"
@@ -879,4 +854,4 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
         "annual": _mentions(doc, arts, _ANNUAL_PATTERNS),
         "repeat": _repeat_mentions(doc, arts, s16),
     }
-    return BarcTermSheet(flds, rows, mentions, TextIndex(all_lines), doc, scenario_rows, header_pcts)
+    return BarcTermSheet(flds, mentions, TextIndex(all_lines), doc, header_pcts)

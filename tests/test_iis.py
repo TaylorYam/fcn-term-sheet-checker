@@ -384,7 +384,7 @@ def test_unreadable_iis_price_table_requires_review_naming_the_iis(tmp_path):
     ts, iis = pair(tmp_path, spec, edits=[Edit("最初價格", "期初價格")])
     _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
     assert sheet.report.status == REVIEW
-    assert "價格表：投資人須知的值無法辨識：價格表欄頭找不到或有多個「最初價格」" in problems(sheet)
+    assert "價格表：投資人須知的值無法辨識：收益分配事項價格表表頭找不到「最初價格」欄" in problems(sheet)
 
 
 # ---------------------------------------------------------------- Issue #124 審查後補充

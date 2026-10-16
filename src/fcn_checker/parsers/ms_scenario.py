@@ -135,7 +135,7 @@ def section(lines: list[Line]) -> ScenarioSection:
     if len(monthly) == 1 and heads:
         last = monthly[0].lines[-1]
         region = lines[lines.index(last) + 1 : head_end]
-        table = ms_tables.price_table("scenario_table", region, None)
+        table = ms_tables.price_table("scenario_table", region, ms_tables.SCENARIO_TABLE)
     else:
         table = ParsedField.missing("scenario_table", "找不到第 18 項重印價格表（月配息率之後、情境一之前）")
     scenarios = []
