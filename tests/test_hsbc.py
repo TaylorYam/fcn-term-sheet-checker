@@ -134,7 +134,7 @@ def test_order_difference_is_reported(tmp_path, field, value, rule):
         (
             "平均年化報酬率(以簡單平均年化報酬率之方式計算)為12.00%",
             "平均年化報酬率(以簡單平均年化報酬率之方式計算)為13.00%",
-            "doc.scenario_general_annualized",
+            "scenario.params",
         ),
         ("自動提前到期價格為期初股價×100%", "自動提前到期價格為期初股價×101%", "doc.price_header_pct"),
         ("70.0000", "71.0000", "derive.prices"),
@@ -143,7 +143,7 @@ def test_order_difference_is_reported(tmp_path, field, value, rule):
         (
             "商品天期為6個月期，每單位面額為美元10,000元",
             "商品天期為7個月期，每單位面額為美元10,000元",
-            "doc.scenario_parameters",
+            "scenario.params",
         ),
     ],
 )
@@ -381,8 +381,8 @@ def test_warning_risk_wording_and_name_rules(tmp_path):
 @pytest.mark.parametrize(
     "old,new,rule",
     [
-        ("70.0000", "71.0000", "doc.scenario_table"),
-        ("(即期初股價的70%)", "(即期初股價的71%)", "doc.scenario_header_pct"),
+        ("70.0000", "71.0000", "scenario.reprint"),
+        ("(即期初股價的70%)", "(即期初股價的71%)", "scenario.reprint"),
     ],
 )
 def test_scenario_table_is_independently_compared(tmp_path, old, new, rule):
@@ -543,8 +543,8 @@ def test_reference_fields_use_the_shared_rule_ids(tmp_path):
     [
         ("到期贖回金額為美元10,000×100%=美元10,000.00", "", "principal_formula"),
         ("到期贖回金額為美元10,000×100%=美元10,000.00", "到期贖回金額為未知算式", "principal_formula"),
-        ("假設標的（虛構標的1），執行價美元70.0000", "假設標的（虛構標的1），執行價未知", "reference_strike"),
-        ("觸及不保本價格美元60.0000", "觸及不保本價格未知", "reference_ki"),
+        ("假設標的（虛構標的1），執行價美元70.0000", "假設標的（虛構標的1），執行價未知", "scenario_price"),
+        ("觸及不保本價格美元60.0000", "觸及不保本價格未知", "scenario_price"),
     ],
 )
 def test_each_required_scenario_formula_or_reference_must_be_present(tmp_path, old, new, field):
@@ -801,7 +801,7 @@ def test_strike_and_ki_prices_in_the_scenarios_follow_the_underlying(tmp_path):
     r = check(tmp_path, edits=edits)
     assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
     r = check(tmp_path, edits=[Edit("執行價美元70.0000", "執行價日幣71.0000", "ts.art18")])
-    assert any(x.rule_id == "doc.scenario_parameters" and x.status == S.MISMATCH for x in r.results)
+    assert any(x.rule_id == "scenario.strike" and x.status == S.MISMATCH for x in r.results)
 
 
 @pytest.mark.parametrize(("written", "status"), [("70.0000", S.PASS), ("69.9999", S.MISMATCH)])
@@ -809,5 +809,5 @@ def test_scenario_ki_price_truncated_instead_of_rounded(tmp_path, written, statu
     """期初 100 × 70.00005% = 70.00005：表上四捨五入 70.0001，情境寫捨去的 70.0000 也通過；其他值仍不一致（#259）。"""
     spec = Spec(ki_pct=Decimal("70.00005"))
     r = check(tmp_path, spec, edits=[Edit("觸及不保本價格美元70.0001", f"觸及不保本價格美元{written}", "ts.art18")])
-    refs = [x for x in r.results if x.rule_id == "doc.scenario_parameters" and ".reference_ki." in x.field]
+    refs = [x for x in r.results if x.rule_id == "scenario.strike" and x.item.name.endswith("下限價")]
     assert refs and {x.status for x in refs} == {status}, [(x.field, x.message) for x in refs]

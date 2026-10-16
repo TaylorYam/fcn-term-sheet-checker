@@ -1,7 +1,8 @@
-"""MS 第一章第 18 項情境分析（核對規則 §3.5 價格表重印、§3.7）：假設、重印價格表、較差情境執行價、各情境金額。
+"""MS 第一章第 18 項情境分析（核對規則 §3.7）：情境標題、各情境金額。
 
 MS 的總配息是「已進位的每期配息 × 期數」（文件算式 `A 美元×k`），與 HSBC 用未進位年利率推算不同。
-月配息率與獲利情境年化報酬率由 rules/ms.py 依參考條件表核對；每期配息的預期值也用表上年利率推得的月配息率（§3.7）。
+重印價格表、假設的總投資金額與年期、各處月配息率、獲利情境年化報酬率與較差情境執行價由共用情境規則（rules/scenario.py，
+Issue #294）核對；每期配息的預期值用參考條件表年利率推得的月配息率（§3.7）。
 情境標題、期數寫法未知或算式找不到時轉人工覆核，不跳過後宣稱通過。
 """
 
@@ -9,124 +10,29 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, Item
 from . import kit
 from .kit import Check, IssuerContext
 
 
-def monthly_rate(annual: Decimal) -> Decimal:
-    """月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（核對規則 §3.3）。"""
-    return (annual / 12).quantize(kit.Q4, ROUND_HALF_UP)
-
-
-def _cells(table: ParsedField) -> list[dict]:
-    """價格表逐格比對的值：各列的彭博代碼與價格。"""
-    return [{"ticker": r.ticker, "prices": r.prices} for r in table.value.rows]
-
-
-def reprint(ctx: IssuerContext) -> list[CheckResult]:
-    """第 18 項重印價格表的彭博代碼、各價格與表頭百分比逐格 = 第 16 項。"""
-    pt, st = ctx.ts.f("price_table"), ctx.ts.scenarios.table
-    out = []
-    for rid, field, name, value in (
-        ("doc.scenario_table", "scenario_table", "第 18 項重印價格表", _cells),
-        ("doc.scenario_header_pct", "scenario_headers", "第 18 項重印價格表欄頭百分比", lambda t: t.value.pcts),
-    ):
-        check = Check(rid, field, Item.expected(name), ctx.document).needs(pt, st)
-        if (problem := check.blocked) is not None:
-            out.append(problem)
-            continue
-        out.append(
-            check.compare(
-                value(pt),
-                value(st),
-                evidence=list(st.evidence),
-                fail_message="第 18 項重印的價格表須與第 16 項逐格相同",
-            )
-        )
-    return out
-
-
-def parameters(ctx: IssuerContext) -> list[CheckResult]:
-    """假設的總投資金額 = 面額、年期 = 天期；情境標題要有獲利情境與一個較差情境。"""
-    sec, f = ctx.ts.scenarios, ctx.ts.f
-    rid = "doc.scenario_parameters"
-    out = []
-    for field, name, hit, pf in (
-        ("scenario_denomination", "第 18 項假設總投資金額", sec.denomination, f("denomination")),
-        ("scenario_tenor", "第 18 項假設年期", sec.tenor, f("tenor_months")),
-    ):
-        item = Item.expected(name)
-        if not pf.ok:
-            out.append(Check(rid, field, item, ctx.document).review(pf))
-        elif hit is None:
-            issues = ["第 18 項假設找不到這個值或出現多次"]
-            out.append(kit.calc_result(rid, field, name, issues, kit.evidence(sec.lines[:1]), review=True))
-        else:
-            ok = hit.value == pf.value
-            out.append(
-                kit.calc_result(
-                    rid,
-                    field,
-                    name,
-                    [] if ok else ["與第一章不同"],
-                    kit.evidence(hit.lines),
-                    expected=pf.value,
-                    actual=hit.value,
-                )
-            )
+def titles(ctx: IssuerContext) -> list[CheckResult]:
+    """情境標題要有獲利情境與一個較差情境（假設的總投資金額與年期由共用情境規則 `scenario.params` 核對）。"""
+    sec = ctx.ts.scenarios
     kinds = [s.kind for s in sec.scenarios]
     issues = (
         [] if kinds.count("worse") == 1 and "profit" in kinds else ["找不到獲利情境與一個較差情境（標題含「較差」）"]
     )
-    out.append(
+    return [
         kit.calc_result(
-            rid, "scenario_titles", "第 18 項情境標題", issues, kit.evidence(sec.lines[:1]), review=True, actual=kinds
+            "doc.scenario_parameters",
+            "scenario_titles",
+            "第 18 項情境標題",
+            issues,
+            kit.evidence(sec.lines[:1]),
+            review=True,
+            actual=kinds,
         )
-    )
-    return out
-
-
-def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
-    """較差情境的「執行價 =N」= 第 16 項該標的的執行價。"""
-    pt, rid, name = ctx.ts.f("price_table"), "doc.scenario_strike", "較差情境執行價"
-    out = []
-    for s in ctx.ts.scenarios.scenarios:
-        if s.kind != "worse":
-            continue
-        if not pt.ok:
-            out.append(Check(rid, "scenario_strike", Item.expected(name), ctx.document).review(pt))
-            continue
-        if len(s.strike) != 1:
-            out.append(
-                kit.calc_result(
-                    rid, "scenario_strike", name, ["較差情境找不到執行價"], kit.evidence(s.lines[:1]), review=True
-                )
-            )
-            continue
-        ticker, strike = s.strike[0].value.ticker, s.strike[0].value.strike
-        rows = [r for r in pt.value.rows if r.ticker.replace(" ", "") == ticker]
-        if len(rows) != 1:
-            out.append(
-                kit.calc_result(
-                    rid,
-                    "scenario_strike",
-                    name,
-                    [f"較差情境的標的 {ticker} 不在價格表"],
-                    kit.evidence(s.strike[0].lines),
-                )
-            )
-            continue
-        expected = rows[0].prices["strike"]
-        pct = kit.field_value(ctx.ts, "strike_pct")
-        ok = kit.scenario_price_ok(strike, expected, rows[0].prices.get("initial"), pct)  # 兩種進位都接受（#259）
-        issues = [] if ok else ["與第 16 項價格表的執行價不同"]
-        out.append(
-            kit.calc_result(
-                rid, "scenario_strike", name, issues, kit.evidence(s.strike[0].lines), expected=expected, actual=strike
-            )
-        )
-    return out
+    ]
 
 
 def calculations(ctx: IssuerContext) -> list[CheckResult]:
@@ -151,7 +57,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
                 for field, item in ((f"{tag}_coupon", coupon_item), (f"{tag}_pnl", pnl_item))
             )
             continue
-        monthly = monthly_rate(annual)
+        monthly = kit.monthly_of_annual(annual)
         a = (Decimal(denom.value) * monthly / 100).quantize(kit.Q2, ROUND_HALF_UP)
         issues = []
         for h in s.coupons:
@@ -217,4 +123,4 @@ def _pnl(rid, s, tag, item, a, denom, tenor, ov) -> CheckResult:
 
 
 def run(ctx: IssuerContext) -> list[CheckResult]:
-    return [*reprint(ctx), *parameters(ctx), *worse_strike(ctx), *calculations(ctx)]
+    return [*titles(ctx), *calculations(ctx)]

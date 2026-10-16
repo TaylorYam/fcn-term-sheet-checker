@@ -136,7 +136,8 @@ class Occurrence:
 
 @dataclass(frozen=True)
 class TableAt:
-    """說明書上的一張價格表：位置（用在項目名稱與錯訊，例：第 9 項價格表）與 parsers/price_table.py 讀出的表。"""
+    """說明書上的一張價格表：位置（用在項目名稱與錯訊，例：第 9 項價格表）與 parsers/price_table.py 讀出的表（或同形狀的表：
+    BNP、SG 的標的表每檔各寫一個百分比，`pcts` 為各欄依檔序的百分比 tuple）。"""
 
     where: str
     table: PriceTable
@@ -147,8 +148,10 @@ SCENARIO_TARGETS: dict[str, tuple[str, str]] = {
     "scenario_denomination": ("每單位面額", "denomination"),
     "scenario_principal": ("本金", "denomination"),
     "scenario_investment": ("總投資金額", "denomination"),  # 面額 × 倍數（同一處寫的單位數）
+    "scenario_initial_investment": ("初始投資金額", "denomination"),  # 每單位的初始投資金額
     "scenario_tenor": ("天期", "tenor_months"),
     "scenario_coupon_months": ("配息月數", "tenor_months"),
+    "scenario_coupon_periods": ("配息期數", "tenor_months"),
     "scenario_coupon_pa": ("年利率", "coupon_pa_pct"),
     "scenario_annualized_return": ("年化報酬率", "coupon_pa_pct"),
     "scenario_monthly_coupon": ("配息率", "monthly_coupon_pct"),

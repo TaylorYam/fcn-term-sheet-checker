@@ -15,7 +15,7 @@ from ..parsers import gs
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, scenario
+from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "GS"
@@ -340,5 +340,4 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *repeated(ctx),
-        *scenario.run(ctx),  # 第 17 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
     ]

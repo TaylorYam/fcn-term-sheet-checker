@@ -1,5 +1,6 @@
 """BBVA 專屬規則（docs/rules/bbva-check-rules.md）：配息率（KO 每日／每期兩種寫法）、說明書內部交叉驗證、日期表（KO 每日／
-每期兩種）、價格表表頭、情境假設與情境價格表、記憶式與下限值寫法的一致性。
+每期兩種）、價格表表頭、記憶式與下限值寫法的一致性。第 16 項情境價格表、情境假設與情境二～四第 1 期配息率由共用情境規則
+（rules/scenario.py，Issue #294）核對。
 
 參考條件表欄位、價格推算、審查標準（含 BBVA 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
 規則。說明書有年利率（KO 每期型在第 16 項情境假設），不讀參考條件表（REFERENCE_FIELDS 為空）。保證機構、總代理人名稱
@@ -73,8 +74,9 @@ def _kind(ctx: IssuerContext) -> str | None:
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """KO 每日：第 13 項 m = 12、第 16 項假設年利率 = 第 13 項、情境一第 1 期配息率 = 年利率 ÷ 12（4 位）。
-    KO 每期：第 13 項每期配息率 = 年利率（第 16 項年利率相當於約）÷ 12（4 位）、第 16 項每月利率 = 第 13 項、天數慣例 1/1。"""
+    """KO 每日：第 13 項 m = 12、情境一第 1 期配息率（說明書寫出的月配息率）= 年利率 ÷ 12（4 位）。
+    KO 每期：第 13 項每期配息率 = 年利率（第 16 項年利率相當於約）÷ 12（4 位）、天數慣例 1/1。
+    第 16 項情境假設的年利率、每月利率由共用情境規則 `scenario.params` 核對（Issue #294）。"""
     f = ctx.ts.f
     annual = f("coupon_pa_pct")
     rid = "doc.coupon_mentions"
@@ -82,22 +84,26 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
     if kind is None:
         return [Check(rid, "coupon", Item.expected("配息率"), ctx.document).review(f("date_table"))]
     if kind == "D":
-        m, scen, first = f("coupon_m"), f("scenario_coupon_pct"), f("scenario_first_coupon_pct")
+        m, first = f("coupon_m"), f("scenario_first_coupon_pct")
         return [
             kit.doc_check(ctx, rid, "coupon_m", "第 13 項配息率公式的 m", m).compare(
                 12, m.value, fail_message="KO 每日型配息率公式的 m 須為 12（每月配息）"
             ),
-            kit.doc_check(ctx, rid, "scenario_coupon_pct", "第 16 項情境假設年利率", annual, scen).compare(
-                annual.value, scen.value, fail_message="情境假設的年利率須等於第 13 項年利率"
-            ),
-            kit.doc_check(ctx, rid, "scenario_first_coupon_pct", "第 16 項情境一第 1 期配息率", annual, first).compare(
+            kit.doc_check(
+                ctx,
+                "derive.monthly_coupon",
+                "scenario_first_coupon_pct",
+                "第 16 項情境一第 1 期配息率 %（年利率 ÷ 12）",
+                annual,
+                first,
+            ).compare(
                 kit.monthly_of_annual(annual.value) if annual.ok else None,
                 first.value,
                 tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位後比數值",
                 fail_message="情境一第 1 期配息率須等於年利率 ÷ 12 四捨五入到 4 位",
             ),
         ]
-    monthly, scen_m, day = f("monthly_coupon_pct"), f("scenario_monthly_pct"), f("day_count")
+    monthly, day = f("monthly_coupon_pct"), f("day_count")
     return [
         kit.doc_check(
             ctx, "derive.monthly_coupon", "monthly_coupon_pct", "第 13 項每期配息率 %（年利率 ÷ 12）", annual, monthly
@@ -106,9 +112,6 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             monthly.value,
             tolerance="年利率（第 16 項「年利率相當於約」）÷ 12 四捨五入（half-up）到 4 位後比數值",
             fail_message="第 13 項配息率須等於年利率 ÷ 12 四捨五入到 4 位",
-        ),
-        kit.doc_check(ctx, rid, "scenario_monthly_pct", "第 16 項情境假設每月利率", monthly, scen_m).compare(
-            monthly.value, scen_m.value, fail_message="情境假設的每月利率須等於第 13 項配息率"
         ),
         kit.doc_check(ctx, rid, "day_count", "第 13 項計息天數慣例", day).compare(
             DAY_COUNT,
@@ -177,16 +180,12 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         return ParsedField("name_months", pf.status, int(m[1]) if m else None, pf.evidence, note=pf.note)
 
     zh_months, en_months = months(zh, r"(\d+)個月期", "商品中文名稱"), months(en, r"(\d+)-month", "商品英文名稱")
-    scen = f("scenario_tenor")
     return [
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
         kit.doc_check(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(
             tenor.value, en_months.value
-        ),
-        kit.doc_check(ctx, rid, "scenario_tenor", "第 16 項情境假設商品年期", tenor, scen).compare(
-            tenor.value, scen.value
         ),
     ]
 
@@ -252,8 +251,8 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """價格表表頭 % = 第 14、15 項定義；第 9 項標的 = 價格表標的（同順序）；情境價格表逐格 = 價格表、表頭 % 相同；
-    情境假設總投資金額 ÷ 單位數 = 每單位面額。"""
+    """價格表表頭 % = 第 14、15 項定義；第 9 項標的 = 價格表標的（同順序）（情境價格表與情境假設總投資金額由共用情境規則
+    核對，Issue #294）。"""
     f = ctx.ts.f
     table = f("price_table")
     out = []
@@ -278,37 +277,6 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             fail_message="第 9 項連結標的表的彭博代碼與順序須等於第 14 項價格表",
         )
     )
-    scen, denom, units, amount = f("scenario_table"), f("denomination"), f("scenario_units"), f("scenario_amount")
-    check = kit.doc_check(
-        ctx, "doc.scenario_table", "scenario_table", "第 16 項情境價格表與假設", table, scen, denom, units, amount
-    )
-    if table.ok and scen.ok and denom.ok and units.ok and amount.ok:
-        issues = []
-        if scen.value.pcts != table.value.pcts:
-            issues.append("情境價格表表頭 % 和第 14 項價格表不同")
-        if scen.value.tickers != table.value.tickers:
-            issues.append("情境價格表的標的和第 14 項價格表不同")
-        rows, own = scen.value.prices, table.value.prices
-        if len(rows) != len(own):
-            issues.append(f"情境價格表 {len(rows)} 列，第 14 項價格表 {len(own)} 列")
-        else:
-            for n, (a, b) in enumerate(zip(rows, own, strict=True), start=1):
-                diff = [c for c in b if a.get(c) != b[c]]
-                if diff:
-                    issues.append(f"第 {n} 列{'、'.join(diff)}和第 14 項價格表不同")
-        if not units.value or amount.value != denom.value * units.value:
-            issues.append(f"情境假設總投資金額 {amount.value} 不等於 {units.value} 單位 × 每單位面額 {denom.value}")
-        out.append(
-            check.compare(
-                kit.price_cells(own),
-                kit.price_cells(rows),
-                ok=not issues,
-                reason="value_mismatch",
-                message="；".join(issues) or "等於第 14 項價格表與每單位面額",
-            )
-        )
-    else:
-        out.append(check.compare(None, None))
     return out
 
 
@@ -317,8 +285,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
 
 def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
     """重複寫出的值 = 正式條款：第 14 項最佳表現值的觀察起算日（記憶式才有）與情境觀察起算日 = 第 12 項 (10) 觀察期間
-    起日；情境二～四第 1 期配息率 = 情境一（KO 每日型）；情境下限值 % = KI %（無 KI 時 = 轉換比例）；情境出場值 % = KO %；
-    第 18 項 (1) 的 % = KO %。"""
+    起日；情境下限值 % = KI %（無 KI 時 = 轉換比例）；情境出場值 % = KO %；第 18 項 (1) 的 % = KO %。情境二～四第 1 期
+    配息率（KO 每日型）由共用情境規則 `scenario.params` 和情境一比（Issue #294）。"""
     f = ctx.ts.f
     start, memory, best = f("ko_period_start"), f("ko_memory"), f("best_value_start")
     out = []
@@ -333,7 +301,6 @@ def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
     barrier_name = "轉換比例（無 KI 的到期門檻）" if ki == "none" else "第 14 項下限值 %"
     for container, rid, expected, what in (
         ("scenario_start_mentions", "doc.ko_period_mentions", start, "第 12 項 (10) 自動提前贖回觀察期間起日"),
-        ("scenario_coupon_mentions", "doc.coupon_mentions", f("scenario_first_coupon_pct"), "情境一第 1 期配息率"),
         ("scenario_barrier_mentions", "doc.ki_consistency", barrier, barrier_name),
         ("scenario_ko_mentions", "doc.ko_mentions", f("ko_def_pct"), "第 15 項 KO %"),
     ):

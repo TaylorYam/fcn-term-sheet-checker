@@ -12,14 +12,14 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
-from . import bnp_scenario, bnp_tables, money, schedule
+from . import bnp_scenario, bnp_tables, money, price_table, schedule
 from .common import NUM, Hit, Mention, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "bnp-zh-pd"
-PARSER_VERSION = "2"  # 2：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "3"  # 2：日期表標準欄位與共用排程推導（Issue #289）；3：情境交成共用情境規則的標準欄位（Issue #294）
 CHAPTER_NAMES = {
     1: ("一", "商品相關基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -168,8 +168,7 @@ class BnpTermSheet:
     full_text: TextIndex
     document: Document
     scenarios: bnp_scenario.ScenarioSection  # 第 18 項(3)
-    coupon_mentions: list[Mention]  # 月配息率的每個出處（第 15 項兩處、第 18 項假設與各情境算式）
-    annualized_mentions: list[Mention]  # 獲利情境（自動提前贖回、最佳）的年化報酬率
+    coupon_mentions: list[Mention]  # 月配息率的每個出處（第 15 項兩處；第 18 項的交給共用情境規則）
     page_headers: list[tuple[int, int, Line]]  # 每頁頁首的（頁碼, 總頁數, 原文行）
 
     def f(self, name: str) -> ParsedField:
@@ -449,8 +448,12 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
         ],
     )
     fields["currency_others"] = standard_fields.occurrences("currency_others", _currency_occurrences(fields, scenarios))
-    coupons, annualized = _mentions(fields, scenarios)
-    return BnpTermSheet(fields, full, doc, scenarios, coupons, annualized, page_headers(lines))
+    _scenario_standard(fields, scenarios)
+    coupons = [
+        Mention.of_field("第 15 項月配息率", fields["monthly_coupon_pct"]),
+        Mention.of_field("第 15 項固定配息金額算式", fields["coupon_formula_pct"]),
+    ]
+    return BnpTermSheet(fields, full, doc, scenarios, coupons, page_headers(lines))
 
 
 def _hit_field(name: str, hit: Hit | None, missing: str, pick: Callable = lambda v: v) -> ParsedField:
@@ -644,29 +647,86 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
     return out
 
 
-def _mentions(
-    fields: dict[str, ParsedField], scenarios: bnp_scenario.ScenarioSection
-) -> tuple[list[Mention], list[Mention]]:
-    """月配息率的每個出處與獲利情境的年化報酬率（核對規則 §3.3）；讀不到的出處值為 None。"""
+def _table_at(name: str, table: ParsedField, where: str) -> ParsedField:
+    """BNP 標的表 → 共用情境規則的 `TableAt`（`parsers/price_table.PriceTable` 的形狀）：每檔各寫一個百分比，`pcts` 為
+    各欄依檔序的百分比（tuple）；表有問題時沿用它的狀態。"""
+    if not table.ok:
+        return derived(name, table)
+    v = table.value
+    tickers = v["tickers"] or [None] * len(v["rows"])
+    rows = tuple(
+        price_table.TableRow(dict(r["prices"]), ticker, "", None, tuple(lns))
+        for r, ticker, lns in zip(v["rows"], tickers, v["row_lines"], strict=True)
+    )
+    pcts = {col: tuple(values) for col, values in v["pcts"].items()}
+    shaped = price_table.PriceTable(tuple(v["columns"]), pcts, rows, {}, ())
+    return derived(name, table, standard_fields.TableAt(where, shaped))
 
-    one = Mention.of_field
 
-    hit = Mention.of_optional_hit
+def _worst_row(s: bnp_scenario.Scenario, rows: ParsedField) -> int | None:
+    """較差情境假設的表現最差標的是價格表第幾檔：單一標的為第 1 檔；多檔時依「(假設為X)」對到第 11 項名稱；對不到為 None。"""
+    if not rows.ok:
+        return None
+    if len(rows.value) == 1:
+        return 1
+    if s.worst_name is None:
+        return None
+    wanted = squash(s.worst_name.value)
+    found = [n for n, r in enumerate(rows.value, start=1) if r.name is not None and squash(r.name) == wanted]
+    return found[0] if len(found) == 1 else None
 
-    coupons = [
-        one("第 15 項月配息率", fields["monthly_coupon_pct"]),
-        one("第 15 項固定配息金額算式", fields["coupon_formula_pct"]),
+
+def _scenario_standard(fields: dict[str, ParsedField], sec: bnp_scenario.ScenarioSection) -> None:
+    """第 18 項(3) 交給共用情境規則的標準欄位（Issue #294）：重印標的表；假設的商品面額、投資本金、每月配息率，各情境
+    配息算式的月配息率與獲利情境（自動提前贖回、最佳）的年化報酬率（`scenario_params`）；較差／最差情境假設句與股數
+    算式的執行價格（`scenario_prices`）。發行價格的出處在 `issue_price_others`。"""
+    fields["main_price_table"] = _table_at("main_price_table", fields["underlying_table"], "第 11 項標的表")
+    fields["scenario_reprint_table"] = _table_at("scenario_reprint_table", sec.table, "第 18 項重印標的表")
+    where = "第 18 項假設"
+    monthly = sec.monthly[0] if len(sec.monthly) == 1 else None
+    params = [
+        ScenarioParam(
+            "scenario_denomination",
+            where,
+            _hit_field(
+                "scenario_denomination", sec.denomination, f"{where}找不到商品面額或出現多次", lambda v: v.amount
+            ),
+        ),
+        ScenarioParam(
+            "scenario_principal",
+            f"{where}投資",
+            _hit_field("scenario_principal", sec.principal, f"{where}找不到投資本金或出現多次", lambda v: v.amount),
+        ),
+        ScenarioParam(
+            "scenario_monthly_coupon",
+            f"{where}每月",
+            _hit_field("scenario_monthly_coupon", monthly, f"{where}找不到每月配息率或出現多次"),
+        ),
     ]
-    if len(scenarios.monthly) == 1:
-        coupons.append(hit("第 18 項假設每月配息率", scenarios.monthly[0], lambda v: v, []))
-    else:
-        coupons.append(Mention.missing("第 18 項假設每月配息率", scenarios.assumptions[:1]))
-    annualized = []
-    for s in scenarios.scenarios:
+    prices = []
+    for s in sec.scenarios:
         if s.kind == "extreme":
             continue
         where = f"第 18 項情境{s.number}"
-        coupons.append(hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1]))
+        coupon = Mention.of_optional_hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1])
+        params.append(
+            ScenarioParam("scenario_monthly_coupon", f"{where}配息算式的", coupon.parsed("scenario_monthly_coupon"))
+        )
         if s.kind in ("autocall", "best"):
-            annualized.append(hit(f"{where}年化報酬率", s.total_return, lambda v: v.annualized, s.lines[:1]))
-    return coupons, annualized
+            annualized = Mention.of_optional_hit(
+                f"{where}年化報酬率", s.total_return, lambda v: v.annualized, s.lines[:1]
+            )
+            params.append(
+                ScenarioParam("scenario_annualized_return", where, annualized.parsed("scenario_annualized_return"))
+            )
+        if s.kind in ("worse", "worst"):
+            row = _worst_row(s, fields["underlying_prices"])
+            strike = Mention.of_optional_hit(
+                f"{where}「收盤價格…小於其執行價格…」假設句", s.strike, lambda v: v.strike, s.lines[:1]
+            )
+            prices.append(ScenarioPrice(f"{where}假設句的", row, "strike", strike.parsed("scenario_strike")))
+            if s.shares is not None:
+                shares = Mention.of_hit(f"{where}股數算式", s.shares.value.strike, s.shares)
+                prices.append(ScenarioPrice(f"{where}股數算式的", row, "strike", shares.parsed("scenario_strike")))
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
+    fields["scenario_prices"] = standard_fields.occurrences("scenario_prices", prices)

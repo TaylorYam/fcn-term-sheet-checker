@@ -56,8 +56,8 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert len(rule(r, "field.min_amounts")) == 3
     assert rule(r, "field.initial_pricing")[0].status == S.PASS  # 說明書沒寫：只檢查表上是允許值
     assert [x.status for x in rule(r, "doc.underlying_list")] == [S.PASS]
-    monthly = [x.status for x in r.results if x.rule_id == "derive.monthly_coupon"]  # 只有 KO 每期型有每期配息率
-    assert monthly == ([S.PASS] if spec.ko_obs == "P" else [])
+    monthly = [x.status for x in r.results if x.rule_id == "derive.monthly_coupon"]
+    assert monthly == [S.PASS]  # KO 每期型：第 13 項每期配息率；KO 每日型：情境一第 1 期配息率
     # Issue #305：重複寫出的值都有核對
     details = {"distributor_name_detail", "distributor_address_detail", "chairman_detail"}
     fields = {x.field for x in r.results}
@@ -66,9 +66,10 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert {"risk_currency", "risk_conversion_currency"} | {f"scenario{n}_currency" for n in range(1, 5)} <= fields
     assert ("best_value_start" in fields) == spec.memory
     assert ("scenario_ko_mentions_3_1" in fields) == spec.memory
-    assert ("scenario_coupon_mentions_2_1" in fields) == (spec.ko_obs == "D")
+    coupons = [x for x in rule(r, "scenario.params") if x.field.startswith("scenario_monthly_coupon")]
+    assert len(coupons) == (3 if spec.ko_obs == "D" else 1)  # 情境二～四第 1 期配息率；KO 每期型為情境假設每月利率
     assert "scenario_barrier_mentions_2_1" in fields and "art18_ko_pct" in fields
-    assert rule(r, "doc.scenario_table")[0].actual  # 情境價格表各格放進實際值，看得出逐格比了哪些價格
+    assert rule(r, "scenario.reprint")[0].actual  # 情境價格表各格放進實際值，看得出逐格比了哪些價格
 
 
 def test_underlyings_are_paired_by_ticker(tmp_path):
@@ -156,19 +157,19 @@ def test_forbidden_wording_in_chapter_four_follows_the_trade_date_exemption(tmp_
         pytest.param(
             Spec(),
             Edit("100.4500 美元", "100.4600 美元", "ts.art16.table"),
-            ("doc.scenario_table", "scenario_table"),
+            ("scenario.reprint", "scenario_reprint_table"),
             id="情境價格表",
         ),
         pytest.param(
             Spec(),
             Edit("年利率：18.00%", "年利率：17.00%", "ts.art16"),
-            ("doc.coupon_mentions", "scenario_coupon_pct"),
+            ("scenario.params", "scenario_coupon_pa_1"),
             id="情境年利率",
         ),
         pytest.param(
             Spec(),
             Edit("X 1.5000%", "X 1.6000%", "ts.art16"),
-            ("doc.coupon_mentions", "scenario_first_coupon_pct"),
+            ("derive.monthly_coupon", "scenario_first_coupon_pct"),
             id="情境一配息率",
         ),
         pytest.param(
@@ -275,7 +276,7 @@ def test_forbidden_wording_in_chapter_four_follows_the_trade_date_exemption(tmp_
                 "第1～6 個配息觀察期間之配息金額＝10 單位面額X 配息率＝10 X 10,000 美元 X 1.6000%",
                 "ts.art16",
             ),
-            ("doc.coupon_mentions", "scenario_coupon_mentions_2_1"),
+            ("scenario.params", "scenario_monthly_coupon_1"),
             id="情境二～四配息率",
         ),
         pytest.param(

@@ -1,7 +1,8 @@
-"""SG 第一章 §15(3) 情境分析（核對規則 §3.4 重印表、§3.7）：假設、重印標的表、較差情境執行價、各情境算式。
+"""SG 第一章 §15(3) 情境分析（核對規則 §3.7）：情境標題、各情境算式。
 
-總配息 = 已進位的每期配息 × 期數（同 MS／BNP）。配息率與獲利情境平均年化報酬率由 rules/sg.py 依參考條件表核對；
-每期配息的預期值也用表上年利率推得的配息率（固定 4 位）。較差／最差情境的數額（無條件進入 4 位）、應實際交付數、
+重印價格表、假設的總投資金額與天期、各處配息率、獲利情境平均年化報酬率與較差情境執行價由共用情境規則
+（rules/scenario.py，Issue #294）核對。總配息 = 已進位的每期配息 × 期數（同 MS／BNP）；
+每期配息的預期值用參考條件表年利率推得的配息率（固定 4 位）。較差／最差情境的數額（無條件進入 4 位）、應實際交付數、
 現金交割（無條件進入 2 位）、總報酬率依文件寫的收盤價與匯率驗算（收盤價、匯率是試算值，本身不核對；年化不核對）。
 情境標題、期別寫法未知或算式找不到時轉人工覆核。
 """
@@ -22,85 +23,12 @@ Q2 = kit.Q2
 Q4 = kit.Q4
 
 
-def monthly_rate(annual: Decimal) -> Decimal:
-    """配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位（SG 固定 4 位，JPY 也是）。"""
-    return (annual / 12).quantize(Q4, ROUND_HALF_UP)
-
-
-def reprint(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項重印標的表的各價格逐格 = 第 8 項；表頭的百分比 = 第 8 項的 KO／KI／執行價百分比。"""
-    f = ctx.ts.f
-    pt, st = f("underlying_table"), ctx.ts.scenarios.table
-    out = []
-    check = Check("doc.scenario_table", "scenario_table", Item.expected("第 15 項重印標的表"), ctx.document).needs(
-        pt, st
-    )
-    if (problem := check.blocked) is not None:
-        out.append(problem)
-    else:
-        out.append(
-            check.compare(
-                pt.value.prices,
-                st.value.prices,
-                evidence=list(st.evidence),
-                fail_message="第 15 項重印的標的表須與第 8 項逐格相同",
-            )
-        )
-    pcts = {"ko": f("ko_pct"), "ki": f("ki_pct"), "strike": f("strike_pct")}
-    check = Check(
-        "doc.scenario_header_pct", "scenario_pcts", Item.expected("第 15 項重印標的表百分比"), ctx.document
-    ).needs(st)
-    if (problem := check.blocked) is not None:
-        out.append(problem)
-        return out
-    expected = {}
-    for col in st.value.columns:
-        if col == "initial":
-            continue
-        pf = pcts[col]
-        if not pf.ok:
-            out.append(check.needs(pf).blocked)
-            return out
-        expected[col] = pf.value
-    out.append(
-        check.compare(
-            expected, st.value.pcts, evidence=list(st.evidence), fail_message="重印表表頭的百分比須與第 8 項相同"
-        )
-    )
-    return out
-
-
-def parameters(ctx: IssuerContext) -> list[CheckResult]:
-    """假設的總投資金額 = 單位數 × 面額；情境種類依有無自動提前出場（四個／三個）。"""
+def titles(ctx: IssuerContext) -> list[CheckResult]:
+    """情境種類依有無自動提前出場（四個／三個）；假設的總投資金額由共用情境規則 `scenario.params` 核對（Issue #294）。"""
     sec, f = ctx.ts.scenarios, ctx.ts.f
     rid = "doc.scenario_parameters"
-    denom, has = f("denomination"), f("has_autocall")
+    has = f("has_autocall")
     out = []
-    item = Item.expected("第 15 項假設總投資金額")
-    if not denom.ok:
-        out.append(Check(rid, "scenario_total", item, ctx.document).review(denom))
-    elif sec.total is None:
-        out.append(
-            kit.calc_result(
-                rid,
-                "scenario_total",
-                item,
-                ["第 15 項假設找不到「總投資金額 = U單位面額 = N」或出現多次"],
-                kit.evidence(sec.assumptions[:1]),
-                review=True,
-            )
-        )
-    else:
-        units, amount = sec.total.value.units, sec.total.value.amount
-        expected = Decimal(denom.value) * units
-        issues = (
-            [] if amount == expected else [f"總投資金額 {amount} 應為 {units} 單位 × 面額 {denom.value} = {expected}"]
-        )
-        out.append(
-            kit.calc_result(
-                rid, "scenario_total", item, issues, kit.evidence(sec.total.lines), expected=expected, actual=amount
-            )
-        )
     kinds = [s.kind for s in sec.scenarios]
     check = Check(rid, "scenario_titles", Item.expected("第 15 項情境標題"), ctx.document).needs(has)
     if (problem := check.blocked) is not None:
@@ -125,9 +53,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
     """各情境的算式（核對規則 §3.7）；每個情境一組結果，欄位名稱以「情境X_」開頭。"""
     f, rid = ctx.ts.f, "doc.scenario_calculations"
     sec = ctx.ts.scenarios
-    denom, tenor, k, has, rows = (
-        f(x) for x in ("denomination", "tenor_months", "first_callable_period", "has_autocall", "underlying_prices")
-    )
+    denom, tenor, k, has = (f(x) for x in ("denomination", "tenor_months", "first_callable_period", "has_autocall"))
     annual, ov, problem = kit.annual_rate(ctx, rid, "scenario_calculations")
     if problem:
         return [problem]
@@ -139,7 +65,6 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             "cumulative": Item.expected(f"{tag}累積總配息金額"),
             "redemption": Item.expected(f"{tag}贖回金額"),
             "return": Item.expected(f"{tag}總報酬率"),
-            "strike": Item.expected(f"{tag}執行價"),
             "shares": Item.expected(f"{tag}數額與應實際交付數"),
             "cash": Item.expected(f"{tag}現金交割"),
             "annualized": Item.expected(f"{tag}平均年化報酬率"),
@@ -176,8 +101,7 @@ def calculations(ctx: IssuerContext) -> list[CheckResult]:
             _redemption(out, rid, tag, items["redemption"], s, denom.value, units)
             _profit_return(out, rid, tag, items["return"], s)
         else:
-            pct = kit.field_value(ctx.ts, "strike_pct")
-            _worse(out, rid, tag, items, s, denom.value, units, rows, tenor.value, pct)
+            _worse(out, rid, tag, items, s, denom.value, units, tenor.value)
     return out
 
 
@@ -212,7 +136,7 @@ def _coupon(out, rid, tag, item, s, denom, units, tenor, k, autocall, annual, ov
     c = s.coupon.value
     a, u, d, rate, total, rate2, amount = c.first, c.units, c.denomination, c.rate, c.total, c.rate_again, c.amount
     b = a if c.last is None else c.last
-    expected_rate = monthly_rate(annual)
+    expected_rate = kit.monthly_of_annual(annual)
     want = (1, k) if autocall else (1, tenor)
     issues = []
     if (a, b) != want:
@@ -287,7 +211,7 @@ def _redemption(out, rid, tag, item, s, denom, units) -> None:
 
 
 def _profit_return(out, rid, tag, item, s) -> None:
-    """獲利情境總報酬率 = (贖回金額 + 累積) ÷ 總投資金額 − 1，依說明書顯示位數四捨五入；平均年化另由 derive.annualized_return 核對。"""
+    """獲利情境總報酬率 = (贖回金額 + 累積) ÷ 總投資金額 − 1，依說明書顯示位數四捨五入；平均年化另由共用情境規則 scenario.params 核對。"""
     field = f"{tag}_return"
     if s.total_return is None:
         out.append(kit.calc_result(rid, field, item, ["找不到總報酬率算式"], kit.evidence(s.lines[:1]), review=True))
@@ -309,66 +233,23 @@ def _profit_return(out, rid, tag, item, s) -> None:
     )
 
 
-def _worse(out, rid, tag, items, s, denom, units, rows, tenor, strike_pct) -> None:
-    """較差／最差情境：執行價 = 第 8 項該檔執行價；數額 = 面額 ÷ 執行價（÷ 匯率換算）無條件進入 4 位；應實際交付數 = 向下取整；
+def _worse(out, rid, tag, items, s, denom, units, tenor) -> None:
+    """較差／最差情境（執行價 = 第 8 項該檔執行價由共用情境規則 `scenario.strike` 核對，Issue #294）：
+    數額 = 面額 ÷ 執行價（÷ 匯率換算）無條件進入 4 位；應實際交付數 = 向下取整；
     現金交割 = 收盤價 × 畸零數（× 匯率）無條件進入 2 位；總單位 = 單位數 × 應實際交付數；總報酬率 = [總投資 × 收盤價 ÷ 執行價 + 累積] ÷ 總投資 − 1；
     平均年化報酬率 = 未四捨五入的總報酬率 × 12 ÷ 天期（依文件顯示位數四捨五入）。"""
-    if s.close is None:
+    if s.close is None:  # 找不到假設句：共用情境規則的執行價已轉人工覆核
+        return
+    close = s.close.value.close
+    if s.shares is None:
         out.append(
             kit.calc_result(
-                rid,
-                f"{tag}_strike",
-                items["strike"],
-                ["找不到「連結標的(k=n)收盤價=…小於下限價／執行價」假設句"],
-                kit.evidence(s.lines[:1]),
-                review=True,
+                rid, f"{tag}_shares", items["shares"], ["找不到數額算式"], kit.evidence(s.lines[:1]), review=True
             )
         )
-        return
-    kidx, close = s.close.value.k, s.close.value.close
-    strike_expected = initial = None
-    if rows.ok:
-        prices = list(rows.value)
-        idx = (kidx or 1) - 1
-        if 0 <= idx < len(prices):
-            strike_expected = prices[idx].prices.get("strike")
-            initial = prices[idx].prices.get("initial")
-    if s.shares is None:
-        for key in ("strike", "shares"):
-            out.append(
-                kit.calc_result(
-                    rid, f"{tag}_{key}", items[key], ["找不到數額算式"], kit.evidence(s.lines[:1]), review=True
-                )
-            )
         return
     q = s.shares.value
     d, strike, fx, quantity = q.denomination, q.strike, q.fx, q.quantity
-    issues = []
-    if strike_expected is None:
-        out.append(
-            kit.calc_result(
-                rid,
-                f"{tag}_strike",
-                items["strike"],
-                ["對不到第 8 項標的表的那一檔（k）"],
-                kit.evidence(s.shares.lines),
-                review=True,
-            )
-        )
-    else:
-        if not kit.scenario_price_ok(strike, strike_expected, initial, strike_pct):  # 兩種進位都接受（#259）
-            issues.append(f"執行價 {strike} 不是第 8 項第 {kidx or 1} 檔的執行價 {strike_expected}")
-        out.append(
-            kit.calc_result(
-                rid,
-                f"{tag}_strike",
-                items["strike"],
-                issues,
-                kit.evidence(s.shares.lines),
-                expected=strike_expected,
-                actual=strike,
-            )
-        )
     issues = []
     if d != denom:
         issues.append(f"數額算式的面額 {d} 不等於第一章面額 {denom}")
@@ -488,4 +369,4 @@ def _worse(out, rid, tag, items, s, denom, units, rows, tenor, strike_pct) -> No
 
 
 def run(ctx: IssuerContext) -> list[CheckResult]:
-    return [*reprint(ctx), *parameters(ctx), *calculations(ctx)]
+    return [*titles(ctx), *calculations(ctx)]

@@ -15,15 +15,16 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam
 from ..text import squash
 from . import money, price_table, schedule
 from .common import RawText, capture_group, compat_normalized, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "bbva-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #305）；4：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "4"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #305）；4：日期表標準欄位與共用排程推導（Issue #289）；
+# 5：情境價格表與假設值交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "5"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -229,12 +230,13 @@ def read(lines: Sequence[Line]) -> BbvaTermSheet:
     art15 = article(15)
     fields["ko_memory"], fields["ko_def_pct"] = ko_event(TextIndex(art15), art15)
     _table_fields(fields, fields["price_table"])
+    fields["main_price_table"] = price_table.at("main_price_table", fields["price_table"], PRICE_TABLE)
     # 年利率：KO 每日型在第 13 項；KO 每期型第 13 項只有每期配息率，由 _article16 改取第 16 項「年利率相當於約y%」
     fields["coupon_pa_pct"] = fields["coupon_annual_art13"]
     _schedule(fields)
     art16 = article(16)
-    _article16(fields, art16)
-    scenario_currencies = _scenarios(fields, art16)
+    assumed = _article16(fields, art16)
+    scenario_currencies = _scenarios(fields, art16, assumed)
     fields["art18_ko_pct"] = capture("art18_ko_pct", TextIndex(article(18)), ART18_KO, Decimal, whole_match=True)
 
     _chapter2(fields, doc)
@@ -541,33 +543,40 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 # ---------------------------------------------------------------- 第 16 項情境分析
 
 
-def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
-    """情境假設（總投資金額、商品年期、年利率或每月利率）、情境價格表、情境一第 1 期配息率（範本規格 §4.9）。"""
+def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> list[ScenarioParam]:
+    """情境假設（總投資金額、商品年期、年利率或每月利率）、情境價格表、情境一第 1 期配息率（範本規格 §4.9）；回傳交給共用
+    情境規則的情境假設（Issue #294）。"""
     ti = TextIndex(art16)
+    where = "第 16 項情境假設"
     total = rf"總投資金額=(\d+)單位面額=([\d,]+)({CCY})"
-    fields["scenario_units"] = capture("scenario_units", ti, total, int, whole_match=True)
-    fields["scenario_amount"] = capture_group(art16, total, 2, "scenario_amount", number)
-    fields["scenario_tenor"] = capture("scenario_tenor", ti, r"[•‧]商品年期：(\d+)個月", int, whole_match=True)
+    units = capture("scenario_units", ti, total, int, whole_match=True)
+    assumed = [
+        ScenarioParam(  # 總投資金額 = 單位數 × 每單位面額
+            "scenario_investment", where, capture_group(art16, total, 2, "scenario_amount", number), times=units
+        ),
+        ScenarioParam(
+            "scenario_tenor", where, capture("scenario_tenor", ti, r"[•‧]商品年期：(\d+)個月", int, whole_match=True)
+        ),
+    ]
     if fields["date_table"].ok and fields["date_table"].value["kind"] == "P":
-        fields["scenario_monthly_pct"] = capture(
-            "scenario_monthly_pct", ti, r"配息率：每月利率" + PCT, Decimal, whole_match=True
-        )
-        fields["scenario_coupon_pct"] = capture(
-            "scenario_coupon_pct", ti, r"年利率相當於約" + PCT, Decimal, whole_match=True
-        )
-        fields["coupon_pa_pct"] = fields["scenario_coupon_pct"]
+        monthly = capture("scenario_monthly_pct", ti, r"配息率：每月利率" + PCT, Decimal, whole_match=True)
+        assumed.append(ScenarioParam("scenario_monthly_coupon", f"{where}每月利率的", monthly))
+        fields["coupon_pa_pct"] = capture("scenario_coupon_pct", ti, r"年利率相當於約" + PCT, Decimal, whole_match=True)
         fields["scenario_first_coupon_pct"] = standard_fields.absent(
             "scenario_first_coupon_pct", "KO 每期型情境一配息率（只寫每單位配息金額）"
         )
     else:
-        fields["scenario_coupon_pct"] = capture(
-            "scenario_coupon_pct", ti, r"[•‧]年利率：" + PCT, Decimal, whole_match=True
-        )
+        annual = capture("scenario_coupon_pct", ti, r"[•‧]年利率：" + PCT, Decimal, whole_match=True)
+        assumed.append(ScenarioParam("scenario_coupon_pa", where, annual))
         first = rf"情境一.*?配息金額＝\d+單位面額X配息率＝\d+X[\d,.]+{CCY}X" + PCT
         fields["scenario_first_coupon_pct"] = capture("scenario_first_coupon_pct", ti, first, Decimal, whole_match=True)
-    fields["scenario_table"] = price_table.read(
-        "scenario_table", table_region(art16, "假設：", "情境一"), SCENARIO_TABLE
-    )
+        # KO 每日型第 13 項只寫年利率與 m，說明書寫出的月配息率只有情境一第 1 期配息率（= 年利率 ÷ 12，由 BBVA 規則核對）
+        first_pf = fields["scenario_first_coupon_pct"]
+        fields["monthly_coupon_pct"] = derived("monthly_coupon_pct", first_pf, first_pf.value)
+    table = price_table.read("scenario_table", table_region(art16, "假設：", "情境一"), SCENARIO_TABLE)
+    fields["scenario_reprint_table"] = price_table.at("scenario_reprint_table", table, SCENARIO_TABLE)
+    fields["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
+    return assumed
 
 
 def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
@@ -602,15 +611,21 @@ def _mentions(
     return standard_fields.occurrences(name, items)
 
 
-def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurrence]:
-    """第 16 項情境一～四重複寫出的值（Issue #305）：第 1 期配息率（KO 每日型的情境二～四）、下限值／門檻 %、出場值 %、
-    觀察起算日；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
+def _scenarios(fields: dict[str, ParsedField], art16: list[Line], assumed: list[ScenarioParam]) -> list[Occurrence]:
+    """第 16 項情境一～四重複寫出的值（Issue #305）：下限值／門檻 %、出場值 %、觀察起算日；KO 每日型情境二～四的第 1 期
+    配息率併入情境假設 `assumed` 交成共用情境規則的 `scenario_params`（= 月配息率，即情境一第 1 期配息率；Issue #294）。
+    回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
     ti = TextIndex(art16)
     spans = _scenario_spans(ti)
-    names = ("scenario_coupon_mentions", "scenario_barrier_mentions", "scenario_ko_mentions", "scenario_start_mentions")
+    names = ("scenario_barrier_mentions", "scenario_ko_mentions", "scenario_start_mentions")
     if not spans:
+        note = "第 16 項找不到情境一～四（到「免責聲明」為止）"
         for name in names:
-            fields[name] = ParsedField.missing(name, "第 16 項找不到情境一～四（到「免責聲明」為止）")
+            fields[name] = ParsedField.missing(name, note)
+        coupons = ScenarioParam(
+            "scenario_monthly_coupon", "第 16 項情境第 1 期", ParsedField.missing("scenario_monthly_coupon", note)
+        )
+        fields["scenario_params"] = standard_fields.occurrences("scenario_params", [*assumed, coupons])
         return [
             Occurrence(
                 "scenario_currency",
@@ -620,7 +635,7 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurr
             )
         ]
     daily = fields["date_table"].ok and fields["date_table"].value["kind"] == "D"
-    fields["scenario_coupon_mentions"] = _mentions(
+    coupons = _mentions(
         "scenario_coupon_mentions",
         ti,
         spans[1:] if daily else [],
@@ -628,6 +643,17 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurr
         Decimal,
         "第 1 期配息率",
         required=True,
+    )
+    fields["scenario_params"] = standard_fields.occurrences(
+        "scenario_params",
+        [
+            *assumed,
+            *(
+                [ScenarioParam("scenario_monthly_coupon", f"{o.where}第 1 期", o.value) for o in coupons.value]
+                if coupons.ok
+                else [ScenarioParam("scenario_monthly_coupon", "第 16 項情境第 1 期", coupons)]
+            ),
+        ],
     )
     fields["scenario_barrier_mentions"] = _mentions(
         "scenario_barrier_mentions", ti, spans, SCENARIO_BARRIER, Decimal, "下限值 %", required=True

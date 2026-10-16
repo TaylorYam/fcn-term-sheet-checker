@@ -78,11 +78,14 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     )
     assert bool([x for x in r.results if x.rule_id == "doc.ko_pct_mentions"]) == spec.ko_pct_in_clause
     # 八的發行價格金額（有寫時）、一般交易事項四每單位面額、五申購價金之計算（Issue #303）
-    # 十五情境算式代入的每單位面額、配息率各一筆（Issue #320）
-    assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2) + 1
-    variable = spec.ko_obs == "D"  # 八與十五的變動配息率與年化
-    assert len(rule(r, "doc.coupon_mentions")) == 2 + (4 if variable else 0) + 1
-    assert {x.field for x in rule(r, "doc.coupon_periods")} == {"scenario_tenor", "scenario_coupon_count"}
+    assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2)
+    variable = spec.ko_obs == "D"  # 八的變動配息率與年化
+    assert len([x for x in r.results if x.rule_id == "doc.coupon_mentions"]) == (2 if variable else 0)
+    # 十五設定參數（天期、配息觀察次數、面額、初始投資金額、發行價格、固定配息率與年化；KO 每日型另有變動配息率與年化）、
+    # 情境算式代入的每單位面額、配息率（Issue #320、#294）
+    params = {x.field for x in rule(r, "scenario.params")}
+    assert {"scenario_tenor_1", "scenario_coupon_periods_1", "scenario_initial_investment_1"} <= params
+    assert len([x for x in params if x.startswith("scenario_monthly_coupon")]) == (3 if variable else 2)
     assert rule(r, "schedule.period_count")[0].status == S.PASS  # 配息表期數是共用檢查（Issue #289）
     currency = {x.field for x in rule(r, "field.currency")}  # 說明文字與情境的幣別字（Issue #320）
     words = {"residual_conversion_currency", "scenario_residual_currency", "scenario_residual_paid_currency"}
@@ -182,17 +185,17 @@ def test_name_without_memory_wording_is_a_mismatch(tmp_path):
         (Edit("t 係為2 至6", "t 係為2 至5", "ts.art8"), "doc.autocall_terms"),
         (Edit("變動配息率：1.0000%X", "變動配息率：1.0100%X", "ts.art8"), "doc.coupon_mentions"),
         (Edit("（nt/Nt）（年化配息率為12.00%）", "（nt/Nt）（年化配息率為12.50%）", "ts.art8"), "doc.coupon_mentions"),
-        (Edit("固定配息率：1.0000%。", "固定配息率：1.0100%。", "ts.art15"), "doc.coupon_mentions"),
-        (Edit("天期：6 個月", "天期：7 個月", "ts.art15"), "doc.coupon_periods"),
-        (Edit("70.3150 美元", "70.3151 美元", "ts.art15.table"), "doc.scenario_table"),
-        (Edit("70.00%）", "75.00%）", "ts.art15.table"), "doc.scenario_table"),
-        (Edit("每單位面額：10,000.00 美元 /", "每單位面額：1,000.00 美元 /", "ts.art15"), "doc.scenario_table"),
-        (Edit("初始投資金額：10,000.00 美元", "初始投資金額：1,000.00 美元", "ts.art15"), "doc.scenario_table"),
-        (Edit("發行價格：100% /", "發行價格：99% /", "ts.art15"), "doc.scenario_table"),
-        (Edit("變動配息率：1.0000%X", "變動配息率：1.0100%X", "ts.art15"), "doc.coupon_mentions"),
+        (Edit("固定配息率：1.0000%。", "固定配息率：1.0100%。", "ts.art15"), "scenario.params"),
+        (Edit("天期：6 個月", "天期：7 個月", "ts.art15"), "scenario.params"),
+        (Edit("70.3150 美元", "70.3151 美元", "ts.art15.table"), "scenario.reprint"),
+        (Edit("70.00%）", "75.00%）", "ts.art15.table"), "scenario.reprint"),
+        (Edit("每單位面額：10,000.00 美元 /", "每單位面額：1,000.00 美元 /", "ts.art15"), "scenario.params"),
+        (Edit("初始投資金額：10,000.00 美元", "初始投資金額：1,000.00 美元", "ts.art15"), "scenario.params"),
+        (Edit("發行價格：100% /", "發行價格：99% /", "ts.art15"), "scenario.params"),
+        (Edit("變動配息率：1.0000%X", "變動配息率：1.0100%X", "ts.art15"), "scenario.params"),
         (
             Edit("（nt/Nt）（年化配息率為12.00%）", "（nt/Nt）（年化配息率為12.50%）", "ts.art15"),
-            "doc.coupon_mentions",
+            "scenario.params",
         ),
         (Edit("t 係為2 至6", "t 係為2 至5", "ts.art15"), "doc.autocall_terms"),
         (Edit("發行價格：100%，即10,000.00", "發行價格：100%，即1,000.00", "ts.art8"), "doc.denomination_mentions"),
@@ -200,13 +203,13 @@ def test_name_without_memory_wording_is_a_mismatch(tmp_path):
         (Edit("申購價金之計算：10,000.00", "申購價金之計算：1,000.00", "ts.general"), "doc.denomination_mentions"),
         (Edit("申購價金之計算：10,000.00 美元", "申購價金之計算：10,000.00 日圓", "ts.general"), "field.currency"),
         # 十五情境與說明文字重複寫出的值（Issue #320）
-        (Edit("美元X1.0000%X1=", "美元X1.0100%X1=", "ts.art15"), "doc.coupon_mentions"),
-        (Edit("-10,000.00 美元=", "-1,000.00 美元=", "ts.art15"), "doc.denomination_mentions"),
+        (Edit("美元X1.0000%X1=", "美元X1.0100%X1=", "ts.art15"), "scenario.params"),
+        (Edit("-10,000.00 美元=", "-1,000.00 美元=", "ts.art15"), "scenario.params"),
         (
             Edit("每單位面額/轉換價=（10,000.00", "每單位面額/轉換價=（1,000.00", "ts.art15"),
-            "doc.denomination_mentions",
+            "scenario.params",
         ),
-        (Edit("每月（共6 個）", "每月（共7 個）", "ts.art15"), "doc.coupon_periods"),
+        (Edit("每月（共6 個）", "每月（共7 個）", "ts.art15"), "scenario.params"),
         (Edit("換算後的美元金額", "換算後的日圓金額", "ts.art8"), "field.currency"),
         (Edit("則以美元支付", "則以日圓支付", "ts.art15"), "field.currency"),
         (Edit("以美元支付的剩餘金額", "以日圓支付的剩餘金額", "ts.art15"), "field.currency"),
@@ -250,8 +253,8 @@ def test_cross_currency_wording_must_be_the_deal_currency(tmp_path):
 @pytest.mark.parametrize(
     ("edit", "found"),
     [
-        (Edit("美元X1.0000%X", "美元乘1.0000%乘", "ts.art15"), {("doc.coupon_mentions", "scenario_coupon_mentions")}),
-        (Edit("每月（共6 個）", "每月", "ts.art15"), {("doc.coupon_periods", "scenario_coupon_count")}),
+        (Edit("美元X1.0000%X", "美元乘1.0000%乘", "ts.art15"), {("scenario.params", "scenario_monthly_coupon_3")}),
+        (Edit("每月（共6 個）", "每月", "ts.art15"), {("scenario.params", "scenario_coupon_periods_1")}),
         (Edit("換算後的美元金額", "換算後的金額", "ts.art8"), {("field.currency", "residual_conversion_currency")}),
         (Edit("則以美元支付", "則支付", "ts.art15"), {("field.currency", "scenario_residual_currency")}),
         (

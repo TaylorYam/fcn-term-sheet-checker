@@ -14,15 +14,16 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
 from . import money, price_table, schedule, sg_scenario, sg_tables
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "sg-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "3"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）；
+# 4：重印價格表、情境假設值與較差情境執行價交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -142,8 +143,7 @@ class SgTermSheet:
     full_text: TextIndex
     document: Document
     scenarios: sg_scenario.ScenarioSection  # 第 15 項(3)
-    coupon_mentions: list[Mention]  # 配息率的每個出處（第 8 項、第 15 項假設、各情境算式）
-    annualized_mentions: list[Mention]  # 獲利情境（較佳、中間）的平均年化報酬率
+    coupon_mentions: list[Mention]  # 配息率主來源（第 8 項；第 15 項的交給共用情境規則）
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -417,8 +417,9 @@ def read(lines: Sequence[Line]) -> SgTermSheet:
         ],
     )
     fields["currency_others"] = standard_fields.occurrences("currency_others", _currency_occurrences(fields, scenarios))
-    coupons, annualized = _mentions(fields, scenarios)
-    return SgTermSheet(fields, TextIndex(doc.lines), doc, scenarios, coupons, annualized)
+    _scenario_standard(fields, scenarios)
+    coupons = [Mention.of_field("第 8 項配息率", fields["monthly_coupon_pct"])]
+    return SgTermSheet(fields, TextIndex(doc.lines), doc, scenarios, coupons)
 
 
 # ---------------------------------------------------------------- 第 8 項
@@ -671,21 +672,74 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: sg_scenario
     return out
 
 
-def _mentions(
-    fields: dict[str, ParsedField], scenarios: sg_scenario.ScenarioSection
-) -> tuple[list[Mention], list[Mention]]:
-    """配息率的每個出處與獲利情境的平均年化報酬率（核對規則 §3.3）；讀不到的出處值為 None。"""
+def _main_table(fields: dict[str, ParsedField]) -> ParsedField:
+    """第 8 項價格表 → 共用情境規則的 `main_price_table`：表頭沒寫百分比，每欄的百分比取第 8 項定義（KO／KI／執行價 %），
+    重印價格表表頭的百分比和它比；定義讀不到時沿用該欄位的狀態。"""
+    table = fields["underlying_table"]
+    if not table.ok:
+        return derived("main_price_table", table)
+    pcts = {}
+    for col in (c for c in table.value.columns if c != "initial"):
+        pf = fields[f"{col}_pct"]
+        if not pf.ok:
+            return derived("main_price_table", pf)
+        pcts[col] = pf.value
+    shaped = replace(table.value, pcts=pcts)
+    return derived("main_price_table", table, standard_fields.TableAt(sg_tables.PRICE_TABLE.where, shaped))
 
-    one, hit = Mention.of_field, Mention.of_optional_hit
 
-    coupons = [
-        one("第 8 項配息率", fields["monthly_coupon_pct"]),
-        hit("第 15 項假設配息率", scenarios.rate, lambda v: v, scenarios.assumptions[-1:]),
+def _scenario_standard(fields: dict[str, ParsedField], sec: sg_scenario.ScenarioSection) -> None:
+    """第 15 項(3) 交給共用情境規則的標準欄位（Issue #294）：重印價格表；假設的總投資金額（= 單位數 × 面額）、天期、
+    配息率，各情境配息算式的配息率與獲利情境（較佳、中間）的平均年化報酬率（`scenario_params`）；較差／最差情境數額
+    算式的執行價（`scenario_prices`，k = n 那一檔，單一標的為第 1 檔）。"""
+    fields["main_price_table"] = _main_table(fields)
+    fields["scenario_reprint_table"] = price_table.at("scenario_reprint_table", sec.table, sg_tables.REPRINT_TABLE)
+    hit, where = Mention.of_optional_hit, "第 15 項假設"
+    head = sec.assumptions[-1:]
+    total = sec.total
+    units = ParsedField.present("scenario_units", total.value.units, total.lines) if total else None
+    params = [
+        ScenarioParam(
+            "scenario_investment",
+            where,
+            hit(f"{where}「總投資金額 = U單位面額 = N」", total, lambda v: v.amount, head).parsed(
+                "scenario_investment"
+            ),
+            times=units,
+        ),
+        ScenarioParam(
+            "scenario_tenor",
+            where,
+            hit(f"{where}「天期：N個月」", sec.tenor, lambda v: v, head).parsed("scenario_tenor"),
+        ),
+        ScenarioParam(
+            "scenario_monthly_coupon",
+            where,
+            hit(f"{where}配息率", sec.rate, lambda v: v, head).parsed("scenario_monthly_coupon"),
+        ),
     ]
-    annualized = []
-    for s in scenarios.scenarios:
+    prices = []
+    for s in sec.scenarios:
         where = f"第 15 項情境{s.number}"
-        coupons.append(hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1]))
+        coupon = hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1])
+        params.append(
+            ScenarioParam("scenario_monthly_coupon", f"{where}配息算式的", coupon.parsed("scenario_monthly_coupon"))
+        )
         if s.kind in ("best", "middle"):
-            annualized.append(hit(f"{where}平均年化報酬率", s.total_return, lambda v: v.annualized, s.lines[:1]))
-    return coupons, annualized
+            annualized = hit(f"{where}平均年化報酬率", s.total_return, lambda v: v.annualized, s.lines[:1])
+            params.append(
+                ScenarioParam(
+                    "scenario_annualized_return", f"{where}平均", annualized.parsed("scenario_annualized_return")
+                )
+            )
+        elif s.kind in ("worse", "worst"):
+            if s.close is None:
+                pf = Mention.missing(f"{where}「連結標的(k=n)收盤價=…小於下限價／執行價」假設句", s.lines[:1])
+                prices.append(ScenarioPrice(f"{where}數額算式的", None, "strike", pf.parsed("scenario_strike")))
+                continue
+            strike = hit(f"{where}數額算式", s.shares, lambda v: v.strike, s.lines[:1])
+            prices.append(
+                ScenarioPrice(f"{where}數額算式的", s.close.value.k or 1, "strike", strike.parsed("scenario_strike"))
+            )
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
+    fields["scenario_prices"] = standard_fields.occurrences("scenario_prices", prices)

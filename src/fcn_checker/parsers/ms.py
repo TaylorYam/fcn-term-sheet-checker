@@ -12,14 +12,16 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import ScenarioParam, ScenarioPrice
 from ..text import full_brackets, squash
 from . import money, ms_scenario, ms_tables, ms_wording, price_table, schedule
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "3"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）；
+# 4：重印價格表、情境假設值與較差情境執行價交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -138,8 +140,7 @@ class MsTermSheet:
     full_text: TextIndex
     document: Document
     scenarios: ms_scenario.ScenarioSection  # 第 18 項
-    coupon_mentions: list[Mention]  # 月配息率的每個出處（第 15 項、第 18 項假設與各情境算式）
-    annualized_mentions: list[Mention]  # 獲利情境的年化報酬率
+    coupon_mentions: list[Mention]  # 月配息率的出處（第 15 項；第 18 項的交給共用情境規則）
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -309,8 +310,8 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
 
-    coupons, annualized = _mentions(fields, scenarios)
-    return MsTermSheet(fields, TextIndex(doc.lines), doc, scenarios, coupons, annualized)
+    _scenario_standard(fields, scenarios)
+    return MsTermSheet(fields, TextIndex(doc.lines), doc, scenarios, _mentions(fields))
 
 
 def _currency_occurrences(
@@ -456,35 +457,93 @@ def _prices(fields: dict[str, ParsedField]) -> None:
         fields["ko_pct"] = ParsedField("ko_pct", FieldStatus.INVALID, evidence=ev, note=note)
 
 
-def _mentions(
-    fields: dict[str, ParsedField], scenarios: ms_scenario.ScenarioSection
-) -> tuple[list[Mention], list[Mention]]:
-    """月配息率的每個出處與獲利情境的年化報酬率（核對規則 §3.3）；讀不到的出處值為 None。"""
-
-    one, missing = Mention.of_field, Mention.missing
-
-    def hit(where: str, h: Hit[Decimal]) -> Mention:
-        return Mention.of_hit(where, h.value, h)
-
-    coupons = [one("第 15 項(2) 固定配息率", fields["monthly_coupon_pct"])]
+def _mentions(fields: dict[str, ParsedField]) -> list[Mention]:
+    """月配息率主來源（第 15 項(2)）與 D 型第 15 項配息公式（核對規則 §3.3）；第 18 項情境的月配息率與年化報酬率交給共用
+    情境規則（`_scenario_standard`）。讀不到的出處值為 None。"""
+    coupons = [Mention.of_field("第 15 項(2) 固定配息率", fields["monthly_coupon_pct"])]
     table = fields["date_table"]
     if table.ok and table.value["type"] == "D":
-        coupons.append(one("第 15 項配息公式", fields["coupon_formula_pct"]))
-    if len(scenarios.monthly) == 1:
-        coupons.append(hit("第 18 項假設月配息率", scenarios.monthly[0]))
-    else:
-        coupons.append(missing("第 18 項假設月配息率", [h.lines[0] for h in scenarios.monthly]))
-    annualized = []
-    for s in scenarios.scenarios:
+        coupons.append(Mention.of_field("第 15 項配息公式", fields["coupon_formula_pct"]))
+    return coupons
+
+
+def _scenario_standard(fields: dict[str, ParsedField], sec: ms_scenario.ScenarioSection) -> None:
+    """第 18 項交給共用情境規則的標準欄位（Issue #294）：重印價格表；假設的總投資金額、年期、月配息率，各情境算式的
+    每個月配息率與獲利情境的年化報酬率（`scenario_params`；說明書沒有年利率，年化報酬率和參考條件表年利率比）；較差
+    情境的執行價（`scenario_prices`，依彭博代碼對到第 16 項價格表那一列）。"""
+    fields["main_price_table"] = price_table.at("main_price_table", fields["price_table"], ms_tables.PRICE_TABLE)
+    fields["scenario_reprint_table"] = price_table.at("scenario_reprint_table", sec.table, ms_tables.SCENARIO_TABLE)
+    head = [Evidence.of(x) for x in sec.lines[:1]]
+
+    def value(code: str, h: Hit | None, lines: list, note: str) -> ParsedField:
+        if h is None:
+            return ParsedField(code, FieldStatus.MISSING, evidence=lines or head, note=note)
+        return ParsedField.present(code, h.value, h.lines)
+
+    where = "第 18 項假設"
+    monthly = sec.monthly[0] if len(sec.monthly) == 1 else None
+    params = [
+        ScenarioParam(
+            "scenario_investment",
+            where,
+            value("scenario_investment", sec.denomination, [], f"{where}找不到總投資金額或出現多次"),
+        ),
+        ScenarioParam("scenario_tenor", where, value("scenario_tenor", sec.tenor, [], f"{where}找不到年期或出現多次")),
+        ScenarioParam(
+            "scenario_monthly_coupon",
+            f"{where}月",
+            value(
+                "scenario_monthly_coupon",
+                monthly,
+                [Evidence.of(h.lines[0]) for h in sec.monthly],
+                f"{where}找不到月配息率或出現多次",
+            ),
+        ),
+    ]
+    prices = []
+    pt = fields["price_table"]
+    tickers = [r.ticker.replace(" ", "") for r in pt.value.rows] if pt.ok else []
+    for s in sec.scenarios:
         if s.kind == "default":
             continue
         where = f"第 18 項情境{s.number}"
+        lines = [Evidence.of(x) for x in s.lines[:1]]
         many = len(s.rates) > 1
-        coupons.extend(hit(f"{where}算式" + (f"第 {i} 處" if many else ""), h) for i, h in enumerate(s.rates, 1))
-        if not s.rates:
-            coupons.append(missing(f"{where}算式", s.lines[:1]))
+        params += [
+            ScenarioParam(
+                "scenario_monthly_coupon",
+                f"{where}算式" + (f"第 {i} 處" if many else "") + "的",
+                value("scenario_monthly_coupon", h, [], ""),
+            )
+            for i, h in enumerate(s.rates, 1)
+        ] or [
+            ScenarioParam(
+                "scenario_monthly_coupon",
+                f"{where}算式的",
+                value("scenario_monthly_coupon", None, lines, f"{where}算式找不到月配息率"),
+            )
+        ]
         if s.kind == "profit":
-            annualized.extend(hit(f"{where}年化報酬率", h) for h in s.annualized)
-            if not s.annualized:
-                annualized.append(missing(f"{where}年化報酬率", s.lines[:1]))
-    return coupons, annualized
+            params += [
+                ScenarioParam("scenario_annualized_return", where, value("scenario_annualized_return", h, [], ""))
+                for h in s.annualized
+            ] or [
+                ScenarioParam(
+                    "scenario_annualized_return",
+                    where,
+                    value("scenario_annualized_return", None, lines, f"{where}找不到年化報酬率"),
+                )
+            ]
+        if s.kind == "worse":
+            strike = s.strike[0] if len(s.strike) == 1 else None
+            row = tickers.index(strike.value.ticker) + 1 if strike and tickers.count(strike.value.ticker) == 1 else None
+            pf = (
+                ParsedField.present("scenario_strike", strike.value.strike, strike.lines)
+                if strike
+                else ParsedField(
+                    "scenario_strike", FieldStatus.MISSING, evidence=lines, note=f"{where}找不到執行價或出現多次"
+                )
+            )
+            prices.append(ScenarioPrice(f"{where}（較差情境）", row, "strike", pf))
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
+    fields["scenario_prices"] = standard_fields.occurrences("scenario_prices", prices)

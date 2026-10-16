@@ -276,16 +276,16 @@ C4 依說明書定義：自動提前出場觀察期是期始日到期末日之�
 | `schedule.period_count`、`schedule.payment_order`、`schedule.observation_order`、`schedule.last_observation`、`schedule.last_payment`、`schedule.period_start` | A3、A4、B1、B2、C4 改由各上手共用的日期表規則檢查（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）：`第 13 條日期表` 以配息表每期一列（評價日為觀察日、支付日為配息日），期間型提前出場表另帶期始日、期末日；期始日為下一個一籃子預定交易日，第 1 期有日期時為發行日後的下一個一籃子預定交易日，開頭空白的期數 = 保證配息期 G | §3.8 |
 | `schedule.autocall_dates` | C1–C3 | §3.8 |
 | `doc.autocall_trigger_per_period` | §13(7) 每期觸發百分比 = §15 定義句 | §3.7 |
-| `doc.scenario_price_table` | §16(3) 重印價格表 = §15 價格表 | §3.7 |
+| `scenario.reprint`（共用，Issue #294） | §16(3) 重印價格表 = §15 價格表（逐格、欄頭比例、列數） | §3.7 |
 | `field.min_amounts` | 第四章最低申購、最低贖回金額 = 參考條件表「單位面額」（各上手共用，`rules/reference.py`） | §3.7 |
 | `field.currency`（其他出處） | §6 面額、第四章最低金額、§16 情境假設面額與各情境金額旁的幣別字 = 參考條件表承作幣別（各上手共用，`rules/reference.py`；欄位 `denomination_currency`、`min_subscription_currency`、`min_redemption_currency`、`scenario_notional_currency`、`scenario_i/ii/iii_currency`） | §3.7 |
 | `doc.name_consistency` | 封面標題、第一章 §1 商品名稱 = 封面中文名稱 | §3.7 |
 | `doc.distributor_product_code` | 受託或銷售機構商品代號 = 商品代號 | §3.7 |
 | `doc.currency_consistency` | 第一章 §5 計價幣別 = 封面 | §3.7 |
-| `doc.scenario_notional` | §16(3) 情境假設面額 = §6 面額 | §3.7 |
-| `doc.price_header_pct` | §15、§16 價格表欄頭比例 = §15 定義句 | §3.7 |
-| `doc.coupon_repeats` | §9(3)、§16 每處月配息率 = §14 | §3.7 |
-| `doc.scenario_returns` | 有利／一般情況總報酬率重算；一般情況年化率 = 年利率 | §3.7 |
+| `scenario.params`（共用，Issue #294） | §16(3) 情境假設面額 = §6 面額；§16 情境試算每處月配息率 = §14（同一個值一筆）；一般情況平均年化報酬率 = 年利率（依說明書位數四捨五入） | §3.7 |
+| `doc.price_header_pct` | §15 價格表與 §16 各情境表欄頭比例 = §15 定義句（§16(3) 重印價格表的欄頭由 `scenario.reprint` 和 §15 比） | §3.7 |
+| `doc.coupon_repeats` | §9(3) 每處月配息率 = §14 | §3.7 |
+| `doc.scenario_returns` | 有利／一般情況總報酬率重算 | §3.7 |
 | `doc.observation_t_range` | Daily Memory 定義句 t 起訖 | §3.7 |
 | `standard.issuer_name`／`standard.distributor`／`standard.fees`／`standard.issue_price` | 審查標準固定值 | §3.9、審查標準 |
 

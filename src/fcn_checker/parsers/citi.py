@@ -14,15 +14,16 @@ from typing import NamedTuple
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam
 from ..text import squash
 from . import money, price_table, schedule
 from .common import NO_AUTOCALL_KO_PCT, NUM, Mention, derived, ko_at_initial, number, zh_number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "citi-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #314）；4：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "4"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #314）；4：日期表標準欄位與共用排程推導（Issue #289）；
+# 5：假設價格表與情境配息率、年息交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "5"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -202,8 +203,10 @@ class CitiTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
-    coupon_mentions: list[Mention]  # 月配息率的每個出處（第 13、14(2) 項、第 13 項末段、第 15 項假設 d) 與各情境）
-    annual_mentions: list[Mention]  # 年息的其他出處（第 13 項其他處、第 14 項(2)、第 13 項末段、第 15 項假設 d)）
+    # 月配息率的每個出處（第 13、14(2) 項、第 13 項末段）與年息的其他出處（第 13 項其他處、第 14 項(2)、第 13 項末段）；
+    # 第 15 項情境的交給共用情境規則
+    coupon_mentions: list[Mention]
+    annual_mentions: list[Mention]
     redemption_mentions: list[Repeat]  # 到期、提前出場給付 100% 的其他出處（第 8、13、15、17 項；Issue #314）
     header_mentions: list[Repeat]  # 第 15 項各情境小表表頭 %，`source` 為對應的 % 欄位（strike_pct 等；Issue #314）
 
@@ -388,6 +391,7 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     )
     fields["underlying_table"] = table
     fields["underlyings"] = price_table.underlyings(table)
+    fields["main_price_table"] = price_table.at("main_price_table", table, PRICE_TABLE)
     fields["initial_pricing"] = initial_pricing(table)
     _prices(fields, table, has_autocall)
 
@@ -416,9 +420,11 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     put("scenario_coupon", assumptions, rf"d\)固定配息金額為每單位商品面額{X}" + PCT, Decimal)
     put("scenario_denomination_currency", assumptions, rf"a\)每單位商品面額：{money.NUMBER}({CCY})")
     put("scenario_total_currency", assumptions, rf"c\)初始投資金額[=：].*?={money.NUMBER}({CCY})")
-    fields["scenario_table"] = price_table.read(
+    scenario_table = price_table.read(
         "scenario_table", _table_region(assumptions, "連結標的相關股價資訊", None), SCENARIO_TABLE
     )
+    fields["scenario_reprint_table"] = price_table.at("scenario_reprint_table", scenario_table, SCENARIO_TABLE)
+    fields["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
     fields["dividend_example"] = capture(
         "dividend_example",
         t13,
@@ -531,8 +537,6 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     coupons += [
         one("第 14 項(2) 最低保證配息率", fields["monthly_coupon_art14"]),
         one("第 13 項配息後市場價值舉例", fields["dividend_example"]),
-        one("第 15 項假設 d) 固定配息金額", fields["scenario_coupon"]),
-        *scenarios.coupons,
     ]
     annual = [
         Mention(
@@ -545,8 +549,15 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     annual += [
         one("第 14 項(2) 年化配息率", fields["coupon_pa_art14"]),
         one("第 13 項配息後市場價值舉例的年化配息率", fields["coupon_pa_example"]),
-        one("第 15 項假設 d) 年息", fields["coupon_pa_scenario"]),
     ]
+    fields["scenario_params"] = standard_fields.occurrences(  # 共用情境規則（Issue #294）
+        "scenario_params",
+        [
+            ScenarioParam("scenario_monthly_coupon", "第 15 項假設 d) 固定配息金額的", fields["scenario_coupon"]),
+            ScenarioParam("scenario_coupon_pa", "第 15 項假設 d) 的", fields["coupon_pa_scenario"]),
+            *scenarios.coupons,
+        ],
+    )
     t17 = TextIndex(article(17))
     redemptions = [  # §8(3)(b) 每種型態都有；§8(4)、§13、§17(C) 只有會自動提前出場的商品才有
         *_repeats(t8, (DELIVERY_100,), "redemption_art8_b", "第 8 項(3)(b) 實物交付股數"),
@@ -680,7 +691,9 @@ def _repeats(
 class _Scenarios:
     """第 15 項各情境重複寫出的值（Issue #314）。"""
 
-    coupons: list[Mention]  # 「每單位固定配息金額 = 每單位商品面額 × X%」與「m/M × X%」
+    coupons: list[
+        ScenarioParam
+    ]  # 「每單位固定配息金額 = 每單位商品面額 × X%」與「m/M × X%」（共用情境規則的月配息率出處）
     redemptions: list[Repeat]  # 到期、提前出場給付的 100%
     headers: list[Repeat]  # 小表表頭「欄名(期初股價的X%)」，`source` 為欄名對應的 % 欄位
     currencies: list[Occurrence]  # 每個情境 (一) 之後金額旁的幣別
@@ -706,7 +719,10 @@ def _scenarios(t15: TextIndex, assumptions_at: int) -> _Scenarios:
     labels = re.compile(r"(" + "|".join(HEADER_PCT) + r")\($")
     for k, name, a, b in spans:
         where = f"第 15 項情境「{name}」"
-        out.coupons += [r.mention for r in _repeats(t15, (SCENARIO_COUPON,), "", f"{where}配息率", start=a, end=b)]
+        out.coupons += [
+            ScenarioParam("scenario_monthly_coupon", r.mention.where, _coupon(r.mention))
+            for r in _repeats(t15, (SCENARIO_COUPON,), "", where, start=a, end=b)
+        ]
         out.redemptions += _repeats(t15, SCENARIO_100, f"redemption_scenario_{k}", f"{where}給付 100%", start=a, end=b)
         pcts = [p for p in t15.finditer(r"期初股價的" + PCT) if a <= p.start() < b]
         if not pcts:
@@ -728,6 +744,15 @@ def _scenarios(t15: TextIndex, assumptions_at: int) -> _Scenarios:
             money.scenario_occurrence(field, f"{name}金額幣別", where, found, t15.lines_for(a, a + 1))
         )
     return out
+
+
+def _coupon(m: Mention) -> ParsedField:
+    """情境配息率的一處 → 共用情境規則的值；讀不到時寫出位置。"""
+    if m.value is None:
+        return ParsedField(
+            "scenario_monthly_coupon", FieldStatus.MISSING, evidence=list(m.evidence), note=f"{m.where}找不到配息率"
+        )
+    return m.parsed("scenario_monthly_coupon")
 
 
 def _memory_wording(doc: Document) -> ParsedField:

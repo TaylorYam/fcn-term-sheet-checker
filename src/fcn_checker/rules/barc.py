@@ -4,6 +4,7 @@
 規則只接收標準化後的說明書欄位與審查標準；不讀檔、不改來源值。
 每條規則產生一或多筆 CheckResult；抓不到、歧義、未知值一律轉人工覆核，不猜值。
 每筆結果的項目名稱寫在規則旁；預期值來自說明書其他位置或推算（錯訊寫「預期」）。
+§16 重印價格表、情境假設面額、情境試算的月配息率與一般情況平均年化報酬率由共用情境規則（rules/scenario.py，Issue #294）核對。
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from .kit import (
     HEADER_PCT_ITEM,
-    PRICE_LABEL,
     Q4,
     Check,
     IssuerContext,
@@ -211,27 +211,6 @@ def trigger_per_period(ctx: IssuerContext) -> CheckResult:
     )
 
 
-def scenario_price_table(ctx: IssuerContext) -> CheckResult:
-    """§16(3) 情境分析重印價格表逐格 = §15 價格表。"""
-    rid, s15, s16 = "doc.scenario_price_table", ctx.ts.f("price_table"), ctx.ts.f("scenario_price_table")
-    check = Check(rid, "scenario_price_table", Item.expected("情境試算價格表"), ctx.document).needs(s15, s16)
-    if (problem := check.blocked) is not None:
-        return problem
-    a, b = s15.value.prices, s16.value.prices
-    diffs = [] if len(a) == len(b) else [f"列數 {len(a)} ≠ {len(b)}"]
-    for k, (r15, r16) in enumerate(zip(a, b, strict=False), 1):
-        for col in sorted(set(r15) | set(r16)):
-            if r15.get(col) != r16.get(col):
-                diffs.append(f"第 {k} 檔 {PRICE_LABEL.get(col, '最初價格')}：§15 {r15.get(col)}／§16 {r16.get(col)}")
-    return check.compare(
-        None,
-        diffs or None,
-        ok=not diffs,
-        evidence=s16.evidence[:6],
-        message="§16(3) 重印價格表須與 §15 價格表逐格相同",
-    )
-
-
 # ---------------------------------------------------------------- 文件內重複出現處（Issue #38）
 
 _NAME_SUFFIX = "（下稱「本商品」）"
@@ -322,22 +301,9 @@ def currency_consistency(ctx: IssuerContext) -> CheckResult:
     )
 
 
-def scenario_notional(ctx: IssuerContext) -> CheckResult:
-    denom, pf = ctx.ts.f("denomination"), ctx.ts.f("scenario_notional")
-    return _consistent(
-        ctx,
-        "doc.scenario_notional",
-        "scenario_notional",
-        "情境假設每單位面額",
-        pf,
-        denom,
-        denom.value,
-        "第 16 條情境假設的每單位商品面額須等於第 6 條面額",
-    )
-
-
 def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
-    """§15 價格表與 §16 情境表欄頭「X（為最初價格的N%）」= §15 定義句的百分比（執行價格另與參考條件表 K(%) 比對）。"""
+    """§15 價格表與 §16 各情境表欄頭「X（為最初價格的N%）」= §15 定義句的百分比（執行價格另與參考條件表 K(%) 比對；
+    §16(3) 重印價格表的欄頭由共用情境規則 `scenario.reprint` 和 §15 價格表比，Issue #294）。"""
     rid = "doc.price_header_pct"
     out = []
     for field in ("strike_pct", "ko_pct", "ki_pct"):
@@ -373,7 +339,7 @@ def price_header_pct(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
-    """§9(3) 相關配息率與 §16 情境試算中每次出現的月配息率 = §14 正式月配息率。"""
+    """§9(3) 相關配息率 = §14 正式月配息率（§16 情境試算的月配息率由共用情境規則 `scenario.params` 核對，Issue #294）。"""
     rid, pf = "doc.coupon_repeats", ctx.ts.f("monthly_coupon_pct")
     mentions = ctx.ts.coupon_mentions["repeat"]
     out = []
@@ -420,10 +386,10 @@ def coupon_repeats(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
-    """§16(3) 有利情況：總報酬率 = 月配息率 × 配息期數；一般情況：總報酬率 = 月配息率 × 總期數、
-    平均年化報酬率 = 正式年利率。有利情況的年化率取決於持有期間，不核對（列未涵蓋）。"""
+    """§16(3) 有利情況：總報酬率 = 月配息率 × 配息期數；一般情況：總報酬率 = 月配息率 × 總期數。一般情況平均年化報酬率
+    = 年利率由共用情境規則 `scenario.params` 核對（Issue #294）；有利情況的年化率取決於持有期間，不核對（列未涵蓋）。"""
     rid = "doc.scenario_returns"
-    monthly, annual, table = ctx.ts.f("monthly_coupon_pct"), ctx.ts.f("coupon_pa_pct"), ctx.ts.f("coupon_table")
+    monthly, table = ctx.ts.f("monthly_coupon_pct"), ctx.ts.f("coupon_table")
     out = []
     for name, label in (("scenario_favourable", "有利情況"), ("scenario_general", "一般情況")):
         pf, general = ctx.ts.f(name), name == "scenario_general"
@@ -444,22 +410,6 @@ def scenario_returns(ctx: IssuerContext) -> list[CheckResult]:
                 message=f"{label}總報酬率 = 月配息率 {monthly.value}% × {periods} 期",
             )
         )
-        if general:
-            annualized = Check(rid, f"{name}_annualized", Item.expected(f"{label}平均年化報酬率"), ctx.document)
-            annualized = annualized.needs(annual)
-            if (problem := annualized.blocked) is not None:
-                out.append(problem)
-                continue
-            ann = pf.value["annualized"]
-            out.append(
-                annualized.compare(
-                    annual.value,
-                    ann,
-                    ok=shown(annual.value, ann) == ann,
-                    evidence=pf.evidence + annual.evidence,
-                    message="一般情況（持有至到期、全部配息）平均年化報酬率須等於第 14 條年利率",
-                )
-            )
     return out
 
 
@@ -509,11 +459,9 @@ def document_rules(ctx: IssuerContext) -> list[CheckResult]:
         *coupon_consistency(ctx),
         *autocall_dates(ctx),
         trigger_per_period(ctx),
-        scenario_price_table(ctx),
         *name_consistency(ctx),
         distributor_product_code(ctx),
         currency_consistency(ctx),
-        scenario_notional(ctx),
         *price_header_pct(ctx),
         *coupon_repeats(ctx),
         *scenario_returns(ctx),

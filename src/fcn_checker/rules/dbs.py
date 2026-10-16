@@ -1,5 +1,6 @@
 """DBS 專屬規則（docs/rules/dbs-check-rules.md）：最大利率值（無條件進位）與其他出處、第 1～k 期、說明書內部交叉驗證、
-表A、情境基本假設與情境價格表。
+表A、情境投資金額與情境三表現最差連結標的。情境價格表、情境基本假設、情境重複寫出的最大利率值與情境三的價格由共用情境
+規則（rules/scenario.py，Issue #294）核對。
 
 參考條件表欄位、價格推算、審查標準（含 DBS 分節：固定警語、名稱樣板（含 Quanto、KI 段與單一標的轉人工覆核）、發行機構名稱、
 商品種類、最低金額倍數）與回填是各上手共用的規則。說明書有年利率（最大利率值括號內），不讀參考條件表（REFERENCE_FIELDS 為空）。
@@ -12,10 +13,10 @@ from __future__ import annotations
 import re
 from decimal import ROUND_CEILING, Decimal
 
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, ParsedField
 from ..text import full_brackets, squash
 from . import kit
-from .kit import Q4, Check, IssuerContext
+from .kit import Q4, IssuerContext
 
 ISSUER = "DBS"
 REFERENCE_FIELDS: tuple[str, ...] = ()
@@ -66,10 +67,11 @@ def ceiling_monthly(annual: Decimal) -> Decimal:
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """最大利率值 = 年利率 ÷ 12 無條件進位 4 位；情境基本假設最大利率值 = 最大利率值；情境二年化報酬率 = 年利率。"""
+    """最大利率值 = 年利率 ÷ 12 無條件進位 4 位（情境基本假設與利息算式的最大利率值、情境二年化報酬率由共用情境規則
+    `scenario.params` 核對，Issue #294）。"""
     f = ctx.ts.f
     annual, monthly = f("coupon_pa_pct"), f("monthly_coupon_pct")
-    out = [
+    return [
         kit.doc_check(
             ctx, "derive.monthly_coupon", "monthly_coupon_pct", "最大利率值 %（年利率 ÷ 12）", annual, monthly
         ).compare(
@@ -79,32 +81,6 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             fail_message="最大利率值須等於括號內年利率 ÷ 12、無條件進位到 4 位",
         )
     ]
-    scen = f("scenario_monthly_pct")
-    out.append(
-        kit.doc_check(
-            ctx, "doc.coupon_mentions", "scenario_monthly_pct", "情境基本假設最大利率值", monthly, scen
-        ).compare(monthly.value, scen.value, fail_message="情境基本假設的最大利率值須等於配息資料的最大利率值")
-    )
-    best = f("scenario_best_annual_pct")
-    out.append(
-        kit.doc_check(
-            ctx, "doc.coupon_mentions", "scenario_best_annual_pct", "情境二年化平均報酬率", annual, best
-        ).compare(annual.value, best.value, fail_message="於到期最佳情況的年化平均報酬率須等於年利率")
-    )
-    mentions = f("scenario_coupon_mentions")
-    if not mentions.ok:
-        name = "情境一～三利息算式最大利率值"
-        out.append(
-            Check("doc.coupon_mentions", "scenario_coupon_mentions", Item.expected(name), ctx.document).review(mentions)
-        )
-        return out
-    for occ in mentions.value:  # 情境利息算式「面額 X a% X」的 a（Issue #321）
-        out.append(
-            kit.doc_check(ctx, "doc.coupon_mentions", occ.field, f"{occ.where}{occ.name}", monthly, occ.value).compare(
-                monthly.value, occ.value.value, fail_message="須等於配息資料的最大利率值"
-            )
-        )
-    return out
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
@@ -194,7 +170,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         return ParsedField("name_months", pf.status, int(m[1]) if m else None, pf.evidence, note=pf.note)
 
     zh_months, en_months = months(zh, r"(\d+)個月期", "商品中文名稱"), months(en, r"(\d+)-Month", "商品英文名稱")
-    scen = f("scenario_tenor")
     return [
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
@@ -202,128 +177,57 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(
             tenor.value, en_months.value
         ),
-        kit.doc_check(ctx, rid, "scenario_tenor", "情境基本假設商品年期", tenor, scen).compare(tenor.value, scen.value),
-    ]
-
-
-def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """情境價格表逐格與表頭 % = 表1；情境基本假設商品面額 = 商品面額、發行價格 = 商品基本資料發行價格。"""
-    f = ctx.ts.f
-    table, scen = f("underlying_table"), f("scenario_table")
-    denom, scen_denom = f("denomination"), f("scenario_denomination")
-    price, scen_price = f("issue_price_pct"), f("scenario_issue_price_pct")
-    check = kit.doc_check(
-        ctx,
-        "doc.scenario_table",
-        "scenario_table",
-        "情境價格表與基本假設",
-        table,
-        scen,
-        denom,
-        scen_denom,
-        price,
-        scen_price,
-    )
-    if (problem := check.blocked) is not None:
-        return [problem]
-    issues = []
-    if scen.value.pcts != table.value.pcts:
-        issues.append("情境價格表表頭 % 和表1 不同")
-    if scen.value.tickers != table.value.tickers:
-        issues.append("情境價格表的彭博代碼和表1 不同")
-    rows, own = scen.value.prices, table.value.prices
-    if len(rows) == len(own):
-        for n, (a, b) in enumerate(zip(rows, own, strict=True), start=1):
-            diff = [c for c in b if a.get(c) != b[c]]
-            if diff:
-                issues.append(f"第 {n} 列{'、'.join(diff)}和表1 不同")
-    if scen_denom.value != denom.value:
-        issues.append(f"基本假設商品面額 {scen_denom.value} 不等於商品面額 {denom.value}")
-    if scen_price.value != price.value:
-        issues.append(f"基本假設發行價格 {scen_price.value}% 不等於 {price.value}%")
-    return [
-        check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #321，比照 BBVA #305）
-            kit.price_cells(own),
-            kit.price_cells(rows),
-            ok=not issues,
-            reason="value_mismatch",
-            message="；".join(issues) or "等於表1 與商品面額、發行價格",
-        )
     ]
 
 
 def scenario_investment(ctx: IssuerContext) -> list[CheckResult]:
-    """情境基本假設投資金額 `{面額} X {發行價格}% X {單位數}= X幣別{金額}`：面額 = 商品面額、% = 發行價格、金額 = 面額
-    X 發行價格 X 單位數（Issue #321，比照 Nomura #316）。"""
+    """情境基本假設投資金額 `{面額} X {發行價格}% X {單位數}= X幣別{金額}` 的金額 = 面額 X 發行價格 X 單位數（Issue #321，比照
+    Nomura #316）；算式代入的面額、發行價格由共用情境規則 `scenario.params` 核對（Issue #294）。"""
     f = ctx.ts.f
-    denom, pct, units = f("denomination"), f("issue_price_pct"), f("scenario_units")
-    principal, shown_pct, amount = (
+    units, principal, shown_pct, amount = (
+        f("scenario_units"),
         f("scenario_investment_principal"),
         f("scenario_investment_pct"),
         f("scenario_investment"),
     )
     check = kit.doc_check(
-        ctx,
-        "doc.scenario_table",
-        "scenario_investment",
-        "情境基本假設投資金額",
-        denom,
-        pct,
-        units,
-        principal,
-        shown_pct,
-        amount,
+        ctx, "doc.scenario_units", "scenario_investment", "情境基本假設投資金額", units, principal, shown_pct, amount
     )
     if (problem := check.blocked) is not None:
         return [problem]
-    expected = denom.value * pct.value / 100 * units.value
+    expected = principal.value * shown_pct.value / 100 * units.value
     if expected == expected.to_integral_value():  # 整數金額照說明書寫法不帶小數
         expected = int(expected)
     return [
         check.compare(
-            f"{denom.value:,} X {pct.value}% X {units.value} = {expected:,}",
+            f"{principal.value:,} X {shown_pct.value}% X {units.value} = {expected:,}",
             f"{principal.value:,} X {shown_pct.value}% X {units.value} = {amount.value:,}",
-            ok=principal.value == denom.value and shown_pct.value == pct.value and amount.value == expected,
-            fail_message="投資金額須為商品面額 X 發行價格 X 投資單位數",
+            ok=amount.value == expected,
+            fail_message="投資金額須為面額 X 發行價格 X 投資單位數",
         )
     ]
 
 
 def scenario3(ctx: IssuerContext) -> list[CheckResult]:
-    """情境三重複寫出的價格（Issue #321）：最終價格表的期初價格 = 表1；「表現最差連結標的為X，其最終價格(x)低於其執行
-    價格／下限觸發價格(y)」的 x = 最終價格表 X 那一列、y = 表1 X 的執行價格（無 KI）或下限觸發價格（KI 到期觀察）。
-    表現最差是哪一檔、股數與金額不重算。"""
+    """情境三「表現最差連結標的為X，其最終價格(x)低於其執行價格／下限觸發價格(y)」：x = 最終價格表 X 那一列；無 KI 寫執行
+    價格、KI 到期觀察寫下限觸發價格（Issue #321）。最終價格表的期初價格與 y 由共用情境規則 `scenario.strike` 和表1 比
+    （Issue #294）；表現最差是哪一檔、股數與金額不重算。"""
     f = ctx.ts.f
-    table, initial = f("underlying_table"), f("scenario3_initial")
-    out = [
-        kit.doc_check(
-            ctx, "doc.scenario_table", "scenario3_initial", "情境三最終價格表的期初價格", table, initial
-        ).compare(  # compare 的引數先算，依賴欄位有問題時不能取 value
-            kit.price_cells([{"initial": r["initial"]} for r in table.value.prices]) if table.ok else None,
-            kit.price_cells([{"initial": v} for v in initial.value]) if initial.ok else None,
-            ok=table.ok and initial.ok and [r["initial"] for r in table.value.prices] == initial.value,
-            fail_message="須等於表1 各列期初價格",
-        )
-    ]
     worst, ki = f("scenario3_worst"), f("ki_type")
-    check = kit.doc_check(
-        ctx, "doc.scenario_table", "scenario3_worst", "情境三表現最差連結標的的價格", table, ki, worst
-    )
+    check = kit.doc_check(ctx, "doc.scenario_table", "scenario3_worst", "情境三表現最差連結標的的價格", ki, worst)
     if (problem := check.blocked) is not None:
-        return [*out, problem]
+        return [problem]
     w = worst.value
     column = "ki" if ki.value == "AM" else "strike"
     words = {"strike": "執行價格", "ki": "下限觸發價格"}
-    row = table.value.prices[table.value.tickers.index(w["ticker"])]
-    out.append(
+    return [
         check.compare(
-            f"{w['ticker']} 最終價格 {w['table_final']:,}（最終價格表）、{words[column]} {row[column]:,}（表1）",
-            f"{w['ticker']} 最終價格 {w['final']:,}、{words[w['column']]} {w['price']:,}",
-            ok=w["final"] == w["table_final"] and w["column"] == column and w["price"] == row[column],
-            fail_message="最終價格須等於最終價格表；無 KI 寫執行價格、KI 到期觀察寫下限觸發價格，且等於表1",
+            f"{w['ticker']} 最終價格 {w['table_final']:,}（最終價格表）、寫{words[column]}",
+            f"{w['ticker']} 最終價格 {w['final']:,}、寫{words[w['column']]}",
+            ok=w["final"] == w["table_final"] and w["column"] == column,
+            fail_message="最終價格須等於最終價格表；無 KI 寫執行價格、KI 到期觀察寫下限觸發價格",
         )
-    )
-    return out
+    ]
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
@@ -333,7 +237,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *document_info(ctx),
         *periods(ctx),
-        *tables(ctx),
         *scenario_investment(ctx),
         *scenario3(ctx),
     ]

@@ -1,6 +1,7 @@
-"""BNP 第一章第 18 項(3) 情境分析（核對規則 §3.4 重印表、§3.7）：假設、重印標的表、較差情境執行價、各情境算式。
+"""BNP 第一章第 18 項(3) 情境分析（核對規則 §3.7）：情境標題、各情境算式。
 
-總配息 = 已進位的每期配息 × 期數（同 MS）。月配息率與獲利情境年化報酬率由 rules/bnp.py 依參考條件表核對；
+重印標的表、假設的商品面額與投資本金、各處月配息率、獲利情境年化報酬率與較差情境執行價格由共用情境規則
+（rules/scenario.py，Issue #294）核對。總配息 = 已進位的每期配息 × 期數（同 MS）；
 每期配息的預期值也用表上年利率推得的月配息率（依說明書顯示位數四捨五入）。較差／最差情境的股數、剩餘金額、總報酬率
 依文件寫的收盤價與匯率驗算（收盤價、匯率是試算值，本身不核對）。情境標題、期別寫法未知或算式找不到時轉人工覆核。
 """
@@ -13,8 +14,6 @@ from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from ..parsers.bnp_scenario import Scenario
 from ..schema import CheckResult, Item, OrderValue
 from ..schema import CheckStatus as S
-from ..standard_fields import PriceRow
-from ..text import squash
 from . import kit
 from .kit import Check, IssuerContext
 
@@ -43,64 +42,12 @@ def _q(decimals: int) -> Decimal:
     return Decimal(1).scaleb(-decimals)
 
 
-def reprint(ctx: IssuerContext) -> list[CheckResult]:
-    """第 18 項重印標的表的各價格與百分比逐格 = 第 11 項。"""
-    pt, st = ctx.ts.f("underlying_table"), ctx.ts.scenarios.table
-    out = []
-    for rid, field, name, value in (
-        (
-            "doc.scenario_table",
-            "scenario_table",
-            "第 18 項重印標的表",
-            lambda t: [r["prices"] for r in t.value["rows"]],
-        ),
-        ("doc.scenario_header_pct", "scenario_pcts", "第 18 項重印標的表百分比", lambda t: t.value["pcts"]),
-    ):
-        check = Check(rid, field, Item.expected(name), ctx.document).needs(pt, st)
-        if (problem := check.blocked) is not None:
-            out.append(problem)
-            continue
-        out.append(
-            check.compare(
-                value(pt),
-                value(st),
-                evidence=list(st.evidence),
-                fail_message="第 18 項重印的標的表須與第 11 項逐格相同",
-            )
-        )
-    return out
-
-
-def parameters(ctx: IssuerContext) -> list[CheckResult]:
-    """假設的商品面額、投資本金 = 面額；情境種類依 KI 型態（無 KI 與到期觀察五個、每日／每期觀察六個）。"""
+def titles(ctx: IssuerContext) -> list[CheckResult]:
+    """情境種類依 KI 型態（無 KI 與到期觀察五個、每日／每期觀察六個）；假設的商品面額與投資本金由共用情境規則
+    `scenario.params` 核對（Issue #294）。"""
     sec, f = ctx.ts.scenarios, ctx.ts.f
     rid = "doc.scenario_parameters"
-    denom = f("denomination")
     out = []
-    for field, name, hit in (
-        ("scenario_denomination", "第 18 項假設商品面額", sec.denomination),
-        ("scenario_principal", "第 18 項假設投資本金", sec.principal),
-    ):
-        item = Item.expected(name)
-        if not denom.ok:
-            out.append(Check(rid, field, item, ctx.document).review(denom))
-        elif hit is None:
-            out.append(
-                kit.calc_result(
-                    rid,
-                    field,
-                    name,
-                    ["第 18 項假設找不到這個值或出現多次"],
-                    kit.evidence(sec.assumptions[:1]),
-                    review=True,
-                )
-            )
-        else:
-            value = hit.value.amount
-            issues = [] if value == denom.value else ["與第一章第 6 項商品面額不同"]
-            out.append(
-                kit.calc_result(rid, field, name, issues, kit.evidence(hit.lines), expected=denom.value, actual=value)
-            )
     ki = f("ki_type")
     kinds = [s.kind for s in sec.scenarios]
     check = Check(rid, "scenario_titles", Item.expected("第 18 項情境標題"), ctx.document)
@@ -121,71 +68,6 @@ def parameters(ctx: IssuerContext) -> list[CheckResult]:
             )
         )
     return out
-
-
-def worse_strike(ctx: IssuerContext) -> list[CheckResult]:
-    """較差／最差情境假設句與股數算式的執行價格 = 第 11 項表現最差標的的執行價格（核對規則 §3.4）。
-
-    表現最差標的是假設句「(假設為X)」對到第 11 項名稱列的那一檔；單一標的就是那一檔。對不到時轉人工覆核。
-    """
-    rows, rid, name = ctx.ts.f("underlying_prices"), "doc.scenario_strike", "較差情境執行價格"
-    out = []
-    for s in ctx.ts.scenarios.scenarios:
-        if s.kind not in ("worse", "worst"):
-            continue
-        field = f"情境{s.number}_strike"
-        if not rows.ok:
-            out.append(Check(rid, field, Item.expected(name), ctx.document).review(rows))
-            continue
-        if s.strike is None:
-            out.append(
-                kit.calc_result(
-                    rid,
-                    field,
-                    name,
-                    ["找不到「收盤價格…小於其執行價格…」假設句"],
-                    kit.evidence(s.lines[:1]),
-                    review=True,
-                )
-            )
-            continue
-        strike = s.strike.value.strike
-        target, why = _worst_row(s, list(rows.value))
-        if target is None:
-            out.append(kit.calc_result(rid, field, name, [why], kit.evidence(s.strike.lines), review=True))
-            continue
-        expected = target.prices["strike"]
-        pct = kit.field_value(ctx.ts, "strike_pct")
-        issues = []
-        if not kit.scenario_price_ok(strike, expected, target.prices.get("initial"), pct):  # 兩種進位都接受（#259）
-            issues.append(f"執行價格 {strike} 不是表現最差標的 {target.ticker} 的執行價格 {expected}")
-        if s.shares is not None and s.shares.value.strike != strike:
-            issues.append(f"股數算式的執行價格 {s.shares.value.strike} 與假設句的 {strike} 不同")
-        out.append(
-            kit.calc_result(
-                rid,
-                field,
-                name,
-                issues,
-                kit.evidence(s.strike.lines) + (kit.evidence(s.shares.lines) if s.shares else []),
-                expected=expected,
-                actual=strike,
-            )
-        )
-    return out
-
-
-def _worst_row(s: Scenario, rows: list[PriceRow]) -> tuple[PriceRow | None, str | None]:
-    """情境假設的表現最差標的那一列；對不到時 (None, 原因)。"""
-    if len(rows) == 1:
-        return rows[0], None
-    if s.worst_name is None:
-        return None, "多檔標的但找不到「(假設為某標的)」，無法確定表現最差標的是哪一檔"
-    wanted = squash(s.worst_name.value)
-    row = next((r for r in rows if r.name is not None and squash(r.name) == wanted), None)
-    if row is None:
-        return None, f"假設的表現最差標的「{s.worst_name.value}」對不到第 11 項的標的名稱"
-    return row, None
 
 
 # ---------------------------------------------------------------- 各情境算式（核對規則 §3.7）
@@ -356,7 +238,7 @@ def _redemption(c: _Case, item: Item) -> CheckResult:
 
 
 def _profit_return(c: _Case, item: Item) -> CheckResult:
-    """獲利情境總報酬率 = [(面額 + 累積) ÷ 面額] − 1，依說明書顯示位數四捨五入；年化報酬率另由 derive.annualized_return 核對。"""
+    """獲利情境總報酬率 = [(面額 + 累積) ÷ 面額] − 1，依說明書顯示位數四捨五入；年化報酬率另由共用情境規則 scenario.params 核對。"""
     s = c.s
     if s.total_return is None:
         return c.unread("return", item, "找不到總報酬率算式")
@@ -476,4 +358,4 @@ def _worse(c: _Case, items: dict[str, Item]) -> list[CheckResult]:
 
 
 def run(ctx: IssuerContext) -> list[CheckResult]:
-    return [*reprint(ctx), *parameters(ctx), *worse_strike(ctx), *calculations(ctx)]
+    return [*titles(ctx), *calculations(ctx)]

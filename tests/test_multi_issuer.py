@@ -180,6 +180,52 @@ def test_read_term_sheet_gives_missing_for_a_field_it_does_not_provide(tmp_path,
     assert "no_such_field" in pf.note
 
 
+SYNTH_MODULES = (
+    "synth",
+    "hsbc_synth",
+    "ms_synth",
+    "bnp_synth",
+    "sg_synth",
+    "citi_synth",
+    "jpm_synth",
+    "nomura_synth",
+    "gs_synth",
+    "natixis_synth",
+    "ca_synth",
+    "bbva_synth",
+    "dbs_synth",
+    "ubs_synth",
+)
+SCENARIO_FIELDS = ("scenario_reprint_table", "scenario_params", "scenario_prices")
+
+
+@pytest.mark.parametrize("module", SYNTH_MODULES)
+def test_every_issuer_provides_the_scenario_fields_or_absent(tmp_path, module):
+    """情境分析共用規則由單份核對對 14 家執行：每家都交出三塊情境標準欄位，範本沒有的交 absent；有重印價格表的也交出
+    主價格表（Issue #294）。"""
+    import importlib
+
+    from fcn_checker.extraction import extract_lines
+    from fcn_checker.ingestion import open_pdf
+    from fcn_checker.issuers import detect
+    from fcn_checker.schema import FieldStatus
+
+    synth_module = importlib.import_module(module)
+    pdf = synth_module.build_pdf(tmp_path / "TS.pdf", synth_module.Spec(), iis=False)
+    doc = open_pdf(pdf)
+    try:
+        lines = extract_lines(doc)
+    finally:
+        doc.close()
+    issuer, _ = detect(lines)
+    ts = issuer.read(lines)
+    names = SCENARIO_FIELDS + (("main_price_table",) if ts.f("scenario_reprint_table").ok else ())
+    for name in names:
+        pf = ts.f(name)
+        assert "上手未提供" not in pf.note, (issuer.code, name)
+        assert pf.ok or pf.status == FieldStatus.NOT_APPLICABLE, (issuer.code, name, pf.status, pf.note)
+
+
 def test_shared_rules_can_only_read_standard_fields():
     from fcn_checker.rules.kit import read_standard
 

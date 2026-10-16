@@ -65,14 +65,15 @@ def test_monthly_kept_annual_and_scenario_annualized_follow_the_sheet(tmp_path):
     r = check(tmp_path, Spec(annual=Decimal("15.8")))  # 15.8 ÷ 12 = 1.31666… → 1.3167
     assert r.status == S.PASS, problems(r)
     assert rule(r, "derive.monthly_coupon")[0].expected == Decimal("1.3167")
-    assert all(x.actual == Decimal("15.80") for x in rule(r, "derive.annualized_return"))
+    annualized = [x for x in rule(r, "scenario.params") if x.field.startswith("scenario_annualized_return")]
+    assert annualized and all(x.actual == Decimal("15.80") for x in annualized)  # 範本沒有年利率：和參考條件表比
 
 
 @pytest.mark.parametrize(
     "column,value,rule_id",
     [
         ("Coupon p.a. (%)", 12.12, "derive.monthly_coupon"),
-        ("Coupon p.a. (%)", 12.12, "derive.annualized_return"),
+        ("Coupon p.a. (%)", 12.12, "scenario.params"),  # 獲利情境年化報酬率
         ("Coupon p.a. (%)", 12.12, "doc.scenario_calculations"),  # 每期配息依表上年利率推得的月配息率
         ("KO(%)", 101, "field.ko_pct"),
         ("K(%)", 71, "field.strike_pct"),
@@ -114,10 +115,10 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
         # 月配息率與年化報酬率：正式條款正確、重印處錯誤也要抓到（核對規則 §3.8）
         (("art15", "固定配息率 (1.0000%)", "固定配息率 (1.0100%)"), "derive.monthly_coupon", S.MISMATCH),
         (("art15", "{1.0000%×n(j)/N(j)}", "{1.0100%×n(j)/N(j)}"), "derive.monthly_coupon", S.MISMATCH),
-        (("art18", "月配息率=1.0000%", "月配息率=1.0100%"), "derive.monthly_coupon", S.MISMATCH),
-        (("scen.二", "×1.0000%", "×1.0100%"), "derive.monthly_coupon", S.MISMATCH),
-        (("scen.一", "年化報酬率為12.00%", "年化報酬率為12.10%"), "derive.annualized_return", S.MISMATCH),
-        (("scen.三", "年化報酬率為12.00%", "報酬率另計"), "derive.annualized_return", S.REVIEW_REQUIRED),
+        (("art18", "月配息率=1.0000%", "月配息率=1.0100%"), "scenario.params", S.MISMATCH),
+        (("scen.二", "×1.0000%", "×1.0100%"), "scenario.params", S.MISMATCH),
+        (("scen.一", "年化報酬率為12.00%", "年化報酬率為12.10%"), "scenario.params", S.MISMATCH),
+        (("scen.三", "年化報酬率為12.00%", "報酬率另計"), "scenario.params", S.REVIEW_REQUIRED),
         # 封面與第一章交叉驗證
         (("cover", "商品種類：股票與/或", "商品種類：股票或"), "doc.product_type", S.MISMATCH),
         (("art1", "固定配息", "固定收益"), "doc.name_consistency", S.MISMATCH),
@@ -145,11 +146,11 @@ S0 = Spec()  # 預設：D 型、記憶式、到期 KI、2 檔、4 個月、Non-C
         (("art16.table", "140.0000", "140.0001"), "derive.prices", S.MISMATCH),
         (("art16", "若在期末定價日", "若在每個觀察日"), "field.ki_type", S.REVIEW_REQUIRED),
         # 第 18 項情境（§16 正確、§18 重印錯）
-        (("art18.table", "70.0000", "70.0001"), "doc.scenario_table", S.MISMATCH),
-        (("art18.table", "60.00%）", "61.00%）"), "doc.scenario_header_pct", S.MISMATCH),
-        (("scen.四", "小於其執行價=70.0000", "小於其執行價=70.0001"), "doc.scenario_strike", S.MISMATCH),
-        (("art18", "年期：4 個月", "年期：5 個月"), "doc.scenario_parameters", S.MISMATCH),
-        (("art18", "面額 = 10,000.00 美元", "面額 = 20,000.00 美元"), "doc.scenario_parameters", S.MISMATCH),
+        (("art18.table", "70.0000", "70.0001"), "scenario.reprint", S.MISMATCH),
+        (("art18.table", "60.00%）", "61.00%）"), "scenario.reprint", S.MISMATCH),
+        (("scen.四", "小於其執行價=70.0000", "小於其執行價=70.0001"), "scenario.strike", S.MISMATCH),
+        (("art18", "年期：4 個月", "年期：5 個月"), "scenario.params", S.MISMATCH),
+        (("art18", "面額 = 10,000.00 美元", "面額 = 20,000.00 美元"), "scenario.params", S.MISMATCH),
         (("scen.二", "=200.00 美元", "=201.00 美元"), "doc.scenario_calculations", S.MISMATCH),
         (("scen.二", "100.00 美元×2", "100.00 美元×3"), "doc.scenario_calculations", S.MISMATCH),
         (("scen.二", "=100.00 美元", "=101.00 美元"), "doc.scenario_calculations", S.MISMATCH),

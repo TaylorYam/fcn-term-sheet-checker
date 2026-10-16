@@ -14,14 +14,17 @@ from typing import Any
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import ScenarioParam
 from ..text import squash
 from . import barc_schedule as schedule
 from . import money, price_table
+from .common import by_value, derived
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "barc-zh-pd"
-# 3：價格表改由 parsers/price_table.py 讀（Issue #288）；4：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "4"
+# 3：價格表改由 parsers/price_table.py 讀（Issue #288）；4：日期表標準欄位與共用排程推導（Issue #289）；
+# 5：情境重印價格表與假設值交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "5"
 
 # 章名「第一章 商品基本資料」、條號「1.」、子項「(1)」（範本規格 §3）
 LAYOUT = LayoutSpec(
@@ -588,6 +591,8 @@ def _scenario_notional(ti: TextIndex) -> ParsedField:
 
 
 _CASE_IDS = ("i", "ii", "iii")
+SCENARIO_WHERE = "第一章第 16 條情境分析價格表"
+ARTICLE_16 = "第16條"  # 重複出現處的條文（§16 情境試算的月配息率交給共用情境規則）
 
 
 def _currency_occurrences(
@@ -696,9 +701,9 @@ def _repeat_mentions(doc: Document, arts: dict[int, Span], s16: TextIndex) -> li
         key=lambda m: m.start(),
     )
     for m in found:
-        out.append(Mention("第16條", Decimal(m.group(1)), s16.lines_for(m.start(), m.end())))
+        out.append(Mention(ARTICLE_16, Decimal(m.group(1)), s16.lines_for(m.start(), m.end())))
     if not found:
-        out.append(Mention("第16條", Decimal("NaN"), []))
+        out.append(Mention(ARTICLE_16, Decimal("NaN"), []))
     return out
 
 
@@ -782,13 +787,14 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["ki_type"] = _ki_type(s15, flds["ki_pct"], flds["strike_pct"])
     flds["price_table"] = _price_table(s15, "price_table", PRICE_TABLE.where, _PRICE_START, _PRICE_END)
     flds["underlying_prices"] = price_table.price_rows(flds["price_table"])  # 表上沒有代號，以 `underlyings` 同順序為準
-    flds["scenario_price_table"] = _price_table(
-        doc.span_lines(arts.get(16)),
-        "scenario_price_table",
-        "第一章第 16 條情境分析價格表",
-        _SCENARIO_START,
-        _SCENARIO_END,
+    scenario_table = _price_table(
+        doc.span_lines(arts.get(16)), "scenario_price_table", SCENARIO_WHERE, _SCENARIO_START, _SCENARIO_END
     )
+    flds["main_price_table"] = price_table.at("main_price_table", flds["price_table"], PRICE_TABLE)
+    flds["scenario_reprint_table"] = price_table.at(
+        "scenario_reprint_table", scenario_table, replace(PRICE_TABLE, where=SCENARIO_WHERE)
+    )
+    flds["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
 
     tables = schedule.find_tables(doc, arts.get(13))
     flds["coupon_table"] = schedule.coupon_table(tables)
@@ -802,13 +808,9 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     flds["autocall_schedule"] = schedule.autocall_schedule(flds.__getitem__)
 
     s16 = TextIndex(doc.span_lines(arts.get(16)))
-    flds["scenario_notional"] = _scenario_notional(s16)
     flds.update(_scenario_returns(s16))
-    header_pcts = (
-        _header_pcts(flds["price_table"], "第15條")
-        + _header_pcts(flds["scenario_price_table"], "第16條")
-        + _scenario_header_pcts(doc.span_lines(arts.get(16)))
-    )
+    # §16(3) 重印價格表的欄頭 % 由共用情境規則和 §15 價格表比（Issue #294）；其他情境表的欄頭仍和定義句比
+    header_pcts = _header_pcts(flds["price_table"], "第15條") + _scenario_header_pcts(doc.span_lines(arts.get(16)))
 
     flds["subscription_start_date"] = _labelled_date(
         doc.chapter_lines(4), r"^商品開始受理申購日期[:：]", "subscription_start_date", "第四章「商品開始受理申購日期」"
@@ -853,9 +855,33 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
         "print_dates", [occ("print_date", "刊印日期", "封面刊印日期", flds["print_date"])]
     )
 
+    repeats = _repeat_mentions(doc, arts, s16)
+    flds["scenario_params"] = standard_fields.occurrences("scenario_params", _scenario_params(flds, s16, repeats))
     mentions = {
         "monthly": _mentions(doc, arts, _MONTHLY_PATTERNS),
         "annual": _mentions(doc, arts, _ANNUAL_PATTERNS),
-        "repeat": _repeat_mentions(doc, arts, s16),
+        "repeat": [m for m in repeats if m.article != ARTICLE_16],
     }
     return BarcTermSheet(flds, mentions, TextIndex(all_lines), doc, header_pcts)
+
+
+def _scenario_params(flds: dict[str, ParsedField], s16: TextIndex, repeats: list[Mention]) -> list[ScenarioParam]:
+    """交給共用情境規則的 §16 情境假設值（Issue #294）：情境假設每單位商品面額、情境試算的月配息率（同一個值一筆；
+    讀不到數值時一筆缺漏）、一般情況平均年化報酬率。"""
+    params = [ScenarioParam("scenario_denomination", "第 16 條情境假設", _scenario_notional(s16))]
+    for value, lines in by_value((m.value, m.lines) for m in repeats if m.article == ARTICLE_16).items():
+        pf = (
+            ParsedField(
+                "scenario_monthly_coupon",
+                FieldStatus.MISSING,
+                evidence=[Evidence.of(x) for x in lines],
+                note="第 16 條情境試算有月配息率讀不到數值（寫法與範本不同）",
+            )
+            if value.is_nan()
+            else ParsedField.present("scenario_monthly_coupon", value, lines)
+        )
+        params.append(ScenarioParam("scenario_monthly_coupon", "第 16 條情境試算的", pf))
+    general = flds["scenario_general"]
+    annualized = derived("scenario_general_annualized", general, general.value["annualized"] if general.ok else None)
+    params.append(ScenarioParam("scenario_annualized_return", "第 16 條(ii)一般情況平均", annualized))
+    return params

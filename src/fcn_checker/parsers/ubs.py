@@ -17,17 +17,17 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam
 from ..text import squash
 from . import money, price_table, schedule
-from .common import RawText, capture_group, derived, fee_rates, number, zh_number
+from .common import RawText, by_value, capture_group, derived, fee_rates, number, zh_number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
 # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：非記憶式要有明確的提前出場事件句（Issue #297）；
 # 4：補讀發行價格金額、申購價金、十五設定參數的變動配息（Issue #303）；5：說明文字與十五情境重複寫出的值（Issue #320）；
-# 6：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "6"
+# 6：日期表標準欄位與共用排程推導（Issue #289）；7：情境價格表與設定參數交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "7"
 SECTIONS = ("商品基本資料", "相關機構事業概況", "商品風險揭露", "投資風險警語", "一般交易事項", "特別記載事項")
 PRODUCT_TYPE = "股權結構型商品"
 OLD_PRODUCT_TYPE = "股權結構型債券"
@@ -238,6 +238,10 @@ def read(lines: Sequence[Line]) -> UbsTermSheet:
     _table_fields(fields)
     _schedule(fields)
     _article15(fields, article(15))
+    fields["scenario_reprint_table"] = price_table.at(
+        "scenario_reprint_table", fields["scenario_table"], SCENARIO_TABLE
+    )
+    fields["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
     scenarios = _scenarios(fields, article(15))
     put("isin", article(25), r"ISIN代碼[:：]([A-Z]{2}[A-Z0-9]{10})")
     _organizations(fields, doc)
@@ -375,6 +379,7 @@ def _article8(fields: dict[str, ParsedField], art8: list[Line], put: Callable) -
         "underlying_table", table_region(art8, r"其中[:：]", "將四捨五入至小數點後第4位"), PRICE_TABLE
     )
     fields["underlying_table"] = table
+    fields["main_price_table"] = price_table.at("main_price_table", table, PRICE_TABLE)
     # KO 條款寫出的 KO %（UB3）：價格表表頭以外的出處
     head = table.value.header_lines if table.ok else ()
     mentions = [m for m in ko_pct if not set(ti.lines_for(m.start(), m.end())) & set(head)]
@@ -670,9 +675,44 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
     )
 
 
+def _assumed(fields: dict[str, ParsedField]) -> list[ScenarioParam]:
+    """十五設定參數交給共用情境規則的出處（Issue #294）：天期、配息觀察次數、每單位面額、初始投資金額、發行價格、固定配息率
+    與年化配息率；KO 每日型另有變動配息率與它的年化配息率。範本沒有的（例：沒寫年化配息率）不列。"""
+    where = "商品基本資料十五設定參數"
+    observation, table = fields["ko_observation"], fields["coupon_table"]
+    daily = (observation.ok and observation.value == "D") or (table.ok and table.value["kind"] == "D")
+    items = [
+        ("scenario_tenor", where, "scenario_tenor"),
+        ("scenario_coupon_periods", f"{where}「每月（共N個）」的", "scenario_coupon_count"),
+        ("scenario_denomination", where, "scenario_denomination"),
+        ("scenario_initial_investment", f"{where}每單位面額", "scenario_investment"),
+        ("scenario_issue_price", where, "scenario_issue_price_pct"),
+        ("scenario_monthly_coupon", f"{where}固定", "scenario_monthly_pct"),
+        ("scenario_coupon_pa", f"{where}固定配息率的", "scenario_coupon_pa_pct"),
+    ]
+    if daily:
+        items += [
+            ("scenario_monthly_coupon", f"{where}變動", "scenario_variable_coupon_pct"),
+            ("scenario_coupon_pa", f"{where}變動配息率的", "scenario_variable_coupon_pa_pct"),
+        ]
+    return [
+        ScenarioParam(code, place, fields[name])
+        for code, place, name in items
+        if fields[name].status != FieldStatus.NOT_APPLICABLE
+    ]
+
+
+# 十五情境算式代入的值 → 共用情境規則的出處代號
+SCENARIO_MENTIONS = {
+    "scenario_denomination_mentions": "scenario_denomination",
+    "scenario_coupon_mentions": "scenario_monthly_coupon",
+}
+
+
 def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurrence]:
     """十五重複寫出的值（Issue #320）：設定參數「配息觀察日／期間：每月（共N個）」、「提前出場觀察日」（有這句才核）、
-    情境分析一～四算式代入的每單位面額與配息率；回傳各情境金額旁的幣別出處（併入 `currency_others`）。
+    情境分析一～四算式代入的每單位面額與配息率；設定參數與算式代入的值交成共用情境規則的 `scenario_params`（同一個值
+    一筆，Issue #294）。回傳各情境金額旁的幣別出處（併入 `currency_others`）。
 
     情境的金額寫到小數 2 位（或「價值為0X」），股價寫到小數 4 位：小數 4 位的股價跟著標的走（UB3 澳幣連日股、UB6 日圓
     連美股），不列入；期末匯率、股數、報酬率不讀。"""
@@ -686,10 +726,16 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
     fields["ko_wording_art15"] = ko
     marks = [(m.start(), m[1]) for m in ti.finditer(r"情境分析([一二三四五])[:：]")]
     end = ti.text.find("以上情境分析相關之免責聲明", marks[0][0]) if marks else -1
+    where = "商品基本資料十五情境算式代入的"
     if not marks:
         note = "商品基本資料十五找不到「情境分析一：」"
-        for name in ("scenario_denomination_mentions", "scenario_coupon_mentions"):
-            fields[name] = ParsedField.missing(name, note)
+        fields["scenario_params"] = standard_fields.occurrences(
+            "scenario_params",
+            [
+                *_assumed(fields),
+                *(ScenarioParam(c, where, ParsedField.missing(c, note)) for c in SCENARIO_MENTIONS.values()),
+            ],
+        )
         return [
             Occurrence(
                 "scenario_currency",
@@ -700,6 +746,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         ]
     end = len(ti.text) if end < 0 else end
     lo = marks[0][0]
+    params = _assumed(fields)
     for name, patterns, convert in (
         # 算式第一個代入值（`=X…`、`=（X/`）與減去的初始投資金額（`-X=`）都是每單位面額
         (
@@ -718,11 +765,12 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
             ],
             key=lambda h: h[0],
         )
-        fields[name] = (
-            ParsedField.present(name, [v for _, v, _ in hits], [ln for *_, lns in hits for ln in lns])
-            if hits
-            else ParsedField.missing(name, "商品基本資料十五情境分析的算式讀不到")
-        )
+        code = SCENARIO_MENTIONS[name]
+        if not hits:
+            params.append(ScenarioParam(code, where, ParsedField.missing(code, "商品基本資料十五情境分析的算式讀不到")))
+        values = by_value((v, lns) for _, v, lns in hits)  # 同一個值一筆（證據為每一處）
+        params += [ScenarioParam(code, where, ParsedField.present(code, v, lns)) for v, lns in values.items()]
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
     out = []
     for k, (start, zh) in enumerate(marks):
         stop = marks[k + 1][0] if k + 1 < len(marks) else end

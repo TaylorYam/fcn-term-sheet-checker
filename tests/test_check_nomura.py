@@ -67,7 +67,8 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in NOMURA.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    assert len(rule(r, "doc.coupon_mentions")) == 2  # 第 14 項設定參數、第 15 項(1)
+    assert len(rule(r, "doc.coupon_mentions")) == 1  # 第 15 項(1)（第 14 項設定參數的是 scenario.params）
+    assert len(rule(r, "scenario.params")) == 5  # 設定參數年期、面額、固定配息率；投資金額算式的面額、發行價格
     assert rule(r, "standard.fixed_warning")[0].actual == 2  # 上手別說明書次數
     assert len(rule(r, "standard.guarantor_name")) == 3
     assert len(rule(r, "standard.agent_name")) == 2
@@ -141,9 +142,9 @@ def test_non_monthly_coupon_needs_review(tmp_path):
             ),
             "doc.coupon_mentions",
         ),
-        (Edit("就每配息日而言，0.8333%", "就每配息日而言，0.8334%", "ts.art14.table"), "doc.coupon_mentions"),
+        (Edit("就每配息日而言，0.8333%", "就每配息日而言，0.8334%", "ts.art14.table"), "scenario.params"),
         (Edit("70.00%", "75.00%", "ts.art14.table"), "doc.scenario_table"),
-        (Edit("10,000美元", "1,000美元", "ts.art14.table"), "doc.scenario_params"),
+        (Edit("10,000", "1,000", "ts.art14.table"), "scenario.params"),  # 面額與投資金額算式一起改：算式本身仍成立
         (
             Edit(
                 "商品名稱：Nomura International Funding Pte. Ltd.發行6個月",
@@ -158,15 +159,16 @@ def test_non_monthly_coupon_needs_review(tmp_path):
         (Edit("計價幣別：美元(USD)", "計價幣別：美元(JPY)", "ts.art5"), "doc.currency_consistency"),
         (Edit("◎ 計價幣別：美元(USD)", "◎ 計價幣別：美元(JPY)", "ts.cover"), "doc.currency_consistency"),
         (Edit(f"(ISIN No. {ISIN} / TDCC No.", "(ISIN No. XS1999900002 / TDCC No.", "ts.cover"), "doc.isin_consistency"),
-        (Edit("6個月", "7個月", "ts.art14.table"), "doc.coupon_periods"),
+        (Edit("6個月", "7個月", "ts.art14.table"), "scenario.params"),
         (Edit("彭博代碼：ZNB UW Equity", "彭博代碼：ZNX UW Equity", "ts.art9"), "doc.underlying_tickers"),
         (Edit("每單位商品面額x 100.00%", "每單位商品面額x 99.00%", "ts.art7"), "doc.redemption_pct"),
         # Issue #316：說明文字、情境三、設定參數投資金額重複寫出的幣別與金額
         (Edit("以美元為計價單位給付（四捨五入", "以日圓為計價單位給付（四捨五入", "ts.art7"), "field.currency"),
         (Edit("本商品係以美元計價", "本商品係以日圓計價", "ts.ch三"), "field.currency"),
         (Edit("支付30.00美元", "支付30.00日圓", "ts.art14"), "field.currency"),
-        (Edit("x 100% x 1 = 10,000美元", "x 100% x 1 = 20,000美元", "ts.art14.table"), "doc.scenario_params"),
-        (Edit("x 100% x 1 = 10,000美元", "x 99% x 1 = 10,000美元", "ts.art14.table"), "doc.scenario_params"),
+        (Edit("x 100% x 1 = 10,000美元", "x 100% x 1 = 20,000美元", "ts.art14.table"), "doc.scenario_units"),
+        (Edit("x 100% x 1 = 10,000美元", "x 100% x 2 = 20,000美元", "ts.art14.table"), "doc.scenario_units"),
+        (Edit("x 100% x 1 = 10,000美元", "x 99% x 1 = 9,900美元", "ts.art14.table"), "scenario.params"),
         (Edit("x 100% x 1 = 10,000美元", "x 100% x 1 = 10,000日圓", "ts.art14.table"), "field.currency"),
         (Edit("轉換成美元進行投資", "轉換成日圓進行投資", "ts.ch三"), "field.currency"),
         (Edit("若美元利率上漲", "若日圓利率上漲", "ts.ch三"), "field.currency"),

@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam
 from ..text import squash
 from . import iis, money, price_table, schedule
 from .common import Hit, Mention, RawText, capture_group, derived, hits, number, one
@@ -22,8 +22,8 @@ from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "nomura-zh-pd"
 # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：年利率取自情境、無 KI 要有明確到期贖回款（Issue #297）；
-# 4：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "4"
+# 4：日期表標準欄位與共用排程推導（Issue #289）；5：情境設定參數交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "5"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -222,7 +222,8 @@ class NomuraTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
-    coupon_mentions: list[Mention]  # 每期配息率主來源（第 7 項）以外的出處（第 14 項設定參數、第 15 項(1)）
+    # 每期配息率主來源（第 7 項）以外的出處（第 15 項(1)；第 14 項設定參數的交給共用情境規則）
+    coupon_mentions: list[Mention]
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -355,10 +356,7 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [*fields["currency_others"].value, *wording, _scenario3_currency(article(14))]
     )
-    coupons = [
-        Mention.of_field("第 14 項設定參數固定配息率", fields["coupon_art14"]),
-        Mention.of_field("第 15 項(1) 固定配息率", fields["coupon_art15"]),
-    ]
+    coupons = [Mention.of_field("第 15 項(1) 固定配息率", fields["coupon_art15"])]
     return NomuraTermSheet(fields, TextIndex(doc.lines), doc, coupons)
 
 
@@ -421,6 +419,7 @@ def _article7(fields: dict[str, ParsedField], art7: list[Line], put: Callable) -
     )
     table = price_table.read("underlying_table", _table_region(art7), PRICE_TABLE)
     fields["underlying_table"] = table
+    fields["main_price_table"] = price_table.at("main_price_table", table, PRICE_TABLE)
     fields["underlyings"] = price_table.underlyings(table)
     for col, key in (("strike", "strike_pct"), ("ko", "ko_pct"), ("ki", "ki_pct")):
         if table.ok and col in table.value.pcts:
@@ -781,7 +780,23 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
     fields["scenario_investment_amount"] = capture_group(params, investment, 4, "scenario_investment_amount", number)
     fields["scenario_investment_currency"] = capture_group(params, investment, 5, "scenario_investment_currency")
     put("coupon_art14", params, r"固定配息率就每配息日而言，" + PCT, Decimal)
-    fields["scenario_table"] = _pct_table(params)
+    fields["scenario_table"] = _pct_table(params)  # 百分比表（= 價格表表頭 %），由 Nomura 規則核對
+    # 共用情境規則（Issue #294）：百分比表不是價格表的重印、情境三／四的價格不核對
+    fields["scenario_reprint_table"] = standard_fields.absent("scenario_reprint_table", "重印的價格表")
+    fields["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
+    period = fields["coupon_period_pct"]
+    fields["monthly_coupon_pct"] = derived("monthly_coupon_pct", period, period.value)  # 第 7 項每期配息率
+    where, formula = "第 14 項設定參數", "第 14 項設定參數投資金額算式的"
+    fields["scenario_params"] = standard_fields.occurrences(
+        "scenario_params",
+        [
+            ScenarioParam("scenario_tenor", where, fields["scenario_tenor"]),
+            ScenarioParam("scenario_denomination", where, fields["scenario_denomination"]),
+            ScenarioParam("scenario_monthly_coupon", f"{where}固定", fields["coupon_art14"]),
+            ScenarioParam("scenario_denomination", formula, fields["scenario_investment"]),
+            ScenarioParam("scenario_issue_price", formula, fields["scenario_investment_pct"]),
+        ],
+    )
     sections = {k: t14.text.find(f"情境{k}（") for k in ("一", "二", "三")}
     found = hits(t14, r"本情境中年化報酬率為(?:\[[^\]]*\][^=]*=)?" + PCT, lambda m: Decimal(m[1]))
     picked = []

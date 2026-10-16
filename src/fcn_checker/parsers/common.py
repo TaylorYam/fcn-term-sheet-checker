@@ -10,7 +10,7 @@ from __future__ import annotations
 import bisect
 import re
 import unicodedata
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Generic, NamedTuple, TypeVar
@@ -44,6 +44,14 @@ def ko_at_initial(prices: dict) -> dict:
     out = dict(prices)
     if "ko" not in out and "initial" in out:
         out["ko"] = out["initial"]
+    return out
+
+
+def by_value(hits: Iterable[tuple[T, Sequence[Line]]]) -> dict[T, list[Line]]:
+    """重複寫出的值：同一個值的各處合成一筆（依第一次出現的順序），原文行為每一處的行（情境假設值，Issue #294）。"""
+    out: dict[T, list[Line]] = {}
+    for value, lines in hits:
+        out.setdefault(value, []).extend(lines)
     return out
 
 

@@ -1,5 +1,6 @@
 """Natixis 專屬規則（docs/rules/natixis-check-rules.md）：月配息率與年利率其他出處、說明書內部交叉驗證、重複寫出的值、日期表（KO 每日／
-每期兩種）、第 9 項價格表表頭、情境假設與情境價格表、空白的受託機構商品代號。
+每期兩種）、第 9 項價格表表頭、空白的受託機構商品代號。第 16 項情境價格表、情境假設與情境重複寫出的面額、年利率、實物交割
+算式的執行價格由共用情境規則（rules/scenario.py，Issue #294）核對。
 
 參考條件表欄位、價格推算、審查標準（含 Natixis 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
 規則。說明書有年利率，不讀參考條件表（REFERENCE_FIELDS 為空）。發行人、保證機構名稱、發行不成立門檻與期初定價依作業人員
@@ -60,10 +61,11 @@ NOT_COVERED = [
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 13 項月配息率 = 年利率 ÷ 12（4 位）；第 16 項情境假設年利率、各期配息「x (y%/12)」的 y = 第 13 項年利率。"""
+    """第 13 項月配息率 = 年利率 ÷ 12（4 位）；第 16 項情境假設年利率、各期配息「x (y%/12)」的 y 由共用情境規則
+    `scenario.params` 和第 13 項年利率比（Issue #294）。"""
     f = ctx.ts.f
     annual, monthly = f("coupon_pa_pct"), f("monthly_coupon_pct")
-    out = [
+    return [
         kit.doc_check(
             ctx, "derive.monthly_coupon", "monthly_coupon_pct", "月配息率 %（年利率 ÷ 12）", annual, monthly
         ).compare(
@@ -73,22 +75,6 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             fail_message="第 13 項月配息率須等於年利率 ÷ 12 四捨五入到 4 位",
         )
     ]
-    scen, terms = f("scenario_coupon_pct"), f("scenario_coupon_terms")
-    out.append(
-        kit.doc_check(
-            ctx, "doc.coupon_mentions", "scenario_coupon_pct", "第 16 項情境假設 f. 年利率", annual, scen
-        ).compare(annual.value, scen.value, fail_message="情境假設的年利率須等於第 13 項年利率")
-    )
-    out.append(
-        kit.doc_check(
-            ctx, "doc.coupon_mentions", "scenario_coupon_terms", "第 16 項各期配息的年利率", annual, terms
-        ).compare(
-            [annual.value] if annual.ok else None,
-            terms.value,
-            fail_message="情境各期配息「面額 x (年利率/12)」的年利率須等於第 13 項年利率",
-        )
-    )
-    return out
 
 
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.5）
@@ -160,7 +146,8 @@ def distributor_code(ctx: IssuerContext | IisIssuerContext, code: ParsedField) -
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 中英文名稱月數 = 情境假設 c. 天期與 d. 配息觀察期間數（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
+    """天期 = 中英文名稱月數（日期表期數由共用規則 `schedule.period_count`、情境假設 c. 天期與 d. 配息觀察期間數由
+    `scenario.params` 檢查）。"""
     f = ctx.ts.f
     tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
@@ -172,7 +159,7 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         return ParsedField("name_months", pf.status, int(m[1]) if m else None, pf.evidence, note=pf.note)
 
     zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)-Month", "商品英文名稱")
-    out = [
+    return [
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -180,13 +167,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
             tenor.value, en_months.value
         ),
     ]
-    for field, name in (
-        ("scenario_tenor", "第 16 項情境假設 c. 天期"),
-        ("scenario_periods", "第 16 項情境假設 d. 配息觀察期間數"),
-    ):
-        pf = f(field)
-        out.append(kit.doc_check(ctx, rid, field, name, tenor, pf).compare(tenor.value, pf.value))
-    return out
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
@@ -247,7 +227,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """第 9 項價格表表頭 % = 第 14、15 項定義；情境價格表逐格 = 第 9 項價格表、表頭 % 相同；情境假設 a. 面額 = 第一章第 5 項。"""
+    """第 9 項價格表表頭 % = 第 14、15 項定義（情境價格表由共用情境規則 `scenario.reprint` 核對，Issue #294）。"""
     f = ctx.ts.f
     table = f("underlying_table")
     out = []
@@ -264,42 +244,13 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
                 pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
-    scen, denom, scen_denom = f("scenario_table"), f("denomination"), f("scenario_denomination")
-    check = kit.doc_check(
-        ctx, "doc.scenario_table", "scenario_table", "第 16 項情境價格表與假設", table, scen, denom, scen_denom
-    )
-    if table.ok and scen.ok and denom.ok and scen_denom.ok:
-        issues = []
-        if scen.value.pcts != table.value.pcts:
-            issues.append("情境價格表表頭 % 和第 9 項價格表不同")
-        rows, own = scen.value.prices, table.value.prices
-        if len(rows) != len(own):
-            issues.append(f"情境價格表 {len(rows)} 列，第 9 項價格表 {len(own)} 列")
-        else:
-            for n, (a, b) in enumerate(zip(rows, own, strict=True), start=1):
-                diff = [c for c in b if a.get(c) != b[c]]
-                if diff:
-                    issues.append(f"第 {n} 列{'、'.join(diff)}和第 9 項價格表不同")
-        if scen_denom.value != denom.value:
-            issues.append(f"情境假設面額 {scen_denom.value} 不等於每單位商品面額 {denom.value}")
-        out.append(
-            check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #318，比照 BBVA #305）
-                kit.price_cells(own),
-                kit.price_cells(rows),
-                ok=not issues,
-                reason="value_mismatch",
-                message="；".join(issues) or "等於第 9 項價格表與每單位商品面額",
-            )
-        )
-    else:
-        out.append(check.compare(None, None))
     return out
 
 
 def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
     """重複寫出的值 = 正式條款（Issue #318，比照 BBVA #305）：情境一自動提前到期贖回 % = 第 14 項；第 15 項情況一公式、
-    2.a 與情境的到期贖回 % = 第 15 項情況一；情境配息算式、原始投資本金、實物交割算式的面額 = 每單位商品面額；
-    實物交割算式的執行價格 = 情境價格表該標的的執行價格；情境一配息列數 = Non-Call（第一個可提前到期期），其他情境 = 天期。"""
+    2.a 與情境的到期贖回 % = 第 15 項情況一；情境一配息列數 = Non-Call（第一個可提前到期期），其他情境 = 天期。情境配息
+    算式、原始投資本金、實物交割算式的面額與執行價格由共用情境規則核對（Issue #294）。"""
     f = ctx.ts.f
     tenor, first = f("tenor_months"), f("first_callable_period")
     out = []
@@ -316,7 +267,6 @@ def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
             f("maturity_redemption_pct"),
             "第 15 項情況一到期贖回 %",
         ),
-        ("scenario_denomination_mentions", "doc.scenario_params", f("denomination"), "第一章第 5 項每單位商品面額"),
     ):
         pf = f(container)
         if not pf.ok:
@@ -342,36 +292,6 @@ def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
             out.append(
                 kit.doc_check(ctx, "doc.coupon_periods", occ.field, f"{occ.where}{occ.name}", base, occ.value).compare(
                     base.value, occ.value.value, fail_message=f"情境各期配息的列數須等於{what}"
-                )
-            )
-    scen, worst = f("scenario_table"), f("scenario_worst_strike")
-    check = kit.doc_check(
-        ctx, "doc.scenario_table", "scenario_worst_strike", "第 16 項實物交割算式的執行價格", scen, worst
-    )
-    if not scen.ok:
-        pass  # 情境價格表讀不到已由 `tables` 轉人工覆核，不重複報
-    elif (problem := check.blocked) is not None:
-        out.append(problem)
-    else:
-        name, strike = worst.value
-        # 情境價格表的名稱可能和期初進場價格擠在同一行（`特斯拉公司 195.92`），比名稱時去掉結尾的數字
-        found = [r.prices.get("strike") for r in scen.value.rows if squash(re.sub(r"[\d,.\s]+$", "", r.name)) == name]
-        if len(found) != 1:
-            out.append(
-                check.result(
-                    S.REVIEW_REQUIRED,
-                    actual=f"{name} {strike}",
-                    reason="document_inconsistent",
-                    message=f"情境價格表找不到或有多列「{name}」，請人工確認實物交割算式的執行價格",
-                )
-            )
-        else:
-            out.append(
-                check.compare(
-                    f"{name} {found[0]}",
-                    f"{name} {strike}",
-                    ok=found[0] == strike,
-                    fail_message="實物交割算式的執行價格須等於情境價格表該標的的執行價格",
                 )
             )
     return out

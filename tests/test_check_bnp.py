@@ -71,7 +71,8 @@ def test_monthly_rate_uses_the_digits_shown_in_the_document(tmp_path):
     usd = check(tmp_path / "usd", Spec(annual=Decimal("15.8")))  # 15.8 ÷ 12 = 1.31666… → 1.3167
     assert usd.status == S.PASS, problems(usd)
     assert rule(usd, "derive.monthly_coupon")[0].expected == Decimal("1.3167")
-    assert all(x.actual == Decimal("15.800") for x in rule(usd, "derive.annualized_return"))
+    annualized = [x for x in rule(usd, "scenario.params") if x.field.startswith("scenario_annualized_return")]
+    assert annualized and all(x.actual == Decimal("15.800") for x in annualized)
     jpy = check(tmp_path / "jpy", Spec(currency_zh="日圓", annual=Decimal("8")))  # 8 ÷ 12 → 0.666667
     assert jpy.status == S.PASS, problems(jpy)
     assert rule(jpy, "derive.monthly_coupon")[0].expected == Decimal("0.666667")
@@ -92,7 +93,6 @@ def test_min_amounts_use_bnp_multiples(tmp_path):
     [
         ("Coupon p.a. (%)", 12.12, "field.coupon_pa_pct"),
         ("Coupon p.a. (%)", 12.12, "derive.monthly_coupon"),
-        ("Coupon p.a. (%)", 12.12, "derive.annualized_return"),
         ("Coupon p.a. (%)", 12.12, "doc.scenario_calculations"),
         ("KO(%)", 101, "field.ko_pct"),
         ("K(%)", 71, "field.strike_pct"),
@@ -160,10 +160,10 @@ S0 = Spec()
         # 月配息率與年化報酬率：正式條款正確、重印處錯誤也要抓到（核對規則 §3.8）
         (("art15", "月配息率：0.8333%", "月配息率：0.8334%"), "derive.monthly_coupon", S.MISMATCH),
         (("art15", "每單位面額 × 0.8333%", "每單位面額 × 0.8334%"), "derive.monthly_coupon", S.MISMATCH),
-        (("art18", "每月配息率：0.8333%", "每月配息率：0.8334%"), "derive.monthly_coupon", S.MISMATCH),
-        (("scen.二", "× 0.8333%", "× 0.8334%"), "derive.monthly_coupon", S.MISMATCH),
-        (("scen.一", "年化報酬率：10.000%", "年化報酬率：10.100%"), "derive.annualized_return", S.MISMATCH),
-        (("scen.二", "(年化報酬率：10.000%)", ""), "derive.annualized_return", S.REVIEW_REQUIRED),
+        (("art18", "每月配息率：0.8333%", "每月配息率：0.8334%"), "scenario.params", S.MISMATCH),
+        (("scen.二", "× 0.8333%", "× 0.8334%"), "scenario.params", S.MISMATCH),
+        (("scen.一", "年化報酬率：10.000%", "年化報酬率：10.100%"), "scenario.params", S.MISMATCH),
+        (("scen.二", "(年化報酬率：10.000%)", ""), "scenario.params", S.REVIEW_REQUIRED),
         (("art17", "最低配息率為10%", "最低配息率為11%"), "doc.min_coupon_rate", S.MISMATCH),
         # 封面與第一章交叉驗證
         (
@@ -200,17 +200,17 @@ S0 = Spec()
         # 第 18 項情境（第 11 項正確、第 18 項重印錯）
         (
             ("art18.table", "70.0000，即期初價格之70.00%", "70.0001，即期初價格之70.00%"),
-            "doc.scenario_table",
+            "scenario.reprint",
             S.MISMATCH,
         ),
-        (("art18.table", "之70.00%", "之71.00%"), "doc.scenario_header_pct", S.MISMATCH),
-        (("scen.三", "小於其執行價格70.0000 美元", "小於其執行價格70.0001 美元"), "doc.scenario_strike", S.MISMATCH),
+        (("art18.table", "之70.00%", "之71.00%"), "scenario.reprint", S.MISMATCH),
+        (("scen.三", "小於其執行價格70.0000 美元", "小於其執行價格70.0001 美元"), "scenario.strike", S.MISMATCH),
         (
             ("art18", "商品面額 = 每單位商品為10,000 美元", "商品面額 = 每單位商品為20,000 美元"),
-            "doc.scenario_parameters",
+            "scenario.params",
             S.MISMATCH,
         ),
-        (("art18", "× 100.00% = 10,000 美元", "× 100.00% = 20,000 美元"), "doc.scenario_parameters", S.MISMATCH),
+        (("art18", "× 100.00% = 10,000 美元", "× 100.00% = 20,000 美元"), "scenario.params", S.MISMATCH),
         (("art18", "× 100.00% = 10,000 美元", "× 99.00% = 10,000 美元"), "standard.issue_price", S.REVIEW_REQUIRED),
         (("scen.二", "= 83.33 美元(四捨五入", "= 83.34 美元(四捨五入"), "doc.scenario_calculations", S.MISMATCH),
         (
@@ -415,14 +415,14 @@ def test_worse_scenario_strike_must_be_the_assumed_worst_underlying(tmp_path):
     first, second = Spec().underlyings[:2]
     worst, other = first.name, second.name
     r = check(tmp_path / "other", Spec(), edits=[Edit(f"假設為{worst}", f"假設為{other}", "ts.scen.三")])
-    x = rule(r, "doc.scenario_strike", "情境三_strike")[0]
-    assert x.status == S.MISMATCH and second.ticker in x.message
+    x = rule(r, "scenario.strike", "scenario_price_1")[0]  # 情境三假設句
+    assert x.status == S.MISMATCH and "第 2 檔" in x.item.name
     r = check(
         tmp_path / "unknown",
         Spec(),
         edits=[Edit(f"假設為{worst}", "假設為不存在的公司", "ts.scen.三")],
     )
-    assert rule(r, "doc.scenario_strike", "情境三_strike")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "scenario.strike", "scenario_price_1")[0].status == S.REVIEW_REQUIRED
 
 
 @pytest.mark.parametrize(

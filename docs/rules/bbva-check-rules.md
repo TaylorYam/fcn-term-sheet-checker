@@ -90,13 +90,13 @@
 | 名稱 | 第 1 頁 4. `商品中文名稱` = 第一章第 1 項中文名稱（忽略空白） |
 | 幣別 | 第 1 頁 8. `計價幣別` = 第一章第 5 項；中文查 `[currency]` = 英文名稱的 ISO 代碼 |
 | 商品代號 | 第 1 頁 2. `受託機構商品代號` = 1. `商品代號` |
-| 期數 | 日期表列數 = 天期 = 名稱 `N 個月期`／`N-month` = 情境假設 `商品年期` |
+| 期數 | 日期表列數 = 天期 = 名稱 `N 個月期`／`N-month` = 情境假設 `商品年期`（情境假設 Issue #294 起由共用情境規則 `scenario.params` 核對） |
 | KO 型態 | 第 12 項 D 型寫法（`觀察期間內之每個預定交易日`＋觀察期間）⇔ 日期表是「配息觀察期間」表；P 型寫法 ⇔「配息日」表＋自動提前贖回表（範本規格 §4.1、§5.2） |
 | Non-Call | D：觀察期間起日 = 日期表某期終止日（該期期別即 Non-Call）；P：表第 1 列自動提前贖回日在配息日表內，表列數 = 天期 − Non-Call |
 | 記憶式 | 第 15 項句型（最佳表現值＋「不須出現在同一個」⇔ Y；最差表現值 ⇔ N）；Y 時第 14 項有 `（出場值）` 條件，其 % = KO % |
 | KI | 第 14 項有無 `（下限值）`、價格表有無下限值欄一致；無 KI 時到期門檻 % = 轉換比例（範本規格 §4.4） |
 | 日期表 | D：第 1 期起始日 = 發行日、下一期起始日 > 前期終止日、末列終止日 = 贖回評價日、末列配息日 = 到期日、終止日 < 同列配息日；P：配息日表末列 = 到期日、自動提前贖回日都在配息日表、`觀察日` 欄 = `自動提前贖回觀察日` 欄、觀察日 < 同列自動提前贖回日、(10) 觀察期間起訖 = 表首末觀察日 |
-| 情境 | 情境假設 `總投資金額 = N 單位面額 = 金額`：金額 ÷ N = 每單位面額；情境價格表逐格 = 第 14 項價格表、表頭 % 相同；情境重複寫出的值（§3.7） |
+| 情境 | 情境假設 `總投資金額 = N 單位面額 = 金額`：金額 = N × 每單位面額；情境價格表逐格 = 第 14 項價格表、表頭 % 相同；情境重複寫出的值（§3.7）。Issue #294 起由共用情境規則 `scenario.reprint`、`scenario.params` 核對（[共用核對規則](shared-check-rules.md) §7） |
 | 觀察起算日 | 第 14 項 `最佳表現值 (Highest RI Value)：…為自{日期}（含）起至…` 的日期 = 第 12 項 (10) 觀察期間起日（記憶式才有這句；Issue #305） |
 | 第 18 項 | (1) 自動提前贖回事件 `…大於或等於x%，則視為發生自動提前贖回事件` 的 x = 第 15 項 KO %（Issue #305） |
 
@@ -206,20 +206,21 @@
 | 規則 | rule_id |
 |---|---|
 | P 型第 13 項每期配息率 = 年利率 ÷ 12（4 位） | `derive.monthly_coupon` |
-| 第 16 項假設年利率／每月利率、情境一第 1 期配息率 = 第 13 項 | `doc.coupon_mentions` |
+| 第 16 項假設年利率／每月利率 = 第 13 項（Issue #294） | 共用 `scenario.params` |
+| KO 每日型情境一第 1 期配息率（說明書寫出的月配息率）= 年利率 ÷ 12（4 位） | `derive.monthly_coupon` |
 | 第一章第 1 項中文名稱 = 第 1 頁 | `doc.name_consistency` |
 | 第 1 頁、第一章第 5 項中文幣別與英文名稱 ISO 代碼 | `doc.currency_consistency` |
 | 受託機構商品代號 = 商品代號 | `doc.distributor_product_code` |
-| 期數（日期表列數、中英文名稱月數、情境年期） | `doc.coupon_periods` |
+| 期數（中英文名稱月數；情境年期由共用 `scenario.params` 核對） | `doc.coupon_periods` |
 | 記憶式句型 ⇔ 到期條件出場值；出場值 % = KO % | `doc.memory_consistency` |
 | 「（下限值）」⇔ 價格表下限值欄；無 KI 到期門檻 = 轉換比例 | `doc.ki_consistency` |
 | 價格表表頭 KO／K／KI % = 定義 | `doc.table_header_pct` |
-| 情境價格表逐格與表頭 % = 價格表；情境總投資金額 ÷ 單位數 = 面額 | `doc.scenario_table` |
+| 情境價格表逐格與表頭 % = 價格表；情境總投資金額 = 單位數 × 面額（Issue #294） | 共用 `scenario.reprint`、`scenario.params` |
 | 日期表（D：起始日 = 發行日、遞增、末列 = 贖回評價日／到期日、觀察期間起日在表內；P：配息日遞增、末列 = 到期日、自動提前贖回表） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）；起始日只查晚於前一期終止日（`after_previous_end`：起始日會跳過美股開市的銀行假日，2026-10-16 使用者決定）；自動提前贖回觀察日兩欄相同、觀察期間起訖 = 觀察日表首末列為 `schedule.autocall_dates` |
 | 投資人須知開始受理贖回日期 = 說明書 | `iis.redemption_start`（範本專屬規則） |
 | 第 1 頁受託機構明細 (i)、(iii)、(iv)（有才核） | `standard.distributor`、`standard.chairman`（adapter 交出 `distributor_names_others`、`distributor_addresses_others`、`chairman_others`，共用規則核對；任一標籤出現就算有這段，三處都要讀到） |
 | 第 14 項最佳表現值與情境的觀察起算日 = 第 12 項 (10) 起日 | `doc.ko_period_mentions` |
-| 情境二～四第 1 期配息率 = 情境一 | `doc.coupon_mentions` |
+| 情境二～四第 1 期配息率 = 情境一（Issue #294） | 共用 `scenario.params` |
 | 情境下限值／門檻 % = KI %（無 KI = 轉換比例） | `doc.ki_consistency` |
 | 情境出場值 %、第 18 項 (1) % = KO % | `doc.ko_mentions` |
 | 第 9 項連結標的表的彭博代碼與順序 = 第 14 項價格表 | `doc.underlying_list` |

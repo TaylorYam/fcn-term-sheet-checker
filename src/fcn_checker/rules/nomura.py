@@ -1,4 +1,6 @@
-"""Nomura 專屬規則（docs/rules/nomura-check-rules.md）：每期配息率與年利率、說明書內部交叉驗證、日期表結構、情境設定參數。
+"""Nomura 專屬規則（docs/rules/nomura-check-rules.md）：每期配息率與年利率、說明書內部交叉驗證、日期表結構、情境投資單位數
+與百分比表。第 14 項設定參數的年期、面額、固定配息率與投資金額算式的面額、發行價格由共用情境規則（rules/scenario.py，
+Issue #294）核對。
 
 參考條件表欄位、價格推算、審查標準（含 Nomura 分節：保證機構與總代理人名稱、商品種類、發行不成立門檻、上手別的固定警語
 次數）、年利率（第 14 項情境一、二的年化報酬率，`field.coupon_pa_pct`）與回填是各上手共用的規則。抓不到、歧義或寫法
@@ -96,7 +98,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def coupon_mentions(ctx: IssuerContext) -> list[CheckResult]:
-    """第 14 項設定參數、第 15 項(1) 的每期配息率 = 第 7 項（核對規則 §3.3）。"""
+    """第 15 項(1) 的每期配息率 = 第 7 項（核對規則 §3.3；第 14 項設定參數的由共用情境規則 `scenario.params` 核對）。"""
     main = ctx.ts.f("coupon_period_pct")
     out = []
     for m in ctx.ts.coupon_mentions:
@@ -199,7 +201,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
     zh_months = months(zh, r"發行(\d+)個月", "商品中文名稱")
     en_months = months(en, r"^(\d+)-Month", "商品英文名稱")
-    scen = f("scenario_tenor")
     return [
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
@@ -207,7 +208,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(
             tenor.value, en_months.value
         ),
-        kit.doc_check(ctx, rid, "scenario_tenor", "第 14 項設定參數年期", tenor, scen).compare(tenor.value, scen.value),
     ]
 
 
@@ -372,36 +372,28 @@ def redemption(ctx: IssuerContext) -> list[CheckResult]:
     ]
 
 
-def scenario(ctx: IssuerContext) -> list[CheckResult]:
-    """第 14 項設定參數面額 = 第 7 項面額；百分比表每列 = 價格表表頭（期初 100%、K／KO／KI %），列數 = 標的數。
-    設定參數年期、固定配息率、發行價格另由 `periods`、`coupon_mentions` 與共用發行價格規則核對。"""
+def scenario_terms(ctx: IssuerContext) -> list[CheckResult]:
+    """第 14 項投資金額那一行 `a x b% x n = c` 的 n = 設定參數投資單位數、c = a × b% × n（a、b 由共用情境規則
+    `scenario.params` 和面額、發行價格比，Issue #294）；百分比表每列 = 價格表表頭（期初 100%、K／KO／KI %），列數 = 標的數。"""
     f = ctx.ts.f
-    denom, scen = f("denomination"), f("scenario_denomination")
-    out = [
-        kit.doc_check(
-            ctx, "doc.scenario_params", "scenario_denomination", "第 14 項設定參數每單位商品面額", denom, scen
-        ).compare(denom.value, scen.value)
-    ]
-    # 投資金額那一行 `a x b% x n = c` 的 a、b、n 各自等於設定參數的面額、發行價格、投資單位數，c = a × b% × n
     line = [f(x) for x in ("scenario_investment", "scenario_investment_pct", "scenario_investment_units")]
-    rate, units, amount = f("scenario_issue_price"), f("scenario_units"), f("scenario_investment_amount")
+    units, amount = f("scenario_units"), f("scenario_investment_amount")
     check = kit.doc_check(
-        ctx, "doc.scenario_params", "scenario_investment", "第 14 項設定參數投資金額", denom, rate, units, *line, amount
+        ctx, "doc.scenario_units", "scenario_investment", "第 14 項設定參數投資金額的單位數與金額", units, *line, amount
     )
     if (problem := check.blocked) is not None:
-        out.append(problem)
+        out = [problem]
     else:
         principal, pct, count = (pf.value for pf in line)
-        total = denom.value * rate.value / 100 * units.value
-        out.append(
+        total = principal * pct / 100 * units.value
+        out = [
             check.compare(
-                f"{denom.value:,} x {rate.value}% x {units.value} = {total:,}",
+                f"{principal:,} x {pct}% x {units.value} = {total:,}",
                 f"{principal:,} x {pct}% x {count} = {amount.value:,}",
-                ok=(principal, pct, count) == (denom.value, rate.value, units.value)
-                and amount.value == principal * pct / 100 * count,
-                fail_message="投資金額須為每單位商品面額 x 發行價格 x 投資單位數",
+                ok=count == units.value and amount.value == principal * pct / 100 * count,
+                fail_message="投資金額算式的單位數須等於設定參數投資單位數，金額須為面額 x 發行價格 x 投資單位數",
             )
-        )
+        ]
     table, pcts = f("underlying_table"), f("scenario_table")
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 14 項百分比表", table, pcts)
     if table.ok and pcts.ok:
@@ -461,6 +453,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *underlying_terms(ctx),
         *ki_terms(ctx),
         *redemption(ctx),
-        *scenario(ctx),
+        *scenario_terms(ctx),
         *schedule(ctx),
     ]
