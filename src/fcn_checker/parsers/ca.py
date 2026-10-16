@@ -77,6 +77,7 @@ MATURITY_REDEMPTION = r"「到期贖回金額」：[^「]*?商品面額x" + PCT
 # 說明文字的幣別字（Issue #319）：到期交付股票時「以X支付剩餘金額」、提前贖回「可能低於100%X投資本金」
 REMAINDER_CURRENCY = rf"以({CCY})支付剩餘金額"
 PRINCIPAL_CURRENCY = rf"可能低於\d+(?:\.\d+)?%({CCY})投資本金"
+INTEREST_CURRENCY = rf"(?:受|當)({CCY})利率"  # 利率風險「受X利率變動所影響，例如當X利率上漲時…當X利率下跌時」
 # 價格表（第 9 項 (2)、第 16 項情境）：第 16 項沒有列號，兩張表都以價格切列；表內沒有代碼（第 10 項的代碼依列序
 # 對到）。欄序 K → KI → KO，價格後接報價幣別字（可能換行）
 PRICE_TABLE = price_table.TableSpec(
@@ -637,12 +638,13 @@ def _scenarios(fields: dict[str, ParsedField], ti: TextIndex) -> None:
             lists["scenario_denomination_mentions"].append(
                 Occurrence(field, "每單位面額", f"{where}{label}算式", line(field, 2, number))
             )
-        amounts = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=lo, end=hi) if found else ()
-        lists["scenario_currencies"].append(
-            money.scenario_occurrence(
-                f"scenario{n}_currency", "情境金額幣別", where, amounts, ti.lines_for(max(lo, 0), max(lo, 0) + 1)
-            )
-        )
+        field = f"scenario{n}_currency"
+        if found:
+            amounts = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=lo, end=hi)
+            occ = money.scenario_occurrence(field, "情境金額幣別", where, amounts, ti.lines_for(lo, lo + 1))
+        else:
+            occ = Occurrence(field, "情境金額幣別", where, ParsedField.missing(field, "第 16 項找不到情境分析一～三"))
+        lists["scenario_currencies"].append(occ)
     lo = bounds[2] if found else -1
     lists["scenario_currencies"] += money.currency_words(
         ti.lines_for(lo, bounds[3]) if found else [],
@@ -769,7 +771,8 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
     fields.update(
         standard_fields.absent_all(
-            ("distributor_addresses_others", "chairman_others"), "受託機構地址、負責人的其他出處"
+            [x for x in standard_fields.DISTRIBUTOR_OTHERS if x != "distributor_names_others"],
+            "受託機構地址、負責人的其他出處",
         )
     )
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、情境三股價與股數算式不列入
@@ -812,7 +815,7 @@ def _repeated(fields: dict[str, ParsedField], doc: Document, article: Callable[[
         ),
         *words(
             doc.chapter_lines(3),
-            rf"(?:受|當)({CCY})利率",
+            INTEREST_CURRENCY,
             "interest_rate_currency",
             "利率幣別",
             "第三章 1.(3) 利率風險",

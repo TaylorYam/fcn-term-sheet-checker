@@ -226,18 +226,13 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         issues.append(f"基本假設每單位面額 {scen_denom.value} 不等於商品面額 {denom.value}")
     return [
         check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #319，比照 BBVA #305）
-            [*_cells(own), f"{denom.value:,}"],
-            [*_cells(rows), f"{scen_denom.value:,}"],
+            [*kit.price_cells(own), f"{denom.value:,}"],
+            [*kit.price_cells(rows), f"{scen_denom.value:,}"],
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "等於第 9 項價格表與商品面額",
         )
     ]
-
-
-def _cells(rows: list[dict]) -> list[str]:
-    """價格表各格依列、欄順序（千分位、保留小數位）。"""
-    return [f"{v:,}" for row in rows for v in row.values()]
 
 
 # ---------------------------------------------------------------- 贖回 % 與重複寫出的值（Issue #319）

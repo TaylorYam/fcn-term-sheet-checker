@@ -122,7 +122,6 @@ def test_ki_type_is_compared_with_the_sheet(tmp_path):
         (Edit("• 第 1~6 個月配息金額", "• 第 1~5 個月配息金額", "ts.art16"), "doc.coupon_periods"),
         (Edit("出場贖回金額＝每單位面額 × 100%", "出場贖回金額＝每單位面額 × 99%", "ts.art16"), "doc.redemption_pct"),
         (Edit("到期贖回金額＝每單位面額 × 100%", "到期贖回金額＝每單位面額 × 99%", "ts.art16"), "doc.redemption_pct"),
-        (Edit("商品面額x100%", "商品面額x99%", "ts.art9"), "doc.redemption_pct"),
         (Edit("天期：6 個月", "天期：7 個月", "ts.art16"), "doc.coupon_periods"),
         (Edit("70.3150 美元", "70.3151 美元", "ts.art16.table"), "doc.scenario_table"),
         (Edit("70.00% )", "75.00% )", "ts.art16.table"), "doc.scenario_table"),
@@ -205,6 +204,13 @@ def test_repeated_wording_must_match(tmp_path, edit, rid, field):
     assert {x for x, _, _ in problems(r)} == {rid}, problems(r)
 
 
+def test_redemption_pct_must_be_100(tmp_path):
+    """第 9 項 (b) 贖回 % 不是 100%：正式條款判不一致，情境一贖回金額行（仍寫 100%）也和它不一致。"""
+    r = check(tmp_path, edits=[Edit("商品面額x100%", "商品面額x99%", "ts.art9")])
+    assert rule(r, "doc.redemption_pct", "ko_redemption_pct")[0].status == S.MISMATCH
+    assert {x for x, _, _ in problems(r)} == {"doc.redemption_pct"}, problems(r)
+
+
 @pytest.mark.parametrize(
     ("edit", "rid", "field"),
     [
@@ -221,6 +227,14 @@ def test_repeated_wording_must_match(tmp_path, edit, rid, field):
         (Edit("低於100%美元投資本金", "低於投資本金", "ts.ch四"), "field.currency", "principal_currency_ch4"),
         (Edit("而非由", "並非由", "ts.ch三"), "standard.distributor", "distributor_name_ch3_w5"),
         (Edit("商品面額x100%", "商品面額", "ts.art9"), "doc.redemption_pct", "ko_redemption_pct"),
+        (Edit("月配息率為0.7500%", "月配息率約略", "ts.art9"), "doc.coupon_mentions", "coupon_note_pct"),
+        (Edit("及以美元支付剩餘金額", "及支付剩餘金額", "ts.art9"), "field.currency", "redemption_currency"),
+        (Edit("及以美元支付剩餘金額", "及支付剩餘金額", "ts.art16"), "field.currency", "scenario3_remainder_currency"),
+        (Edit("低於100%美元投資本金", "低於投資本金", "ts.art15"), "field.currency", "principal_currency_art15"),
+        (Edit("利率", "利息", "ts.ch三"), "field.currency", "interest_rate_currency"),
+        (Edit("導致美元投資本金", "導致投資本金", "ts.ch三"), "field.currency", "risk_principal_currency"),
+        (Edit("本商品雖經", "本商品經", "ts.warn"), "standard.distributor", "distributor_name_w4a"),
+        (Edit("投資人透過與", "投資人經由", "ts.ch二"), "standard.distributor", "distributor_name_structure"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )

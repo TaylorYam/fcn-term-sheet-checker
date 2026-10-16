@@ -224,7 +224,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
                 "二、3.(4)「可能低於100%X投資本金」",
             ),
             *money.currency_words(
-                text_lines, rf"(?:受|當)({ca.CCY})利率", "interest_rate_currency", "利率幣別", "三、 利率風險"
+                text_lines, ca.INTEREST_CURRENCY, "interest_rate_currency", "利率幣別", "三、 利率風險"
             ),
         ],
     )

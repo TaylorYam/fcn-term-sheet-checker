@@ -39,8 +39,10 @@ def redemption(ctx: IisIssuerContext) -> list[CheckResult]:
     """二、2.(b)、(c) 贖回金額「商品面額x N%」的 N = 同商品說明書第 9 項 (b)、(c)（Issue #319）。"""
     rid = "iis.redemption_pct"
     pf = read_iis(ctx.sheet, "redemption_pcts")
+    if not pf.ok:
+        return [Check(rid, "redemption_pcts", Item.term_sheet("贖回 %"), ctx.document).review(pf)]
     out = []
-    for occ in pf.value if pf.ok else ():
+    for occ in pf.value:
         check = Check(rid, occ.field, Item.term_sheet(occ.name), ctx.document).needs(occ.value)
         if (problem := check.blocked) is not None:
             out.append(problem)

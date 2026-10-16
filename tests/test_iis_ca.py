@@ -102,6 +102,28 @@ def test_items_are_checked(tmp_path, edit, broken):
     assert broken in {rid for rid, _, _ in problems(r)}, problems(r)
 
 
+@pytest.mark.parametrize(
+    ("edit", "rid", "field"),
+    [
+        (Edit("低於100%美元投資本金", "低於投資本金", "iis.coupon"), "field.currency", "principal_currency"),
+        (Edit("利率", "利息", "iis.rest"), "field.currency", "interest_rate_currency"),
+        (Edit("商品面額x100%", "商品面額", "iis.coupon"), "iis.redemption_pct", "ko_redemption_pct"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
+)
+def test_unreadable_repeated_mentions_need_review(tmp_path, edit, rid, field):
+    """投資人須知重複寫出處讀不到（Issue #319）：轉人工覆核。"""
+    r = check_iis(tmp_path, edits=[edit]).report
+    assert rule(r, rid, field)[0].status == S.REVIEW_REQUIRED, problems(r)
+
+
+def test_redemption_pct_must_match_the_term_sheet(tmp_path):
+    """投資人須知二、2.(c) 到期贖回 % 和說明書不同（Issue #319）：只有這一處判不一致。"""
+    r = check_iis(tmp_path, edits=[Edit("商品面額x 100%", "商品面額x 99%", "iis.coupon")]).report
+    assert rule(r, "iis.redemption_pct", "maturity_redemption_pct")[0].status == S.MISMATCH
+    assert rule(r, "iis.redemption_pct", "ko_redemption_pct")[0].status == S.PASS
+
+
 def test_compatibility_ideograph_year_is_normalised():
     """真實投資人須知日期的「年」是 U+F98E（外觀和「年」相同）：正規化後日期照讀（同 GS 投資人須知的「利」）。"""
     texts = [
