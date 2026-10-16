@@ -763,6 +763,22 @@ def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, se
         assert x.actual == "JPY" or "日幣" in str(x.actual), "單一出處顯示 ISO 代碼，情境列出不符的金額"
 
 
+S1_RANGE = "第1個至第2個計息期間"
+
+
+def test_scenario_1_total_coupon_uses_first_callable_period(tmp_path):
+    """情境一印「共為」時期數與總額依第一個可提前出場期 k，不是天期（#293；預設天期 6、k = 2）。"""
+    r = check(tmp_path, edits=[Edit(S1_RANGE, S1_RANGE + "；2個計息期間配息金額共為美元200.00", "ts.art18")])
+    assert r.status == S.PASS, [(x.rule_id, x.field) for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)]
+    r = check(tmp_path, edits=[Edit(S1_RANGE, S1_RANGE + "；6個計息期間配息金額共為美元600.00", "ts.art18")])
+    for rule, field in [
+        ("doc.scenario_parameters", "s1.total_periods"),
+        ("doc.scenario_calculations", "s1.total_coupon"),
+    ]:
+        hits = [x for x in r.results if x.rule_id == rule and x.field.startswith(field + ".")]
+        assert hits and {x.status for x in hits} == {S.MISMATCH}, [(x.field, x.status) for x in hits]
+
+
 def test_every_scenario_has_its_own_currency_result(tmp_path):
     r = check(tmp_path)
     fields = [x.field for x in r.results if x.rule_id == "field.currency" and x.field.startswith("scenario_")]

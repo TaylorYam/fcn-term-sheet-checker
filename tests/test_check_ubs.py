@@ -69,12 +69,29 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert len(rule(r, "field.min_amounts")) == 5
     assert rule(r, "field.initial_pricing")[0].status == S.PASS  # 說明書沒寫：只檢查表上是允許值
     assert rule(r, "field.ki_type")[0].status == S.PASS
-    assert bool([x for x in r.results if x.rule_id == "doc.autocall_terms"]) == (spec.ko_obs == "D")
+    # D：配息表期別與 t 範圍；P：十五設定參數寫出的提前出場觀察日（Issue #320）
+    assert {x.field for x in rule(r, "doc.autocall_terms")} == (
+        {"coupon_table", "variable_periods", "scenario_variable_periods"}
+        - ({"variable_periods", "scenario_variable_periods"} if spec.first_callable >= spec.tenor else set())
+        if spec.ko_obs == "D"
+        else {"ko_wording_art15"}
+    )
     assert bool([x for x in r.results if x.rule_id == "doc.ko_pct_mentions"]) == spec.ko_pct_in_clause
     # 八的發行價格金額（有寫時）、一般交易事項四每單位面額、五申購價金之計算（Issue #303）
-    assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2)
+    # 十五情境算式代入的每單位面額、配息率各一筆（Issue #320）
+    assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2) + 1
     variable = spec.ko_obs == "D"  # 八與十五的變動配息率與年化
-    assert len(rule(r, "doc.coupon_mentions")) == 2 + (4 if variable else 0)
+    assert len(rule(r, "doc.coupon_mentions")) == 2 + (4 if variable else 0) + 1
+    assert {x.field for x in rule(r, "doc.coupon_periods")} == {
+        "coupon_table",
+        "scenario_tenor",
+        "scenario_coupon_count",
+    }
+    currency = {x.field for x in rule(r, "field.currency")}  # 說明文字與情境的幣別字（Issue #320）
+    words = {"residual_conversion_currency", "scenario_residual_currency", "scenario_residual_paid_currency"}
+    scenarios = {"scenario1_currency", "scenario2_currency", "scenario3_currency"}
+    assert words | scenarios <= currency
+    assert ("fx_definition_currency" in currency) == spec.cross
 
 
 def test_wrapped_underlying_name_stays_in_its_row(tmp_path):
@@ -185,6 +202,20 @@ def test_name_without_memory_wording_is_a_mismatch(tmp_path):
         (Edit("• 每單位面額：10,000.00", "• 每單位面額：1,000.00", "ts.general"), "doc.denomination_mentions"),
         (Edit("申購價金之計算：10,000.00", "申購價金之計算：1,000.00", "ts.general"), "doc.denomination_mentions"),
         (Edit("申購價金之計算：10,000.00 美元", "申購價金之計算：10,000.00 日圓", "ts.general"), "field.currency"),
+        # 十五情境與說明文字重複寫出的值（Issue #320）
+        (Edit("美元X1.0000%X1=", "美元X1.0100%X1=", "ts.art15"), "doc.coupon_mentions"),
+        (Edit("-10,000.00 美元=", "-1,000.00 美元=", "ts.art15"), "doc.denomination_mentions"),
+        (
+            Edit("每單位面額/轉換價=（10,000.00", "每單位面額/轉換價=（1,000.00", "ts.art15"),
+            "doc.denomination_mentions",
+        ),
+        (Edit("每月（共6 個）", "每月（共7 個）", "ts.art15"), "doc.coupon_periods"),
+        (Edit("換算後的美元金額", "換算後的日圓金額", "ts.art8"), "field.currency"),
+        (Edit("則以美元支付", "則以日圓支付", "ts.art15"), "field.currency"),
+        (Edit("以美元支付的剩餘金額", "以日圓支付的剩餘金額", "ts.art15"), "field.currency"),
+        (Edit("價值為0美元", "價值為0日圓", "ts.art15"), "field.currency"),
+        (Edit("=10,000.00 美元+100.00 美元-", "=10,000.00 美元+100.00 日圓-", "ts.art15"), "field.currency"),
+        (Edit("=-4,400.00 美元。", "=-4,400.00 日圓。", "ts.art15"), "field.currency"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:12],
 )
@@ -194,6 +225,61 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     bad = {rid for rid, _, _ in problems(r)}
     assert broken in bad, problems(r)
     assert bad <= {broken, "standard.product_name"}, problems(r)
+
+
+def test_scenario_autocall_clause_must_match_article_8(tmp_path):
+    """KO 每期十五設定參數寫出的提前出場觀察日和八不同：判不一致（Issue #320）。"""
+    edit = Edit("提前出場觀察日：為自第1 個", "提前出場觀察日：為自第2 個", "ts.art15")
+    r = check(tmp_path, Spec(ko_obs="P"), edits=[edit])
+    assert {(rid, f, st) for rid, f, st in problems(r)} == {("doc.autocall_terms", "ko_wording_art15", S.MISMATCH)}
+
+
+def test_unreadable_scenario_autocall_clause_needs_review(tmp_path):
+    """十五寫了「提前出場觀察日：為自…」但不是已知寫法：轉人工覆核，不當成沒寫（Issue #320）。"""
+    edit = Edit("為自第1 個配息觀察的每個配息觀察日。", "為自第1 個配息觀察的某些日子。", "ts.art15")
+    r = check(tmp_path, Spec(ko_obs="P"), edits=[edit])
+    assert {(rid, f, st) for rid, f, st in problems(r)} == {
+        ("doc.autocall_terms", "ko_wording_art15", S.REVIEW_REQUIRED)
+    }
+
+
+def test_cross_currency_wording_must_be_the_deal_currency(tmp_path):
+    """跨幣別（澳幣連日股）：期末匯率定義的幣別錯判不一致；小數 4 位的日股股價不列入（Issue #320）。"""
+    spec = VARIANTS["KO 每期非記憶式、2 檔日股澳幣計價、KO 條款寫 %、發行價格沒有金額、受託機構/銷售機構標籤"]
+    r = check(tmp_path, spec, edits=[Edit("以每一澳幣可兌", "以每一美元可兌", "ts.art8")])
+    assert {(rid, f, st) for rid, f, st in problems(r)} == {("field.currency", "fx_definition_currency", S.MISMATCH)}
+
+
+@pytest.mark.parametrize(
+    ("edit", "found"),
+    [
+        (Edit("美元X1.0000%X", "美元乘1.0000%乘", "ts.art15"), {("doc.coupon_mentions", "scenario_coupon_mentions")}),
+        (Edit("每月（共6 個）", "每月", "ts.art15"), {("doc.coupon_periods", "scenario_coupon_count")}),
+        (Edit("換算後的美元金額", "換算後的金額", "ts.art8"), {("field.currency", "residual_conversion_currency")}),
+        (Edit("則以美元支付", "則支付", "ts.art15"), {("field.currency", "scenario_residual_currency")}),
+        (
+            Edit("以美元支付的剩餘金額", "支付的剩餘金額", "ts.art15"),
+            {("field.currency", "scenario_residual_paid_currency")},
+        ),
+        (
+            Edit("以上情境分析相關之免責聲明", "情境分析四：假設情境。以上情境分析相關之免責聲明", "ts.art15"),
+            {("field.currency", "scenario4_currency")},
+        ),
+    ],
+    ids=[
+        "情境算式讀不到配息率",
+        "沒有配息觀察次數",
+        "剩餘金額定義沒有幣別",
+        "情境剩餘金額沒有幣別",
+        "情境剩餘金額句沒有幣別",
+        "情境沒有金額",
+    ],
+)
+def test_unreadable_repeats_need_review(tmp_path, edit, found):
+    """十五情境與說明文字的重複出處讀不到：轉人工覆核（Issue #320）。"""
+    r = check(tmp_path, edits=[edit])
+    assert {(rid, f) for rid, f, st in problems(r) if st == S.REVIEW_REQUIRED} >= found, problems(r)
+    assert {st for *_, st in problems(r)} == {S.REVIEW_REQUIRED}, problems(r)
 
 
 def test_issuing_branch_other_than_london_needs_review(tmp_path):

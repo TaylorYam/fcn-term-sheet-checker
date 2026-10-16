@@ -347,6 +347,9 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
             "說明文字幣別",
             "第三章匯率風險",
         ),
+        *money.currency_words(
+            doc.chapter_lines(3), rf"若({CCY})利率上漲", "rate_risk_currency", "說明文字幣別", "第三章利率風險"
+        ),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [*fields["currency_others"].value, *wording, _scenario3_currency(article(14))]
@@ -768,7 +771,9 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
     put("scenario_issue_price", params, r"發行價格(\d+(?:\.\d+)?)%", Decimal)
     investment = rf"投資金額([\d,]+)x(\d+(?:\.\d+)?)%x(\d+)={AMOUNT}"
     put("scenario_investment", params, investment, number)
-    fields["scenario_units"] = capture_group(params, investment, 3, "scenario_units", int)
+    fields["scenario_investment_pct"] = capture_group(params, investment, 2, "scenario_investment_pct", Decimal)
+    fields["scenario_investment_units"] = capture_group(params, investment, 3, "scenario_investment_units", int)
+    put("scenario_units", params, r"投資單位數(\d+)單位", int)
     fields["scenario_investment_amount"] = capture_group(params, investment, 4, "scenario_investment_amount", number)
     fields["scenario_investment_currency"] = capture_group(params, investment, 5, "scenario_investment_currency")
     put("coupon_art14", params, r"固定配息率就每配息日而言，" + PCT, Decimal)

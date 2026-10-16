@@ -44,7 +44,8 @@ def test_only_the_confirmed_differences_are_reported(items):
     assert bad == Counter(
         {
             ("standard.product_name", S.MISMATCH): 4,  # 2 份 KO 每日寫「定期觀察」：中英文名稱
-            ("field.currency", S.MISMATCH): 14,  # 表上幣別填錯：說明書計價幣別與金額旁幣別字 13 處、投資人須知 1 處
+            # 表上幣別填錯：說明書計價幣別與金額旁幣別字 13 處、說明文字與情境幣別 6 處（Issue #320）、投資人須知 1 處
+            ("field.currency", S.MISMATCH): 20,
         }
     ), bad
     assert sum(i.fills_sheet for i in term_sheets) == 3

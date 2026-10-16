@@ -40,8 +40,9 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "商品基本資料十五情境只核對設定參數與情境價格表；配息金額、股數、剩餘金額、報酬率、期末匯率不重算，"
-        "KO 每日的 nt/Nt 變動配息不推算（2026-10-15 確認）",
+        "description": "商品基本資料十五情境的配息金額、股數、剩餘金額、報酬率不重算，期末匯率、假設收盤價、股價與提前出場"
+        "期別（示意）不核對，KO 每日的 nt/Nt 變動配息不推算（2026-10-15 確認）；算式代入的每單位面額與配息率、金額幣別、"
+        "設定參數「每月（共N個）」與提前出場觀察日要等於正式條款（Issue #320）",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -93,7 +94,34 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
                 base.value, pf.value, fail_message="須等於商品基本資料八的固定配息率與年化配息率"
             )
         )
+    out.append(
+        _each(
+            ctx,
+            "doc.coupon_mentions",
+            "scenario_coupon_mentions",
+            "商品基本資料十五情境算式代入的配息率",
+            monthly,
+            f("scenario_coupon_mentions"),
+            "須等於商品基本資料八的固定配息率（Issue #320）",
+        )
+    )
     return out
+
+
+def _each(
+    ctx: IssuerContext, rid: str, field: str, name: str, base: ParsedField, pf: ParsedField, fail: str
+) -> CheckResult:
+    """十五情境算式重複寫出的值（`pf.value` 每一處）都等於 `base`；預期值／實際值帶出每一處（Issue #320）。"""
+    check = kit.doc_check(ctx, rid, field, name, base, pf)
+    if (problem := check.blocked) is not None:
+        return problem
+    bad = [n for n, v in enumerate(pf.value, start=1) if v != base.value]
+    return check.compare(
+        [str(base.value)] * len(pf.value),
+        [str(v) for v in pf.value],
+        ok=not bad,
+        fail_message=f"第 {'、'.join(map(str, bad))} 處{fail}" if bad else "",
+    )
 
 
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.5）
@@ -155,6 +183,17 @@ def denomination_mentions(ctx: IssuerContext) -> list[CheckResult]:
                 denom.value, pf.value, fail_message="須等於商品基本資料八的每單位面額"
             )
         )
+    out.append(
+        _each(
+            ctx,
+            rid,
+            "scenario_denomination_mentions",
+            "商品基本資料十五情境算式代入的每單位面額",
+            denom,
+            f("scenario_denomination_mentions"),
+            "須等於商品基本資料八的每單位面額",
+        )
+    )
     return out
 
 
@@ -172,9 +211,10 @@ def issuing_branch(check: Check, pf: ParsedField) -> CheckResult:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 配息表列數 = 情境設定參數天期。"""
+    """天期 = 配息表列數 = 情境設定參數天期 = 情境設定參數配息觀察次數。"""
     f = ctx.ts.f
     tenor, table, scen = f("tenor_months"), f("coupon_table"), f("scenario_tenor")
+    count = f("scenario_coupon_count")
     rid = "doc.coupon_periods"
     return [
         kit.doc_check(ctx, rid, "coupon_table", "商品基本資料八配息表期數", tenor, table).compare(
@@ -183,25 +223,38 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(ctx, rid, "scenario_tenor", "商品基本資料十五設定參數天期", tenor, scen).compare(
             tenor.value, scen.value
         ),
+        kit.doc_check(  # Issue #320
+            ctx, rid, "scenario_coupon_count", "商品基本資料十五設定參數「每月（共N個）」", tenor, count
+        ).compare(tenor.value, count.value, fail_message="配息觀察次數須等於天期"),
     ]
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KO 每日：配息表「固定配息率」期數 = Non-Call，八與十五設定參數的「t 係為a 至b」= Non-Call+1 至天期（核對規則
-    §3.3）。"""
+    """十五寫出的「提前出場觀察日」= 八（Issue #320）；KO 每日：配息表「固定配息率」期數 = Non-Call，八與十五設定參數的
+    「t 係為a 至b」= Non-Call+1 至天期（核對規則 §3.3）。"""
     f = ctx.ts.f
     k, table, tenor = f("first_callable_period"), f("coupon_table"), f("tenor_months")
-    if not (table.ok and table.value["kind"] == "D"):
-        return []
     rid = "doc.autocall_terms"
+    out = []
+    art8, art15 = f("ko_wording_art8"), f("ko_wording_art15")
+    if art15.status != FieldStatus.NOT_APPLICABLE:  # 十五寫出提前出場觀察日時（Issue #320）
+        out.append(
+            kit.doc_check(ctx, rid, "ko_wording_art15", "商品基本資料十五「提前出場觀察日」", art8, art15).compare(
+                _ko_text(art8.value) if art8.ok else None,
+                _ko_text(art15.value) if art15.ok else None,
+                fail_message="提前出場觀察方式與起始期須等於商品基本資料八",
+            )
+        )
+    if not (table.ok and table.value["kind"] == "D"):
+        return out
     fixed = [r["period"] for r in table.value["rows"] if r["fixed"]]
-    out = [
+    out.append(
         kit.doc_check(ctx, rid, "coupon_table", "配息表「固定配息率」的期別", k, table).compare(
             list(range(1, k.value + 1)) if k.ok else None,
             fixed,
             fail_message="配息表前 Non-Call 期的公式須是「固定配息率」、之後是「變動配息率」",
         )
-    ]
+    )
     if k.ok and tenor.ok and k.value < tenor.value:
         for field, name in (
             ("variable_periods", "「t 係為a 至b 的數字」"),
@@ -216,6 +269,11 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
                 )
             )
     return out
+
+
+def _ko_text(value: tuple[str, int]) -> str:
+    kind, k = value
+    return f"每日觀察，自第 {k} 個配息觀察期間結束日起" if kind == "D" else f"定期觀察，自第 {k} 個配息觀察日起"
 
 
 def ko_pct_mentions(ctx: IssuerContext) -> list[CheckResult]:
@@ -277,10 +335,17 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         issues.append(f"設定參數每單位面額初始投資金額 {scen_invest.value} 不等於商品面額 {denom.value}")
     if scen_price.value != price.value:
         issues.append(f"設定參數發行價格 {scen_price.value}% 不等於商品基本資料八發行價格 {price.value}%")
+    params = [str(denom.value), str(denom.value), str(price.value)]
     return [
-        check.compare(
-            None,
-            None,
+        check.compare(  # 預期值／實際值帶出每一格與設定參數（Issue #320，比照 BBVA #305）
+            [*(str(x) for row in own for x in row.values()), *(str(x) for x in table.value.pcts.values()), *params],
+            [
+                *(str(x) for row in rows for x in row.values()),
+                *(str(x) for x in scen.value.pcts.values()),
+                str(scen_denom.value),
+                str(scen_invest.value),
+                str(scen_price.value),
+            ],
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "等於商品基本資料八價格表、商品面額與發行價格",
