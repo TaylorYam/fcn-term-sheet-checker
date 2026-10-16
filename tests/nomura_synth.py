@@ -109,9 +109,8 @@ class Spec(ProductSpec):
 
     @property
     def starts(self) -> list[dt.date]:
-        """D 型各期觀察期間開始日：第 1 期為交易日後一個平日，其後為前期終止日後一個平日。"""
-        prev = [self.trade_date, *self.ends[:-1]]
-        return [weekday_on_or_after(d + dt.timedelta(days=1)) for d in prev]
+        """D 型各期觀察期間開始日：第 1 期為發行日（同真實樣本），其後為前期終止日後一個平日。"""
+        return [self.issue_date] + [weekday_on_or_after(d + dt.timedelta(days=1)) for d in self.ends[:-1]]
 
     @property
     def payments(self) -> list[dt.date]:

@@ -17,12 +17,14 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import iis, money, price_table
+from . import schedule as nomura_schedule
 from .common import Hit, Mention, RawText, capture_group, derived, hits, number, one
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "nomura-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：年利率取自情境、無 KI 要有明確到期贖回款（Issue #297）
-PARSER_VERSION = "3"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：年利率取自情境、無 KI 要有明確到期贖回款（Issue #297）；
+# 4：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -710,47 +712,53 @@ def _one_table(lines: list[Line]) -> ParsedField:
     return ParsedField.present(name, {"type": kind, "rows": out, "row_lines": row_lines}, lines[first:])
 
 
-def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前出場期與提前出場排程（範本規格 §4.1）：第 7 項寫法須與日期表排法一致。
+SCHEDULE_WHERE = "第 11 項(6) 日期表"
+# D 型觀察期間開始日 = 前一期終止日後的下一個一籃子預定交易日、第 1 期 = 發行日（Issue #289 決定 5：Nomura 開始核對）
+SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
 
-    D 型：第 7 項 KO 起日剛好等於日期表第 k 期「觀察期間終止日(含)」→ Non-Call = k；P 型：第一個不是「不適用」的決定日期別。
-    """
+
+def _schedule_table(value: dict) -> standard_fields.DateTable:
+    """日期表：D 觀察日 = 觀察期間終止日；P 觀察日 = 自動提前出場決定日（第 1～k−1 期「不適用」為空），沒有開始日欄。"""
+    if value["type"] == "D":
+        rows = nomura_schedule.rows_of(value["rows"], "end", value["row_lines"])
+        return standard_fields.DateTable(SCHEDULE_WHERE, rows, SCHEDULE_START)
+    rows = nomura_schedule.rows_of(value["rows"], "observation", value["row_lines"])
+    return standard_fields.DateTable(SCHEDULE_WHERE, rows)
+
+
+def _schedule(fields: dict[str, ParsedField]) -> None:
+    """日期表、KO 觀察方式、第一個可提前出場期與提前出場排程（`parsers/schedule.py`，範本規格 §4.1）：第 7 項寫法須與日期表
+    排法一致。D 型：第 7 項 KO 起日剛好等於日期表第 k 期「觀察期間終止日(含)」→ Non-Call = k；P 型：第一個不是「不適用」的
+    決定日期別。"""
     table, wording = fields["date_table"], fields["ko_wording"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = nomura_schedule.table_field(table, _schedule_table)
     bad = next((p for p in (wording, table) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(nomura_schedule.failed(bad))
         return
     kind, rows = table.value["type"], table.value["rows"]
     ev = list(wording.evidence) + list(table.evidence)
-
-    def invalid(note: str) -> None:
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
-    n = len(rows)
     observed, start = wording.value
+    note, k = "", None
     if observed != kind:
-        invalid(f"第 7 項自動提前出場決定日是{'每日' if observed == 'D' else '每期'}觀察寫法，但日期表是另一種排法")
-        return
-    if kind == "D":
+        note = f"第 7 項自動提前出場決定日是{'每日' if observed == 'D' else '每期'}觀察寫法，但日期表是另一種排法"
+    elif kind == "D":
         k = next((r["period"] for r in rows if r["end"] == start), None)
         if k is None:
-            invalid(f"第 7 項自動提前出場決定日起日 {start} 不是日期表任何一期的觀察期間終止日")
-            return
-        dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
+            note = f"第 7 項自動提前出場決定日起日 {start} 不是日期表任何一期的觀察期間終止日"
     else:
         k = next((r["period"] for r in rows if r["observation"] is not None), None)
         if k is None:
-            invalid("日期表每一期的自動提前出場決定日都是「不適用」")
-            return
-        dates = {r["period"]: r["observation"] for r in rows if r["period"] >= k and r["observation"] is not None}
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, kind, ev)
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(kind, k, n, dates), ev
-    )
+            note = "日期表每一期的自動提前出場決定日都是「不適用」"
+    if note:
+        invalid = {
+            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in nomura_schedule.SCHEDULE_KEYS
+        }
+        fields.update(invalid)
+        return
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, ev)
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    fields.update(nomura_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 # ---------------------------------------------------------------- 第 14 項情境分析
