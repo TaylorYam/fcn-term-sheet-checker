@@ -424,10 +424,10 @@ def ki_type(ti: TextIndex, table: ParsedField) -> ParsedField:
             return derived("ki_type", table)
         if has_col:
             return ParsedField.invalid("ki_type", ti.lines, "價格表有下限價欄，但沒有觸及下限事件")
-        p = text.find("收盤價低於轉換價")
-        if p < 0:
+        m = re.search(r"收盤價低於其?轉換價", text)  # OOS 的版本寫「低於其轉換價」（Issue #295）
+        if m is None:
             return ParsedField.invalid("ki_type", ti.lines, "沒有觸及下限事件，到期日給付也不是直接比轉換價")
-        return ParsedField.present("ki_type", "none", ti.lines_for(p, p + 8))
+        return ParsedField.present("ki_type", "none", ti.lines_for(m.start(), m.end()))
     if len(defs) != 1 or not maturity:
         return ParsedField.invalid("ki_type", ti.lines, "觸及下限事件的定義與到期日給付寫法不一致或不在範本規格內")
     m = defs[0]

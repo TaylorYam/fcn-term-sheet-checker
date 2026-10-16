@@ -12,7 +12,7 @@ import fitz
 import pytest
 
 from fcn_checker.extraction import extract_lines
-from fcn_checker.parsers import gs
+from fcn_checker.parsers import gs, ubs
 from fcn_checker.parsers.price_table import Column, TableSpec, price_rows, read, split_at_columns
 from fcn_checker.schema import FieldStatus, Line
 
@@ -574,6 +574,89 @@ def test_gs_last_row_overflowing_onto_the_next_page_belongs_to_that_row():
 
 
 # ---------------------------------------------------------------- 依字座標切欄
+
+
+def test_ubs_two_header_cells_in_one_line_with_percentages_on_the_next_page():
+    """UBS 說明書表頭第一行是轉換價與提前出場價兩格擷取成同一行（`轉換價 （即期初價格的提前出場價 （即期初價`，間隙
+    對不到任何欄的左緣），百分比在下一頁；左欄「籃子中連結標的 / 股票名稱」比這一行低（OOS 真實樣本，Issue #295）：
+    在第二個欄名切開，各自接到下一頁的百分比。"""
+    lines = [
+        cell(3, 736.9, (97.1, "籃子中連結標的")),
+        cell(3, 752.2, (112.1, "股票名稱")),
+        cell(3, 745.9, (231.5, "期初價格")),
+        cell(3, 744.2, (313.4, "轉換價 （即期初價格的"), (430.0, "提前出場價 （即期初價")),
+        cell(4, 77.1, (343.5, "85.00%）")),
+        cell(4, 77.1, (440.2, "格的100.00%）")),
+        cell(4, 108.7, (107.1, "虛構甲公司")),
+        cell(4, 108.3, (219.4, "200.0000 美元")),
+        cell(4, 108.3, (333.9, "170.0000 美元")),
+        cell(4, 108.3, (444.7, "200.0000 美元")),
+        cell(4, 137.5, (122.1, "虛構乙")),
+        cell(4, 137.0, (219.4, "100.0000 美元")),
+        cell(4, 137.0, (333.9, "85.0000 美元")),
+        cell(4, 137.0, (444.7, "100.0000 美元")),
+    ]
+    table = read("underlying_table", lines, ubs.PRICE_TABLE)
+    assert table.ok, table.note
+    assert table.value.pcts == {"strike": Decimal("85.00"), "ko": Decimal("100.00")}
+    assert table.value.prices[1] == {
+        "initial": Decimal("100.0000"),
+        "strike": Decimal("85.0000"),
+        "ko": Decimal("100.0000"),
+    }
+
+
+def test_ubs_scenario_last_row_with_a_lower_cell_beside_a_vertical_name():
+    """UBS 情境價格表的標的名稱直書（一字一行）、一列很高，下限價那格比同列其他格低約 27pt；最後一列的這一格不是
+    表後說明（OOS 真實樣本，Issue #295）。名稱溢到下一頁的字照收。"""
+
+    def at(page: int, x: float, y: float, text: str) -> Line:
+        h = 10.0 if len(text) == 1 else 11.2  # 直書一字一行的行高（真實樣本）
+        return Line(page, x, y, x + (10.0 if len(text) == 1 else 67.0), y + h, text)
+
+    lines = [
+        at(9, 127.8, 490.2, "期初價格"),
+        Line(9, 224.1, 482.6, 324.3, 492.6, "轉換價（即期初價格的"),
+        Line(9, 251.6, 499.2, 299.5, 510.7, "75.00%）"),
+        Line(9, 341.7, 481.2, 446.9, 492.7, "下限價 （即期初價格的"),
+        Line(9, 371.7, 499.2, 419.5, 510.7, "65.00%）"),
+        Line(9, 452.3, 481.2, 567.2, 492.7, "提前出場價 （即期初價格"),
+        Line(9, 478.1, 499.2, 544.0, 510.7, "的100.00%）"),
+        *(at(9, 73.4, y, ch) for y, ch in ((600.1, "甲"), (618.1, "公"), (635.0, "司"))),
+        at(9, 115.7, 617.0, "400.0000 美元"),
+        at(9, 242.1, 617.0, "300.0000 美元"),
+        at(9, 362.1, 635.0, "260.0000 美元"),
+        at(9, 477.5, 617.0, "400.0000 美元"),
+        *(at(9, 73.4, y, ch) for y, ch in ((654.6, "乙"), (671.5, "司"))),
+        at(9, 115.7, 662.5, "100.0000 美元"),
+        at(9, 242.1, 662.5, "75.0000 美元"),
+        at(9, 362.1, 671.5, "65.0000 美元"),
+        at(9, 477.5, 662.5, "100.0000 美元"),
+        *(at(9, 73.4, y, ch) for y, ch in ((691.1, "丙"), (709.1, "丁"), (727.1, "戊"), (745.1, "己"))),
+        at(9, 115.7, 717.0, "20.0000 美元"),
+        at(9, 242.1, 717.0, "15.0000 美元"),
+        at(9, 362.1, 744.0, "13.0000 美元"),
+        at(9, 477.5, 717.0, "20.0000 美元"),
+        *(at(10, 73.4, y, ch) for y, ch in ((97.5, "公"), (115.5, "司"))),
+    ]
+    table = read("scenario_table", lines, ubs.SCENARIO_TABLE)
+    assert table.ok, table.note
+    assert [r["ki"] for r in table.value.prices] == [Decimal("260.0000"), Decimal("65.0000"), Decimal("13.0000")]
+    assert table.value.names[2] == "丙丁戊己公司"
+
+
+def test_a_lone_number_below_the_last_row_does_not_replace_a_value_it_already_has():
+    """最後一列各欄都有值時，下方隔一段距離、落在價格欄的單獨數字（例：註腳）仍不算進表。"""
+    note = centered(1, X["ki"], 200, "1")
+    lines = [
+        *header(code=False),
+        *row(1, 150, None, "甲公司", None, ROW1),
+        *row(1, 170, None, "乙公司", None, ROW2),
+        note,
+    ]
+    table = read("t", lines, PRICE_SPEC)
+    assert table.ok, table.note
+    assert note not in table.value.rows[-1].lines
 
 
 def test_extracted_lines_carry_one_span_per_character(tmp_path):

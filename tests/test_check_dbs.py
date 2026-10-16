@@ -1,4 +1,7 @@
-"""DBS 黑箱回歸（Issue #280）：合成說明書經批量入口（預覽＋核對）；不直接測擷取或解析的內部函式。"""
+"""DBS 黑箱回歸（Issue #280）：合成說明書經批量入口（預覽＋核對）；不直接測擷取或解析的內部函式。
+
+例外：合成器排不出的費用表版面（分銷費用的子列跨頁，Issue #295），最後一個測試直接用擷取後的行測。
+"""
 
 from __future__ import annotations
 
@@ -19,8 +22,11 @@ import nomura_synth
 import sg_synth
 import synth
 from dbs_synth import DIST_ADDRESS, PRODUCT_TYPE, WARNING, Spec, check, check_item
+from fcn_checker import standard_fields
 from fcn_checker.issuers import DBS
+from fcn_checker.parsers import dbs
 from fcn_checker.schema import CheckStatus as S
+from fcn_checker.schema import Line, ParsedField
 from harness import check_all
 from harness import field_problems as problems
 from harness import results as rule
@@ -263,3 +269,31 @@ def test_draft_title_is_not_recognised(tmp_path):
     """標題不是「中文產品說明書(最終版本)」：沒有樣本的版本，範本不符。"""
     item = check_item(tmp_path, edits=[Edit("中文產品說明書(最終版本)", "中文產品說明書(初步版本)", "ts.cover")])
     assert item.report.template != DBS.template_id
+
+
+def test_distribution_fee_when_the_next_sub_row_is_on_the_next_page():
+    """說明書分銷費用的「費用」子列在頁底、下一個子列「折讓」在下一頁頁首（OOS 真實樣本版面，Issue #295）：
+    費率照常讀到，不因為下一頁的 y 比較小而把「費用」子列截成空的。"""
+    texts = [
+        (22, 162.1, 184.7, 202.0, "費率（百"),
+        (22, 162.1, 197.2, 194.9, "分比）"),
+        (22, 221.8, 184.2, 264.5, "收取時點"),
+        (22, 321.3, 184.2, 364.0, "收取方式"),
+        (22, 470.4, 184.2, 503.1, "收取人"),
+        (22, 56.4, 341.4, 149.6, "分銷費用(如屬發行機"),
+        (22, 162.1, 341.4, 185.0, "報酬"),
+        (22, 221.8, 341.4, 234.5, "無"),
+        (22, 321.3, 341.4, 354.1, "不適用"),
+        (22, 162.1, 371.4, 185.0, "費用"),
+        (22, 221.8, 371.4, 311.8, "申購價金的0%~5%"),
+        (22, 321.3, 371.4, 434.1, "於本商品發行時一次給付"),
+        (22, 470.4, 371.9, 490.3, "受託"),
+        (23, 162.1, 60.5, 185.0, "折讓"),
+        (23, 221.8, 60.5, 234.5, "無"),
+        (23, 321.3, 60.5, 354.1, "不適用"),
+    ]
+    lines = [Line(p, x0, y0, x1, y0 + 11, t) for p, x0, y0, x1, t in texts]
+    name = standard_fields.fee_field("分銷費用")
+    fee = dbs.distribution_fee(lines, ParsedField.invalid(name, [], "共用讀法讀不到"))
+    assert fee.ok, fee.note
+    assert fee.value == "0%~5%"
