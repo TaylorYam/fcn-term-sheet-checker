@@ -185,12 +185,12 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "product_codes",
         ti,
         (
-            ("product_code_tdcc", "封面 TDCC 商品代號", "封面「TDCC 商品代號」", r"TDCC商品代號為(\d{12})"),
-            ("product_code_trustee", "封面受託機構商品代號", "封面「受託機構商品代號」", r"受託機構商品代號為(\d{12})"),
+            ("product_code_tdcc", "product_code", "封面「TDCC 商品代號」", r"TDCC商品代號為(\d{12})"),
+            ("product_code_trustee", "trustee_product_code", "封面「受託機構商品代號」", r"受託機構商品代號為(\d{12})"),
         ),
     )
     fields["print_dates"] = iis.occurrences(
-        "print_dates", ti, (("print_date_iis", "刊印日期", "封面刊印日期", r"刊印日期[:：]" + iis.DATE),), parse_date
+        "print_dates", ti, (("print_date_iis", "print_date", "封面刊印日期", r"刊印日期[:：]" + iis.DATE),), parse_date
     )
     # 商品簡介
     put("currency_zh", r"計價幣別[:：]([^●]+?)●商品面額")
@@ -202,13 +202,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "denomination_currency",
-                "商品面額幣別",
+                "denomination_currency",
                 "商品簡介商品面額",
                 rf"商品面額[:：]每單位商品[\d,]+({money.CURRENCY})",
             ),
             (
                 "min_subscription_currency",
-                "最低申購金額幣別",
+                "minimum_subscription_currency",
                 "商品簡介最低申購金額",
                 rf"最低申購金額[:：][\d,]+({money.CURRENCY})",
             ),
@@ -225,13 +225,13 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             Occurrence(
                 "subscription_start",
-                "開始受理申購日（起）",
+                "subscription_start",
                 "商品簡介商品開始受理申購日期（起）",
                 fields["subscription_start"],
             ),
             Occurrence(
                 "subscription_end",
-                "開始受理申購日（迄）",
+                "subscription_end",
                 "商品簡介商品開始受理申購日期（迄）",
                 fields["subscription_end"],
             ),
@@ -264,36 +264,36 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "issuer_names",
         ti,
         (
-            ("issuer_name_w5a", "發行機構名稱（警語 5）", "警語 5", r"保證保本率，係由(.+?)\(發行機構\)與"),
-            ("issuer_name_w5b", "發行機構名稱（警語 5）", "警語 5", r"\(受託機構\)所保證。(.+?)\(發行機構\)與"),
-            ("issuer_name_org", "發行機構名稱（相關機構）", "相關機構第 1 點", r"發行機構[:：](.+?)\(註冊辦公地點"),
+            ("issuer_name_w5a", "issuer_name_warning", "警語 5", r"保證保本率，係由(.+?)\(發行機構\)與"),
+            ("issuer_name_w5b", "issuer_name_warning", "警語 5", r"\(受託機構\)所保證。(.+?)\(發行機構\)與"),
+            ("issuer_name_org", "issuer_name_org", "相關機構第 1 點", r"發行機構[:：](.+?)\(註冊辦公地點"),
         ),
     )
     fields["guarantor_names"] = iis.occurrences(
         "guarantor_names",
         ti,
-        (("guarantor_name_org", "保證機構名稱（相關機構）", "相關機構第 3 點", r"保證機構[:：](.+?)\(下稱「"),),
+        (("guarantor_name_org", "guarantor_name_org", "相關機構第 3 點", r"保證機構[:：](.+?)\(下稱「"),),
     )
     fields["guarantor_names_short"] = iis.occurrences(
         "guarantor_names_short",
         ti,
         (
             # 名稱不含括號：避免從警語 5 第一個「(發行機構)與」一路抓到第二句
-            ("guarantor_name_w5a", "保證機構名稱（警語 5）", "警語 5", r"\(發行機構\)與([^()]+?)\(保證機構\)保證"),
-            ("guarantor_name_w5b", "保證機構名稱（警語 5）", "警語 5", r"\(發行機構\)與([^()]+?)\(保證機構\)間有"),
-            ("guarantor_name_risk", "保證機構名稱（信用風險）", "投資風險「信用風險」", r"本商品之保證機構為(.+?)。"),
+            ("guarantor_name_w5a", "guarantor_name_warning", "警語 5", r"\(發行機構\)與([^()]+?)\(保證機構\)保證"),
+            ("guarantor_name_w5b", "guarantor_name_warning", "警語 5", r"\(發行機構\)與([^()]+?)\(保證機構\)間有"),
+            ("guarantor_name_risk", "guarantor_name_risk", "投資風險「信用風險」", r"本商品之保證機構為(.+?)。"),
         ),
     )
     fields["distributor_names"] = iis.occurrences(
         "distributor_names",
         ti,
         (
-            ("distributor_name_w4a", "受託機構名稱（警語 4）", "警語 4", r"本商品雖經(.+?)\(受託機構\)審查"),
-            ("distributor_name_w4b", "受託機構名稱（警語 4）", "警語 4", r"之價值，且(.+?)\(受託機構\)不負本"),
-            ("distributor_name_w4c", "受託機構名稱（警語 4）", "警語 4", r"盈虧之責。(.+?)\(受託機構\)依法不得承諾"),
-            ("distributor_name_w5", "受託機構名稱（警語 5）", "警語 5", r"而非由(.+?)\(受託機構\)所保證"),
-            ("distributor_name_w6", "受託機構名稱（警語 6）", "警語 6", r"係由受託機構\(即(.+?)\)負責外"),
-            ("distributor_name_org", "受託機構名稱（相關機構）", "相關機構第 4 點", r"受託機構[:：](.+?)\(地址[:：]"),
+            ("distributor_name_w4a", "distributor_name_warning", "警語 4", r"本商品雖經(.+?)\(受託機構\)審查"),
+            ("distributor_name_w4b", "distributor_name_warning", "警語 4", r"之價值，且(.+?)\(受託機構\)不負本"),
+            ("distributor_name_w4c", "distributor_name_warning", "警語 4", r"盈虧之責。(.+?)\(受託機構\)依法不得承諾"),
+            ("distributor_name_w5", "distributor_name_warning", "警語 5", r"而非由(.+?)\(受託機構\)所保證"),
+            ("distributor_name_w6", "distributor_name_warning", "警語 6", r"係由受託機構\(即(.+?)\)負責外"),
+            ("distributor_name_org", "distributor_name_org", "相關機構第 4 點", r"受託機構[:：](.+?)\(地址[:：]"),
         ),
     )
     fields["distributor_addresses"] = iis.occurrences(
@@ -302,7 +302,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構第 4 點",
                 r"受託機構[:：][^(]{1,30}\(地址[:：](.+?)\)貳、商品事項",
             ),
@@ -313,7 +313,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             Occurrence(
                 "distributor_phone_rights",
-                "受託機構電話（權益保護）",
+                "distributor_phone_rights",
                 "陸、協助投資人權益保護之方式第 1 點",
                 bnp.labelled("distributor_phone_rights", text_lines, "受託機構聯絡方式："),
             )

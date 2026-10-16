@@ -249,26 +249,30 @@ def read(lines: Sequence[Line]) -> UbsTermSheet:
     _occurrences(fields)
     wording = [  # 說明文字的幣別字（Issue #320，比照 BBVA #305）；ADE 提前贖回「美元價值的美元金額」固定寫美元，不列入
         *money.currency_words(
-            art8, rf"換算後的({CCY})金額", "residual_conversion_currency", "說明文字幣別", "商品基本資料八剩餘金額定義"
+            art8,
+            rf"換算後的({CCY})金額",
+            "residual_conversion_currency",
+            "wording_currency",
+            "商品基本資料八剩餘金額定義",
         ),
         *money.currency_words(
             article(15),
             rf"則以({CCY})支付[（(]",
             "scenario_residual_currency",
-            "說明文字幣別",
+            "wording_currency",
             "商品基本資料十五情境「則以X支付（“剩餘金額”）」",
         ),
         *money.currency_words(
             article(15),
             rf"以({CCY})支付的剩餘金額",
             "scenario_residual_paid_currency",
-            "說明文字幣別",
+            "wording_currency",
             "商品基本資料十五情境「以X支付的剩餘金額」",
         ),
     ]
     if re.search(rf"以每一{CCY}可兌", TextIndex(art8).text):  # 跨幣別商品才有的期末匯率定義
         wording += money.currency_words(
-            art8, rf"以每一({CCY})可兌", "fx_definition_currency", "說明文字幣別", "商品基本資料八期末匯率定義"
+            art8, rf"以每一({CCY})可兌", "fx_definition_currency", "wording_currency", "商品基本資料八期末匯率定義"
         )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [*fields["currency_others"].value, *wording, *scenarios]
@@ -739,7 +743,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         return [
             Occurrence(
                 "scenario_currency",
-                "情境金額幣別",
+                "scenario_currency",
                 "商品基本資料十五情境分析",
                 ParsedField.missing("scenario_currency", note),
             )
@@ -778,10 +782,11 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         out.append(
             money.scenario_occurrence(
                 f"scenario{k + 1}_currency",
-                f"情境分析{zh}金額幣別",
+                "scenario_currency",
                 f"商品基本資料十五情境分析{zh}",
                 found,
                 ti.lines_for(start, start + 1),
+                f"情境分析{zh}",
             )
         )
     return out
@@ -839,18 +844,28 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_trade", "最低交易金額", "商品基本資料八最低交易金額", fields["minimum_trade"]),
-            occ("minimum_subscription", "最低申購金額", "一般交易事項四最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購金額", "一般交易事項四最低累加申購金額", fields["minimum_additional"]),
+            occ("minimum_trade", "minimum_trade", "商品基本資料八最低交易金額", fields["minimum_trade"]),
+            occ(
+                "minimum_subscription",
+                "minimum_subscription",
+                "一般交易事項四最低申購金額",
+                fields["minimum_subscription"],
+            ),
+            occ(
+                "minimum_additional",
+                "minimum_additional",
+                "一般交易事項四最低累加申購金額",
+                fields["minimum_additional"],
+            ),
             occ(
                 "minimum_redemption",
-                "最低贖回金額",
+                "minimum_redemption",
                 "一般交易事項八最低投資人提前贖回單位數",
                 fields["minimum_redemption"],
             ),
             occ(
                 "redemption_increment",
-                "最低累加贖回金額",
+                "redemption_increment",
                 "一般交易事項八最低累加投資人提前贖回單位數",
                 fields["redemption_increment"],
             ),
@@ -858,25 +873,36 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     )
     fields["subscription_dates"] = standard_fields.occurrences(
         "subscription_dates",
-        [occ("subscription_start", "開始受理申購日", "一般交易事項一商品申購開始受理日", fields["subscription_start"])],
+        [
+            occ(
+                "subscription_start",
+                "subscription_start",
+                "一般交易事項一商品申購開始受理日",
+                fields["subscription_start"],
+            )
+        ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "第 1 頁本產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "第 1 頁本產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、到期交割句的股價與情境算式不列入
-        ("issue_price_currency", "發行價格金額幣別", "商品基本資料八發行價格"),
-        ("denomination_currency", "每單位面額幣別", "商品基本資料八每單位面額"),
-        ("minimum_trade_currency", "最低交易金額幣別", "商品基本資料八最低交易金額"),
-        ("redemption_currency", "剩餘金額幣別", "商品基本資料八到期日給付「以X支付剩餘金額」"),
-        ("denomination_ch4_currency", "每單位面額幣別", "一般交易事項四每單位面額"),
-        ("minimum_subscription_currency", "最低申購金額幣別", "一般交易事項四最低申購金額"),
-        ("subscription_amount_ch5_currency", "申購價金幣別", "一般交易事項五申購價金之計算"),
-        ("minimum_additional_currency", "累加申購金額幣別", "一般交易事項四最低累加申購金額"),
-        ("minimum_redemption_currency", "最低贖回金額幣別", "一般交易事項八最低投資人提前贖回單位數"),
-        ("redemption_increment_currency", "累加贖回金額幣別", "一般交易事項八最低累加投資人提前贖回單位數"),
-        ("scenario_denomination_currency", "情境每單位面額幣別", "商品基本資料十五設定參數每單位面額"),
-        ("scenario_investment_currency", "情境初始投資金額幣別", "商品基本資料十五設定參數初始投資金額"),
+        ("issue_price_currency", "issue_price_amount_currency", "商品基本資料八發行價格"),
+        ("denomination_currency", "denomination_currency", "商品基本資料八每單位面額"),
+        ("minimum_trade_currency", "minimum_trade_currency", "商品基本資料八最低交易金額"),
+        ("redemption_currency", "remainder_currency", "商品基本資料八到期日給付「以X支付剩餘金額」"),
+        ("denomination_ch4_currency", "denomination_currency", "一般交易事項四每單位面額"),
+        ("minimum_subscription_currency", "minimum_subscription_currency", "一般交易事項四最低申購金額"),
+        ("subscription_amount_ch5_currency", "subscription_price_currency", "一般交易事項五申購價金之計算"),
+        ("minimum_additional_currency", "minimum_additional_currency", "一般交易事項四最低累加申購金額"),
+        ("minimum_redemption_currency", "minimum_redemption_currency", "一般交易事項八最低投資人提前贖回單位數"),
+        (
+            "redemption_increment_currency",
+            "redemption_increment_currency",
+            "一般交易事項八最低累加投資人提前贖回單位數",
+        ),
+        ("scenario_denomination_currency", "scenario_denomination_currency", "商品基本資料十五設定參數每單位面額"),
+        ("scenario_investment_currency", "scenario_investment_currency", "商品基本資料十五設定參數初始投資金額"),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others",

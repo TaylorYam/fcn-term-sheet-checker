@@ -432,10 +432,11 @@ def test_wrong_currency_next_to_an_amount_is_reported_at_that_place(tmp_path, ed
 def test_wrong_currency_message_names_the_place(tmp_path):
     report = check(tmp_path, edits=[Edit("每單位商品面額為10,000 美元。", "每單位商品面額為10,000 日幣。", "ts.art6")])
     [r] = results(report, "field.currency", "denomination_currency")
-    assert problem_message(r) == "每單位商品面額幣別對不起來：參考條件表 USD／說明書 JPY"
+    assert problem_message(r) == "每單位面額幣別對不起來：參考條件表 USD／說明書 JPY"
     report = check(tmp_path, edits=[Edit("[(5,000.00 美元)", "[(5,000.00 日幣)", "ts.art16.iii")])
     [r] = results(report, "field.currency", "scenario_iii_currency")
-    assert problem_message(r) == "情境 (iii) 金額幣別對不起來：參考條件表 USD／說明書 5,000.00日幣"
+    assert problem_message(r) == "情境金額幣別（情境 (iii)）對不起來：參考條件表 USD／說明書 5,000.00日幣"
+    assert r.message.startswith("第 16 條(iii)最差情況")  # 名稱查共用表，是哪個情境接在名稱後面（Issue #294）
 
 
 def test_currency_word_outside_the_review_standard_table_requires_review(tmp_path):

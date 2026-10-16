@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
+from ..standard_fields import OCCURRENCE_NAMES, Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
 from . import money, price_table, schedule
 from .common import RawText, by_value, capture_group, derived, fee_rates, number
@@ -395,7 +395,7 @@ def read(lines: Sequence[Line]) -> NatixisTermSheet:
         occ
         for field, n, pattern, where, optional in CURRENCY_WORDING
         if not optional or any(TextIndex(article(n)).finditer(pattern))
-        for occ in money.currency_words(article(n), pattern, field, "說明文字幣別", where)
+        for occ in money.currency_words(article(n), pattern, field, "wording_currency", where)
     ]
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [*fields["currency_others"].value, *wording, *scenario_currencies]
@@ -771,7 +771,7 @@ def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
 
 def _mentions(
     name: str,
-    label: str,
+    code: str,
     ti: TextIndex,
     spans: list[tuple[str, int, int]],
     pattern: str,
@@ -789,11 +789,10 @@ def _mentions(
         if hits:
             lines = [ln for m in hits for ln in ti.lines_for(m.start(), m.end())]
             pf = ParsedField.present(f"{name}_{n}", tuple(convert(m[group]) for m in hits), lines)
-            out.append(Occurrence(f"{name}_{n}", label, f"第 16 項{case}", pf))
+            out.append(Occurrence(f"{name}_{n}", code, f"第 16 項{case}", pf))
     if required and not out:
-        out.append(
-            Occurrence(name, label, "第 16 項情境", ParsedField.missing(name, f"第 16 項情境找不到{label}的句子"))
-        )
+        note = f"第 16 項情境找不到{OCCURRENCE_NAMES[code]}的句子"
+        out.append(Occurrence(name, code, "第 16 項情境", ParsedField.missing(name, note)))
     return out
 
 
@@ -809,10 +808,10 @@ def _scenarios(
         hits = list(t15.finditer(pattern))
         if required and not hits:
             missing = ParsedField.missing(field, f"{places[0]}找不到「每單位商品面額 x X%」")
-            repeats.append(Occurrence(field, "到期贖回 %", places[0], missing))
+            repeats.append(Occurrence(field, "maturity_redemption_pct", places[0], missing))
         for n, m in enumerate(hits, start=1):
             pf = ParsedField.present(f"{field}_{n}", (Decimal(m[1]),), t15.lines_for(m.start(), m.end()))
-            repeats.append(Occurrence(f"{field}_{n}", "到期贖回 %", places[min(n, len(places)) - 1], pf))
+            repeats.append(Occurrence(f"{field}_{n}", "maturity_redemption_pct", places[min(n, len(places)) - 1], pf))
     spans = _scenario_spans(ti)
     if not spans:
         missing = "第 16 項找不到情境一～三（或四）到「關於上述情境分析之警語」的段落"
@@ -824,7 +823,7 @@ def _scenarios(
         fields["scenario_params"] = standard_fields.occurrences("scenario_params", [*assumed, denomination])
         fields["scenario_prices"] = _worst_strike(fields, ParsedField.missing("scenario_worst_strike", missing))
         pf = ParsedField.missing("scenario_currency", missing)
-        return [Occurrence("scenario_currency", "情境金額幣別", "第 16 項情境", pf)]
+        return [Occurrence("scenario_currency", "scenario_currency", "第 16 項情境", pf)]
     rows, coupon_denominations = [], []
     for n, (case, a, b) in enumerate(spans, start=1):
         hits = [(ln, m) for ln in ti.lines_for(a, b) if (m := SCENARIO_COUPON_ROW.search(ln.text))]
@@ -833,24 +832,24 @@ def _scenarios(
             rows.append(
                 Occurrence(
                     field,
-                    "配息列數",
+                    "coupon_rows",
                     f"第 16 項{case}",
                     ParsedField.missing(field, f"第 16 項{case}找不到各期配息「面額 x (年利率/12)」"),
                 )
             )
             continue
         lines = [ln for ln, _ in hits]
-        rows.append(Occurrence(field, "配息列數", f"第 16 項{case}", ParsedField.present(field, len(hits), lines)))
+        rows.append(Occurrence(field, "coupon_rows", f"第 16 項{case}", ParsedField.present(field, len(hits), lines)))
         field = f"scenario_coupon_denomination_{n}"
         pf = ParsedField.present(field, tuple(number(m[1]) for _, m in hits), lines)
-        coupon_denominations.append(Occurrence(field, "配息算式的面額", f"第 16 項{case}", pf))
+        coupon_denominations.append(Occurrence(field, "coupon_formula_denomination", f"第 16 項{case}", pf))
     fields["scenario_row_counts"] = standard_fields.occurrences("scenario_row_counts", rows)
     denominations = [
         *coupon_denominations,
-        *_mentions("scenario_principal", "原始投資本金", ti, spans, SCENARIO_PRINCIPAL, number),
+        *_mentions("scenario_principal", "original_principal", ti, spans, SCENARIO_PRINCIPAL, number),
         *_mentions(
             "scenario_physical_denomination",
-            "實物交割算式的面額",
+            "physical_denomination",
             ti,
             spans,
             WORST_STRIKE,
@@ -864,11 +863,14 @@ def _scenarios(
     )
     fields["autocall_redemption_mentions"] = standard_fields.occurrences(
         "autocall_redemption_mentions",
-        _mentions("scenario_autocall_pct", "自動提前到期贖回 %", ti, spans, SCENARIO_AUTOCALL_PCT, Decimal),
+        _mentions("scenario_autocall_pct", "autocall_redemption_pct", ti, spans, SCENARIO_AUTOCALL_PCT, Decimal),
     )
     fields["maturity_redemption_mentions"] = standard_fields.occurrences(
         "maturity_redemption_mentions",
-        [*repeats, *_mentions("scenario_maturity_pct", "到期贖回 %", ti, spans, SCENARIO_MATURITY_PCT, Decimal)],
+        [
+            *repeats,
+            *_mentions("scenario_maturity_pct", "maturity_redemption_pct", ti, spans, SCENARIO_MATURITY_PCT, Decimal),
+        ],
     )
     worst = list(ti.finditer(WORST_STRIKE))
     fields["scenario_prices"] = _worst_strike(
@@ -895,23 +897,23 @@ def _scenarios(
         )
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", f"{case}金額幣別", f"第 16 項{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"第 16 項{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out
 
 
-# 情境裡重複寫出的面額（`_mentions` 的標籤）→ 共用情境規則的（出處代號, 位置接在情境名稱後面的字）
+# 情境裡重複寫出的面額（`_mentions` 的出處代號）→ 共用情境規則的（出處代號, 位置接在情境名稱後面的字）
 DENOMINATION_PARAMS = {
-    "配息算式的面額": ("scenario_denomination", "配息算式的"),
-    "原始投資本金": ("scenario_principal", "原始投資"),
-    "實物交割算式的面額": ("scenario_denomination", "實物交割算式的"),
+    "coupon_formula_denomination": ("scenario_denomination", "配息算式的"),
+    "original_principal": ("scenario_principal", "原始投資"),
+    "physical_denomination": ("scenario_denomination", "實物交割算式的"),
 }
 
 
 def _denomination_params(occ: Occurrence) -> list[ScenarioParam]:
     """情境的一種面額句（每個情境一筆，值是該情境每一處的值）→ 共用情境規則的出處：同一個情境裡同一個值一筆。"""
-    code, suffix = DENOMINATION_PARAMS[occ.name]
+    code, suffix = DENOMINATION_PARAMS[occ.code]
     pf = occ.value
     if not pf.ok:
         return [ScenarioParam(code, f"{occ.where}{suffix}", replace(pf, name=code))]
@@ -998,7 +1000,7 @@ def _distributor_names(doc: Document) -> ParsedField:
     items = [
         Occurrence(
             f"distributor_name_{tag}_{key}",
-            "受託機構名稱（警語）",
+            "distributor_name_warning",
             where + label,
             capture(f"distributor_name_{tag}_{key}", ti, pattern),
         )
@@ -1006,7 +1008,7 @@ def _distributor_names(doc: Document) -> ParsedField:
         for key, label, pattern in WARNING_NAMES
     ]
     items += [
-        Occurrence(field, "受託機構名稱", where, capture(field, TextIndex(doc.span_lines(ch4.get(n))), pattern))
+        Occurrence(field, "distributor_name", where, capture(field, TextIndex(doc.span_lines(ch4.get(n))), pattern))
         for n, field, where, pattern in CH4_NAMES
     ]
     return standard_fields.occurrences("distributor_names_others", items)
@@ -1020,25 +1022,40 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_subscription", "最低申購金額", "第四章第 4 項最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購金額", "第四章第 4 項累加申購金額", fields["minimum_additional"]),
-            occ("minimum_redemption", "最低贖回金額", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
-            occ("redemption_increment", "增加贖回單位", "第四章第 8 項累加贖回金額", fields["redemption_increment"]),
+            occ(
+                "minimum_subscription",
+                "minimum_subscription",
+                "第四章第 4 項最低申購金額",
+                fields["minimum_subscription"],
+            ),
+            occ("minimum_additional", "minimum_additional", "第四章第 4 項累加申購金額", fields["minimum_additional"]),
+            occ("minimum_redemption", "minimum_redemption", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
+            occ(
+                "redemption_increment",
+                "redemption_increment",
+                "第四章第 8 項累加贖回金額",
+                fields["redemption_increment"],
+            ),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
         "subscription_dates",
         [
-            occ("subscription_start", "開始受理申購日", "第四章第 1 項開始受理申購日期", fields["subscription_start"]),
-            occ("subscription_end", "結束受理申購日", "第四章第 1 項結束受理申購日期", fields["subscription_end"]),
+            occ(
+                "subscription_start",
+                "subscription_start",
+                "第四章第 1 項開始受理申購日期",
+                fields["subscription_start"],
+            ),
+            occ("subscription_end", "subscription_end", "第四章第 1 項結束受理申購日期", fields["subscription_end"]),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "第 2 頁中文產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "第 2 頁中文產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
-        [occ("issue_price_ch4", "發行價格（申購價金）", "第四章第 5 項申購價金之計算", fields["issue_price_ch4"])],
+        [occ("issue_price_ch4", "issue_price_subscription", "第四章第 5 項申購價金之計算", fields["issue_price_ch4"])],
     )
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
     fields.update(
@@ -1048,11 +1065,11 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         )
     )
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表貨幣欄不列入；說明文字與情境另在 read 加入（Issue #318）
-        ("denomination_currency", "每單位商品面額幣別", "第一章第 5 項每單位商品面額"),
-        ("minimum_subscription_currency", "最低申購金額幣別", "第四章第 4 項最低申購金額"),
-        ("minimum_additional_currency", "累加申購金額幣別", "第四章第 4 項累加申購金額"),
-        ("minimum_redemption_currency", "最低贖回金額幣別", "第四章第 8 項最低贖回金額"),
-        ("redemption_increment_currency", "累加贖回金額幣別", "第四章第 8 項累加贖回金額"),
+        ("denomination_currency", "denomination_currency", "第一章第 5 項每單位商品面額"),
+        ("minimum_subscription_currency", "minimum_subscription_currency", "第四章第 4 項最低申購金額"),
+        ("minimum_additional_currency", "minimum_additional_currency", "第四章第 4 項累加申購金額"),
+        ("minimum_redemption_currency", "minimum_redemption_currency", "第四章第 8 項最低贖回金額"),
+        ("redemption_increment_currency", "redemption_increment_currency", "第四章第 8 項累加贖回金額"),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]

@@ -98,9 +98,9 @@ def test_barc_reference_fields_use_column_name_and_both_values(tmp_path, column,
         others = [r for r in sheet_side if r.field != "currency"]
         assert others and all(r.rule_id == "field.currency" and r.status == CheckStatus.MISMATCH for r in others)
         for r in others:  # 單一出處顯示 ISO 代碼；情境列出該情境裡每一處不符的金額
-            assert re.search(r"幣別對不起來：參考條件表 JPY／說明書 (USD|.*美元.*)$", problem_message(r)), (
-                problem_message(r)
-            )
+            assert re.search(
+                r"幣別(（[^）]+）)?對不起來：參考條件表 JPY／說明書 (USD|.*美元.*)$", problem_message(r)
+            ), problem_message(r)
         sheet_side = [r for r in sheet_side if r.field == "currency"]
     assert len(sheet_side) == 1, [(r.rule_id, r.field) for r in sheet_side]
     msg = problem_message(sheet_side[0])
@@ -476,7 +476,7 @@ def test_each_minimum_amount_names_itself(tmp_path):
     msgs = [problem_message(r) for r in issues(report) if r.rule_id == "field.min_amounts"]
     assert msgs == [
         "最低申購金額對不起來：參考條件表 10000／說明書 1",
-        "最低贖回商品面額對不起來：參考條件表 10000／說明書 1",
+        "最低贖回金額對不起來：參考條件表 10000／說明書 1",
     ]
 
 

@@ -131,27 +131,28 @@ def _result(ti: TextIndex, start: int, end: int) -> bool:
 
 
 def scenario_occurrence(
-    field: str, name: str, where: str, found: Sequence[Money], fallback: Sequence[Line]
+    field: str, code: str, where: str, found: Sequence[Money], fallback: Sequence[Line], case: str = ""
 ) -> Occurrence:
-    """一個情境的金額幣別出處：值是該情境裡每一處金額旁的幣別；一處金額都沒有時為缺漏（證據引情境開頭）。"""
+    """一個情境的金額幣別出處：值是該情境裡每一處金額旁的幣別；一處金額都沒有時為缺漏（證據引情境開頭）。`case` 為
+    哪一個情境（例：情境一），接在項目名稱後面，作業人員看錯訊就知道是哪一個情境。"""
     if not found:
         pf = ParsedField(field, FieldStatus.MISSING, evidence=[Evidence.of(x) for x in fallback], note="找不到金額")
     else:
         pf = ParsedField(field, FieldStatus.PRESENT, tuple(found), [e for money in found for e in money.evidence])
-    return Occurrence(field, name, where, pf)
+    return Occurrence(field, code, where, pf, case)
 
 
-def currency_words(lns: list[Line], pattern: str, field: str, name: str, where: str) -> list[Occurrence]:
+def currency_words(lns: list[Line], pattern: str, field: str, code: str, where: str) -> list[Occurrence]:
     """說明文字裡每一處幣別字（`pattern` 第 1 組，例：`以美元為計價單位`；BBVA、Nomura，Issue #305、#316）：每處一筆
     （欄位 `<field>_<n>`，只有一處時為 `<field>`），沒有任何一處時一筆缺漏。"""
     ti = TextIndex(lns)
     hits = list(ti.finditer(pattern))
     if not hits:
-        return [Occurrence(field, name, where, ParsedField.missing(field, f"{where}找不到幣別說明文字"))]
+        return [Occurrence(field, code, where, ParsedField.missing(field, f"{where}找不到幣別說明文字"))]
     return [
         Occurrence(
             f"{field}_{n}" if len(hits) > 1 else field,
-            name,
+            code,
             where,
             ParsedField.present(field, m[1], ti.lines_for(m.start(), m.end())),
         )

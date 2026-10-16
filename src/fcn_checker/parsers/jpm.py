@@ -441,10 +441,23 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
         "min_amounts",
         [
             occ(
-                "minimum_subscription", "最低申購金額", "第 IV 部分第 4 項最低申購金額", fields["minimum_subscription"]
+                "minimum_subscription",
+                "minimum_subscription",
+                "第 IV 部分第 4 項最低申購金額",
+                fields["minimum_subscription"],
             ),
-            occ("minimum_additional", "最低加購金額", "第 IV 部分第 4 項最低加購金額", fields["minimum_additional"]),
-            occ("minimum_redemption", "最低贖回金額", "第 IV 部分第 8 項最低贖回金額", fields["minimum_redemption"]),
+            occ(
+                "minimum_additional",
+                "minimum_additional",
+                "第 IV 部分第 4 項最低加購金額",
+                fields["minimum_additional"],
+            ),
+            occ(
+                "minimum_redemption",
+                "minimum_redemption",
+                "第 IV 部分第 8 項最低贖回金額",
+                fields["minimum_redemption"],
+            ),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
@@ -452,21 +465,21 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
         [
             occ(
                 "subscription_start",
-                "開始受理申購日",
+                "subscription_start",
                 "第 IV 部分第 1 項開始受理申購日期",
                 fields["subscription_start"],
             )
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "封面產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "封面產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
         [
             occ(
                 "issue_price_ch4",
-                "發行價格（第 IV 部分申購價金）",
+                "issue_price_subscription",
                 "第 IV 部分第 5 項申購價金之計算",
                 fields["issue_price_ch4"],
             )
@@ -476,29 +489,32 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
         "currency_others",
         [
             occ(
-                "denomination_currency", "每單位面額幣別", "第 I 部分第 5 項每單位面額", fields["denomination_currency"]
+                "denomination_currency",
+                "denomination_currency",
+                "第 I 部分第 5 項每單位面額",
+                fields["denomination_currency"],
             ),
             occ(
                 "scenario_principal_currency",
-                "情境假設本金幣別",
+                "scenario_principal_currency",
                 "第 15 項假設原計價幣別本金",
                 fields["scenario_principal_currency"],
             ),
             occ(
                 "minimum_subscription_currency",
-                "最低申購金額幣別",
+                "minimum_subscription_currency",
                 "第 IV 部分第 4 項最低申購金額",
                 fields["minimum_subscription_currency"],
             ),
             occ(
                 "minimum_additional_currency",
-                "最低加購金額幣別",
+                "minimum_additional_currency",
                 "第 IV 部分第 4 項最低加購金額",
                 fields["minimum_additional_currency"],
             ),
             occ(
                 "minimum_redemption_currency",
-                "最低贖回金額幣別",
+                "minimum_redemption_currency",
                 "第 IV 部分第 8 項最低贖回金額",
                 fields["minimum_redemption_currency"],
             ),
@@ -630,7 +646,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         fields["scenario_prices"] = ParsedField.missing("scenario_prices", note)
         return [
             Occurrence(
-                "scenario_currency", "情境金額幣別", "第 15 項情境", ParsedField.missing("scenario_currency", note)
+                "scenario_currency", "scenario_currency", "第 15 項情境", ParsedField.missing("scenario_currency", note)
             )
         ]
     for case, a, b in spans:
@@ -665,7 +681,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         found = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=a, end=b)
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", f"{case}金額幣別", f"第 15 項{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"第 15 項{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out

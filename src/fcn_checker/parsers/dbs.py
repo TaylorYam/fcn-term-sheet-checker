@@ -526,18 +526,18 @@ def _scenario_mentions(fields: dict[str, ParsedField], ti: TextIndex) -> list[Oc
         for name in ("scenario_coupon_mentions", "scenario_k_mention", "scenario3_initial", "scenario3_worst"):
             fields[name] = ParsedField.missing(name, note)
         missing = ParsedField.missing("scenario_currency", note)
-        return [Occurrence("scenario_currency", "情境金額幣別", "情境分析", missing)]
+        return [Occurrence("scenario_currency", "scenario_currency", "情境分析", missing)]
     items = []
     for n, (case, a, b) in enumerate(spans, start=1):  # 情境一～三都有利息算式（33 份成立），某一情境沒有就缺漏
         hits = [m for m in ti.finditer(SCENARIO_COUPON) if a <= m.start() < b]
         if not hits:
             missing = ParsedField.missing(f"scenario_coupon_mentions_{n}", f"{case}找不到利息算式「面額 X a% X」")
-            items.append(Occurrence(missing.name, "利息算式最大利率值", f"情境分析{case}", missing))
+            items.append(Occurrence(missing.name, "interest_formula_rate", f"情境分析{case}", missing))
         for k, m in enumerate(hits, start=1):
             pf = ParsedField.present(
                 f"scenario_coupon_mentions_{n}_{k}", Decimal(m[1]), ti.lines_for(m.start(), m.end())
             )
-            items.append(Occurrence(pf.name, "利息算式最大利率值", f"情境分析{case}", pf))
+            items.append(Occurrence(pf.name, "interest_formula_rate", f"情境分析{case}", pf))
     fields["scenario_coupon_mentions"] = standard_fields.occurrences("scenario_coupon_mentions", items)
     _, a, b = spans[0]
     ks = [m for m in ti.finditer(SCENARIO_K) if a <= m.start() < b]
@@ -557,7 +557,7 @@ def _scenario_mentions(fields: dict[str, ParsedField], ti: TextIndex) -> list[Oc
         ]
         out.append(
             money.scenario_occurrence(
-                f"scenario{n}_currency", f"{case}金額幣別", f"情境分析{case}", found, ti.lines_for(a, a + 1)
+                f"scenario{n}_currency", "scenario_currency", f"情境分析{case}", found, ti.lines_for(a, a + 1), case
             )
         )
     return out
@@ -702,20 +702,26 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     minimums = (
         (
             "minimum_subscription",
-            "最低申購金額",
+            "minimum_subscription",
             "一般交易事項 4. 最低申購金額",
             "minimum_subscription_units",
             "minimum_subscription_amount",
         ),
-        ("minimum_additional", "最低加購金額", "一般交易事項 4. 最低加購金額", "minimum_subscription_step", None),
+        ("minimum_additional", "minimum_additional", "一般交易事項 4. 最低加購金額", "minimum_subscription_step", None),
         (
             "minimum_redemption",
-            "最低贖回金額",
+            "minimum_redemption",
             "一般交易事項 8.(3) 最低贖回金額",
             "minimum_redemption_units",
             "minimum_redemption_amount",
         ),
-        ("redemption_increment", "增加贖回單位", "一般交易事項 8.(3) 累加單位", "minimum_redemption_step", None),
+        (
+            "redemption_increment",
+            "redemption_increment",
+            "一般交易事項 8.(3) 累加單位",
+            "minimum_redemption_step",
+            None,
+        ),
     )
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
@@ -726,24 +732,24 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         [
             occ(
                 "subscription_start",
-                "開始受理申購日",
+                "subscription_start",
                 "一般交易事項 1.(1) 商品開始受理申購日期",
                 fields["subscription_start"],
             )
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "第 2 頁中文產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "第 2 頁中文產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "一般交易事項受託機構電話")
     fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、情境股價不列入；情境一～三另在 read 加入
-        ("denomination_currency", "每單位商品面額幣別", "商品基本資料商品面額"),
-        ("minimum_subscription_currency", "最低申購金額幣別", "一般交易事項 4. 最低申購金額"),
-        ("minimum_redemption_currency", "最低贖回金額幣別", "一般交易事項 8.(3) 最低贖回金額"),
-        ("scenario_denomination_currency", "情境假設商品面額幣別", "情境分析假設商品面額"),
-        ("scenario_investment_currency", "情境假設投資金額幣別", "情境分析假設投資金額"),
+        ("denomination_currency", "denomination_currency", "商品基本資料商品面額"),
+        ("minimum_subscription_currency", "minimum_subscription_currency", "一般交易事項 4. 最低申購金額"),
+        ("minimum_redemption_currency", "minimum_redemption_currency", "一般交易事項 8.(3) 最低贖回金額"),
+        ("scenario_denomination_currency", "scenario_denomination_currency", "情境分析假設商品面額"),
+        ("scenario_investment_currency", "scenario_investment_currency", "情境分析假設投資金額"),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]

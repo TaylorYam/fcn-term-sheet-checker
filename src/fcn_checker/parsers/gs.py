@@ -591,25 +591,25 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         [
             occ(
                 "minimum_subscription",
-                "最低申購金額",
+                "minimum_subscription",
                 "第四章第 4 項最低申購單位數 × 每一單位金額",
                 _times(subscribe, unit, "minimum_subscription"),
             ),
             occ(
                 "minimum_additional",
-                "最低加購金額",
+                "minimum_additional",
                 "第四章第 4 項其後增加單位（一單位）",
                 _times(subscribe, unit, "minimum_additional", count=1),
             ),
             occ(
                 "minimum_redemption",
-                "最低贖回金額",
+                "minimum_redemption",
                 "第四章第 8 項最低贖回單位數 × 每單位面額",
                 _times(redeem, denom, "minimum_redemption"),
             ),
             occ(
                 "redemption_increment",
-                "增加贖回單位",
+                "redemption_increment",
                 "第四章第 8 項後續贖回（一單位）",
                 _times(redeem, denom, "redemption_increment", count=1),
             ),
@@ -620,20 +620,20 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         [
             occ(
                 "subscription_start",
-                "開始受理申購日",
+                "subscription_start",
                 "第四章第 1 項(1) 本商品開始受理申購日期",
                 fields["subscription_start"],
             ),
             occ(
                 "subscription_end",
-                "結束受理申購日",
+                "subscription_end",
                 "第四章第 1 項(2) 本商品結束受理申購日期",
                 fields["subscription_end"],
             ),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "第 2 頁本中文產品說明書刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "第 2 頁本中文產品說明書刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.absent(
         "issue_price_others", "發行價格的其他出處（只有第四章申購價金）"
@@ -641,9 +641,9 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
     fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表價格、情境算式金額不列入
-        ("denomination_currency", "每單位面額幣別", "第一章第 6 項每單位面額"),
-        ("unit_amount_currency", "每一單位金額幣別", "第四章第 4 項每一單位"),
-        ("subscription_price_currency", "申購價金面額幣別", "第四章第 5 項申購價金之計算"),
+        ("denomination_currency", "denomination_currency", "第一章第 6 項每單位面額"),
+        ("unit_amount_currency", "unit_amount_currency", "第四章第 4 項每一單位"),
+        ("subscription_price_currency", "subscription_price_currency", "第四章第 5 項申購價金之計算"),
     )
     fields["currency_others"] = standard_fields.occurrences(
         "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]
@@ -766,13 +766,15 @@ def _currency_mentions(
         occ
         for n in (9, 14, 15, 16)
         for occ in words(
-            article(n), denom, f"art{n}_denomination_currency", "每單位面額幣別", f"第一章第 {n} 項每單位面額"
+            article(n), denom, f"art{n}_denomination_currency", "denomination_currency", f"第一章第 {n} 項每單位面額"
         )
     ]
-    out += words(ch4[9], denom, "redemption_denomination_currency", "每單位面額幣別", "第四章第 9 項提前贖回價金")
+    out += words(
+        ch4[9], denom, "redemption_denomination_currency", "denomination_currency", "第四章第 9 項提前贖回價金"
+    )
     pay = rf"以({CCY})支付配息金額及到期買回金額"  # 非美元商品才有（匯率中斷事件的說明），沒有就不核對
     if re.search(pay, TextIndex(article(9)).text):
-        out += words(article(9), pay, "payment_currency", "說明文字幣別", "第一章第 9 項主要給付項目")
+        out += words(article(9), pay, "payment_currency", "wording_currency", "第一章第 9 項主要給付項目")
     for lns, pattern, field, where in (
         (article(15), ODD_LOT_CURRENCY, "odd_lot_currency", "第一章第 15 項可交付資產"),
         (ch3, RISK_CURRENCY, "risk_currency", "第三章利率風險、匯兌風險「計價幣別（X）」"),
@@ -781,14 +783,16 @@ def _currency_mentions(
         (ch4[2], FEE_NAV_CURRENCY, "fee_nav_currency", "第四章第 2 項通路服務費說明期初淨值"),
         (ch4[2], FEE_NAV_AFTER_CURRENCY, "fee_nav_after_currency", "第四章第 2 項期初淨值降至"),
     ):
-        out += words(lns, pattern, field, "說明文字幣別", where)
+        out += words(lns, pattern, field, "wording_currency", where)
     ti, starts = _scenarios(article(17))
     a, end = starts[0], starts[6]
     if a < 0 or end < a:
         missing = ParsedField.missing("scenario_currency", "第 17 項找不到「(3) 最大可能獲利」到情境 4 價格段")
-        out.append(Occurrence("scenario_currency", "情境金額幣別", "第一章第 17 項情境", missing))
+        out.append(Occurrence("scenario_currency", "scenario_currency", "第一章第 17 項情境", missing))
         return out
     found = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=lambda _: False, start=a, end=end)
     where = "第一章第 17 項情境 1～4（情境 4 價格段以外）"
-    out.append(money.scenario_occurrence("scenario_currency", "情境金額幣別", where, found, ti.lines_for(a, a + 1)))
+    out.append(
+        money.scenario_occurrence("scenario_currency", "scenario_currency", where, found, ti.lines_for(a, a + 1))
+    )
     return out

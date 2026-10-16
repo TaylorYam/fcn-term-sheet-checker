@@ -161,12 +161,14 @@ def _monthly_coupons(sec: TextIndex | None, ko: ParsedField) -> ParsedField:
     """收益分配事項的固定配息率；D 型另有提前出場配息公式 {X%×n(j)/N(j)}（範本規格 §5）。"""
     if sec is None:
         return ParsedField.missing("monthly_coupons", "找不到「收益分配事項」段落")
-    specs = [("monthly_coupon_fixed", "月配息率", "收益分配事項固定配息率", r"固定配息率[(（](\d+(?:\.\d+)?)%[)）]")]
+    specs = [
+        ("monthly_coupon_fixed", "monthly_coupon", "收益分配事項固定配息率", r"固定配息率[(（](\d+(?:\.\d+)?)%[)）]")
+    ]
     if (ko.ok and ko.value == "D") or (not ko.ok and "×n(j)/N(j)}" in sec.text):
         specs.append(
             (
                 "monthly_coupon_formula",
-                "月配息率（提前出場配息公式）",
+                "monthly_coupon_autocall",
                 "收益分配事項提前出場配息公式",
                 r"\{(\d+(?:\.\d+)?)%×n[(（]j[)）]/N[(（]j[)）]\}",
             )
@@ -190,7 +192,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["print_dates"] = iis.occurrences(
         "print_dates",
         full,
-        (("print_date_iis", "刊印日期", "封面刊印日期", PRINT_DATE + "[:：]" + iis.DATE),),
+        (("print_date_iis", "print_date", "封面刊印日期", PRINT_DATE + "[:：]" + iis.DATE),),
         parse_date,
     )
     # 商品簡介
@@ -216,7 +218,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "issuer_name_org",
-                "發行機構名稱（相關機構）",
+                "issuer_name_org",
                 "相關機構第 1 點",
                 r"相關機構：(?:1\.)?發行機構[:：](.+?)；營業所在地",
             ),
@@ -226,24 +228,24 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         "issuer_names_zh",
         ti,
         (
-            ("issuer_name_w5", "發行機構名稱（警語 5）", "警語 5)", r"5\)本商品持有期間.+?係由(.+?)（發行機構）保證"),
-            ("issuer_name_w6", "發行機構名稱（警語 6）", "警語 6)", r"6\)本中文.+?或由發行機構(.+?)依法負責"),
-            ("issuer_name_summary", "發行機構名稱（商品簡介）", "商品簡介第 4) 點", r"本商品發行機構為(.+?)，"),
+            ("issuer_name_w5", "issuer_name_warning", "警語 5)", r"5\)本商品持有期間.+?係由(.+?)（發行機構）保證"),
+            ("issuer_name_w6", "issuer_name_warning", "警語 6)", r"6\)本中文.+?或由發行機構(.+?)依法負責"),
+            ("issuer_name_summary", "issuer_name_summary", "商品簡介第 4) 點", r"本商品發行機構為(.+?)，"),
         ),
     )
     fields["distributor_names"] = iis.occurrences(
         "distributor_names",
         ti,
         (
-            ("distributor_name_w4a", "受託機構名稱（警語 4）", "警語 4)", r"4\)商品雖經(.+?)審查"),
-            ("distributor_name_w4b", "受託機構名稱（警語 4）", "警語 4)", r"之價值，且(.+?)不負本商品投資盈虧之責"),
-            ("distributor_name_w4c", "受託機構名稱（警語 4）", "警語 4)", r"盈虧之責。(.+?)依法不得承諾"),
-            ("distributor_name_w5", "受託機構名稱（警語 5）", "警語 5)", r"5\)本商品持有期間.+?而非由(.+?)所保證"),
-            ("distributor_name_w6", "受託機構名稱（警語 6）", "警語 6)", r"係由受託機構[(（]即(.+?)[)）]負責外"),
-            ("distributor_name_w9", "受託機構名稱（警語 9）", "警語 9)", r"9\)(.{1,30}?)應提供專業投資人"),
+            ("distributor_name_w4a", "distributor_name_warning", "警語 4)", r"4\)商品雖經(.+?)審查"),
+            ("distributor_name_w4b", "distributor_name_warning", "警語 4)", r"之價值，且(.+?)不負本商品投資盈虧之責"),
+            ("distributor_name_w4c", "distributor_name_warning", "警語 4)", r"盈虧之責。(.+?)依法不得承諾"),
+            ("distributor_name_w5", "distributor_name_warning", "警語 5)", r"5\)本商品持有期間.+?而非由(.+?)所保證"),
+            ("distributor_name_w6", "distributor_name_warning", "警語 6)", r"係由受託機構[(（]即(.+?)[)）]負責外"),
+            ("distributor_name_w9", "distributor_name_warning", "警語 9)", r"9\)(.{1,30}?)應提供專業投資人"),
             (
                 "distributor_name_org",
-                "受託機構名稱（相關機構）",
+                "distributor_name_org",
                 "相關機構第 3 點",
                 r"3\.受託機構[:：](.+?)；營業所在地",
             ),
@@ -255,7 +257,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         (
             (
                 "distributor_address_org",
-                "受託機構地址（相關機構）",
+                "distributor_address_org",
                 "相關機構第 3 點",
                 r"3\.受託機構[:：].{1,30}?；營業所在地[:：](.+?)(?:[(（]營業活動所在地[)）])?二、境外結構型商品事項",
             ),

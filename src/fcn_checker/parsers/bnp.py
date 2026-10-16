@@ -398,10 +398,20 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     fields["min_amounts"] = standard_fields.occurrences(
         "min_amounts",
         [
-            occ("minimum_subscription", "最低申購金額", "第四章第 4 項最低申購金額", fields["minimum_subscription"]),
-            occ("minimum_additional", "最低加購金額", "第四章第 4 項最低加購金額", fields["minimum_additional"]),
-            occ("minimum_redemption", "最低贖回金額", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
-            occ("redemption_increment", "增加贖回單位", "第四章第 8 項增加贖回之單位", fields["redemption_increment"]),
+            occ(
+                "minimum_subscription",
+                "minimum_subscription",
+                "第四章第 4 項最低申購金額",
+                fields["minimum_subscription"],
+            ),
+            occ("minimum_additional", "minimum_additional", "第四章第 4 項最低加購金額", fields["minimum_additional"]),
+            occ("minimum_redemption", "minimum_redemption", "第四章第 8 項最低贖回金額", fields["minimum_redemption"]),
+            occ(
+                "redemption_increment",
+                "redemption_increment",
+                "第四章第 8 項增加贖回之單位",
+                fields["redemption_increment"],
+            ),
         ],
     )
     fields["subscription_dates"] = standard_fields.occurrences(
@@ -409,33 +419,33 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
         [
             occ(
                 "subscription_start",
-                "開始受理申購日（起）",
+                "subscription_start",
                 "第四章第 1 項商品開始受理申購日期（起）",
                 fields["subscription_start"],
             ),
             occ(
                 "subscription_end",
-                "開始受理申購日（迄）",
+                "subscription_end",
                 "第四章第 1 項商品開始受理申購日期（迄）",
                 fields["subscription_end"],
             ),
         ],
     )
     fields["print_dates"] = standard_fields.occurrences(
-        "print_dates", [occ("print_date", "刊印日期", "封面第 16 項刊印日期", fields["print_date"])]
+        "print_dates", [occ("print_date", "print_date", "封面第 16 項刊印日期", fields["print_date"])]
     )
     fields["issue_price_others"] = standard_fields.occurrences(
         "issue_price_others",
         [
             occ(
                 "issue_price_scenario",
-                "發行價格（第 18 項假設）",
+                "issue_price_scenario",
                 "第 18 項假設發行價格",
                 _hit_field("issue_price_scenario", scenarios.issue_price, "第 18 項假設找不到發行價格或出現多次"),
             ),
             occ(
                 "issue_price_principal",
-                "發行價格（第 18 項投資本金）",
+                "issue_price_principal",
                 "第 18 項投資本金算式",
                 _hit_field(
                     "issue_price_principal",
@@ -444,7 +454,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
                     lambda v: v.pct,
                 ),
             ),
-            occ("issue_price_ch4", "發行價格（第四章申購價金）", "第四章第 5 項申購價金", fields["issue_price_ch4"]),
+            occ("issue_price_ch4", "issue_price_subscription", "第四章第 5 項申購價金", fields["issue_price_ch4"]),
         ],
     )
     fields["currency_others"] = standard_fields.occurrences("currency_others", _currency_occurrences(fields, scenarios))
@@ -586,37 +596,37 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
     第四章四個最低金額、§18 假設（面額、投資本金）各一處；§18 每個情境一處（股價、剩餘金額算式與含「股」的算式不算）。"""
     occ = Occurrence
     out = [
-        occ("denomination_currency", "商品面額幣別", "第一章第 6 項商品面額", fields["denomination_currency"]),
-        occ("coupon_currency_art15", "配息款項幣別", "第一章第 15 項配息款項", fields["coupon_currency_art15"]),
-        occ("currency_art16", "自動提前贖回金額幣別", "第一章第 16 項自動提前贖回金額", fields["currency_art16"]),
-        occ("currency_art17", "到期贖回金額幣別", "第一章第 17 項到期贖回金額", fields["currency_art17"]),
+        occ("denomination_currency", "denomination_currency", "第一章第 6 項商品面額", fields["denomination_currency"]),
+        occ("coupon_currency_art15", "coupon_currency", "第一章第 15 項配息款項", fields["coupon_currency_art15"]),
+        occ("currency_art16", "autocall_amount_currency", "第一章第 16 項自動提前贖回金額", fields["currency_art16"]),
+        occ("currency_art17", "maturity_amount_currency", "第一章第 17 項到期贖回金額", fields["currency_art17"]),
         occ(
             "minimum_subscription_currency",
-            "最低申購金額幣別",
+            "minimum_subscription_currency",
             "第四章第 4 項最低申購金額",
             fields["minimum_subscription_currency"],
         ),
         occ(
             "minimum_additional_currency",
-            "最低加購金額幣別",
+            "minimum_additional_currency",
             "第四章第 4 項最低加購金額",
             fields["minimum_additional_currency"],
         ),
         occ(
             "minimum_redemption_currency",
-            "最低贖回金額幣別",
+            "minimum_redemption_currency",
             "第四章第 8 項最低贖回金額",
             fields["minimum_redemption_currency"],
         ),
         occ(
             "redemption_increment_currency",
-            "增加贖回單位幣別",
+            "redemption_increment_currency",
             "第四章第 8 項增加贖回之單位",
             fields["redemption_increment_currency"],
         ),
         occ(
             "scenario_denomination_currency",
-            "情境假設商品面額幣別",
+            "scenario_denomination_currency",
             "第 18 項假設商品面額",
             _hit_field(
                 "scenario_denomination_currency",
@@ -627,7 +637,7 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
         ),
         occ(
             "scenario_principal_currency",
-            "情境假設投資本金幣別",
+            "scenario_principal_currency",
             "第 18 項假設投資本金",
             _hit_field(
                 "scenario_principal_currency",
@@ -642,7 +652,9 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
             continue
         field = f"情境{s.number}_currency"
         out.append(
-            money.scenario_occurrence(field, f"情境{s.number}金額幣別", f"第 18 項情境{s.number}", s.money, s.lines[:1])
+            money.scenario_occurrence(
+                field, "scenario_currency", f"第 18 項情境{s.number}", s.money, s.lines[:1], f"情境{s.number}"
+            )
         )
     return out
 

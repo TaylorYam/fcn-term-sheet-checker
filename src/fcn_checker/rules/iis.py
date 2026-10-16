@@ -372,7 +372,7 @@ def _min_subscription(ctx: Context) -> Found:
     occs, why = _term_sheet_field(ctx, "min_amounts", "最低申購金額")
     if why:
         return None, why
-    occ = next((o for o in occs if o.name == "最低申購金額"), None)
+    occ = next((o for o in occs if o.code == "minimum_subscription"), None)
     if occ is None or not occ.value.ok:
         return None, "同商品說明書讀不到「最低申購金額」，無法比對"
     return occ.value.value, None
