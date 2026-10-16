@@ -56,8 +56,11 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in DBS.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    assert len(rule(r, "doc.coupon_mentions")) == 2  # 情境最大利率值、情境二年化報酬率
-    assert len(rule(r, "doc.autocall_terms")) == 4  # 配息第1~k、情境第1~k、情境 KO 決定日、情境一出場期
+    # 情境最大利率值、情境二年化報酬率、情境一～三利息算式的最大利率值 4 處（Issue #321）
+    assert len(rule(r, "doc.coupon_mentions")) == 6
+    assert len(rule(r, "doc.autocall_terms")) == 5  # 配息第1~k、情境第1~k、情境 KO 決定日、情境一利息第1~k、出場期
+    # 情境價格表、投資金額、情境三期初價格、情境三表現最差標的價格（Issue #321）
+    assert len(rule(r, "doc.scenario_table")) == 4
     assert rule(r, "standard.fixed_warning")[0].actual == 2  # 封面警語 1.、商品主要風險揭露 五、1.
     assert rule(r, "standard.forbidden_wording")[0].status == S.PASS
     assert len(rule(r, "standard.issuer_name")) == 2  # 封面、相關機構事業概況 1.(1)
@@ -65,7 +68,7 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     skipped = ("standard.guarantor_name", "standard.agent_name", "standard.minimum_issue_size")
     assert not [x for x in r.results if x.rule_id in skipped]
     assert len(rule(r, "field.min_amounts")) == 4
-    assert len(rule(r, "field.currency")) == 6  # 封面計價幣別＋金額旁的幣別字 5 處
+    assert len(rule(r, "field.currency")) == 9  # 封面計價幣別＋金額旁的幣別字 5 處＋情境一～三各一處（Issue #321）
     assert rule(r, "field.initial_pricing")[0].status == S.PASS  # 說明書沒寫：只檢查表上是允許值
     assert rule(r, "field.ki_type")[0].status == S.PASS
 
@@ -110,6 +113,21 @@ def test_ki_type_is_compared_with_the_sheet(tmp_path):
         (Edit("70.00%）", "75.00%）", "ts.scenario.table"), "doc.scenario_table"),
         (Edit("商品面額 = 美元10,000", "商品面額 = 美元1,000", "ts.scenario"), "doc.scenario_table"),
         (Edit("發行價格 = 100.00%", "發行價格 = 99.00%", "ts.scenario"), "doc.scenario_table"),
+        # 情境重複寫出的值（Issue #321）
+        (Edit("10,000 X 0.8334% X 6個月)；", "10,000 X 0.8333% X 6個月)；", "ts.scenario"), "doc.coupon_mentions"),
+        (Edit("(10,000 X 0.8334% X 1個月)", "(10,000 X 0.8434% X 1個月)", "ts.scenario"), "doc.coupon_mentions"),
+        (Edit("包括第1個觀察期間之利息金額", "包括第1~2個觀察期間之利息金額", "ts.scenario"), "doc.autocall_terms"),
+        (Edit("X 1= 美元10,000", "X 1= 美元1,000", "ts.scenario"), "doc.scenario_table"),
+        (Edit("美元 100.4500", "美元 100.5400", "ts.scenario.final"), "doc.scenario_table"),
+        (Edit("其最終價格(50)", "其最終價格(55)", "ts.scenario"), "doc.scenario_table"),
+        (Edit("執行價格(70.3150)", "執行價格(70.3151)", "ts.scenario"), "doc.scenario_table"),
+        (Edit("執行價格(70.3150)", "下限觸發價格(70.3150)", "ts.scenario"), "doc.scenario_table"),
+        (Edit("利息總計91.67美元", "利息總計91.67澳幣", "ts.scenario"), "field.currency"),
+        (
+            Edit("即美元10,000。較原始投資金額獲利約5.000%", "即澳幣10,000。較原始投資金額獲利約5.000%", "ts.scenario"),
+            "field.currency",
+        ),
+        (Edit("合計現金價值為5,477.74美元", "合計現金價值為5,477.74日圓", "ts.scenario"), "field.currency"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )
@@ -119,6 +137,65 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     bad = {rid for rid, _, _ in problems(r)}
     assert broken in bad, problems(r)
     assert bad <= {broken, "standard.product_name"}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("edit", "rid", "field"),
+    [
+        (
+            Edit("最大損失情況：", "最大損失：", "ts.scenario"),  # 情境分不出來：整個出處清單缺漏
+            "doc.coupon_mentions",
+            "scenario_coupon_mentions",
+        ),
+        (
+            Edit("包括第1個觀察期間之利息金額", "包括第1期之利息金額", "ts.scenario"),
+            "doc.autocall_terms",
+            "scenario_k_mention",
+        ),
+        (
+            Edit("投資金額 = 10,000 X 100.00% X 1=", "投資金額 = 10,000 X 1=", "ts.scenario"),
+            "doc.scenario_table",
+            "scenario_investment",
+        ),
+        (Edit("ZDB UN", "ZDX UN", "ts.scenario.final"), "doc.scenario_table", "scenario3_initial"),
+        (Edit("表現最差連結標的為", "表現最差者為", "ts.scenario"), "doc.scenario_table", "scenario3_worst"),
+        (Edit("依上所示", "如上所示", "ts.scenario"), "field.currency", "scenario_currency"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
+)
+def test_unreadable_scenario_repeats_need_review(tmp_path, edit, rid, field):
+    """情境重複寫出處讀不到（Issue #321）：該項轉人工覆核，不判通過。"""
+    r = check(tmp_path, edits=[edit])
+    assert [x.status for x in rule(r, rid, field)] == [S.REVIEW_REQUIRED], problems(r)
+
+
+def test_scenario_without_amounts_needs_review(tmp_path):
+    """情境一的金額都沒有寫幣別（讀不到金額）：情境一幣別轉人工覆核，其他情境照常（Issue #321）。"""
+    edits = [Edit(f"{x}美元", x, "ts.scenario") for x in ("91.67", "83.34", "8.33")] + [
+        Edit("即美元10,000。較原始投資金額獲利約0.917%", "即10,000。較原始投資金額獲利約0.917%", "ts.scenario")
+    ]
+    r = check(tmp_path, edits=edits)
+    assert [x.status for x in rule(r, "field.currency", "scenario1_currency")] == [S.REVIEW_REQUIRED]
+    assert [x.status for x in rule(r, "field.currency", "scenario2_currency")] == [S.PASS]
+
+
+def test_scenario_without_coupon_formula_needs_review(tmp_path):
+    """情境一沒有利息算式「面額 X a% X」（其他情境有）：情境一那一筆轉人工覆核，不是靜靜略過（Issue #321）。"""
+    edits = [
+        Edit("(10,000 X 0.8334% X 1個月)", "(10,000 X 1個月)", "ts.scenario"),
+        Edit("(10,000 X 0.8334% X 2 ÷ 20)", "(10,000 X 2 ÷ 20)", "ts.scenario"),
+    ]
+    r = check(tmp_path, edits=edits)
+    statuses = {x.field: x.status for x in rule(r, "doc.coupon_mentions")}
+    assert statuses["scenario_coupon_mentions_1"] == S.REVIEW_REQUIRED
+    assert statuses["scenario_coupon_mentions_2_1"] == S.PASS
+
+
+def test_quanto_scenario_stock_prices_are_not_currency_mentions(tmp_path):
+    """日圓 Quanto 連美股：情境三最終價格表的股價寫標的報價幣別（美元），不列入承作幣別出處（Issue #321）。"""
+    r = check(tmp_path, Spec(currency_zh="日圓", ki="AM"))
+    assert r.status == S.PASS, problems(r)
+    assert [x.actual for x in rule(r, "field.currency", "scenario3_currency")] == ["JPY"]
 
 
 def test_max_rate_rounds_up(tmp_path):

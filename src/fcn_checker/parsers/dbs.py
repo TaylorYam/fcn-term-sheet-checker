@@ -24,7 +24,7 @@ from .common import RawText, capture_group, compat_normalized, derived, fee_rate
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "dbs-zh-pd"
-PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）
+PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #321）
 TITLE = "中文產品說明書(最終版本)"
 SECTIONS = (
     "商品基本資料",
@@ -61,6 +61,18 @@ FULL_RATE = r"利率：1?\)?對於第1(?:~(\d{1,2}))?個觀察期間而言，利
 KI_EVENT = "下限觸發事件：若任一連結標的於定價日的參考價格小於其下限觸發價格，則視為發生下限觸發事件"
 KI_MATURITY = r"\(a\)如果未發生下限觸發事件，將適用現金結算"
 NO_KI_MATURITY = r"\(a\)若表現最差連結標的之最終價格等於或高於其執行價格，將適用現金結算"
+# 情境分析（範本規格 §4.9）：各情境的起點（情境三的金額從最終價格表之後的「依上所示」起算）與重複寫出的值（Issue #321）
+SCENARIO_MARKS = ("有利情況：", "於到期最佳情況：", "較差情況：", "依上所示", "最大損失情況：")
+TIMES = "[Xx×]"
+SCENARIO_COUPON = rf"[\d,]+{TIMES}(\d+(?:\.\d+)?)%{TIMES}"  # 利息算式「10,000 X 0.6667% X 1個月」
+SCENARIO_K = r"第1(?:~(\d{1,2}))?個觀察期間之利息金額"
+SCENARIO3_WORST = (
+    r"表現最差連結標的為([A-Z0-9./-]+)，其最終價格\(("
+    + money.NUMBER
+    + r")\)低於其(執行價格|下限觸發價格)\(("
+    + money.NUMBER
+    + r")\)"
+)
 # 價格表（表1、情境、投資人須知商品簡介）：以彭博代碼切列（代碼在列首），欄序 K → KO → KI；
 # 表頭 %「(期初價格的X%)」可能跨頁（欄名在前一頁）；每格「美元 123.4567」或分兩行「美元」／「123.4567」
 PRICE_TABLE = price_table.TableSpec(
@@ -181,10 +193,13 @@ def read(lines: Sequence[Line]) -> DbsTermSheet:
     basic = section("商品基本資料")
     _basic(fields, basic, put)
     _schedule(fields)
-    _scenario(fields, section("商品投資收益計算方法及其他資料"), put)
+    scenario_currencies = _scenario(fields, section("商品投資收益計算方法及其他資料"), put)
     _organisations(fields, section("相關機構事業概況"))
     _trading(fields, section("一般交易事項"), put)
     _occurrences(fields)
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [*fields["currency_others"].value, *scenario_currencies]
+    )
     fields["initial_pricing"] = standard_fields.absent(
         "initial_pricing", "期初定價方式（說明書沒有寫開盤價／收盤價／VWAP）"
     )
@@ -398,16 +413,27 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 # ---------------------------------------------------------------- 情境分析
 
 
-def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) -> None:
-    """基本假設（年期、面額、發行價格、利率、KO 決定日）、情境價格表、情境一出場期、情境二年化報酬率（範本規格 §4.9）。"""
+def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) -> list[Occurrence]:
+    """基本假設（年期、面額、發行價格、投資金額、利率、KO 決定日）、情境價格表、情境一出場期、情境二年化報酬率
+    （範本規格 §4.9）與情境一～三重複寫出的值（Issue #321）；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
     ti = TextIndex(sec)
     put("scenario_tenor", sec, r"假設：商品年期：(\d+)個月", int)
     denom = rf"商品面額=({CCY})([\d,]+)發行價格=" + PCT
     fields["scenario_denomination"] = capture_group(sec, denom, 2, "scenario_denomination", number)
     fields["scenario_denomination_currency"] = capture_group(sec, denom, 1, "scenario_denomination_currency")
     fields["scenario_issue_price_pct"] = capture_group(sec, denom, 3, "scenario_issue_price_pct", Decimal)
-    invest = rf"投資金額=[^=]+=({CCY})[\d,]+利率："
-    fields["scenario_investment_currency"] = capture_group(sec, invest, 1, "scenario_investment_currency")
+    invest = rf"投資金額=([\d,]+){TIMES}(\d+(?:\.\d+)?)%{TIMES}(\d+)=({CCY})([\d,]+)利率："
+    for group, key, convert in (
+        (1, "scenario_investment_principal", number),
+        (2, "scenario_investment_pct", Decimal),
+        (3, "scenario_units", int),
+        (5, "scenario_investment", number),
+    ):
+        fields[key] = capture_group(sec, invest, group, key, convert)
+    # 幣別照舊寬鬆讀（Issue #170）：算式寫法變了只影響投資金額的核對，不連帶幣別出處讀不到
+    fields["scenario_investment_currency"] = capture_group(
+        sec, rf"投資金額=[^=]+=({CCY})[\d,]+利率：", 1, "scenario_investment_currency"
+    )
     fields["scenario_full_rate_periods"] = full_rate_periods(
         "scenario_full_rate_periods", ti, r"利率：第1(?:~(\d{1,2}))?個觀察期間之利率為最大利率值"
     )
@@ -426,6 +452,105 @@ def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) ->
     b = ti.text.find("較差情況", a)
     best = ti.lines_for(a, b) if a >= 0 and b > a else []
     put("scenario_best_annual_pct", best, r"年化平均報酬率約為" + PCT, Decimal)
+    return _scenario_mentions(fields, ti)
+
+
+def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
+    """情境一～三在全文索引上的範圍（Issue #321）：情境一「有利情況：」到「於到期最佳情況：」、情境二到「較差情況：」、
+    情境三從「依上所示」（最終價格表之後）到「最大損失情況：」；任一處找不到或順序不對時為空清單。"""
+    marks = [ti.text.find(x) for x in SCENARIO_MARKS]
+    if min(marks) < 0 or marks != sorted(marks):
+        return []
+    one, two, worse, after, end = marks
+    return [("情境一", one, two), ("情境二", two, worse), ("情境三", after, end)]
+
+
+def _scenario_mentions(fields: dict[str, ParsedField], ti: TextIndex) -> list[Occurrence]:
+    """情境一～三重複寫出的值（Issue #321，比照 BBVA #305）：利息算式 `面額 X a% X` 的 a（= 最大利率值）、情境一
+    `第1~k個觀察期間之利息金額` 的 k、情境三最終價格表的期初價格與「表現最差連結標的為…其最終價格(x)低於其執行價格／
+    下限觸發價格(y)」；回傳各情境金額旁的幣別出處。利息金額、股數、零股金額、報酬率與假設匯率不重算。"""
+    spans = _scenario_spans(ti)
+    if not spans:
+        note = "情境分析找不到「有利情況：」「於到期最佳情況：」「較差情況：」「依上所示」「最大損失情況：」"
+        for name in ("scenario_coupon_mentions", "scenario_k_mention", "scenario3_initial", "scenario3_worst"):
+            fields[name] = ParsedField.missing(name, note)
+        missing = ParsedField.missing("scenario_currency", note)
+        return [Occurrence("scenario_currency", "情境金額幣別", "情境分析", missing)]
+    items = []
+    for n, (case, a, b) in enumerate(spans, start=1):  # 情境一～三都有利息算式（33 份成立），某一情境沒有就缺漏
+        hits = [m for m in ti.finditer(SCENARIO_COUPON) if a <= m.start() < b]
+        if not hits:
+            missing = ParsedField.missing(f"scenario_coupon_mentions_{n}", f"{case}找不到利息算式「面額 X a% X」")
+            items.append(Occurrence(missing.name, "利息算式最大利率值", f"情境分析{case}", missing))
+        for k, m in enumerate(hits, start=1):
+            pf = ParsedField.present(
+                f"scenario_coupon_mentions_{n}_{k}", Decimal(m[1]), ti.lines_for(m.start(), m.end())
+            )
+            items.append(Occurrence(pf.name, "利息算式最大利率值", f"情境分析{case}", pf))
+    fields["scenario_coupon_mentions"] = standard_fields.occurrences("scenario_coupon_mentions", items)
+    _, a, b = spans[0]
+    ks = [m for m in ti.finditer(SCENARIO_K) if a <= m.start() < b]
+    fields["scenario_k_mention"] = (
+        ParsedField.present("scenario_k_mention", int(ks[0][1] or 1), ti.lines_for(ks[0].start(), ks[0].end()))
+        if len(ks) == 1
+        else ParsedField.missing("scenario_k_mention", "情境一找不到或有多處「第1~k個觀察期間之利息金額」")
+    )
+    fields["scenario3_initial"], fields["scenario3_worst"] = _scenario3(
+        fields["underlying_table"], ti, spans[1][2], *spans[2][1:]
+    )
+    out = []
+    for n, (case, a, b) in enumerate(spans, start=1):
+        found = [  # 情境一～三的金額都以承作幣別寫（股價、匯率在最終價格表與括號內，沒有幣別字）
+            *money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, skip=lambda _: False, start=a, end=b),
+            *money.amounts(ti, rf"即({CCY})({money.NUMBER})", currency_group=1, skip=lambda _: False, start=a, end=b),
+        ]
+        out.append(
+            money.scenario_occurrence(
+                f"scenario{n}_currency", f"{case}金額幣別", f"情境分析{case}", found, ti.lines_for(a, a + 1)
+            )
+        )
+    return out
+
+
+def _scenario3(table: ParsedField, ti: TextIndex, lo: int, end: int, hi: int) -> tuple[ParsedField, ParsedField]:
+    """情境三（`ti.text[lo:hi]`，「較差情況：」到「最大損失情況：」）最終價格表（「假設於定價日」到 `end`「依上所示」）
+    每列的期初價格（依表1 代碼順序）與最終價格，及 `end` 之後「表現最差連結標的為X，其最終價格(x)低於其執行價格／下限
+    觸發價格(y)」（Issue #321）；價格欄名對成表1 的欄（`strike`／`ki`）。"""
+    names = ("scenario3_initial", "scenario3_worst")
+    if not table.ok:
+        return derived(names[0], table), derived(names[1], table)
+    start = ti.text.find("假設於定價日", lo, end)
+    if start < 0:
+        return tuple(ParsedField.missing(x, "情境三找不到「假設於定價日」最終價格表") for x in names)
+    initial, final, ev = [], {}, []
+    for code in table.value.tickers:
+        tk = re.escape(squash(code or "")) or "(?!)"  # 表1 一定有代碼（以代碼切列）；保險起見不讓空字串配到每一列
+        hits = [
+            m
+            for m in ti.finditer(rf"(?<![A-Z0-9]){tk}(?:{CCY})?({money.NUMBER})(?:{CCY})?({money.NUMBER})=")
+            if start <= m.start() < end
+        ]
+        if len(hits) != 1:
+            return (
+                ParsedField.missing(names[0], f"情境三最終價格表找不到或有多列 {code}"),
+                ParsedField.missing(names[1], "情境三最終價格表讀不到"),
+            )
+        m = hits[0]
+        initial.append(number(m[1]))
+        final[squash(code)] = (code, number(m[2]))
+        ev += ti.lines_for(m.start(), m.end())
+    worst = [m for m in ti.finditer(SCENARIO3_WORST) if end <= m.start() < hi]
+    hit = worst[0] if len(worst) == 1 else None
+    if hit is None or hit[1] not in final:
+        return ParsedField.present(names[0], initial, ev), ParsedField.missing(
+            names[1], "情境三找不到或有多處「表現最差連結標的為…其最終價格(x)低於其執行價格／下限觸發價格(y)」"
+        )
+    code, shown = final[hit[1]]
+    column = {"執行價格": "strike", "下限觸發價格": "ki"}[hit[3]]
+    value = {"ticker": code, "table_final": shown, "final": number(hit[2]), "column": column, "price": number(hit[4])}
+    return ParsedField.present(names[0], initial, ev), ParsedField.present(
+        names[1], value, ti.lines_for(hit.start(), hit.end())
+    )
 
 
 # ---------------------------------------------------------------- 相關機構事業概況、一般交易事項
@@ -562,7 +687,7 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "一般交易事項受託機構電話")
     fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
-    currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、情境股價與算式不列入
+    currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、情境股價不列入；情境一～三另在 read 加入
         ("denomination_currency", "每單位商品面額幣別", "商品基本資料商品面額"),
         ("minimum_subscription_currency", "最低申購金額幣別", "一般交易事項 4. 最低申購金額"),
         ("minimum_redemption_currency", "最低贖回金額幣別", "一般交易事項 8.(3) 最低贖回金額"),

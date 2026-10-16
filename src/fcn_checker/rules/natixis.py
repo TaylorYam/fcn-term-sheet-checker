@@ -287,8 +287,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             issues.append(f"情境假設面額 {scen_denom.value} 不等於每單位商品面額 {denom.value}")
         out.append(
             check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #318，比照 BBVA #305）
-                [str(row.get(c)) for row in own for c in table.value.columns],
-                [str(row.get(c)) for row in rows for c in table.value.columns],
+                kit.price_cells(own),
+                kit.price_cells(rows),
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於第 9 項價格表與每單位商品面額",

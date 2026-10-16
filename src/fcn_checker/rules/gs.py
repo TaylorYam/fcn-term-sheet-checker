@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from ..parsers import gs
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
 from . import kit
@@ -35,8 +35,8 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 17 項情境只核對假設配息率、情境 1 的期別、情境 4 第 1 檔價格與 K %；配息金額、股數、畸零金額、"
-        "報酬率不重算，情境 2、3、5 不核對（2026-10-15 確認）",
+        "description": "第 17 項情境的配息金額、股數、畸零金額、報酬率不重算（2026-10-15 確認）；情境裡重複寫出的面額、"
+        "年利率、申購單位數、初始投資金額與金額幣別逐處核對（Issue #317），情境 4 價格段跟著標的走、只核對第 1 檔價格與 K %",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -300,9 +300,9 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             shown = units.value if units.ok else "讀不到"
             issues.append(f"情境假設最低申購單位數 {shown} 不等於第四章第 4 項 {ch4.value if ch4.ok else '讀不到'}")
         out.append(
-            check.compare(
-                None,
-                None,
+            check.compare(  # 預期值／實際值帶出各格，看得出比了哪些值（Issue #317，比照 BBVA #305）
+                [str(row["initial"]), str(row["strike"]), str(strike.value), ch4.value if ch4.ok else None],
+                [str(scen.value["initial"]), str(scen.value["strike"]), str(scen.value["strike_pct"]), units.value],
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於價格表第 1 檔與 K %",
@@ -310,6 +310,44 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         )
     else:
         out.append(check.compare(None, None))
+    return out
+
+
+# ---------------------------------------------------------------- 重複寫出的值（Issue #317）
+
+
+def repeated(ctx: IssuerContext) -> list[CheckResult]:
+    """重複寫出的值逐處等於正式條款：每單位面額 = 第一章第 6 項；「每單位面額 × X%」的 X = 100；情境總報酬率的申購單位數
+    = 第四章第 4 項最低申購單位數；情境初始投資金額 = 最低申購單位數 × 每一單位金額；天期 = 第一章第 13 項(1)。"""
+    f = ctx.ts.f
+    denom, units, unit, tenor = f("denomination"), f("minimum_subscription_units"), f("unit_amount"), f("tenor_months")
+    investment = (
+        ParsedField("investment", FieldStatus.PRESENT, units.value * unit.value, list(units.evidence))
+        if units.ok and unit.ok
+        else next(p for p in (units, unit) if not p.ok)
+    )
+    hundred = ParsedField.present("redemption_pct", gs.REDEMPTION_PCT, [])
+    rules = {  # 種類 → (rule_id, 欄位, 正式條款, 不符說明)
+        "denomination": ("doc.denomination_mentions", "denomination", denom, "須等於第一章第 6 項每單位面額"),
+        "redemption_pct": ("doc.redemption_pct", "redemption_pct", hundred, "到期買回金額須為每單位面額 × 100%"),
+        "units": ("doc.scenario_params", "scenario_units", units, "須等於第四章第 4 項最低申購單位數"),
+        "investment": (
+            "doc.scenario_params",
+            "scenario_investment",
+            investment,
+            "須等於第四章第 4 項最低申購單位數 × 每一單位金額",
+        ),
+        "tenor": ("doc.tenor_mentions", "tenor_months", tenor, "須等於第一章第 13 項(1) 年期"),
+    }
+    out = []
+    for kind, (rid, field, source, fail) in rules.items():
+        for m in ctx.ts.repeated.get(kind, []):
+            pf = m.parsed(field)
+            out.append(
+                kit.doc_check(ctx, rid, field, m.where, source, pf).compare(
+                    source.value, m.value, evidence=list(m.evidence), fail_message=fail
+                )
+            )
     return out
 
 
@@ -348,5 +386,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *underlying_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
+        *repeated(ctx),
         *schedule(ctx),
     ]

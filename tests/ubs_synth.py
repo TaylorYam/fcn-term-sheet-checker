@@ -153,6 +153,14 @@ class Spec(ProductSpec):
         return self.trade_date + dt.timedelta(days=1)
 
     @property
+    def cross(self) -> bool:
+        """承作幣別和標的報價幣別不同（跨幣別商品）。"""
+        return self.quote != self.currency_zh
+
+    def amount(self, value: Decimal) -> str:
+        return f"{value:,.2f} {self.currency_zh}"
+
+    @property
     def basket(self) -> str:
         return "連結標的股票" if self.count == 1 else "籃子中連結標的股票"
 
@@ -438,6 +446,11 @@ def _article8(d: _Doc, s: Spec) -> None:
     d.section = "art8"
     d.text(72, "上述轉換價、下限價、提前出場價將四捨五入至小數點後第4 位")
     d.text(72, "收盤價：就一預定交易日而言，交易所於當日公佈有關連結標的股票之官方收盤價。")
+    if s.cross:  # 跨幣別：股價換回承作幣別；期末匯率定義寫承作幣別（真實樣本澳幣連日股、日圓連美股）
+        d.text(72, f"剩餘金額：指相等於i）畸零股數乘以ii）收盤價iii）1/期末匯率換算後的{s.currency_zh}金額。")
+        d.text(72, f"期末匯率：於期末訂價日彭博資訊所顯示之匯率（以每一{s.currency_zh}可兌多少當地貨幣表達）。")
+    else:
+        d.text(72, f"剩餘金額：指相等於i）畸零股數乘以ii）期末訂價日的收盤價換算後的{s.currency_zh}金額。")
 
 
 def _article9(d: _Doc, s: Spec) -> None:
@@ -470,16 +483,51 @@ def _article15(d: _Doc, s: Spec) -> None:
     d.text(54, "設定參數：")
     d.text(54, f"天期：{s.tenor} 個月")
     d.text(54, f"每單位面額：{s.money()} / 發行價格：100% / 每單位面額初始投資金額：{s.money()}。")
+    if s.ko_obs == "D":  # 配息觀察次數（Issue #320）；KO 每期另和提前出場觀察日寫在固定配息率之後
+        d.text(54, f"配息觀察期間：每月（共{s.tenor} 個），且假設每個觀察期間皆為20 個預定交易日（Nt）")
     d.section = "art15.table"
     _price_table(d, s)
     d.section = "art15"
     d.text(54, f"固定配息率：{s.monthly}%。（年化配息率為{s.annual}%）。")
+    if s.ko_obs == "P":
+        d.text(54, f"配息觀察日：每月（共{s.tenor} 個）；提前出場觀察日：{_ko_observation(s, art8=False)}")
     if s.ko_obs == "D":  # 真實樣本 KO 每日型十五設定參數重複八的變動配息率與 t 期別
         d.text(54, f"變動配息率：{s.monthly}%X（nt/Nt）（年化配息率為{s.annual}%）。")
         if s.first_callable < s.tenor:
             k = s.first_callable + 1
             d.text(54, f"t 係為{k} 至{s.tenor} 的數字，代表第{k} 至第{s.tenor} 個月。")
-    d.text(54, "情境分析一：在第1 個提前出場觀察日發生提前出場事件。")
+    _scenarios(d, s)
+
+
+def _scenarios(d: _Doc, s: Spec) -> None:
+    """十五情境分析一～三（Issue #320）：算式代入每單位面額與配息率，金額小數 2 位寫承作幣別，股價小數 4 位寫報價幣別。"""
+    money, denom = s.money(), Decimal(s.denom)
+    one = (denom * s.monthly / 100).quantize(Decimal("0.01"))
+    total = one * s.tenor
+    u = s.underlyings[0]
+    strike = (u.initial * s.strike / 100).quantize(Q4)
+    close = f"{strike / 2:,.4f} {s.quote}"
+    fx = "x104" if s.cross else ""
+    lines = [
+        "情境分析一：在第1 個提前出場觀察日發生提前出場事件。",
+        f"• 提前出場金額為每單位面額X100%={money}X100%={money}。",
+        f"• 配息金額為：每單位面額X固定配息率X1={money}X{s.monthly}%X1={s.amount(one)}。",
+        f"• 每單位面額結算收益：={money}+{s.amount(one)}-{money}={s.amount(one)}。",
+        "情境分析二：提前出場事件從未發生；期末訂價日最差表現的連結標的股票收盤價高於或等於其轉換價。",
+        f"• 總配息金額為：每單位面額X固定配息率X配息次數={money}X{s.monthly}%X{s.tenor}={s.amount(total)}。",
+        f"• 到期贖回收益為每單位面額X100%={money}X100%={money}。",
+        "情境分析三：提前出場事件從未發生；期末訂價日最差表現的連結標的股票收盤價低於其轉換價。",
+        f"• 總配息金額為：每單位面額X固定配息率X配息次數={money}X{s.monthly}%X{s.tenor}={s.amount(total)}。",
+        f"• 最差表現的連結標的股票於期末訂價日的收盤價為{close}（低於轉換價{strike:,.4f} {s.quote}）。",
+        f"• 交割股數計算方式為：每單位面額/轉換價=（{money}{fx}/{strike:,.4f} {s.quote}）=71.1111股。",
+        f"• 畸零股數（即0.1111股）則以{s.currency_zh}支付（“剩餘金額”），計算方式為：收盤價X畸零股數={s.amount(Decimal('3.91'))}。",
+        f"• 到期贖回收益：收盤價X股數+以{s.currency_zh}支付的剩餘金額={s.amount(denom / 2)}。",
+        f"• 每單位面額結算收益：={s.amount(total)}+{s.amount(denom / 2)}-{money}={s.amount(total - denom / 2)}。",
+        f"• 在最差情況下，每單位面額到期贖回價值為0{s.currency_zh}。",
+        "以上情境分析相關之免責聲明",
+    ]
+    for t in lines:
+        d.text(54, t, 72)
 
 
 ARTICLE_TITLES = {
