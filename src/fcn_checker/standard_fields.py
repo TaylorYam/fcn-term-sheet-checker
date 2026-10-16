@@ -147,6 +147,7 @@ SCENARIO_TARGETS: dict[str, tuple[str, str]] = {
     "scenario_denomination": ("每單位面額", "denomination"),
     "scenario_principal": ("本金", "denomination"),
     "scenario_investment": ("總投資金額", "denomination"),  # 面額 × 倍數（同一處寫的單位數）
+    "scenario_initial_investment": ("初始投資金額", "denomination"),  # 每單位的初始投資金額
     "scenario_tenor": ("天期", "tenor_months"),
     "scenario_coupon_months": ("配息月數", "tenor_months"),
     "scenario_coupon_periods": ("配息期數", "tenor_months"),

@@ -1,5 +1,6 @@
 """UBS 專屬規則（docs/rules/ubs-check-rules.md）：配息率與其他出處、說明書內部交叉驗證（受託機構商品代號、名稱、幣別、
-發行分行、面額的其他出處）、KO 每日型固定／變動配息期別、KO 條款的 KO %、情境設定參數與情境價格表、配息表。
+發行分行、面額的其他出處）、KO 每日型固定／變動配息期別、KO 條款的 KO %、配息表。商品基本資料十五的情境價格表、設定參數
+與情境算式代入的面額、配息率由共用情境規則（rules/scenario.py，Issue #294）核對。
 
 參考條件表欄位、價格推算、審查標準（含 UBS 分節：固定警語、名稱樣板、發行機構名稱、商品種類、最低金額倍數）與回填是
 各上手共用的規則。說明書有年利率（商品基本資料八「年化配息率」），不讀參考條件表（REFERENCE_FIELDS 為空）。發行人、
@@ -12,7 +13,7 @@ from __future__ import annotations
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import kit
+from . import kit, scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "UBS"
@@ -60,8 +61,8 @@ NOT_COVERED = [
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """固定配息率 = 年利率 ÷ 12（4 位）；KO 每日的變動配息率與年化（八與十五設定參數）、情境固定配息率與年化 = 八的固定
-    配息率與年利率。"""
+    """固定配息率 = 年利率 ÷ 12（4 位）；KO 每日的變動配息率與年化（八）= 八的固定配息率與年利率（十五設定參數與情境算式
+    的由共用情境規則 `scenario.params` 核對，Issue #294）。"""
     f = ctx.ts.f
     annual, monthly = f("coupon_pa_pct"), f("monthly_coupon_pct")
     out = [
@@ -76,14 +77,11 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
     ]
     table, observation = f("coupon_table"), f("ko_observation")
     daily = (observation.ok and observation.value == "D") or (table.ok and table.value["kind"] == "D")
-    mentions = [("scenario_monthly_pct", "商品基本資料十五設定參數固定配息率", monthly)]
-    mentions.append(("scenario_coupon_pa_pct", "商品基本資料十五設定參數年化配息率", annual))
+    mentions = []
     if daily:
         mentions += [
             ("variable_coupon_pct", "商品基本資料八變動配息率", monthly),
             ("variable_coupon_pa_pct", "商品基本資料八變動配息率的年化配息率", annual),
-            ("scenario_variable_coupon_pct", "商品基本資料十五設定參數變動配息率", monthly),
-            ("scenario_variable_coupon_pa_pct", "商品基本資料十五設定參數變動配息率的年化配息率", annual),
         ]
     for field, name, base in mentions:
         pf = f(field)
@@ -94,34 +92,7 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
                 base.value, pf.value, fail_message="須等於商品基本資料八的固定配息率與年化配息率"
             )
         )
-    out.append(
-        _each(
-            ctx,
-            "doc.coupon_mentions",
-            "scenario_coupon_mentions",
-            "商品基本資料十五情境算式代入的配息率",
-            monthly,
-            f("scenario_coupon_mentions"),
-            "須等於商品基本資料八的固定配息率（Issue #320）",
-        )
-    )
     return out
-
-
-def _each(
-    ctx: IssuerContext, rid: str, field: str, name: str, base: ParsedField, pf: ParsedField, fail: str
-) -> CheckResult:
-    """十五情境算式重複寫出的值（`pf.value` 每一處）都等於 `base`；預期值／實際值帶出每一處（Issue #320）。"""
-    check = kit.doc_check(ctx, rid, field, name, base, pf)
-    if (problem := check.blocked) is not None:
-        return problem
-    bad = [n for n, v in enumerate(pf.value, start=1) if v != base.value]
-    return check.compare(
-        [str(base.value)] * len(pf.value),
-        [str(v) for v in pf.value],
-        ok=not bad,
-        fail_message=f"第 {'、'.join(map(str, bad))} 處{fail}" if bad else "",
-    )
 
 
 # ---------------------------------------------------------------- 說明書內部交叉驗證（核對規則 §3.5）
@@ -160,7 +131,8 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 def denomination_mentions(ctx: IssuerContext) -> list[CheckResult]:
     """面額的其他出處 = 八的每單位面額：八「發行價格：N%，即X」的 X = 面額 × N%（寫「每單位面額之N%」時沒有金額，不產生
-    結果）、一般交易事項四「每單位面額」、五「申購價金之計算」的金額（Issue #303）。"""
+    結果）、一般交易事項四「每單位面額」、五「申購價金之計算」的金額（Issue #303）。十五情境算式代入的每單位面額由共用
+    情境規則 `scenario.params` 核對（Issue #294）。"""
     f = ctx.ts.f
     denom, price, amount = f("denomination"), f("issue_price_pct"), f("issue_price_amount")
     rid = "doc.denomination_mentions"
@@ -183,17 +155,6 @@ def denomination_mentions(ctx: IssuerContext) -> list[CheckResult]:
                 denom.value, pf.value, fail_message="須等於商品基本資料八的每單位面額"
             )
         )
-    out.append(
-        _each(
-            ctx,
-            rid,
-            "scenario_denomination_mentions",
-            "商品基本資料十五情境算式代入的每單位面額",
-            denom,
-            f("scenario_denomination_mentions"),
-            "須等於商品基本資料八的每單位面額",
-        )
-    )
     return out
 
 
@@ -208,22 +169,6 @@ def issuing_branch(check: Check, pf: ParsedField) -> CheckResult:
         tolerance="「經由瑞士境外之倫敦分行」「經由倫敦分行」「透過其倫敦分行」視為相同",
         fail_message="發行分行不是倫敦分行（目前只支援瑞士銀行經由倫敦分行發行），請人工確認",
     )
-
-
-def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 情境設定參數天期 = 情境設定參數配息觀察次數（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
-    f = ctx.ts.f
-    tenor, scen = f("tenor_months"), f("scenario_tenor")
-    count = f("scenario_coupon_count")
-    rid = "doc.coupon_periods"
-    return [
-        kit.doc_check(ctx, rid, "scenario_tenor", "商品基本資料十五設定參數天期", tenor, scen).compare(
-            tenor.value, scen.value
-        ),
-        kit.doc_check(  # Issue #320
-            ctx, rid, "scenario_coupon_count", "商品基本資料十五設定參數「每月（共N個）」", tenor, count
-        ).compare(tenor.value, count.value, fail_message="配息觀察次數須等於天期"),
-    ]
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
@@ -290,74 +235,13 @@ def ko_pct_mentions(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """情境價格表逐格與表頭 % = 八的價格表；設定參數每單位面額、初始投資金額 = 商品面額，發行價格 = 八的發行價格。"""
-    f = ctx.ts.f
-    table, scen = f("underlying_table"), f("scenario_table")
-    denom, price = f("denomination"), f("issue_price_pct")
-    scen_denom, scen_invest, scen_price = (
-        f("scenario_denomination"),
-        f("scenario_investment"),
-        f("scenario_issue_price_pct"),
-    )
-    check = kit.doc_check(
-        ctx,
-        "doc.scenario_table",
-        "scenario_table",
-        "商品基本資料十五情境價格表與設定參數",
-        table,
-        scen,
-        denom,
-        price,
-        scen_denom,
-        scen_invest,
-        scen_price,
-    )
-    if check.blocked is not None:
-        return [check.blocked]
-    issues = []
-    if scen.value.pcts != table.value.pcts:
-        issues.append("情境價格表表頭 % 和商品基本資料八價格表不同")
-    rows, own = scen.value.prices, table.value.prices
-    if len(rows) != len(own):
-        issues.append(f"情境價格表 {len(rows)} 列，商品基本資料八價格表 {len(own)} 列")
-    else:
-        for n, (a, b) in enumerate(zip(rows, own, strict=True), start=1):
-            diff = [c for c in b if a.get(c) != b[c]]
-            if diff:
-                issues.append(f"第 {n} 列{'、'.join(diff)}和商品基本資料八價格表不同")
-    if scen_denom.value != denom.value:
-        issues.append(f"設定參數每單位面額 {scen_denom.value} 不等於商品面額 {denom.value}")
-    if scen_invest.value != denom.value:
-        issues.append(f"設定參數每單位面額初始投資金額 {scen_invest.value} 不等於商品面額 {denom.value}")
-    if scen_price.value != price.value:
-        issues.append(f"設定參數發行價格 {scen_price.value}% 不等於商品基本資料八發行價格 {price.value}%")
-    params = [str(denom.value), str(denom.value), str(price.value)]
-    return [
-        check.compare(  # 預期值／實際值帶出每一格與設定參數（Issue #320，比照 BBVA #305）
-            [*(str(x) for row in own for x in row.values()), *(str(x) for x in table.value.pcts.values()), *params],
-            [
-                *(str(x) for row in rows for x in row.values()),
-                *(str(x) for x in scen.value.pcts.values()),
-                str(scen_denom.value),
-                str(scen_invest.value),
-                str(scen_price.value),
-            ],
-            ok=not issues,
-            reason="value_mismatch",
-            message="；".join(issues) or "等於商品基本資料八價格表、商品面額與發行價格",
-        )
-    ]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
         *coupon(ctx),
         *document_info(ctx),
         *denomination_mentions(ctx),
-        *periods(ctx),
         *autocall_terms(ctx),
         *ko_pct_mentions(ctx),
-        *tables(ctx),
+        *scenario.run(ctx),  # 十五情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
     ]
