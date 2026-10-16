@@ -1,7 +1,7 @@
 """MS 合成說明書與投資人須知（docs/templates/ms-zh-product-description.md、ms-zh-iis.md）；商品、標的與價格皆虛構。
 
 只用 tests/pdf_writer.py 排版：封面「N. 標籤：值」、章名「第X章、」、第一章條號「N. 標題：」與內文同一行、子項「(n)」，
-表格一格一行。`breaks` 在表格某列之後強制換頁，`iis_pages`／`iis_page_total` 改投資人須知頁數與頁底總頁數。
+表格一格一行（價格表為真實欄列版面）。`breaks` 在表格某列之後強制換頁，`iis_pages`／`iis_page_total` 改投資人須知頁數與頁底總頁數。
 改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：說明書 `ts.cover`、第一章各條 `ts.art{n}`
 （日期表 `ts.art14.table`、價格表 `ts.art16.table`／`ts.art18.table`、情境 `ts.scen.一`…）、其他各章 `ts.ch二`～`ts.ch六`；
 投資人須知 `iis.cover`、`iis.warn`、`iis.org`、`iis.summary`、`iis.coupon`、`iis.redeem`、`iis.risk`、`iis.fees`、`iis.rest`。
@@ -184,36 +184,33 @@ class _Doc:
 
 
 def _price_table(d: _Doc, s: Spec, section: str) -> None:
+    """價格表（真實欄列版面）：連結標的(k)、彭博代碼、期初價格、執行價、（下限價格）、（自動提前出場價），表頭每格拆成幾行。"""
     d.section = section
-    for t in [
-        "連結",
-        "標的",
-        "(k)",
-        "彭博代碼",
-        "(Bloomberg)",
-        "期初價格",
-        "執行價 （期",
-        "初價格的",
-        f"{s.strike}%）",
-    ]:
-        d.cell(96, t)
+    heads = [
+        (96, ["連結", "標的", "(k)"]),
+        (141, ["彭博代碼", "(Bloomberg)"]),
+        (216, ["期初價格"]),
+        (293, ["執行價 （期", "初價格的", f"{s.strike}%）"]),
+    ]
     if s.ki != "none":
-        for t in ["下限價格", "（期初價格的", f"{s.ki_pct}%）"]:
-            d.cell(371, t)
+        heads.append((371, ["下限價格", "（期初價格的", f"{s.ki_pct}%）"]))
     if s.has_ko:
-        for t in ["自動提前出場", "價 （期初價", "格的", f"{s.ko}%）"]:
-            d.cell(437, t)
+        heads.append((448, ["自動提前出場", "價 （期初價", "格的", f"{s.ko}%）"]))
+    rows = []
     for i, (ticker, initial) in enumerate(zip(s.tickers, s.initials, strict=True), 1):
-        d.cell(96, f"k={i}")
-        d.cell(141, ticker)
-        d.cell(216, f"{initial:.4f}")
-        d.cell(293, f"{price(initial, s.strike):.4f}")
+        cells = [
+            (96, [f"k={i}"]),
+            (141, [ticker]),
+            (216, [f"{initial:.4f}"]),
+            (293, [f"{price(initial, s.strike):.4f}"]),
+        ]
         if s.ki != "none":
-            d.cell(371, f"{price(initial, s.ki_pct):.4f}")
+            cells.append((371, [f"{price(initial, s.ki_pct):.4f}"]))
         if s.has_ko:
-            d.cell(448, f"{price(initial, s.ko):.4f}")
-        if section == "art16.table" and s.breaks.get("price") == i:
-            d.w.new_page()
+            cells.append((448, [f"{price(initial, s.ko):.4f}"]))
+        rows.append(cells)
+    brk = s.breaks.get("price")
+    d.w.grid(heads, rows, size=10, gap=14, breaks=(brk + 1,) if section == "art16.table" and brk else ())
 
 
 def _scenarios(d: _Doc, s: Spec) -> None:
