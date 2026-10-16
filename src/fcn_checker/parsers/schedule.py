@@ -23,7 +23,7 @@ def _renamed(key: str, pf: ParsedField) -> ParsedField:
     return ParsedField(key, pf.status, pf.value, list(pf.evidence), pf.candidates, pf.note)
 
 
-def _failed(pf: ParsedField) -> dict[str, ParsedField]:
+def failed(pf: ParsedField) -> dict[str, ParsedField]:
     """依賴的欄位有問題：三個欄位都帶它的狀態、證據與說明（讀不到、歧義、不合法或不適用）。"""
     return {key: ParsedField(key, pf.status, None, list(pf.evidence), pf.candidates, pf.note) for key in SCHEDULE_KEYS}
 
@@ -45,7 +45,7 @@ def autocall_schedule(
     deps = [observation, first, table] + ([final] if final is not None else [])
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
-        return _failed(bad)
+        return failed(bad)
     t: DateTable = table.value
     k, n = first.value, len(t.rows)
     ev = list(first.evidence) + list(table.evidence)

@@ -13,7 +13,7 @@ import re
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit
+from . import kit, schedule
 from .iis import IisIssuerContext
 from .kit import Check, IssuerContext
 
@@ -160,9 +160,9 @@ def distributor_code(ctx: IssuerContext | IisIssuerContext, code: ParsedField) -
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 中英文名稱月數 = 情境假設 c. 天期與 d. 配息觀察期間數。"""
+    """天期 = 中英文名稱月數 = 情境假設 c. 天期與 d. 配息觀察期間數（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -173,9 +173,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
     zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)-Month", "商品英文名稱")
     out = [
-        kit.doc_check(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -380,49 +377,6 @@ def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 日期表（核對規則 §3.5）
-
-
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """D：第 1 期開始日 = 發行日、各期連續、結束日早於同列配息日、末列結束日 = 最終評價日、末列配息日 = 到期日。
-    P：配息日遞增、末列 = 到期日；觀察日表末列 = 最終評價日／到期日、觀察日早於同列自動提前到期日。"""
-    f = ctx.ts.f
-    table, final, maturity, issue = f("date_table"), f("final_valuation_date"), f("maturity_date"), f("issue_date")
-    name = "日期表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "date_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    if table.value["kind"] == "D":
-        if issue.ok and rows[0]["start"] != issue.value:
-            issues.append(f"第 1 期配息觀察期間開始日 {rows[0]['start']} 不等於發行日 {issue.value}")
-        gaps = [b["period"] for a, b in zip(rows, rows[1:], strict=False) if b["start"] != a["end"]]
-        if gaps:
-            issues.append(f"第 {'、'.join(map(str, gaps))} 期開始日不等於前一期結束日")
-        late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-        if late:
-            issues.append(f"第 {'、'.join(map(str, late))} 期配息觀察期間結束日沒有早於配息日")
-        if final.ok and rows[-1]["end"] != final.value:
-            issues.append(f"末列配息觀察期間結束日 {rows[-1]['end']} 不等於最終評價日 {final.value}")
-    else:
-        pays = [r["payment"] for r in rows]
-        if any(b <= a for a, b in zip(pays, pays[1:], strict=False)):
-            issues.append("配息日沒有逐期遞增")
-        ko = table.value["ko_rows"]
-        late = [r["t"] for r in ko if r["observation"] >= r["autocall"]]
-        if late:
-            issues.append(f"自動提前到期觀察日表第 {'、'.join(map(str, late))} 列觀察日沒有早於自動提前到期日")
-        if final.ok and ko[-1]["observation"] != final.value:
-            issues.append(f"自動提前到期觀察日表末列 {ko[-1]['observation']} 不等於最終評價日 {final.value}")
-        if maturity.ok and ko[-1]["autocall"] != maturity.value:
-            issues.append(f"自動提前到期觀察日表末列自動提前到期日 {ko[-1]['autocall']} 不等於到期日 {maturity.value}")
-    if maturity.ok and rows[-1]["payment"] != maturity.value:
-        issues.append(f"末列配息日 {rows[-1]['payment']} 不等於到期日 {maturity.value}")
-    return [
-        kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity, issue], issues)
-    ]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
@@ -433,5 +387,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *repeated_terms(ctx),
-        *schedule(ctx),
+        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
     ]
