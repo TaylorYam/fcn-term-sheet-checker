@@ -91,7 +91,6 @@ def test_min_subscription_multiple_depends_on_currency(tmp_path):
     [
         ("Coupon p.a. (%)", 12.12, "field.coupon_pa_pct"),
         ("Coupon p.a. (%)", 12.12, "derive.monthly_coupon"),
-        ("Coupon p.a. (%)", 12.12, "derive.annualized_return"),
         ("Coupon p.a. (%)", 12.12, "doc.scenario_calculations"),
         ("KO(%)", 101, "field.ko_pct"),
         ("K(%)", 71, "field.strike_pct"),
@@ -132,9 +131,9 @@ S0 = Spec()
     [
         # 配息率與平均年化報酬率：正式條款正確、重印處錯誤也要抓到（核對規則 §3.8）
         (("art8", "配息率 ＝1.1000%", "配息率 ＝1.1001%"), "derive.monthly_coupon", S.MISMATCH),
-        (("art15", "配息率 = 1.1000 %", "配息率 = 1.1001 %"), "derive.monthly_coupon", S.MISMATCH),
-        (("scen.二", "x1.1000%", "x1.1001%"), "derive.monthly_coupon", S.MISMATCH),
-        (("scen.一", "平均年化報酬率：13.20%", "平均年化報酬率：13.21%"), "derive.annualized_return", S.MISMATCH),
+        (("art15", "配息率 = 1.1000 %", "配息率 = 1.1001 %"), "scenario.params", S.MISMATCH),
+        (("scen.二", "x1.1000%", "x1.1001%"), "scenario.params", S.MISMATCH),
+        (("scen.一", "平均年化報酬率：13.20%", "平均年化報酬率：13.21%"), "scenario.params", S.MISMATCH),
         # 封面與第一章交叉驗證
         (("cover", "股權連結結構型債券", "股權連結結構型商品"), "standard.product_type", S.MISMATCH),
         (("art1", "固定配息", "固定收益"), "doc.name_consistency", S.MISMATCH),
@@ -177,11 +176,11 @@ S0 = Spec()
             S.REVIEW_REQUIRED,
         ),
         # 第 15 項情境（第 8 項正確、第 15 項重印錯）
-        (("art15.table", "70.0000美元", "70.0001美元"), "doc.scenario_table", S.MISMATCH),
-        (("art15.table", "(期初價格的70.00%)", "(期初價格的71.00%)"), "doc.scenario_header_pct", S.MISMATCH),
+        (("art15.table", "70.0000美元", "70.0001美元"), "scenario.reprint", S.MISMATCH),
+        (("art15.table", "(期初價格的70.00%)", "(期初價格的71.00%)"), "scenario.reprint", S.MISMATCH),
         (
             ("art15", "總投資金額 = 10單位面額 = 100,000美元", "總投資金額 = 10單位面額 = 200,000美元"),
-            "doc.scenario_parameters",
+            "scenario.params",
             S.MISMATCH,
         ),
         (("scen.二", "= 1,100.00美元", "= 1,100.01美元"), "doc.scenario_calculations", S.MISMATCH),
@@ -351,8 +350,8 @@ def test_p_table_final_row_without_valuation_date_is_reviewed(tmp_path):
 
 def test_scenario_strike_is_reviewed_when_share_formula_is_unreadable(tmp_path):
     r = check(tmp_path, edits=[Edit("= 每單位面額 / 於", "= 每單位面額 ÷ 於", "ts.scen.三")])
-    for field in ("情境三_strike", "情境三_shares"):
-        assert rule(r, "doc.scenario_calculations", field)[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "scenario.strike", "scenario_price_1")[0].status == S.REVIEW_REQUIRED  # 情境三
+    assert rule(r, "doc.scenario_calculations", "情境三_shares")[0].status == S.REVIEW_REQUIRED
 
 
 def test_price_table_ko_column_without_autocall_event_is_flagged(tmp_path):
@@ -399,8 +398,8 @@ def test_ki_fields_follow_the_document_ki_type(tmp_path):
 def test_worse_scenario_strike_must_be_the_assumed_underlying(tmp_path):
     """假設句「(k=1)」指出表現最差標的；數額算式的執行價要是那一檔的執行價。"""
     r = check(tmp_path, S0, edits=[Edit("(k=1)收盤價", "(k=2)收盤價", "ts.scen.三")])
-    x = rule(r, "doc.scenario_calculations", "情境三_strike")[0]
-    assert x.status == S.MISMATCH and "第 2 檔" in x.message
+    x = rule(r, "scenario.strike", "scenario_price_1")[0]  # 情境三
+    assert x.status == S.MISMATCH and "第 2 檔" in x.item.name
 
 
 def test_sg_and_other_issuers_are_never_confused(tmp_path):

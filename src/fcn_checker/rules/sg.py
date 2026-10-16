@@ -12,7 +12,7 @@ import re
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit, sg_scenario
+from . import kit, scenario, sg_scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "SG"
@@ -47,7 +47,6 @@ NOT_COVERED = [
     },
 ]
 AUTOCALL_DAY_LAG = 3  # D 型「自動提前出場日：為發生自動提前出場事件後第 3 個營業日」
-RATE_Q = kit.Q4  # 配息率 = 年利率 ÷ 12，固定四捨五入 4 位（JPY 也 4 位）
 
 
 def _norm_name(value: str) -> str:
@@ -59,30 +58,17 @@ def _norm_name(value: str) -> str:
 
 
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 8 項配息率、第 15 項假設配息率與各情境算式的配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位。"""
+    """第 8 項配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位（SG 固定 4 位，JPY 也是）。第 15 項假設與各情境
+    算式的配息率、獲利情境平均年化報酬率由共用情境規則 `scenario.params` 和第 8 項比（Issue #294）。"""
     return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
         "monthly_coupon_pct",
         "配息率",
         ctx.ts.coupon_mentions,
-        lambda annual, value: (sg_scenario.monthly_rate(annual) == value, sg_scenario.monthly_rate(annual)),
+        lambda annual, value: (kit.monthly_of_annual(annual) == value, kit.monthly_of_annual(annual)),
         "四捨五入（half-up）到 4 位",
         lambda annual: f"推算：年利率 {annual}% ÷ 12",
-    )
-
-
-def annualized_return(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項獲利情境（較佳、中間）每處平均年化報酬率 = 參考條件表年利率（依說明書位數四捨五入）。"""
-    return kit.rate_mentions(
-        ctx,
-        "derive.annualized_return",
-        "annualized_return_pct",
-        "平均年化報酬率",
-        ctx.ts.annualized_mentions,
-        kit.cmp_pct,
-        "依說明書顯示位數四捨五入後比對",
-        lambda annual: "獲利情境的平均年化報酬率應等於年利率",
     )
 
 
@@ -143,12 +129,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
             return ParsedField.invalid("name_months", [], f"{what}找不到月數")
         return ParsedField("name_months", pf.status, int(m[1]) if m else None, pf.evidence, note=pf.note)
 
-    sec = ctx.ts.scenarios
-    scen = (
-        ParsedField.present("scenario_tenor", sec.tenor.value, list(sec.tenor.lines))
-        if sec.tenor
-        else ParsedField.missing("scenario_tenor", "第 15 項假設找不到「天期：N個月」")
-    )
     zh_months = months(zh, r"計價(\d+)個月", "商品中文名稱")
     en_months = months(en, r"(\d+)-month", "商品英文名稱")
     return [
@@ -158,7 +138,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(ctx, rid, "name_months_en", "商品英文名稱月數", tenor, en_months).compare(
             tenor.value, en_months.value
         ),
-        kit.doc_check(ctx, rid, "scenario_tenor", "第 15 項假設天期", tenor, scen).compare(tenor.value, scen.value),
     ]
 
 
@@ -363,12 +342,12 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果、審查標準與宣告的參考條件表欄位（年利率）。"""
     return [
         *monthly_coupon(ctx),
-        *annualized_return(ctx),
         *document_info(ctx),
         *periods(ctx),
         *autocall_terms(ctx),
         *ki_terms(ctx),
         *redemption(ctx),
         *schedule(ctx),
+        *scenario.run(ctx),  # 第 15 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *sg_scenario.run(ctx),
     ]
