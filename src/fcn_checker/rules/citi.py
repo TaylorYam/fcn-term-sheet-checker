@@ -1,4 +1,6 @@
-"""Citi 專屬規則（docs/rules/citi-check-rules.md）：配息率與年息、說明書內部交叉驗證、日期表結構、假設價格表。
+"""Citi 專屬規則（docs/rules/citi-check-rules.md）：配息率與年息、說明書內部交叉驗證、日期表結構。
+
+第 15 項假設價格表、假設 d) 與各情境的配息率、假設 d) 的年息由共用情境規則（rules/scenario.py，Issue #294）核對。
 
 參考條件表欄位（含期初定價、標的依代號配對）、價格推算、審查標準（含 Citi 分節：保證機構與總代理人名稱、商品種類、
 發行不成立門檻）與回填是各上手共用的規則。只有年利率要讀參考條件表（ADR 0009，見 REFERENCE_FIELDS）。
@@ -8,12 +10,11 @@
 from __future__ import annotations
 
 import re
-from decimal import ROUND_HALF_UP, Decimal
 
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import kit
+from . import kit, scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "CITI"
@@ -48,7 +49,6 @@ NOT_COVERED = [
         "HKD／AUD／EUR／GBP／ZAR 計價、CGMHI 以外的發行主體；範本以外的寫法會轉人工覆核",
     },
 ]
-RATE_Q = kit.Q4  # 配息率 = 年利率 ÷ 12，四捨五入 4 位（文件可能去尾零，比數值）
 
 
 def _norm_name(value: str) -> str:
@@ -56,30 +56,27 @@ def _norm_name(value: str) -> str:
     return full_brackets(squash(value))
 
 
-def monthly_rate(annual: Decimal) -> Decimal:
-    return (annual / 12).quantize(RATE_Q, ROUND_HALF_UP)
-
-
 # ---------------------------------------------------------------- 配息率與年息（核對規則 §3.3，讀參考條件表）
 
 
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 13 項、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 與各情境的配息率 = 參考條件表年利率 ÷ 12，四捨五入到
-    4 位。"""
+    """第 13 項、第 14 項(2)、第 13 項末段舉例的配息率 = 參考條件表年利率 ÷ 12，四捨五入到 4 位（第 15 項情境的配息率
+    由共用情境規則 `scenario.params` 和第 13 項配息率比，Issue #294）。"""
     return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
         "monthly_coupon_pct",
         "配息率",
         ctx.ts.coupon_mentions,
-        lambda annual, value: (monthly_rate(annual) == value, monthly_rate(annual)),
+        lambda annual, value: (kit.monthly_of_annual(annual) == value, kit.monthly_of_annual(annual)),
         "四捨五入（half-up）到 4 位後比數值（文件可能去尾零）",
         lambda annual: f"推算：年利率 {annual}% ÷ 12",
     )
 
 
 def annual_mentions(ctx: IssuerContext) -> list[CheckResult]:
-    """第 13 項其他處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 的年化配息率 = 參考條件表年利率。"""
+    """第 13 項其他處、第 14 項(2)、第 13 項末段舉例的年化配息率 = 參考條件表年利率（第 15 項假設 d) 的年息由共用情境
+    規則 `scenario.params` 和第 13 項年息比，Issue #294）。"""
     return kit.rate_mentions(
         ctx,
         "derive.coupon_pa_mentions",
@@ -323,16 +320,11 @@ def _unreadable(check: Check, m, what: str) -> CheckResult:
     )
 
 
-def _cells(table) -> list[str]:
-    """價格表各格「代碼 價格…」依列、欄順序，放進結果的預期值／實際值（Issue #314：看得出逐格比了哪些格）。"""
-    return [f"{r.ticker} {r.prices[c]:,}" for r in table.rows for c in table.columns if c in r.prices]
-
-
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """§9 價格表表頭 % = 第 8、13 項的 K／KI／KO %；§15 各情境小表表頭 % 也是（`doc.scenario_header_pct`，Issue #314）；
-    §15 假設價格表逐格 = §9 價格表（代碼、各價格、表頭 %）。"""
+    """§9 價格表表頭 % = 第 8、13 項的 K／KI／KO %；§15 各情境小表表頭 % 也是（`doc.scenario_header_pct`，Issue #314）。
+    §15 假設價格表由共用情境規則 `scenario.reprint` 核對（Issue #294）。"""
     f = ctx.ts.f
-    table, scen = f("underlying_table"), f("scenario_table")
+    table = f("underlying_table")
     out = []
     for col, key, name in (
         ("strike", "strike_pct", "價格表執行價欄頭 %"),
@@ -354,30 +346,6 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             continue
         pf = f(key)
         out.append(check.needs(pf).compare(pf.value, m.value, evidence=list(m.evidence)))
-    check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 15 項假設價格表", table, scen)
-    if table.ok and scen.ok:
-        issues = []
-        if scen.value.tickers != table.value.tickers:
-            issues.append(f"代碼 {scen.value.tickers} 不等於第 9 項價格表 {table.value.tickers}")
-        if scen.value.columns != table.value.columns:
-            issues.append("欄位與第 9 項價格表不同")
-        if scen.value.pcts != table.value.pcts:
-            issues.append("表頭百分比與第 9 項價格表不同")
-        for i, (a, b) in enumerate(zip(scen.value.prices, table.value.prices, strict=False), start=1):
-            diff = [c for c in b if a.get(c) != b[c]]
-            if diff:
-                issues.append(f"第 {i} 檔 {'、'.join(diff)} 與價格表不同")
-        out.append(
-            check.compare(
-                _cells(table.value),
-                _cells(scen.value),
-                ok=not issues,
-                reason="value_mismatch",
-                message="；".join(issues) or "逐格等於第 9 項價格表",
-            )
-        )
-    else:
-        out.append(check.compare(None, None))
     return out
 
 
@@ -417,5 +385,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *redemption(ctx),
         *tables(ctx),
+        *scenario.run(ctx),  # 第 15 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *schedule(ctx),
     ]

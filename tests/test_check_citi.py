@@ -157,19 +157,19 @@ def test_blank_sheet_pricing_with_an_unknown_header_requires_review(tmp_path):
         (Edit("年化配息率約為9.88%", "年化配息率約為9.89%", "ts.art14"), "derive.coupon_pa_mentions"),
         (
             Edit("d) 固定配息金額為每單位商品面額 × 0.8233%", "d) 固定配息金額為每單位商品面額 × 0.8333%", "ts.art15"),
-            "derive.monthly_coupon",
+            "scenario.params",
         ),
-        (Edit("100.5 美元", "100.4 美元", "ts.art15.table"), "doc.scenario_table"),
+        (Edit("100.5 美元", "100.4 美元", "ts.art15.table"), "scenario.reprint"),
         (Edit("期初評價日：", "期初評價日：2029 年1 月1 日，原訂", "ts.art12"), "doc.initial_valuation_date"),
         (Edit("計價幣別：美元(USD)", "計價幣別：美元(JPY)", "ts.art5"), "doc.currency_consistency"),
         (Edit("商品名稱：CGMHI 6 個月", "商品名稱：CGMHI 7 個月", "ts.art1"), "doc.name_consistency"),
         # Issue #314：重複寫出的值（說明文字幣別、情境、其他條、第五章）
         (
             Edit("配息金額 = 每單位商品面額 × 0.8233%", "配息金額 = 每單位商品面額 × 0.8333%", "ts.art15"),
-            "derive.monthly_coupon",
+            "scenario.params",
         ),
-        (Edit("m/M × 0.8233%", "m/M × 0.8333%", "ts.art15"), "derive.monthly_coupon"),
-        (Edit("0.8233% (等同年息為9.88%)", "0.8233% (等同年息為9.89%)", "ts.art15"), "derive.coupon_pa_mentions"),
+        (Edit("m/M × 0.8233%", "m/M × 0.8333%", "ts.art15"), "scenario.params"),
+        (Edit("0.8233% (等同年息為9.88%)", "0.8233% (等同年息為9.89%)", "ts.art15"), "scenario.params"),
         (
             Edit("界限 (期初股價的95.00%)(假設) 最終", "界限 (期初股價的96.00%)(假設) 最終", "ts.art15"),
             "doc.scenario_header_pct",
@@ -228,7 +228,7 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
         (Edit("面額的100%之金額（簡稱", "面額之金額（簡稱", "ts.art17"), {"doc.redemption_pct"}),
         (
             Edit("配息金額 = 每單位商品面額 ×", "配息金額 = 每單位商品面額 × 年利率 ÷ 12，即", "ts.art15"),
-            {"derive.monthly_coupon"},
+            {"scenario.params"},
         ),
         (Edit("界限 (期初股價的95.00%)(假設) 最終", "界限(假設) 最終", "ts.art15"), {"doc.scenario_header_pct"}),
         (Edit("(一) 配息說明", "配息說明", "ts.art15"), {"field.currency"}),
@@ -253,7 +253,7 @@ def test_unknown_scenario_header_requires_review(tmp_path):
 def test_repeated_values_are_read(tmp_path):
     """重複寫出處都有結果（Issue #314）：情境價格表帶出各格、情境幣別每個情境一筆。"""
     r = check(tmp_path, Spec())
-    scen = rule(r, "doc.scenario_table")[0]
+    scen = rule(r, "scenario.reprint")[0]
     assert scen.status == S.PASS and scen.expected and scen.expected == scen.actual
     assert len(rule(r, "doc.table_header_pct")) == 3  # §9 三欄
     assert len(rule(r, "doc.scenario_header_pct")) == 3  # 三個情境小表
