@@ -14,8 +14,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import bnp_scenario, bnp_tables, money
-from . import schedule as bnp_schedule
+from . import bnp_scenario, bnp_tables, money, schedule
 from .common import NUM, Hit, Mention, derived, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
@@ -496,19 +495,19 @@ SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
 def _schedule_table(value: dict) -> standard_fields.DateTable:
     """日期表：D 觀察日 = 配息期結束日；P 觀察日 = 自動提前贖回評價日（第 1～k−1 期「不適用」為空），沒有開始日欄。"""
     if value["type"] == "D":
-        rows = bnp_schedule.rows_of(value["rows"], "end", value["row_lines"])
+        rows = schedule.rows_of(value["rows"], "end", value["row_lines"])
         return standard_fields.DateTable(SCHEDULE_WHERE, rows, SCHEDULE_START)
-    return standard_fields.DateTable(SCHEDULE_WHERE, bnp_schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
+    return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
 
 
 def _schedule(fields: dict[str, ParsedField]) -> None:
     """日期表、KO 觀察方式（日期表表頭與第 14 項寫法一致）、第一個可提前出場期、提前出場排程（`parsers/schedule.py`，
     範本規格 §4.1、§4.3）：D 型 k 取第 14 項(8)，P 型為第一個有自動提前贖回評價日的期別。"""
     table, wording = fields["date_table"], fields["ko_wording"]
-    fields["schedule_table"] = bnp_schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
-        fields.update(bnp_schedule.failed(bad))
+        fields.update(schedule.failed(bad))
         return
     kind, rows = table.value["type"], table.value["rows"]
     ev = table.evidence + wording.evidence
@@ -522,14 +521,11 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     else:
         note = "日期表每一期的自動提前贖回評價日都是「不適用」，找不到第一個可提前出場期"
     if note:
-        invalid = {
-            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in bnp_schedule.SCHEDULE_KEYS
-        }
-        fields.update(invalid)
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, ev)
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, list(wording.evidence))
-    fields.update(bnp_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 def price_fields(fields: dict[str, ParsedField], table: ParsedField, art11: list[Line]) -> None:

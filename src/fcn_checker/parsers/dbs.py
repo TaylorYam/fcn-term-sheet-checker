@@ -404,9 +404,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     ev = list(wording.evidence) + list(table.evidence)
     if not 1 <= k < n:
         note = f"自動提前出場決定日的起始期（第 {k} 個觀察期間）不在表A（{n} 期）內或等於最後一期"
-        fields.update(
-            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in schedule.SCHEDULE_KEYS}
-        )
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, "D", list(wording.evidence))
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)

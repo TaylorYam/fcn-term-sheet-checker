@@ -484,11 +484,7 @@ def _schedule_table(fields: dict[str, ParsedField]) -> ParsedField:
     def build(value: dict) -> standard_fields.DateTable:
         if value["kind"] == "D":
             return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
-        observed = {r["autocall"]: r["observation"] for r in value["ko_rows"]}
-        rows = [
-            standard_fields.DateRow(r["period"], observation=observed.get(r["payment"]), payment=r["payment"])
-            for r in value["rows"]
-        ]
+        rows = list(schedule.mapped_rows(value["rows"], value["ko_rows"]))
         if rows and final.ok:
             rows[-1] = replace(rows[-1], observation=final.value)
         return standard_fields.DateTable(SCHEDULE_WHERE, tuple(rows))
@@ -534,9 +530,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
         else:
             k = mapped[0]
     if note:
-        fields.update(
-            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in schedule.SCHEDULE_KEYS}
-        )
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)

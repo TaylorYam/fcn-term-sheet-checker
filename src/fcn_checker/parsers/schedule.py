@@ -110,3 +110,20 @@ def table_field(source: ParsedField, build: Callable[[Any], DateTable | ParsedFi
     if isinstance(built, ParsedField):
         return ParsedField(name, built.status, built.value, list(built.evidence), built.candidates, built.note)
     return ParsedField(name, FieldStatus.PRESENT, built, list(source.evidence))
+
+
+def invalid(evidence: Sequence[Evidence], note: str) -> dict[str, ParsedField]:
+    """上手讀出的條款彼此不一致（例：KO 寫法和日期表種類不同）：三個欄位都不合法，說明寫在 `note`。"""
+    return {key: ParsedField(key, FieldStatus.INVALID, evidence=list(evidence), note=note) for key in SCHEDULE_KEYS}
+
+
+def mapped_rows(rows: Sequence[Mapping[str, Any]], ko_rows: Sequence[Mapping[str, Any]]) -> tuple[DateRow, ...]:
+    """P 型配息日表加上另一張自動提前出場觀察日表：觀察日取觀察日表裡出場日（`autocall`）= 該期配息日的那一列，
+    對不到的期別沒有觀察日（CA、Natixis、BBVA；觀察日表的列號不是期別）。"""
+    observed = {r["autocall"]: r["observation"] for r in ko_rows}
+    return tuple(DateRow(r["period"], observation=observed.get(r["payment"]), payment=r["payment"]) for r in rows)
+
+
+def blank_starts(rows: Sequence[DateRow]) -> int:
+    """開頭期始日空白的期數（不可提前出場的期別寫「不適用」／N.A）；整張表都沒有期始日時為期數。"""
+    return next((i for i, r in enumerate(rows) if r.start is not None), len(rows))

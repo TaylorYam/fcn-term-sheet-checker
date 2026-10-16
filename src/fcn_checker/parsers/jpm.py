@@ -17,8 +17,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table
-from . import schedule as jpm_schedule
+from . import money, price_table, schedule
 from .common import NUM, Mention, dec, derived, number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
@@ -755,11 +754,10 @@ def _schedule_table(value: dict) -> standard_fields.DateTable:
     """日期表：D-3 觀察日 = 觀察期間終止日；D-4、P 觀察日 = 評價日。每日觀察的表有觀察期間起始日：= 前一期終止日後的下一個
     一籃子預定交易日，開頭「N.A」的期別空白（D-3 為第 1～k 期，D-4 為第 1 期）；P 沒有起始日欄。"""
     kind = value["kind"]
-    rows = jpm_schedule.rows_of(value["rows"], "end" if kind == "D-3" else "valuation", value["row_lines"])
+    rows = schedule.rows_of(value["rows"], "end" if kind == "D-3" else "valuation", value["row_lines"])
     if kind == "P":
         return standard_fields.DateTable(SCHEDULE_WHERE, rows)
-    dated = next((r.period for r in rows if r.start is not None), len(rows) + 1)
-    start = standard_fields.PeriodStart("next_trading_day", None, dated - 1)
+    start = standard_fields.PeriodStart("next_trading_day", None, schedule.blank_starts(rows))
     return standard_fields.DateTable(SCHEDULE_WHERE, rows, start)
 
 
@@ -768,10 +766,10 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     排法、D 型按日計息條款三者一致才交出；不一致時三個欄位都不合法（轉人工覆核）。D 的比價日為第 k 期第 8 項指定欄的日期與
     最後評價日，P 為第 k 期起每期的評價日。"""
     table, wording, pro, final = (fields[k] for k in ("date_table", "ko_wording", "pro_rata", "final_valuation_date"))
-    fields["schedule_table"] = jpm_schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, wording, pro, final) if not p.ok), None)
     if bad is not None:
-        fields.update(jpm_schedule.failed(bad))
+        fields.update(schedule.failed(bad))
         return
     ev = list(wording.evidence) + list(table.evidence)
     kind, n = table.value["kind"], len(table.value["rows"])
@@ -793,18 +791,15 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     elif not 1 <= k <= last == n:
         note = f"第 8 項自動提前出場評價日 t={k}–{last} 不是到最後一期（共 {n} 期）"
     if note:
-        invalid = {
-            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in jpm_schedule.SCHEDULE_KEYS
-        }
-        fields.update(invalid)
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, observation, ev)
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
     if observation == "D":  # 第 k 期取第 8 項指定欄（起始日／終止日／評價日），末期取最後評價日
         start = ParsedField("ko_start", FieldStatus.PRESENT, table.value["rows"][k - 1][column], ev)
-        fields.update(jpm_schedule.autocall_schedule(obs, first, fields["schedule_table"], "end", final, start))
+        fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"], "end", final, start))
     else:
-        fields.update(jpm_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
+        fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 # ---------------------------------------------------------------- 第 II 部分

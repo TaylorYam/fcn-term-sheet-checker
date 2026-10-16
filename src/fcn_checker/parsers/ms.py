@@ -13,15 +13,13 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import full_brackets, squash
-from . import money, ms_scenario, ms_tables, ms_wording, price_table
-from . import schedule as ms_schedule
+from . import money, ms_scenario, ms_tables, ms_wording, price_table, schedule
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "ms-zh-pd"
-PARSER_VERSION = (
-    "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
-)
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "3"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -393,32 +391,30 @@ SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
 def _schedule_table(value: dict) -> standard_fields.DateTable:
     """日期表：D 觀察日 = 配息週期終止日；P 觀察日 = 定價日，沒有起始日欄。"""
     if value["type"] == "D":
-        rows = ms_schedule.rows_of(value["rows"], "end", value["row_lines"])
+        rows = schedule.rows_of(value["rows"], "end", value["row_lines"])
         return standard_fields.DateTable(SCHEDULE_WHERE, rows, SCHEDULE_START)
-    return standard_fields.DateTable(SCHEDULE_WHERE, ms_schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
+    return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
 
 
 def _schedule(fields: dict[str, ParsedField]) -> None:
     """日期表、KO 觀察方式（日期表型且與第 17 項一致）、第一個可提前出場期、提前出場排程（`parsers/schedule.py`，
     範本規格 §4.1、§4.3）。"""
     table, obs17 = fields["date_table"], fields["ko_observation_art17"]
-    fields["schedule_table"] = ms_schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, obs17) if not p.ok), None)
     if bad is not None:
-        fields.update(ms_schedule.failed(bad))
+        fields.update(schedule.failed(bad))
         return
     ev = table.evidence + obs17.evidence
     if table.value["type"] != obs17.value["type"]:
         note = "第 14 項(6) 日期表型與第 17 項觀察日寫法不一致"
-        fields.update(
-            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in ms_schedule.SCHEDULE_KEYS}
-        )
+        fields.update(schedule.invalid(ev, note))
         return
     kind = table.value["type"]
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, ev)
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, obs17.value["k"], list(obs17.evidence))
     fields.update(
-        ms_schedule.autocall_schedule(obs, first, fields["schedule_table"], "end" if kind == "D" else "observation")
+        schedule.autocall_schedule(obs, first, fields["schedule_table"], "end" if kind == "D" else "observation")
     )
 
 

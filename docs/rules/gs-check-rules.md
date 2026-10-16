@@ -227,7 +227,7 @@
 | 記憶式句型 ⇔ 名稱；單一／多標的寫法（第 16 項句型、價格表表頭有無「(i)」）⇔ 價格表檔數；第 10 項代碼集合與檔數 = 價格表（不看順序） | `doc.ko_memory`、`doc.underlying_count`、`doc.underlying_tickers` |
 | KI 寫法 ⇔ 價格表下限觸發價格欄 ⇔「下限觸發價格」定義 | `doc.ki_consistency` |
 | 價格表表頭 K／KI % = 定義；情境 4 第 1 檔價格與 K %、情境假設最低申購單位數 = 第四章 4. | `doc.table_header_pct`、`doc.scenario_table` |
-| 觀察時程表末列、結束日早於付息日；起始日 = 前一期結束日後的下一個一籃子預定交易日（Issue #289 前只查晚於前一期結束日；第 1 期不核對） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
+| 觀察時程表末列、結束日早於付息日；起始日 = 前一期結束日後的下一個一籃子預定交易日（Issue #289 前只查晚於前一期結束日；本機 42 份樣本都成立，2026-10-16 使用者決定改查；第 1 期不核對） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | 重複寫出的面額、到期買回 %、情境配息率、申購單位數與初始投資金額、天期（§3.10，Issue #317） | `doc.denomination_mentions`、`doc.redemption_pct`、`doc.coupon_mentions`、`doc.scenario_params`、`doc.tenor_mentions` |
 
 第一章第 3 項寫發行機構全名：共用 `standard.issuer_name` 的 `issuer_name_ch1` 是「只寫中文的出處」，parser 交中文部分給共用規則，全名另由 `doc.issuer_name` 和第 1 頁比（實作時決定）。價格表依座標分欄讀（表頭與數字欄由左到右、每欄由上到下接起來；列以左欄列號切），費用表費率欄取「費率（百分比）」到「收取時點」之間、一列剛好一個 X%~Y%。投資人須知的 CJK 相容字在 `parsers/gs_iis.py` 讀之前轉換；合成文件畫不出相容字，這一點只由本機真實樣本測試（`tests/test_real_gs.py`）涵蓋。

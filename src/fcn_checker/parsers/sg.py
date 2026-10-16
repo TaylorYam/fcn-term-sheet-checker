@@ -16,8 +16,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table, sg_scenario, sg_tables
-from . import schedule as sg_schedule
+from . import money, price_table, schedule, sg_scenario, sg_tables
 from .common import NO_AUTOCALL_KO_PCT, NUM, Hit, Mention, derived, ko_at_initial, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
@@ -556,12 +555,10 @@ def _schedule_table(value: dict) -> standard_fields.DateTable:
     """日期表：D 觀察日 = 配息週期終止日，起始日（不含）= 前期終止日，第 1～Non-Call 期起始日「不適用」；P 觀察日 = 評價日，
     沒有起始日欄。"""
     if value["type"] != "D":
-        rows = sg_schedule.rows_of(value["rows"], "pricing", value["row_lines"])
+        rows = schedule.rows_of(value["rows"], "pricing", value["row_lines"])
         return standard_fields.DateTable(SCHEDULE_WHERE, rows)
-    rows = sg_schedule.rows_of(value["rows"], "end", value["row_lines"])
-    dated = next((r.period for r in rows if r.start is not None), None)
-    blank = dated - 1 if dated is not None else None
-    start = standard_fields.PeriodStart("previous_end", None, blank)
+    rows = schedule.rows_of(value["rows"], "end", value["row_lines"])
+    start = standard_fields.PeriodStart("previous_end", None, schedule.blank_starts(rows))
     return standard_fields.DateTable(SCHEDULE_WHERE, rows, start)
 
 
@@ -571,10 +568,10 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     D：日期表第一個有起始日的期別 i → k = i − 1，比價日為第 8 項觀察期間起始日與末期的配息週期終止日。P：k 取第 8 項，比價日為第 k 期起的
     評價日。無自動提前出場：k = 天期，以 P 表示，比價日只有末期評價日。"""
     table, wording = fields["date_table"], fields["ko_wording"]
-    fields["schedule_table"] = sg_schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
-        fields.update(sg_schedule.failed(bad))
+        fields.update(schedule.failed(bad))
         fields["final_valuation_date"] = derived("final_valuation_date", bad)
         return
     kind, rows = table.value["type"], table.value["rows"]
@@ -601,10 +598,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     else:
         k = wording.value["k"] if wtype == "P" else len(rows)  # 無自動提前出場：Non-Call = 天期
     if note:
-        invalid = {
-            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in sg_schedule.SCHEDULE_KEYS
-        }
-        fields.update(invalid)
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, "D" if wtype == "D" else "P", ev)
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, list(wording.evidence))
@@ -613,7 +607,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
         if wtype == "D"
         else None
     )
-    fields.update(sg_schedule.autocall_schedule(obs, first, fields["schedule_table"], first_date=start))
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"], first_date=start))
 
 
 # ---------------------------------------------------------------- 第二章、幣別出處、出處清單

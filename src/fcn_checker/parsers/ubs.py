@@ -19,8 +19,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table
-from . import schedule as ubs_schedule
+from . import money, price_table, schedule
 from .common import RawText, capture_group, derived, fee_rates, number, zh_number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
@@ -593,18 +592,18 @@ SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "after_issue")
 def _schedule_table(value: dict) -> standard_fields.DateTable:
     """日期表：D 為配息觀察期間表（觀察日 = 結束日）；P 為配息觀察日表，沒有開始日欄。"""
     if value["kind"] == "D":
-        return standard_fields.DateTable(SCHEDULE_WHERE, ubs_schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
-    return standard_fields.DateTable(SCHEDULE_WHERE, ubs_schedule.rows_of(value["rows"], "observation"))
+        return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
+    return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "observation"))
 
 
 def _schedule(fields: dict[str, ParsedField]) -> None:
     """日期表、KO 觀察方式、第一個可提前出場期與提前出場排程（`parsers/schedule.py`，範本規格 §4.1）：八與十二的寫法須相同、
     須和配息表種類一致。D：比價日為第 k 期與末期的配息觀察期間結束日；P：第 k 期起每期的配息觀察日（含最後一期）。"""
     w8, w12, table = fields["ko_wording_art8"], fields["ko_wording_art12"], fields["coupon_table"]
-    fields["schedule_table"] = ubs_schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     bad = next((p for p in (w8, w12, table) if not p.ok), None)
     if bad is not None:
-        fields.update(ubs_schedule.failed(bad))
+        fields.update(schedule.failed(bad))
         return
     ev = list(w8.evidence) + list(w12.evidence) + list(table.evidence)
     note = ""
@@ -613,14 +612,12 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     elif w8.value[0] != table.value["kind"]:
         note = "提前出場觀察日的寫法和配息表的種類不一致（每日型配息表要有配息觀察期間開始日、結束日）"
     if note:
-        fields.update(
-            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in ubs_schedule.SCHEDULE_KEYS}
-        )
+        fields.update(schedule.invalid(ev, note))
         return
     kind, k = w8.value
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(w8.evidence))
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields.update(ubs_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 # ---------------------------------------------------------------- 商品基本資料十五：情境設定參數

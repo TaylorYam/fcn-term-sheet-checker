@@ -11,9 +11,10 @@ from dataclasses import replace
 
 import pytest
 
+from fcn_checker.parsers import schedule as schedule_parser
 from fcn_checker.parsers.schedule import autocall_schedule
 from fcn_checker.rules import schedule
-from fcn_checker.schema import FieldStatus, ParsedField
+from fcn_checker.schema import Evidence, FieldStatus, ParsedField
 from fcn_checker.standard_fields import AutocallSchedule, DateRow, DateTable, PeriodStart
 from harness import MISMATCH, NA, PASS, REVIEW
 from rule_fixtures import issuer_context, term_sheet
@@ -251,3 +252,17 @@ def test_derivation_failures_pass_the_status_through_all_three_fields():
     blank = present("schedule_table", table((ROWS[0], replace(ROWS[1], end=None), ROWS[2])))
     out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 2), blank, "end")
     assert out["autocall_schedule"].status == FieldStatus.INVALID and "第 2 期" in out["autocall_schedule"].note
+
+
+def test_shared_helpers_for_issuer_tables():
+    ev = [Evidence(page=1, bbox=(0, 0, 1, 1), text="x")]
+    assert {pf.status for pf in schedule_parser.invalid(ev, "寫法不一致").values()} == {FieldStatus.INVALID}
+    pay = [{"period": p, "payment": D(2030, p + 1, 7)} for p in (1, 2, 3)]
+    ko = [
+        {"autocall": D(2030, 3, 7), "observation": D(2030, 3, 4)},
+        {"autocall": D(2030, 4, 7), "observation": D(2030, 4, 4)},
+    ]
+    rows = schedule_parser.mapped_rows(pay, ko)
+    assert [r.observation for r in rows] == [None, D(2030, 3, 4), D(2030, 4, 4)], "對不到出場日的期別沒有觀察日"
+    assert schedule_parser.blank_starts(rows) == 3, "整張表沒有期始日"
+    assert schedule_parser.blank_starts((replace(ROWS[0], start=None), *ROWS[1:])) == 1

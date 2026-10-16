@@ -482,11 +482,7 @@ def _schedule_table(fields: dict[str, ParsedField]) -> ParsedField:
             return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"))
         if not wording.ok:
             return wording
-        observed = {r["autocall"]: r["observation"] for r in wording.value[2] or ()}
-        rows = tuple(
-            standard_fields.DateRow(r["period"], observation=observed.get(r["payment"]), payment=r["payment"])
-            for r in value["rows"]
-        )
+        rows = schedule.mapped_rows(value["rows"], wording.value[2] or ())
         return standard_fields.DateTable(SCHEDULE_WHERE, rows)
 
     return schedule.table_field(fields["coupon_table"], build)
@@ -520,9 +516,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
         else:
             k = mapped[0]
     if note:
-        fields.update(
-            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in schedule.SCHEDULE_KEYS}
-        )
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)

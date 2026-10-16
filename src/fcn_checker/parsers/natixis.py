@@ -632,12 +632,7 @@ def _schedule_table(value: dict) -> standard_fields.DateTable:
     配息日的那一列（對不到的期別沒有觀察日），沒有開始日欄。"""
     if value["kind"] == "D":
         return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
-    observed = {r["autocall"]: r["observation"] for r in value["ko_rows"]}
-    rows = tuple(
-        standard_fields.DateRow(r["period"], observation=observed.get(r["payment"]), payment=r["payment"])
-        for r in value["rows"]
-    )
-    return standard_fields.DateTable(SCHEDULE_WHERE, rows)
+    return standard_fields.DateTable(SCHEDULE_WHERE, schedule.mapped_rows(value["rows"], value["ko_rows"]))
 
 
 def _schedule(fields: dict[str, ParsedField]) -> None:
@@ -656,7 +651,9 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     ev = list(wording.evidence) + list(table.evidence)
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
     if kind == "D" and k is None:
-        first = ParsedField.invalid("first_callable_period", [], "自動提前到期觀察日的起始期讀不到")
+        first = ParsedField(
+            "first_callable_period", FieldStatus.INVALID, None, ev, note="自動提前到期觀察日的起始期讀不到"
+        )
     elif kind == "P":
         rows = table.value["rows"]
         period_of = {r["payment"]: r["period"] for r in rows}

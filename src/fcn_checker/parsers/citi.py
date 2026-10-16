@@ -16,8 +16,7 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table
-from . import schedule as citi_schedule
+from . import money, price_table, schedule
 from .common import NO_AUTOCALL_KO_PCT, NUM, Mention, derived, ko_at_initial, number, zh_number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
@@ -843,11 +842,10 @@ def _schedule_table(value: dict) -> standard_fields.DateTable:
     k = 1 時第 1 期開始日也是「不適用」）；P 觀察日 = 觀察日；無自動提前出場時只有配息日。後兩種沒有開始日欄。"""
     kind = value["type"]
     if kind != "D":
-        rows = citi_schedule.rows_of(value["rows"], "observation" if kind == "P" else None, value["row_lines"])
+        rows = schedule.rows_of(value["rows"], "observation" if kind == "P" else None, value["row_lines"])
         return standard_fields.DateTable(SCHEDULE_WHERE, rows)
-    rows = citi_schedule.rows_of(value["rows"], "end", value["row_lines"])
-    dated = next((r.period for r in rows if r.start is not None), len(rows) + 1)
-    start = standard_fields.PeriodStart("previous_end", None, dated - 1)
+    rows = schedule.rows_of(value["rows"], "end", value["row_lines"])
+    start = standard_fields.PeriodStart("previous_end", None, schedule.blank_starts(rows))
     return standard_fields.DateTable(SCHEDULE_WHERE, rows, start)
 
 
@@ -857,11 +855,11 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     D：k 取第 12 項(9)（須與第 13 項一致），比價日為第 k 期與末期的配息觀察期間結束日；P：k 取第 13 項，比價日為第 k 期起
     每期的觀察日；無自動提前出場：k = 天期，以 P 表示，比價日只有期末評價日。"""
     table, k12, k13, has = fields["date_table"], fields["ko_k_art12"], fields["ko_k_art13"], fields["has_autocall"]
-    fields["schedule_table"] = citi_schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
     deps = [table, k12] + ([k13] if has.value else [])
     bad = next((p for p in deps if not p.ok), None)
     if bad is not None:
-        fields.update(citi_schedule.failed(bad))
+        fields.update(schedule.failed(bad))
         return
     kind, n = table.value["type"], len(table.value["rows"])
     ev = list(table.evidence) + list(k12.evidence) + (list(k13.evidence) if has.value else [])
@@ -883,14 +881,11 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     else:
         note = "第 13 項有自動提前出場界限，但日期表只有配息日"
     if note:
-        invalid = {
-            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in citi_schedule.SCHEDULE_KEYS
-        }
-        fields.update(invalid)
+        fields.update(schedule.invalid(ev, note))
         return
     obs = ParsedField("ko_observation", FieldStatus.PRESENT, observation, ev)
     first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields.update(citi_schedule.autocall_schedule(obs, first, fields["schedule_table"], final=final))
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"], final=final))
 
 
 # ---------------------------------------------------------------- 第二章、幣別出處
