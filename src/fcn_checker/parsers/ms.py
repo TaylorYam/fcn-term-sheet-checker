@@ -306,6 +306,7 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     )
     fields["coupon_pa_pct"] = standard_fields.absent("coupon_pa_pct", "年利率（MS 改核對月配息率與情境年化報酬率）")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
 
     coupons, annualized = _mentions(fields, scenarios)

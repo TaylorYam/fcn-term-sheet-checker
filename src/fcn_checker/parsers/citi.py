@@ -399,6 +399,7 @@ def read(lines: Sequence[Line]) -> CitiTermSheet:
     fields["distributor_address_ch2"] = _labelled("distributor_address_ch2", trustee, "營業所在地：")
     fields["chairman"] = _labelled("chairman", trustee, "負責人姓名：")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
 
     # 第四章
     ch4 = doc.articles(4)

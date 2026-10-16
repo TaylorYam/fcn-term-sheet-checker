@@ -742,6 +742,7 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         [occ("issue_price_ch4", "發行價格（申購價金）", "第四章第 5 項申購價金之計算", fields["issue_price_ch4"])],
     )
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表貨幣欄、情境算式金額不列入
         ("denomination_currency", "每單位商品面額幣別", "第一章第 5 項每單位商品面額"),
         ("minimum_subscription_currency", "最低申購金額幣別", "第四章第 4 項最低申購金額"),

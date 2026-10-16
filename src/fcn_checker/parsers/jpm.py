@@ -389,6 +389,7 @@ def read(lines: Sequence[Line]) -> JpmTermSheet:
     fields["distributor_address_ch2"] = _labelled("distributor_address_ch2", trustee, "營業所在地：", TRAILING_PLACE)
     fields["chairman"] = _labelled("chairman", trustee, "負責人姓名：")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第 IV 部分受託機構電話")
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
 
     # 第 IV 部分
     ch4 = doc.articles(4)

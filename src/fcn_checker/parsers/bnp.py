@@ -393,6 +393,7 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     fields["distributor_phone_ch4"] = labelled(
         "distributor_phone_ch4", doc.span_lines(ch4.get(16)), "受託機構聯絡方式："
     )
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
 
     occ = Occurrence
     fields["min_amounts"] = standard_fields.occurrences(

@@ -309,6 +309,27 @@ def test_internal_rules_catch_errors(tmp_path, spec, edit, broken):
     assert broken in {(rid, f) for rid, f, _ in problems(r)}, problems(r)
 
 
+@pytest.mark.parametrize(
+    ("edit", "broken"),
+    [
+        pytest.param(
+            Edit("(i) 事業名稱:", "(i) 名稱:", "ts.cover"),
+            ("standard.distributor", "distributor_name_detail"),
+            id="明細只有一個標籤讀不到",
+        ),
+        pytest.param(
+            Edit("期初價格的60.00%（下限值）", "下限值", "ts.art16"),
+            ("doc.ki_consistency", "scenario_barrier_mentions"),
+            id="情境下限值句子讀不到",
+        ),
+    ],
+)
+def test_unreadable_repeated_terms_need_review(tmp_path, edit, broken):
+    """Issue #305：每種型態都會寫的重複出處讀不到時轉人工覆核，不當作沒有。"""
+    r = check(tmp_path, Spec(), edits=[edit])
+    assert (*broken, S.REVIEW_REQUIRED) in problems(r), problems(r)
+
+
 def test_non_memory_with_an_exit_condition_needs_review(tmp_path):
     """非記憶式（最差表現值）的到期條件卻有「最佳表現值…（出場值）」：轉人工覆核。"""
     spec = Spec(memory=False)

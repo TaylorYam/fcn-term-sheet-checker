@@ -69,7 +69,7 @@
 
 - 固定警語：有 `risk.fixed_warning_by_issuer.<上手>` 就用，否則用 `risk.fixed_warning`。
 - 商品名稱樣板 `product_name.<上手>`、發行機構全名 `issuer_name.<上手>`：缺該上手的值時轉人工覆核（`standard_missing`）。
-- 受託機構名稱、電話（含 `phone_equivalents`）、地址（含 `address_equivalents`）：所有上手共用。
+- 受託機構名稱、電話（含 `phone_equivalents`）、地址（含 `address_equivalents`）：所有上手共用。範本另有名稱、地址、負責人的出處時，adapter 交出出處清單 `distributor_names_others`、`distributor_addresses_others`、`chairman_others`（每處各一筆，規則同封面與第二章；範本沒有時交 `absent`，Issue #305；目前只有 BBVA 第 1 頁明細）。
 
 商品名稱樣板的佔位符一律由說明書欄位填入，不依上手分支：
 
@@ -296,7 +296,7 @@ OOS 多家上手的舊範本寫「受託投資」（SG 投資人須知警語七�
 - **商品名稱樣板**（`product_name.bbva`）：中文 `BBVA GLOBAL MARKETS, B.V. {天期} 個月期{幣別中文}計價自動提前贖回連結一籃子股票結構型商品 (無擔保及不保本)`；英文 `BBVA GLOBAL MARKETS, B.V. {幣別代碼} {天期}-month Autocallable Basket of Equity Linked Notes (Non Principal Guaranteed and Unsecured)`。只有天期、幣別兩個佔位符：不分標的數（單一標的也寫「一籃子」）、記憶式、KO／KI 型態、Non-Call；中英文都忽略空白比對。名稱後的 `(下稱「本商品」)`、`(the "Product")` 不屬於名稱。
 - **發行機構全名**（`issuer_name.bbva`）：`荷蘭商BBVA GLOBAL MARKETS, B.V.`（第二章 1.(1)(a)、投資人須知一、 1.）；第一章 3.(1) 寫 `BBVA GLOBAL MARKETS, B.V.`（沒有「荷蘭商」）也算一致；第 1 頁沒有發行機構名稱欄，不報缺漏（`issuer_name_cover` 交 `absent`；共用規則對不適用的封面出處不產生結果，同第一章）。第一章由 parser 補上「荷蘭商」後交出（證據保留原文）。BBVA 目前只有這一個發行主體（2026-10-15 確認）。
 - **保證機構（西班牙對外銀行）、總代理人（臺北分公司）**：**不核對**（2026-10-15 確認），不設 `guarantor_name.bbva`、`agent_name.bbva`。
-- **第 1 頁受託機構明細**（13. 審查日期後的 `(i) 事業名稱～(iv) 負責人`，部分樣本才有）：**不核對**（2026-10-15 確認）。
+- **第 1 頁受託機構明細**（13. 審查日期後的 `(i) 事業名稱～(iv) 負責人`，部分樣本才有）：(i) 名稱、(iii) 地址、(iv) 負責人有這段就核對，沒有不報缺漏；(ii) 設立日期不核對（2026-10-16 改，Issue #305；原 2026-10-15 決定不核對）。
 - **商品種類**（`product_type.bbva`）：`股權連結結構型商品`（同 BNP、JPM、Natixis）。
 - **發行不成立門檻**：範本沒有，不設 `minimum_issue_size.bbva`。
 - **最低金額倍數**：最低申購、最低加購、最低贖回（第四章 4.、8.）都 = 單位面額（不需要 `min_amount_multiples.bbva`）。

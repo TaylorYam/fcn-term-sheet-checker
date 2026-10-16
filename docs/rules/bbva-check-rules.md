@@ -49,8 +49,8 @@
 | 項目 | BBVA 出處 | BBVA 差異 |
 |---|---|---|
 | 審查通過日期 | 第 1 頁 13. `受託機構審查通過之日期及文號：` | 共用（依交易日）；5 份都是設定檔既有日期 |
-| 受託機構負責人 | 第二章 3.(4) `負責人姓名：`；第 1 頁 13. 後明細 `(iv) 負責人`（有這段才核，Issue #305） | 共用 |
-| 受託機構名稱／電話／地址 | 第 1 頁 11.；第二章 3.(4) `事業名稱：`、`營業所在地：`；第 1 頁 13. 後明細 `(i) 事業名稱`、`(iii) 營業所在地`（有這段才核，Issue #305；`rules/bbva.py` 用共用比對） | 共用；電話 `+886 2 5556 1313` 已在 `phone_equivalents`，地址 `台北市松山區民生東路三段158號6樓` = `distributor.address`；第二章、第四章都沒有受託機構電話（`distributor_phone_ch4` 交 `absent`） |
+| 受託機構負責人 | 第二章 3.(4) `負責人姓名：`；第 1 頁 13. 後明細 `(iv) 負責人`（有這段才核，Issue #305：交出 `chairman_others`） | 共用 |
+| 受託機構名稱／電話／地址 | 第 1 頁 11.；第二章 3.(4) `事業名稱：`、`營業所在地：`；第 1 頁 13. 後明細 `(i) 事業名稱`、`(iii) 營業所在地`（有這段才核，Issue #305：交出 `distributor_names_others`／`distributor_addresses_others`，共用規則核對） | 共用；電話 `+886 2 5556 1313` 已在 `phone_equivalents`，地址 `台北市松山區民生東路三段158號6樓` = `distributor.address`；第二章、第四章都沒有受託機構電話（`distributor_phone_ch4` 交 `absent`） |
 | 發行機構名稱 | 第一章 3.(1)；第二章 1.(1)(a) | 新增 `issuer_name.bbva = "荷蘭商BBVA GLOBAL MARKETS, B.V."`；第一章寫 `BBVA GLOBAL MARKETS, B.V.`（沒有「荷蘭商」）也算一致（§3.6）；第 1 頁沒有發行機構名稱欄（`issuer_name_cover` 交 `absent`，不報缺漏） |
 | 保證機構、總代理人名稱 | — | **不核對**：不設 `guarantor_name.bbva`、`agent_name.bbva`（2026-10-15 確認） |
 | 固定風險警語、風險等級 | 第 1 頁警語 (1)、第一章第 2 項、第三章 5.(1) | **GS 版本、說明書 3 次**（§3.6）；風險等級預設 `【RR4】` |
@@ -217,7 +217,7 @@
 | 情境價格表逐格與表頭 % = 價格表；情境總投資金額 ÷ 單位數 = 面額 | `doc.scenario_table` |
 | 日期表（D：起始日 = 發行日、遞增、末列 = 贖回評價日／到期日、觀察期間起日在表內；P：配息日遞增、末列 = 到期日、自動提前贖回表） | `schedule.coupon_dates` |
 | 投資人須知開始受理贖回日期 = 說明書 | `iis.redemption_start`（範本專屬規則） |
-| 第 1 頁受託機構明細 (i)、(iii)、(iv)（有才核） | `standard.distributor`、`standard.chairman`（`rules/bbva.py` 用共用比對） |
+| 第 1 頁受託機構明細 (i)、(iii)、(iv)（有才核） | `standard.distributor`、`standard.chairman`（adapter 交出 `distributor_names_others`、`distributor_addresses_others`、`chairman_others`，共用規則核對；任一標籤出現就算有這段，三處都要讀到） |
 | 第 14 項最佳表現值與情境的觀察起算日 = 第 12 項 (10) 起日 | `doc.ko_period_mentions` |
 | 情境二～四第 1 期配息率 = 情境一 | `doc.coupon_mentions` |
 | 情境下限值／門檻 % = KI %（無 KI = 轉換比例） | `doc.ki_consistency` |

@@ -61,7 +61,8 @@ CHAIRMAN = CONFIG.review_standard.chairman
 
 def _chairman(ts):
     trade = ParsedField.missing("trade_date", "")
-    [r] = [r for r in review_standard_rules(context(ts), reference_trade=trade) if r.rule_id == "standard.chairman"]
+    results = review_standard_rules(context(ts), reference_trade=trade)
+    [r] = [r for r in results if r.rule_id == "standard.chairman" and r.field == "chairman"]
     return r
 
 

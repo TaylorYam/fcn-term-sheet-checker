@@ -330,6 +330,7 @@ def read(lines: Sequence[Line]) -> NomuraTermSheet:
     fields["minimum_redemption_currency"] = capture_group(art8_ch4, redeem, 2, "minimum_redemption_currency")
     fields["redemption_increment_currency"] = capture_group(art8_ch4, redeem, 4, "redemption_increment_currency")
     fields["distributor_phone_ch4"] = rest_of_line("distributor_phone_ch4", doc.chapter_lines(4), "受託機構聯絡方式：")
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
 
     _occurrences(fields)
     coupons = [

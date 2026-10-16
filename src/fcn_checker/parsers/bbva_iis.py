@@ -287,7 +287,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             occ
             for field, where, pattern in CURRENCY_WORDS
-            for occ in bbva.currency_words(text_lines, pattern, field, "說明文字幣別", where)
+            for occ in bbva.currency_words(iis.section(ti, PRODUCT) or [], pattern, field, "說明文字幣別", where)
         ],
     )
     fees = iis.section(ti, ("四、費用", "五、"))

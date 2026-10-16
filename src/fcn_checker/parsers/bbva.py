@@ -85,12 +85,31 @@ STRIKE_DEF = r"轉換比例\(PutStrikePercentage\)：" + PCT
 # 重複寫出的值（Issue #305）：第 14 項最佳表現值的觀察起算日、第 18 項 (1) 自動提前贖回事件的 %
 BEST_VALUE_START = r"最佳表現值\(HighestRIValue\)：[^*]*?為自" + D + "（含）"
 ART18_KO = r"\(1\)自動提前贖回事件：.*?大於或等於" + PCT + r"，則視為發生自動提前贖回事件"
-# 第 1 頁 13. 後的受託機構明細（有些商品沒有這段；(ii) 設立日期不核對）
+# 第 1 頁 13. 後的受託機構明細（有些商品沒有這段；(ii) 設立日期不核對）→ (出處清單, 欄位, 項目名稱, 位置, pattern)
 COVER_DETAILS = (
-    ("distributor_name_detail", r"\(i\)\s*事業名稱\s*[:：]\s*(.+?)\s*\(ii\)"),
-    ("distributor_address_detail", r"\(iii\)\s*營業所在地\s*[:：]\s*(.+?)\s*\(iv\)"),
-    ("chairman_detail", r"\(iv\)\s*負責人\s*[:：]\s*(.+?)\s*\d+\.\s*商品之投資風險警語"),
+    (
+        "distributor_names_others",
+        "distributor_name_detail",
+        "第 1 頁明細受託或銷售機構名稱",
+        "第 1 頁受託機構明細 (i) 事業名稱",
+        r"\(i\)\s*事業名稱\s*[:：]\s*(.+?)\s*\(ii\)",
+    ),
+    (
+        "distributor_addresses_others",
+        "distributor_address_detail",
+        "第 1 頁明細受託或銷售機構地址",
+        "第 1 頁受託機構明細 (iii) 營業所在地",
+        r"\(iii\)\s*營業所在地\s*[:：]\s*(.+?)\s*\(iv\)",
+    ),
+    (
+        "chairman_others",
+        "chairman_detail",
+        "第 1 頁明細受託機構負責人",
+        "第 1 頁受託機構明細 (iv) 負責人",
+        r"\(iv\)\s*負責人\s*[:：]\s*(.+?)\s*\d+\.\s*商品之投資風險警語",
+    ),
 )
+COVER_DETAIL_LABEL = r"\((?:i|iii|iv)\)\s*(?:事業名稱|營業所在地|負責人)\s*[:：]"
 # 第 16 項情境裡重複寫出的值（情境一的配息率另由 scenario_first_coupon_pct 核對）
 SCENARIOS = ("情境一", "情境二", "情境三", "情境四")
 SCENARIO_COUPON = r"配息金額＝\d+單位面額X配息率＝\d+X[\d,.]+" + CCY + "X" + PCT
@@ -265,11 +284,13 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line], put: Callable) -> 
     put("approval_date", cover, r"受託機構審查通過之日期及文號：" + D, parse_date)
     put("print_date", cover, r"(?<!中文)產品說明書刊印日期" + D, parse_date)
     fields["issuer_name_cover"] = standard_fields.absent("issuer_name_cover", "第 1 頁發行機構名稱欄")
-    # 13. 後的受託機構明細 (i)～(iv)：有這段才核對，沒有不報缺漏（Issue #305）
-    has_details = re.search(r"\(i\)\s*事業名稱", raw.text) is not None
-    for name, pattern in COVER_DETAILS:
-        fields[name] = (
-            raw.capture(name, pattern) if has_details else standard_fields.absent(name, "第 1 頁受託機構明細")
+    # 13. 後的受託機構明細 (i)～(iv)：任一標籤出現就算有這段、三處都核對；沒有不報缺漏（Issue #305）
+    has_details = re.search(COVER_DETAIL_LABEL, raw.text) is not None
+    for container, field, label, where, pattern in COVER_DETAILS:
+        fields[container] = (
+            standard_fields.occurrences(container, [Occurrence(field, label, where, raw.capture(field, pattern))])
+            if has_details
+            else standard_fields.absent(container, "第 1 頁受託機構明細")
         )
 
 
@@ -385,10 +406,14 @@ def _article12(fields: dict[str, ParsedField], art12: list[Line]) -> None:
         fields["ko_period"] = ParsedField.present(
             "ko_period", {"start": parse_date(m[1]), "end": end}, ti.lines_for(m.start(), m.end())
         )
+        fields["ko_period_start"] = ParsedField.present(
+            "ko_period_start", parse_date(m[1]), ti.lines_for(m.start(), m.end())
+        )
     else:
         fields["ko_period"] = ParsedField.missing(
             "ko_period", "第 12 項找不到或有多處「自動提前贖回觀察期間：自…止之期間」"
         )
+        fields["ko_period_start"] = derived("ko_period_start", fields["ko_period"])
     daily, periodic = text.count(KO_DAILY), text.count(KO_TABLE_HEAD)
     if daily == 1 and periodic == 0:
         head = "配息觀察期間i起始日(含)終止日(含)配息日"
@@ -529,7 +554,7 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     )
 
 
-def scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
+def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
     """情境一～四在 `ti.text` 的範圍（到下一個情境或「免責聲明」為止）；找不到或順序不對時為空。"""
     starts = [ti.text.find(name + "：") for name in SCENARIOS]
     end = ti.text.find("免責聲明", max(starts))
@@ -538,15 +563,26 @@ def scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
     return [(name, a, b) for name, a, b in zip(SCENARIOS, starts, [*starts[1:], end], strict=True)]
 
 
-def mentions(name: str, ti: TextIndex, spans, pattern: str, convert: Callable, label: str) -> ParsedField:
-    """情境裡每一處重複寫出的值（Issue #305）：出處清單，每處一筆（欄位 `<name>_<情境>_<第幾處>`）；沒有任何一處時為空清單
-    （這個值不是每種型態都會寫，例：非記憶式沒有出場值）。"""
+def _mentions(
+    name: str,
+    ti: TextIndex,
+    spans: list[tuple[str, int, int]],
+    pattern: str,
+    convert: Callable,
+    label: str,
+    *,
+    required: bool = False,
+) -> ParsedField:
+    """情境裡每一處重複寫出的值（Issue #305）：出處清單，每處一筆（欄位 `<name>_<情境>_<第幾處>`）。沒有任何一處時：
+    `required`（每種型態都會寫的句子）為缺漏，否則為空清單（例：非記憶式沒有出場值）。"""
     items = []
     for case, a, b in spans:
         for n, m in enumerate((m for m in ti.finditer(pattern) if a <= m.start() < b), start=1):
             field = f"{name}_{SCENARIOS.index(case) + 1}_{n}"
             pf = ParsedField.present(field, convert(m[1]), ti.lines_for(m.start(), m.end()))
             items.append(Occurrence(field, label, f"第 16 項{case}", pf))
+    if required and spans and not items:
+        return ParsedField.missing(name, f"第 16 項情境找不到{label}的句子")
     return standard_fields.occurrences(name, items)
 
 
@@ -554,7 +590,7 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurr
     """第 16 項情境一～四重複寫出的值（Issue #305）：第 1 期配息率（KO 每日型的情境二～四）、下限值／門檻 %、出場值 %、
     觀察起算日；回傳各情境金額旁的幣別出處（併入 `currency_others`）。"""
     ti = TextIndex(art16)
-    spans = scenario_spans(ti)
+    spans = _scenario_spans(ti)
     names = ("scenario_coupon_mentions", "scenario_barrier_mentions", "scenario_ko_mentions", "scenario_start_mentions")
     if not spans:
         for name in names:
@@ -568,19 +604,25 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurr
             )
         ]
     daily = fields["date_table"].ok and fields["date_table"].value["kind"] == "D"
-    fields["scenario_coupon_mentions"] = mentions(
-        "scenario_coupon_mentions", ti, spans[1:] if daily else [], SCENARIO_COUPON, Decimal, "第 1 期配息率"
+    fields["scenario_coupon_mentions"] = _mentions(
+        "scenario_coupon_mentions",
+        ti,
+        spans[1:] if daily else [],
+        SCENARIO_COUPON,
+        Decimal,
+        "第 1 期配息率",
+        required=True,
     )
-    fields["scenario_barrier_mentions"] = mentions(
-        "scenario_barrier_mentions", ti, spans, SCENARIO_BARRIER, Decimal, "下限值 %"
+    fields["scenario_barrier_mentions"] = _mentions(
+        "scenario_barrier_mentions", ti, spans, SCENARIO_BARRIER, Decimal, "下限值 %", required=True
     )
-    fields["scenario_ko_mentions"] = mentions("scenario_ko_mentions", ti, spans, SCENARIO_KO, Decimal, "出場值 %")
-    fields["scenario_start_mentions"] = mentions(
+    fields["scenario_ko_mentions"] = _mentions("scenario_ko_mentions", ti, spans, SCENARIO_KO, Decimal, "出場值 %")
+    fields["scenario_start_mentions"] = _mentions(
         "scenario_start_mentions", ti, spans, SCENARIO_START, parse_date, "觀察起算日"
     )
 
     def skip(text: str) -> bool:
-        return any(w in text for w in SCENARIO_PRICE_WORDS)
+        return money.stock_price_line(text) or any(w in text for w in SCENARIO_PRICE_WORDS)
 
     out = []
     for n, (case, a, b) in enumerate(spans, start=1):
