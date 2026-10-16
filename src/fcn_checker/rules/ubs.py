@@ -207,10 +207,11 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
             ("variable_periods", "「t 係為a 至b 的數字」"),
             ("scenario_variable_periods", "商品基本資料十五設定參數「t 係為a 至b 的數字」"),
         ):
+            pf = f(field)
             out.append(
-                kit.doc_check(ctx, rid, field, name, k, tenor, f(field)).compare(
+                kit.doc_check(ctx, rid, field, name, k, tenor, pf).compare(
                     (k.value + 1, tenor.value),
-                    f(field).value,
+                    pf.value,
                     fail_message="變動配息率的期別須是第一個可提前出場期的下一期到天期",
                 )
             )

@@ -292,6 +292,24 @@ def _rows(text: str, pattern: str) -> list[re.Match[str]]:
     return out
 
 
+def _variable_coupon(fields: dict[str, ParsedField], lns: list[Line], prefix: str) -> None:
+    """KO 每日型的「變動配息率：x%X（nt/Nt）（年化配息率為y%）」與「t 係為a 至b 的數字」（八，及十五設定參數的重複）。"""
+    variable = r"配息率[:：]" + PCT + r"[xX×]（nt/Nt）（年化配息率為" + PCT + r"）"
+    fields[f"{prefix}variable_coupon_pct"] = capture_group(lns, variable, 1, f"{prefix}variable_coupon_pct", Decimal)
+    fields[f"{prefix}variable_coupon_pa_pct"] = capture_group(
+        lns, variable, 2, f"{prefix}variable_coupon_pa_pct", Decimal
+    )
+    name = f"{prefix}variable_periods"
+    ti = TextIndex(lns, separate_digits=True)
+    t = list(ti.finditer(r"t係為(\d{1,2})至(\d{1,2})的數字"))
+    if len(t) == 1:
+        fields[name] = ParsedField.present(name, (int(t[0][1]), int(t[0][2])), ti.lines_for(t[0].start(), t[0].end()))
+    elif t:
+        fields[name] = ParsedField.invalid(name, lns, "「t 係為a 至b 的數字」出現多處")
+    else:
+        fields[name] = ParsedField.missing(name, "找不到「t 係為a 至b 的數字」")
+
+
 def _article8(fields: dict[str, ParsedField], art8: list[Line], put: Callable) -> None:
     ti = TextIndex(art8, separate_digits=True)
     issue = r"發行價格[:：](?:每單位面額之)?" + PCT
@@ -299,8 +317,8 @@ def _article8(fields: dict[str, ParsedField], art8: list[Line], put: Callable) -
     amount = r"發行價格[:：]\d+(?:\.\d+)?%，即" + AMOUNT
     fields["issue_price_amount"] = capture_group(art8, amount, 1, "issue_price_amount", number)
     fields["issue_price_currency"] = capture_group(art8, amount, 2, "issue_price_currency")
-    for name in ("issue_price_amount", "issue_price_currency"):  # 寫「每單位面額之100%」時沒有金額
-        if fields[name].status == FieldStatus.MISSING:
+    if re.search(r"發行價格[:：]每單位面額之", ti.text):  # 寫「每單位面額之100%」時沒有金額；其他讀不到的寫法照常缺漏
+        for name in ("issue_price_amount", "issue_price_currency"):
             fields[name] = standard_fields.absent(name, "發行價格的金額")
     denom = rf"每單位面額[:：]{AMOUNT}。"
     put("denomination", art8, denom, number)
@@ -564,24 +582,6 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 
 
 # ---------------------------------------------------------------- 商品基本資料十五：情境設定參數
-
-
-def _variable_coupon(fields: dict[str, ParsedField], lns: list[Line], prefix: str) -> None:
-    """KO 每日型的「變動配息率：x%X（nt/Nt）（年化配息率為y%）」與「t 係為a 至b 的數字」（八，及十五設定參數的重複）。"""
-    variable = r"配息率[:：]" + PCT + r"[xX×]（nt/Nt）（年化配息率為" + PCT + r"）"
-    fields[f"{prefix}variable_coupon_pct"] = capture_group(lns, variable, 1, f"{prefix}variable_coupon_pct", Decimal)
-    fields[f"{prefix}variable_coupon_pa_pct"] = capture_group(
-        lns, variable, 2, f"{prefix}variable_coupon_pa_pct", Decimal
-    )
-    name = f"{prefix}variable_periods"
-    ti = TextIndex(lns, separate_digits=True)
-    t = list(ti.finditer(r"t係為(\d{1,2})至(\d{1,2})的數字"))
-    if len(t) == 1:
-        fields[name] = ParsedField.present(name, (int(t[0][1]), int(t[0][2])), ti.lines_for(t[0].start(), t[0].end()))
-    elif t:
-        fields[name] = ParsedField.invalid(name, lns, "「t 係為a 至b 的數字」出現多處")
-    else:
-        fields[name] = ParsedField.missing(name, "找不到「t 係為a 至b 的數字」")
 
 
 def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
