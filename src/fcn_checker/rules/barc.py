@@ -15,19 +15,17 @@ from ..parsers.barc_schedule import NA, ScheduleRow, Table
 from ..schema import CheckResult, Evidence, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
+from . import schedule
 from .kit import (
     HEADER_PCT_ITEM,
     PRICE_LABEL,
     Q4,
-    TRADING_DAY_TOLERANCE,
     Check,
     IssuerContext,
     order_value,
-    period_start,
     shown,
     to_decimal,
     to_int,
-    uncertain_start,
 )
 
 MONTHLY_TOLERANCE = Decimal("0.0001")
@@ -137,68 +135,8 @@ def _periods(rows: list[ScheduleRow]) -> str:
     return "、".join(f"第 {r.t} 期" for r in rows)
 
 
-def coupon_dates(ctx: IssuerContext) -> list[CheckResult]:
-    """B1、B2：期數 = 天期；評價日、支付日逐期遞增；每期評價日 < 支付日。"""
-    rid = "schedule.coupon_dates"
-    table, tenor = ctx.ts.f("coupon_table"), ctx.ts.f("tenor_months")
-    if not table.ok:
-        return [Check(rid, "coupon_table", Item.expected("配息表"), ctx.document).review(table)]
-    rows = table.value.rows
-    periods = Check(rid, "coupon_periods", Item.expected("配息期數"), ctx.document)
-    if not tenor.ok:
-        out = [periods.review(tenor)]
-    else:
-        out = [
-            periods.compare(
-                tenor.value,
-                len(rows),
-                evidence=tenor.evidence + _header_ev(table.value),
-                message="配息表列數須等於天期（每月一期）",
-            )
-        ]
-    bad = []
-    for k, r in enumerate(rows):
-        v, p = r.get("valuation"), r.get("payment")
-        if not (isinstance(v, dt.date) and isinstance(p, dt.date)) or v >= p:
-            bad.append(r)
-            continue
-        prev_v, prev_p = (rows[k - 1].get("valuation"), rows[k - 1].get("payment")) if k else (None, None)
-        if k and not (isinstance(prev_v, dt.date) and isinstance(prev_p, dt.date) and prev_v < v and prev_p < p):
-            bad.append(r)
-    out.append(
-        Check(rid, "coupon_date_order", Item.expected("配息表日期順序"), ctx.document).compare(
-            None,
-            _periods(bad) or None,
-            ok=not bad,
-            evidence=_row_ev(bad) or _header_ev(table.value),
-            reason="date_order",
-            message="每期評價日 < 支付日，且評價日、支付日逐期遞增",
-        )
-    )
-    return out
-
-
-def final_period(ctx: IssuerContext) -> list[CheckResult]:
-    """A3、A4：末期評價日 = 最終評價日；末期支付日 = 到期日。"""
-    rid = "schedule.final_period"
-    table = ctx.ts.f("coupon_table")
-    out = []
-    for field, key, label, name in (
-        ("final_valuation_date", "valuation", "末期評價日須等於最終評價日", "末期評價日"),
-        ("maturity_date", "payment", "末期支付日須等於到期日", "末期支付日"),
-    ):
-        pf = ctx.ts.f(field)
-        check = Check(rid, f"last_{key}", Item.expected(name), ctx.document).needs(table, pf)
-        if (problem := check.blocked) is not None:
-            out.append(problem)
-            continue
-        last = table.value.rows[-1]
-        out.append(check.compare(pf.value, last.get(key), evidence=pf.evidence + _row_ev([last]), message=label))
-    return out
-
-
 def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
-    """C1–C4：自動提前出場表與配息表的日期關係。"""
+    """C1–C3：自動提前出場表與配息表的日期關係（C4 期始日改由共用日期表規則 `schedule.period_start` 檢查，Issue #289）。"""
     rid = "schedule.autocall_dates"
     coupon, ko = ctx.ts.f("coupon_table"), ctx.ts.f("ko_table")
     tables = Check(rid, "ko_table", Item.expected("提前出場表"), ctx.document).needs(coupon, ko)
@@ -221,7 +159,7 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
             )
         ]
     else:
-        pairs = ()  # 觀察期合併表：期末日即配息評價日，只需檢查期始日（C4）
+        pairs = ()  # 觀察期合併表：期末日即配息評價日，期始日由共用日期表規則檢查
     out = []
     for ko_key, c_key, label, name in pairs:
         check = Check(rid, ko_key, Item.expected(name), ctx.document)
@@ -243,49 +181,7 @@ def autocall_dates(ctx: IssuerContext) -> list[CheckResult]:
                 None, _periods(bad) or None, ok=not bad, evidence=_row_ev(bad) or _header_ev(kt), message=label
             )
         )
-    if kt.kind in ("ko_period", "combined"):
-        out.append(_period_starts(ctx, rid, kt))
     return out
-
-
-def _period_starts(ctx: IssuerContext, rid: str, kt: Table) -> CheckResult:
-    """C4：第 1 期期始日為 N/A 或發行日後的下一個一籃子預定交易日；之後各期 = 前一期期末日後的下一個一籃子預定交易日
-    （跳過週末與標的交易所休市日，Issue #208）。
-
-    前一期期末日為 N/A（不可提前出場）時，本期期始日也應為 N/A。各期判定見 `kit.period_start`：
-    只有「比推算結果晚、而推算結果無法確定」的期別轉人工覆核，其他對不上的都是不一致。
-    """
-    issue = ctx.ts.f("issue_date")
-    check = Check(rid, "start", Item.expected("提前出場期始日"), ctx.document)
-    if not issue.ok:
-        return check.review(issue)
-    message = "C4 期始日 = 前一期期末日後的下一個一籃子預定交易日；第 1 期為 N/A 或發行日後的下一個一籃子預定交易日"
-    flagged, notes, sure = [], [], False  # 對不上的期別（依期別順序）、各期說明、是否有確定不一致的
-    for k, r in enumerate(kt.rows):
-        start = r.get("start")
-        prev_end = issue.value if k == 0 else kt.rows[k - 1].get("end")
-        if start == NA:
-            if k and prev_end != NA:
-                flagged.append(r)
-                sure = True
-        elif not isinstance(prev_end, dt.date):
-            flagged.append(r)
-            sure = True
-        elif (verdict := period_start(ctx, prev_end, start)).status != S.PASS:
-            flagged.append(r)
-            notes.append(f"第 {r.t} 期{verdict.note}")
-            sure |= verdict.status == S.MISMATCH
-    if flagged and not sure:
-        return uncertain_start(check, notes, actual=_periods(flagged), evidence=_row_ev(flagged))
-    return check.compare(
-        None,
-        _periods(flagged) or None,
-        ok=not flagged,
-        evidence=_row_ev(flagged) or _header_ev(kt),
-        tolerance=TRADING_DAY_TOLERANCE,
-        message=message,
-        fail_message="".join(f"；{n}" for n in notes),
-    )
 
 
 def trigger_per_period(ctx: IssuerContext) -> CheckResult:
@@ -612,8 +508,7 @@ def document_rules(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：不使用參考條件表的值。"""
     return [
         *coupon_consistency(ctx),
-        *coupon_dates(ctx),
-        *final_period(ctx),
+        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）；其餘上手切換後改由單份核對呼叫
         *autocall_dates(ctx),
         trigger_per_period(ctx),
         scenario_price_table(ctx),

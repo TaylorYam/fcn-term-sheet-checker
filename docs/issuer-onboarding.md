@@ -127,21 +127,22 @@
 |---|---|
 | 識別資料 | 上手代號、範本 ID、名稱、parser 版本、未涵蓋清單 |
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
-| `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。提前出場排程（`autocall_schedule`）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作；範本本身沒有的欄位（例：MS 沒有年利率、受理申購日）要明確交出 `standard_fields.absent(name, 說明)`（不適用），共用規則不核對、不報缺漏 |
-| `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13／§16、HSBC §18 情境與日期表結構；價格推算已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
+| `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。日期表（`schedule_table`：把讀出的列轉成 `standard_fields.DateTable`，交出表的位置與期始日的定義 `PeriodStart`）、提前出場排程（`autocall_schedule`：呼叫共用推導 `parsers/schedule.autocall_schedule`，上手只交出 KO 觀察方式、k、比價日在哪一欄、末期比價日取表的末列或最終評價日）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作；範本本身沒有的欄位（例：MS 沒有年利率、受理申購日）要明確交出 `standard_fields.absent(name, 說明)`（不適用），共用規則不核對、不報缺漏 |
+| `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13 提前出場表與配息表比對、§16，HSBC §18 情境；價格推算與日期表結構檢查已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
 | `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位：只有說明書印的值是由參考條件表才有的條件推算出來時才宣告（ADR 0009；BARC 為年利率與天期，MS、BNP、SG、Citi、JPM 為年利率）；讀未宣告的欄位是開發期錯誤 |
 
 自動沿用（不必再寫）：
 
 - 參考條件表欄位規則（`rules/reference.py`）：商品代號、承作幣別、UL 與各標的價格、百分比、天期、日期、單位面額、最低金額、KO／KI 欄位、Non-Call。
 - 說明書推算規則（`rules/derivation.py`）：價格推算 `derive.prices`（各標的執行價／KO 價／下限價 = 最初價格 × 百分比，四捨五入到 4 位；價格表列數 = 標的數、下限價欄與 KI 型態一致），只讀 `underlyings`、`underlying_prices`、`strike_pct`／`ko_pct`／`ki_pct`、`ki_type`。
+- 日期表結構檢查（`rules/schedule.py`）：期數 = 天期、配息日與觀察日順序、末期觀察日 = 最終評價日、末期配息日 = 到期日、期始日（依上手宣告的定義），只讀 `schedule_table`、`tenor_months`、`issue_date`、`final_valuation_date`、`maturity_date`、`underlyings`；上手規則不再自寫這幾項（[共用核對規則](rules/shared-check-rules.md) §6.1）。
 - 審查標準規則（`rules/review_standard.py` 的 `review_standard_rules`）：面額預設值、受理申購日、刊印日期、審查日期、負責人、固定警語、風險等級、禁用語、商品名稱、發行機構全名、受託機構資訊、費率、發行價格。上手不同的基準只放在 `config/review_standard.toml`。
 - 回填（`backfill.py`）：TS、IIS 打勾，ISIN、發行日、比價日的核對、回填決策與寫入。
 - 單份核對順序（`single_check.py`）與批量入口、CLI、PANEL。
 
 標準欄位清單（`standard_fields.STANDARD_FIELDS`）就是共用規則會讀的全部說明書欄位，分兩組：
 
-- 參考條件表欄位與回填用：商品代號 `product_code`、`isin`、中文幣別 `currency_zh`、承作幣別的其他出處 `currency_others`（範本沒有就交 `absent`）、標的 `underlyings`、各標的價格列 `underlying_prices`、百分比 `strike_pct`／`ko_pct`／`ki_pct`／`coupon_pa_pct`、天期 `tenor_months`、日期 `trade_date`／`issue_date`／`final_valuation_date`／`maturity_date`、面額 `denomination`、KO 觀察方式 `ko_observation`、記憶式 `ko_memory`、KI 型態 `ki_type`、提前出場排程 `autocall_schedule`、出處清單 `min_amounts`／`subscription_dates`／`print_dates`。
+- 參考條件表欄位與回填用：商品代號 `product_code`、`isin`、中文幣別 `currency_zh`、承作幣別的其他出處 `currency_others`（範本沒有就交 `absent`）、標的 `underlyings`、各標的價格列 `underlying_prices`、百分比 `strike_pct`／`ko_pct`／`ki_pct`／`coupon_pa_pct`、天期 `tenor_months`、日期 `trade_date`／`issue_date`／`final_valuation_date`／`maturity_date`、面額 `denomination`、KO 觀察方式 `ko_observation`、記憶式 `ko_memory`、KI 型態 `ki_type`、提前出場排程 `autocall_schedule`、日期表 `schedule_table`、出處清單 `min_amounts`／`subscription_dates`／`print_dates`。
 - 審查標準規則用：商品中英文名稱 `name_zh`／`name_en`、審查通過日期 `approval_date`、負責人姓名 `chairman`、發行價格 `issue_price_pct`（其他出處 `issue_price_others`，範本沒有就交出 `absent`）、發行機構名稱 `issuer_name_cover`／`issuer_name_ch2`／`issuer_name_ch1`（只寫中文的出處，範本沒有就交出 `absent`）、受託或銷售機構 `distributor_name_cover`／`distributor_phone_cover`／`distributor_address_cover`／`distributor_name_ch2`／`distributor_address_ch2`，以及費用表各項費率（名稱由 `standard_fields.fee_field(<費用項目>)` 產生，費用項目同 `config/review_standard.toml` 的 `[fees]`）。
 - 審查標準有該上手分節才核對的固定值（例外：沒有分節的上手不會被讀，可不交出，也不必交 `absent`）：商品種類 `product_type`（`product_type.<上手>`）、保證機構名稱 `guarantor_name_cover`／`guarantor_name_ch1`／`guarantor_name_ch2`（`guarantor_name.<上手>` 的 cover／ch1／ch2）、總代理人名稱 `agent_name_cover`／`agent_name_ch2`（`agent_name.<上手>` 的 cover／ch2）、發行不成立門檻 `minimum_issue_size`（`minimum_issue_size.<上手>`）；最低金額倍數 `min_amount_multiples.<上手>` 不是欄位，由共用 `field.min_amounts` 讀設定。
 - 範本另有、其他範本沒有的出處（範本沒有就交 `absent`，共用規則不核對、不產生結果）：第一章只寫中文的發行機構名稱 `issuer_name_ch1`（MS、BNP）、封面發行機構名稱 `issuer_name_cover`（BBVA 沒有封面發行機構欄，交 `absent`）、第四章受託機構電話 `distributor_phone_ch4`（BNP；UBS 取一般交易事項十六「受託機構聯絡方式」；由共用 `standard.distributor` 核對，含電話等價寫法）；受託機構名稱、地址、負責人的其他出處 `distributor_names_others`／`distributor_addresses_others`／`chairman_others`（出處清單；BBVA 第 1 頁明細，其他範本用 `standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, …)` 一起交 `absent`；Issue #305）；說明書寫明的期初定價 `initial_pricing`（Citi 標的表表頭；範本沒有就交 `absent`，共用 `field.initial_pricing` 只檢查表上是允許值）。

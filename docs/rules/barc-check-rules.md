@@ -273,9 +273,8 @@ C4 依說明書定義：自動提前出場觀察期是期始日到期末日之�
 | `order.duplicate_column` | 詢價表欄名重複 → 人工覆核 | §1 |
 | `field.observation_frequency` | 詢價表 天期 ÷ Observation Frequency = 說明書配息表列數 | §3.2 |
 | `field.guaranteed_periods` | 保證配息期：詢價表 vs 提前出場表；Daily Memory 另以 §13(7) 定義句交叉驗證 | §3.3 |
-| `schedule.coupon_dates` | B1、B2：期數 = 天期；評價日、支付日逐期遞增；評價日 < 支付日 | §3.8 |
-| `schedule.final_period` | A3、A4：末期評價日 = 最終評價日；末期支付日 = 到期日 | §3.8 |
-| `schedule.autocall_dates` | C1–C4 | §3.8 |
+| `schedule.period_count`、`schedule.payment_order`、`schedule.observation_order`、`schedule.last_observation`、`schedule.last_payment`、`schedule.period_start` | A3、A4、B1、B2、C4 改由各上手共用的日期表規則檢查（[共用核對規則](shared-check-rules.md) §6.1，Issue #289）：`第 13 條日期表` 以配息表每期一列（評價日為觀察日、支付日為配息日），期間型提前出場表另帶期始日、期末日；期始日為下一個一籃子預定交易日，第 1 期有日期時為發行日後的下一個一籃子預定交易日，開頭空白的期數 = 保證配息期 G | §3.8 |
+| `schedule.autocall_dates` | C1–C3 | §3.8 |
 | `doc.autocall_trigger_per_period` | §13(7) 每期觸發百分比 = §15 定義句 | §3.7 |
 | `doc.scenario_price_table` | §16(3) 重印價格表 = §15 價格表 | §3.7 |
 | `field.min_amounts` | 第四章最低申購、最低贖回金額 = 參考條件表「單位面額」（各上手共用，`rules/reference.py`） | §3.7 |
@@ -294,14 +293,14 @@ C4 依說明書定義：自動提前出場觀察期是期始日到期末日之�
 
 - **月配息率的期數**：第二階段起改用說明書配息表列數（第一階段暫用詢價表「天期 ÷ Observation Frequency」）；詢價表期數另由 `field.observation_frequency` 比對。
 - **保證配息期（第二階段）**：表格為主來源。Daily Memory 的 §13(7) 定義句「就首個／第N個（即t等於N的情況）…指期末日N」→ N、「就t等於1至n…自相關期始日起（含）至相關期末日止（含）」→ 0，與表格不同時轉人工覆核；Daily 非記憶式與 Period End 沒有此句，只用表格。14 份樣本表格與定義句一致，8 份與舊整理表 Non-Call 推得值一致。
-- **表格型態與日期規則（第二階段）**：Daily 非記憶式只有觀察期合併表（期末日即配息評價日、兼作提前出場表），只檢查 C4；Period End 非記憶式的評價日表兼作提前出場評價日，`schedule.autocall_dates` 為不適用。C4 的「平日」只排除週末。
+- **表格型態與日期規則（第二階段）**：Daily 非記憶式只有觀察期合併表（期末日即配息評價日、兼作提前出場表），只檢查 C4（共用 `schedule.period_start`），沒有 `schedule.autocall_dates` 結果；Period End 非記憶式的評價日表兼作提前出場評價日，`schedule.autocall_dates` 為不適用。C4 的「平日」只排除週末。
 - **商品名稱樣板的參數**：用說明書自身的天期（§13(1)）、幣別（封面）與是否記憶式（§15 觸發名詞）組出預期名稱，只檢查名稱格式；參數本身是否與詢價表一致由 `field.*` 規則負責，避免同一差異重複報告。§15 觸發名詞與名稱是否含「記憶式」不一致時轉人工覆核。
 - **Monthly KI**：詢價表或說明書任一方判定為 Monthly KI 時，`field.ki_type` 轉人工覆核（尚無樣本）。
 - **未涵蓋規則**：以固定清單列在報告「未涵蓋」區（`rules/barc.py` 的 `NOT_COVERED`），不影響整體狀態，也不代表通過。
 
 ## 9. 參考條件表流程（2026-10-02，Issue #43）
 
-表上事先填好的欄位與說明書比對，規則定義見[共用核對規則](shared-check-rules.md) §3；下表只列 BARC 說明書的出處與 BARC 特有的推法（例：Non-Call 由保證配息期 G 推得）。說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：表上欄位的比對與 Non-Call 在各上手共用的 `rules/reference.py`（讀說明書標準欄位，見 `standard_fields.py`），回填規則在共用的 `backfill.py`；審查標準規則在共用的 `rules/review_standard.py`；提前出場排程在擷取端（`parsers/barc_schedule.py` 的 `autocall_schedule`）；`rules/barc.py` 只剩月配息率推算與說明書內部規則。
+表上事先填好的欄位與說明書比對，規則定義見[共用核對規則](shared-check-rules.md) §3；下表只列 BARC 說明書的出處與 BARC 特有的推法（例：Non-Call 由保證配息期 G 推得）。說明書內部規則（§3.4～§3.9、§7）與審查標準不變。程式：表上欄位的比對與 Non-Call 在各上手共用的 `rules/reference.py`（讀說明書標準欄位，見 `standard_fields.py`），回填規則在共用的 `backfill.py`；審查標準規則在共用的 `rules/review_standard.py`；日期表與提前出場排程在擷取端（`parsers/barc_schedule.py` 的 `date_table`、`first_callable`，排程由共用推導 `parsers/schedule.py` 推得；D 型比價日只放第 k 期與末期，P 型取配息表評價日，Issue #289）；`rules/barc.py` 只剩月配息率推算與說明書內部規則。
 
 | 參考條件表欄 | 說明書來源 | 規則 |
 |---|---|---|

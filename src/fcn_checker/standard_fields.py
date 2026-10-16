@@ -12,7 +12,7 @@ import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .parsers.layout import TextIndex
 from .schema import Evidence, FieldStatus, ParsedField
@@ -67,12 +67,47 @@ class PriceRow:
 
 @dataclass(frozen=True)
 class AutocallSchedule:
-    """說明書的提前出場排程（由各上手 parser 結果推得）。"""
+    """說明書的提前出場排程（由 parsers/schedule.py 的共用推導從日期表推得）。"""
 
     observation: str  # D 期間每日觀察／P 每期定日觀察
     first_callable: int  # 第一個可以提前出場的期別（Non-Call(月)），最小為 1
     periods: int  # 期數
-    dates: dict[int, dt.date]  # 期別 → 比價日；至少包含第一個可提前出場期起的每一期
+    dates: dict[int, dt.date]  # 期別 → 比價日；D 只有第 k 期與末期，P 為第 k 期起的每一期
+
+
+@dataclass(frozen=True)
+class DateRow:
+    """日期表的一列（一期）；表上沒有的欄、或該期寫「不適用／N/A／-」的格為 None。"""
+
+    period: int  # 期別（第 1～n 期）
+    start: dt.date | None = None  # 期始日
+    end: dt.date | None = None  # 期末日（觀察期間終止日）
+    observation: dt.date | None = None  # 觀察日（評價日／提前出場評價日；期間每日觀察的表通常 = 期末日）
+    payment: dt.date | None = None  # 配息日
+    evidence: tuple[Evidence, ...] = ()
+
+
+StartRule = Literal["previous_end", "next_trading_day"]
+
+
+@dataclass(frozen=True)
+class PeriodStart:
+    """期始日的定義，由上手依範本宣告（Issue #289 決定 5）。"""
+
+    rule: StartRule  # previous_end：= 前一期期末日（範本寫「開始日（不含當日）」）；next_trading_day：前一期期末後的下一個一籃子預定交易日
+    first: (
+        Literal["issue_date", "after_issue"] | None
+    )  # 第 1 期有期始日時和發行日怎麼比：= 發行日／依 `rule` 由發行日推；None 不比
+    blank: int | None = 0  # 開頭期始日空白的期數（例：第 1～k 期不可提前出場）；None 為讀不到 k、無法確認（轉人工覆核）
+
+
+@dataclass(frozen=True)
+class DateTable:
+    """說明書的日期表（CONTEXT.md「日期表」）：每期一列，加上表的位置與期始日的定義。"""
+
+    where: str  # 表在說明書的位置，用在項目名稱（例：第 13 條日期表）
+    rows: tuple[DateRow, ...]
+    start: PeriodStart | None = None  # None：表上沒有期始日欄，不查期始日
 
 
 @dataclass(frozen=True)
@@ -126,7 +161,10 @@ STANDARD_FIELDS: dict[str, str] = {
     "ko_memory": "bool：是否記憶式",
     "ki_type": "str：none 無 KI／AM 到期觀察／D 每日觀察／P 每期觀察（每個配息週期終止日）／M 每月觀察（BARC Monthly KI，"
     "尚無樣本）；none 可用 NOT_APPLICABLE 狀態交出",
-    "autocall_schedule": "AutocallSchedule：提前出場排程（第一個可提前出場期、期數、各期比價日）",
+    "autocall_schedule": "AutocallSchedule：提前出場排程（第一個可提前出場期、期數、各期比價日），由 parsers/schedule.py 的"
+    "共用推導從 `schedule_table` 推得",
+    "schedule_table": "DateTable：日期表（每期一列：期別、期始日、期末日、觀察日、配息日；表的位置；期始日的定義），"
+    "由 rules/schedule.py 做結構檢查",
     "initial_pricing": "str：期初定價（參考條件表格式 [values.initial_pricing] 的對照值 open／close／vwap）；說明書寫明時才交出"
     "（Citi 標的表表頭「期初評價日之收盤價格／VWAP」），範本沒有交 absent，共用規則只檢查表上是允許值",
     "min_amounts": "tuple[Occurrence, ...]：須等於參考條件表單位面額 × 倍數的各最低金額出處（最低交易／申購／加購／贖回金額）；"
