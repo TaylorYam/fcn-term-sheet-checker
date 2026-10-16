@@ -228,7 +228,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         ),
     )
     # 商品簡介
-    put("currency_zh", rf"計價幣別：({dbs.ZH_CCY})\([A-Z]{{3}}\)；")
+    put("currency_zh", rf"計價幣別：({dbs.ZH_CCY})\([A-Z]{{3}}\){dbs.CCY_NOTE}；")
     denom = rf"商品面額：每單位({dbs.CCY})([\d,]+),發行價格：商品面額的" + PCT
     fields["denomination"] = capture_group(text_lines, denom, 2, "denomination", number)
     fields["issue_price_pct"] = capture_group(text_lines, denom, 3, "issue_price_pct", Decimal)
