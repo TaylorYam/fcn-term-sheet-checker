@@ -26,6 +26,8 @@ def test_supported_types_pass(tmp_path, spec):
     assert rule(r, "iis.page_totals")[0].status == S.PASS
     assert rule(r, "iis.monthly_coupon")[0].status == S.PASS
     assert rule(r, "iis.has_ki")[0].status == S.PASS
+    assert [x.status for x in rule(r, "iis.redemption_pct")] == [S.PASS, S.PASS]  # (b)、(c)（Issue #319）
+    assert len(rule(r, "field.currency")) == 6  # 計價幣別、剩餘金額、投資本金、利率風險 3 處
     assert rule(r, "standard.fixed_warning")[0].actual == 1  # 警語 1.
     assert rule(r, "standard.forbidden_wording")[0].status == S.PASS  # 警語 6.「受託投資或銷售時」是允許片語
     assert [x.status for x in rule(r, "doc.print_date")] == [S.PASS]
@@ -80,6 +82,11 @@ def test_ki_on_the_term_sheet_must_appear_on_the_investor_sheet(tmp_path):
         (Edit("刊印日期：2030 年01 月08 日", "刊印日期：2030 年01 月20 日", "iis.cover"), "doc.print_date"),
         (Edit("(6) 計價幣別：美元(USD)", "(6) 計價幣別：日圓(JPY)", "iis.summary"), "field.currency"),
         (Edit("以美元支付剩餘金額", "以日圓支付剩餘金額", "iis.coupon"), "field.currency"),
+        # Issue #319：說明文字的幣別字、贖回 %
+        (Edit("低於100%美元投資本金", "低於100%日圓投資本金", "iis.coupon"), "field.currency"),
+        (Edit("當美元利率下跌", "當日圓利率下跌", "iis.rest"), "field.currency"),
+        (Edit("商品面額x100%", "商品面額x99%", "iis.coupon"), "iis.redemption_pct"),
+        (Edit("商品面額x 100%", "商品面額x 99%", "iis.coupon"), "iis.redemption_pct"),
         (Edit("(TDCC 商品代號：086199990001)", "(TDCC 商品代號：086199990002)", "iis.cover"), "iis.product_code"),
         (
             Edit("(Unsecured)(Non-principal protected)", "(Secured)(Non-principal protected)", "iis.cover"),
@@ -93,6 +100,28 @@ def test_ki_on_the_term_sheet_must_appear_on_the_investor_sheet(tmp_path):
 def test_items_are_checked(tmp_path, edit, broken):
     r = check_iis(tmp_path, edits=[edit]).report
     assert broken in {rid for rid, _, _ in problems(r)}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("edit", "rid", "field"),
+    [
+        (Edit("低於100%美元投資本金", "低於投資本金", "iis.coupon"), "field.currency", "principal_currency"),
+        (Edit("利率", "利息", "iis.rest"), "field.currency", "interest_rate_currency"),
+        (Edit("商品面額x100%", "商品面額", "iis.coupon"), "iis.redemption_pct", "ko_redemption_pct"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
+)
+def test_unreadable_repeated_mentions_need_review(tmp_path, edit, rid, field):
+    """投資人須知重複寫出處讀不到（Issue #319）：轉人工覆核。"""
+    r = check_iis(tmp_path, edits=[edit]).report
+    assert rule(r, rid, field)[0].status == S.REVIEW_REQUIRED, problems(r)
+
+
+def test_redemption_pct_must_match_the_term_sheet(tmp_path):
+    """投資人須知二、2.(c) 到期贖回 % 和說明書不同（Issue #319）：只有這一處判不一致。"""
+    r = check_iis(tmp_path, edits=[Edit("商品面額x 100%", "商品面額x 99%", "iis.coupon")]).report
+    assert rule(r, "iis.redemption_pct", "maturity_redemption_pct")[0].status == S.MISMATCH
+    assert rule(r, "iis.redemption_pct", "ko_redemption_pct")[0].status == S.PASS
 
 
 def test_compatibility_ideograph_year_is_normalised():

@@ -491,7 +491,7 @@ def occurrences_of(
 
 def price_cells(rows: list[dict]) -> list[str]:
     """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值，看得出逐格比了哪些價格
-    （BBVA #305、JPM #315、DBS #321）。"""
+    （BBVA #305、JPM #315、CA #319、DBS #321）。"""
     return [f"{v:,}" for row in rows for v in row.values()]
 
 

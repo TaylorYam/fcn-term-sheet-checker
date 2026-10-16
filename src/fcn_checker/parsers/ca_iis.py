@@ -15,12 +15,12 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, Line, ParsedField
 from ..text import squash
-from . import ca, iis
+from . import ca, iis, money
 from .common import RawText, compat_normalized, fee_rates
 from .layout import TextIndex, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-iis"
-PARSER_VERSION = "2"  # 2：警語的受託機構名稱（Issue #306）
+PARSER_VERSION = "3"  # 2：警語的受託機構名稱（Issue #306）；3：贖回 %、說明文字幣別（Issue #319）
 SECTIONS = (
     "本商品之投資風險警語：",
     "中文投資人須知刊印日期：",
@@ -67,6 +67,7 @@ PROVIDED = frozenset(
         "monthly_coupons",
         "ko_memory",
         "has_ki",
+        "redemption_pcts",
         "issuer_names",
         "distributor_names",
         "distributor_addresses",
@@ -209,14 +210,32 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     fields["currency_others"] = iis.occurrences(
         "currency_others",
         ti,
-        (
-            (
-                "redemption_currency",
-                "剩餘金額幣別",
-                "二、2.(c) 到期贖回「以X支付剩餘金額」",
-                rf"以({ca.CCY})支付剩餘金額",
+        (("redemption_currency", "剩餘金額幣別", "二、2.(c) 到期贖回「以X支付剩餘金額」", ca.REMAINDER_CURRENCY),),
+    )
+    fields["currency_others"] = standard_fields.occurrences(  # 說明文字的幣別字（Issue #319，同說明書）
+        "currency_others",
+        [
+            *fields["currency_others"].value,
+            *money.currency_words(
+                text_lines,
+                ca.PRINCIPAL_CURRENCY,
+                "principal_currency",
+                "投資本金幣別",
+                "二、3.(4)「可能低於100%X投資本金」",
             ),
+            *money.currency_words(
+                text_lines, ca.INTEREST_CURRENCY, "interest_rate_currency", "利率幣別", "三、 利率風險"
+            ),
+        ],
+    )
+    fields["redemption_pcts"] = iis.occurrences(  # 贖回金額「商品面額x N%」= 同商品說明書第 9 項（Issue #319）
+        "redemption_pcts",
+        ti,
+        (
+            ("ko_redemption_pct", "自動提前出場贖回 %", "二、2.(b) 自動提前出場贖回金額", ca.KO_REDEMPTION),
+            ("maturity_redemption_pct", "到期贖回 %", "二、2.(c) 到期贖回金額", ca.MATURITY_REDEMPTION),
         ),
+        Decimal,
     )
     _product_terms(ti, fields, provided)
     # 一、相關機構（審查標準）
