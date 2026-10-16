@@ -18,11 +18,13 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money, price_table
+from . import schedule as jpm_schedule
 from .common import NUM, Mention, dec, derived, number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "jpm-zh-pd"
-PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #315）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #315）；4：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("I", "商品基本資料"),
     2: ("II", "相關機構事業概況"),
@@ -746,55 +748,63 @@ def date_table(lines: list[Line]) -> ParsedField:
     )
 
 
+SCHEDULE_WHERE = "第 12 項日期表"
+
+
+def _schedule_table(value: dict) -> standard_fields.DateTable:
+    """日期表：D-3 觀察日 = 觀察期間終止日；D-4、P 觀察日 = 評價日。每日觀察的表有觀察期間起始日：= 前一期終止日後的下一個
+    一籃子預定交易日，開頭「N.A」的期別空白（D-3 為第 1～k 期，D-4 為第 1 期）；P 沒有起始日欄。"""
+    kind = value["kind"]
+    rows = jpm_schedule.rows_of(value["rows"], "end" if kind == "D-3" else "valuation", value["row_lines"])
+    if kind == "P":
+        return standard_fields.DateTable(SCHEDULE_WHERE, rows)
+    dated = next((r.period for r in rows if r.start is not None), len(rows) + 1)
+    start = standard_fields.PeriodStart("next_trading_day", None, dated - 1)
+    return standard_fields.DateTable(SCHEDULE_WHERE, rows, start)
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前出場期與提前出場排程（範本規格 §4.1）：第 8 項寫法、日期表排法、D 型按日計息條款
-    三者一致才交出；不一致或日期表沒有起始期的日期時三個欄位都不合法（轉人工覆核）。"""
+    """日期表、KO 觀察方式、第一個可提前出場期與提前出場排程（`parsers/schedule.py`，範本規格 §4.1）：第 8 項寫法、日期表
+    排法、D 型按日計息條款三者一致才交出；不一致時三個欄位都不合法（轉人工覆核）。D 的比價日為第 k 期第 8 項指定欄的日期與
+    最後評價日，P 為第 k 期起每期的評價日。"""
     table, wording, pro, final = (fields[k] for k in ("date_table", "ko_wording", "pro_rata", "final_valuation_date"))
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = jpm_schedule.table_field(table, _schedule_table)
     bad = next((p for p in (table, wording, pro, final) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(jpm_schedule.failed(bad))
         return
     ev = list(wording.evidence) + list(table.evidence)
-
-    def invalid(note: str) -> None:
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
-    kind, rows = table.value["kind"], table.value["rows"]
+    kind, n = table.value["kind"], len(table.value["rows"])
     observation, k, column, last = wording.value
-    n = len(rows)
+    note = ""
     if observation == "D":
         if not kind.startswith("D"):
-            invalid("第 8 項自動提前出場評價日是每日觀察，但日期表是每期觀察的排法")
-            return
-        if column not in table.value["columns"]:
-            invalid("第 8 項自動提前出場評價日的起始欄不在日期表上")
-            return
-        if not pro.value:
-            invalid("每日觀察的商品第 8 項沒有自動提前出場配息金額（x n/N）")
-            return
-        if not 1 <= k <= n or rows[k - 1][column] is None:
-            invalid(f"第一個可提前出場期 {k} 在日期表沒有日期")
-            return
-        dates = {k: rows[k - 1][column], n: final.value}
+            note = "第 8 項自動提前出場評價日是每日觀察，但日期表是每期觀察的排法"
+        elif column not in table.value["columns"]:
+            note = "第 8 項自動提前出場評價日的起始欄不在日期表上"
+        elif not pro.value:
+            note = "每日觀察的商品第 8 項沒有自動提前出場配息金額（x n/N）"
+        elif not 1 <= k <= n or table.value["rows"][k - 1][column] is None:
+            note = f"第一個可提前出場期 {k} 在日期表沒有日期"
+    elif kind != "P":
+        note = "第 8 項自動提前出場評價日是每期觀察，但日期表是每日觀察的排法"
+    elif pro.value:
+        note = "每期觀察的商品第 8 項卻有自動提前出場配息金額（x n/N）"
+    elif not 1 <= k <= last == n:
+        note = f"第 8 項自動提前出場評價日 t={k}–{last} 不是到最後一期（共 {n} 期）"
+    if note:
+        invalid = {
+            key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in jpm_schedule.SCHEDULE_KEYS
+        }
+        fields.update(invalid)
+        return
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, observation, ev)
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    if observation == "D":  # 第 k 期取第 8 項指定欄（起始日／終止日／評價日），末期取最後評價日
+        start = ParsedField("ko_start", FieldStatus.PRESENT, table.value["rows"][k - 1][column], ev)
+        fields.update(jpm_schedule.autocall_schedule(obs, first, fields["schedule_table"], "end", final, start))
     else:
-        if kind != "P":
-            invalid("第 8 項自動提前出場評價日是每期觀察，但日期表是每日觀察的排法")
-            return
-        if pro.value:
-            invalid("每期觀察的商品第 8 項卻有自動提前出場配息金額（x n/N）")
-            return
-        if not 1 <= k <= last == n:
-            invalid(f"第 8 項自動提前出場評價日 t={k}–{last} 不是到最後一期（共 {n} 期）")
-            return
-        dates = {r["period"]: r["valuation"] for r in rows if r["period"] >= k}
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, observation, ev)
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(observation, k, n, dates), ev
-    )
+        fields.update(jpm_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 # ---------------------------------------------------------------- 第 II 部分

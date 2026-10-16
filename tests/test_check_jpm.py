@@ -22,7 +22,7 @@ from harness import field_problems as problems
 from harness import results as rule
 from jpm_synth import APPROVAL, GUARANTOR, PHONE, Spec, check, jdate
 from pdf_writer import Edit
-from reference_synth import build_reference_sheet, reference_row
+from reference_synth import build_reference_sheet, reference_row, weekday_on_or_after
 
 TYPES = [
     Spec(),  # D（4 欄日期表）、記憶式、無 KI、3 檔、6 個月、Non-Call 1
@@ -154,15 +154,24 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     r = check(
         tmp_path, spec, edits=[Edit(f"到期日：{jdate(spec.maturity_date)}", "到期日：2031年01月20日", "ts.art12")]
     )
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_d3_blank_start_dates_must_end_at_the_first_callable_period(tmp_path):
     """3 欄日期表：觀察期間起始日為 N.A 的期別 = 第 1～Non-Call 期。"""
     spec = Spec(d4=False, tenor=7, first_callable=2)
-    start = jdate(spec.valuations[1] + dt.timedelta(days=1))  # 第 3 期起始日
+    start = jdate(weekday_on_or_after(spec.valuations[1] + dt.timedelta(days=1)))  # 第 3 期起始日
     r = check(tmp_path, spec, edits=[Edit(start, "N.A", "ts.art12.table")])
     assert rule(r, "schedule.autocall_dates")[0].status == S.MISMATCH
+
+
+def test_start_dates_must_follow_the_previous_end(tmp_path):
+    """觀察期間起始日 = 前一期終止日後的下一個一籃子預定交易日（Issue #289 起 JPM 也核對）。"""
+    spec = Spec(d4=False, tenor=7, first_callable=2)
+    start = weekday_on_or_after(spec.valuations[2] + dt.timedelta(days=1))  # 第 4 期起始日
+    r = check(tmp_path, spec, edits=[Edit(jdate(start), jdate(spec.valuations[2]), "ts.art12.table")])  # 早於推算結果
+    x = rule(r, "schedule.period_start")[0]
+    assert x.status == S.MISMATCH and "第 4 期期始日應為" in x.message
 
 
 def test_ko_start_period_is_read_from_article_8(tmp_path):
