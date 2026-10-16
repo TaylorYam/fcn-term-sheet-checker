@@ -196,11 +196,11 @@ STANDARD_FIELDS: dict[str, str] = {
     "minimum_issue_size": "str：第四章發行不成立門檻的金額寫法（審查標準 minimum_issue_size.<上手> 有固定值時核對）",
     "distributor_phone_ch4": "str：第四章受託機構聯絡電話（BNP 第四章第 16 項）；範本沒有這處時交出 absent",
     "distributor_names_others": "tuple[Occurrence, ...]：受託機構名稱的其他出處（值為 str，例：BBVA 第 1 頁 13. 後的明細 (i)；"
-    "Issue #305）；範本沒有時交出 absent",
+    "Issue #305；Natixis 封面與第三章警語、第四章 10.、14.，Issue #318）；範本沒有時交出 absent",
     "distributor_addresses_others": "tuple[Occurrence, ...]：受託機構地址的其他出處（BBVA 第 1 頁明細 (iii)）；範本沒有時交出 absent",
     "chairman_others": "tuple[Occurrence, ...]：受託機構負責人的其他出處（BBVA 第 1 頁明細 (iv)），保留原字碼；範本沒有時交出 absent",
 }
-# 受託機構名稱、地址、負責人的其他出處（Issue #305）：只有 BBVA 範本有，其他上手一起交出 absent（`absent_all`）
+# 受託機構名稱、地址、負責人的其他出處（Issue #305）：BBVA 範本有、Natixis 有名稱（Issue #318），其他上手一起交出 absent（`absent_all`）
 DISTRIBUTOR_OTHERS = ("distributor_names_others", "distributor_addresses_others", "chairman_others")
 
 # 保證機構名稱的出處（審查標準 guarantor_name.<上手> 的鍵）→ 標準欄位、說明的開頭、項目名稱；設定檔與審查標準規則共用這一份

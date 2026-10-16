@@ -1,4 +1,4 @@
-"""Natixis 專屬規則（docs/rules/natixis-check-rules.md）：月配息率與年利率其他出處、說明書內部交叉驗證、日期表（KO 每日／
+"""Natixis 專屬規則（docs/rules/natixis-check-rules.md）：月配息率與年利率其他出處、說明書內部交叉驗證、重複寫出的值、日期表（KO 每日／
 每期兩種）、第 9 項價格表表頭、情境假設與情境價格表、空白的受託機構商品代號。
 
 參考條件表欄位、價格推算、審查標準（含 Natixis 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
@@ -40,8 +40,9 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 16 項情境只核對假設、情境價格表與情境一的期別；配息金額、股數、剩餘現金、報酬率不重算，"
-        "情境二～四不核對（2026-10-15 確認）",
+        "description": "第 16 項情境的配息金額、股數、剩餘現金、報酬率不重算，情境的假設最終價格與實物交割算式（匯率、股價）"
+        "的幣別不核對（2026-10-15 確認）；各情境重複寫出的年利率、面額、贖回 %、執行價格、配息列數與金額幣別逐處核對"
+        "（Issue #318）",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -285,9 +286,9 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         if scen_denom.value != denom.value:
             issues.append(f"情境假設面額 {scen_denom.value} 不等於每單位商品面額 {denom.value}")
         out.append(
-            check.compare(
-                None,
-                None,
+            check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #318，比照 BBVA #305）
+                kit.price_cells(own),
+                kit.price_cells(rows),
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於第 9 項價格表與每單位商品面額",
@@ -295,6 +296,87 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         )
     else:
         out.append(check.compare(None, None))
+    return out
+
+
+def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
+    """重複寫出的值 = 正式條款（Issue #318，比照 BBVA #305）：情境一自動提前到期贖回 % = 第 14 項；第 15 項情況一公式、
+    2.a 與情境的到期贖回 % = 第 15 項情況一；情境配息算式、原始投資本金、實物交割算式的面額 = 每單位商品面額；
+    實物交割算式的執行價格 = 情境價格表該標的的執行價格；情境一配息列數 = Non-Call（第一個可提前到期期），其他情境 = 天期。"""
+    f = ctx.ts.f
+    tenor, first = f("tenor_months"), f("first_callable_period")
+    out = []
+    for container, rid, expected, what in (
+        (
+            "autocall_redemption_mentions",
+            "doc.redemption_pct",
+            f("autocall_redemption_pct"),
+            "第 14 項自動提前到期贖回金額 %",
+        ),
+        (
+            "maturity_redemption_mentions",
+            "doc.redemption_pct",
+            f("maturity_redemption_pct"),
+            "第 15 項情況一到期贖回 %",
+        ),
+        ("scenario_denomination_mentions", "doc.scenario_params", f("denomination"), "第一章第 5 項每單位商品面額"),
+    ):
+        pf = f(container)
+        if not pf.ok:
+            out.append(Check(rid, container, Item.expected(what), ctx.document).review(pf))
+            continue
+        for occ in pf.value:
+            got = occ.value.value if occ.value.ok else None
+            out.append(
+                kit.doc_check(ctx, rid, occ.field, f"{occ.where}{occ.name}", expected, occ.value).compare(
+                    [expected.value] * len(got) if expected.ok and got else None,
+                    list(got) if got else None,
+                    fail_message=f"每一處都須等於{what}",
+                )
+            )
+    rows = f("scenario_row_counts")
+    if not rows.ok:
+        out.append(
+            Check("doc.coupon_periods", "scenario_row_counts", Item.expected("情境配息列數"), ctx.document).review(rows)
+        )
+    else:
+        for n, occ in enumerate(rows.value, start=1):
+            base, what = (first, "Non-Call（第一個可提前到期期）") if n == 1 else (tenor, "天期")
+            out.append(
+                kit.doc_check(ctx, "doc.coupon_periods", occ.field, f"{occ.where}{occ.name}", base, occ.value).compare(
+                    base.value, occ.value.value, fail_message=f"情境各期配息的列數須等於{what}"
+                )
+            )
+    scen, worst = f("scenario_table"), f("scenario_worst_strike")
+    check = kit.doc_check(
+        ctx, "doc.scenario_table", "scenario_worst_strike", "第 16 項實物交割算式的執行價格", scen, worst
+    )
+    if not scen.ok:
+        pass  # 情境價格表讀不到已由 `tables` 轉人工覆核，不重複報
+    elif (problem := check.blocked) is not None:
+        out.append(problem)
+    else:
+        name, strike = worst.value
+        # 情境價格表的名稱可能和期初進場價格擠在同一行（`特斯拉公司 195.92`），比名稱時去掉結尾的數字
+        found = [r.prices.get("strike") for r in scen.value.rows if squash(re.sub(r"[\d,.\s]+$", "", r.name)) == name]
+        if len(found) != 1:
+            out.append(
+                check.result(
+                    S.REVIEW_REQUIRED,
+                    actual=f"{name} {strike}",
+                    reason="document_inconsistent",
+                    message=f"情境價格表找不到或有多列「{name}」，請人工確認實物交割算式的執行價格",
+                )
+            )
+        else:
+            out.append(
+                check.compare(
+                    f"{name} {found[0]}",
+                    f"{name} {strike}",
+                    ok=found[0] == strike,
+                    fail_message="實物交割算式的執行價格須等於情境價格表該標的的執行價格",
+                )
+            )
     return out
 
 
@@ -350,5 +432,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
+        *repeated_terms(ctx),
         *schedule(ctx),
     ]

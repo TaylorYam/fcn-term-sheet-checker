@@ -131,6 +131,29 @@ def test_warning_distributor_name_is_checked(tmp_path, edit, field):
     assert ("standard.distributor", field) in {(rid, f) for rid, f, _ in problems(r)}, problems(r)
 
 
+@pytest.mark.parametrize(
+    ("spec", "edit", "field"),
+    [
+        (Spec(), Edit("低於100%美元投資本金", "低於100%日圓投資本金", "iis.summary"), "principal_currency"),
+        (
+            VARIANTS["KO 每期記憶式、日股整數期初價、Non-Call 1"],
+            Edit("整數位之日圓金額", "整數位之美元金額", "iis.coupon"),
+            "coupon_rounding_currency",
+        ),
+    ],
+    ids=lambda x: x if isinstance(x, str) else "",
+)
+def test_currency_wording_is_checked(tmp_path, spec, edit, field):
+    """說明文字的幣別字 = 承作幣別（Issue #318）：只有這一處錯判不一致；句子讀不到轉人工覆核。"""
+    r = check_iis(tmp_path, spec, edits=[edit]).report
+    assert ("field.currency", field, S.MISMATCH) in problems(r), problems(r)
+
+
+def test_missing_principal_currency_wording_needs_review(tmp_path):
+    r = check_iis(tmp_path, edits=[Edit("低於100%美元投資本金", "低於投資本金", "iis.summary")]).report
+    assert ("field.currency", "principal_currency", S.REVIEW_REQUIRED) in problems(r), problems(r)
+
+
 def test_warning_distributor_names_are_read(tmp_path):
     r = check_iis(tmp_path).report
     assert {x.field for x in rule(r, "standard.distributor")} >= {
