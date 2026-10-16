@@ -22,7 +22,7 @@ def test_real_hsbc_samples_match_exploration():
     bad = Counter(
         (x.rule_id, x.reason_code) for r in reports for x in r.results if x.status not in (S.PASS, S.NOT_APPLICABLE)
     )
-    # 1 份參考條件表的標的代碼與說明書的交易所代碼不同（同一檔股票），待查（#310）
+    # 主代號相同但 Nasdaq 交易所尾碼不同；依使用者確認仍逐字比對尾碼（Issue #310）
     assert bad == Counter({("field.underlyings", "value_mismatch"): 1})
     # 其餘全部通過
     assert sum(r.status == S.PASS for r in reports) == 6

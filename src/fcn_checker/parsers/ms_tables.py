@@ -200,7 +200,7 @@ def fee(label: str, name: str, lines: list[Line]) -> ParsedField:
     rate_hdr = [ln for ln in lines if ln.page == lab.page and squash(ln.text).startswith("費率")]
     if len(rate_hdr) != 1:
         return ParsedField.missing(name, "找不到費用表「費率」欄")
-    left = rate_hdr[0].x0 - 15
+    left = rate_hdr[0].x0 - 25  # 費率數值可能比表頭文字向左 21 pt。
     right = next((ln.x0 for ln in lines if ln.page == lab.page and squash(ln.text) == "收取時點"), left + 80)
     nexts = [
         ln.y0

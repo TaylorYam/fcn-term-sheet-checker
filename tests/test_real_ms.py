@@ -43,11 +43,12 @@ def test_samples_only_differ_where_the_exploration_said(items):
             ("doc.trustee_product_code", "value_mismatch"): 1,  # 受託機構商品代號空白（文件錯誤）
             # 1 份表上 1 檔標的的價格都是說明書的同一比例：疑為分割調整後的價格，轉人工覆核（Issue #191）
             ("field.underlying_prices", "split_suspected"): 3,
-            # 待查（#310）：2 份說明書的申購、提前贖回、分銷費用讀不到；1 份配息期數範圍與日期表推得的不同
-            ("standard.fees", "document_missing"): 6,
+            # 配息期數範圍的擷取與原文相符，但與日期表推得的天期不同，屬文件錯誤（Issue #310）
             ("doc.coupon_periods", "value_mismatch"): 1,
         }
     )
+    fees = [r for i in term_sheets for r in i.report.results if r.rule_id == "standard.fees"]
+    assert len(fees) == 21 and all(r.status == S.PASS for r in fees)
     # 第二章受託機構營業所在地都少「松山區」：審查標準的地址等價寫法（2026-10-09 確認視為正確）
     ch2 = [r for i in term_sheets for r in i.report.results if r.field == "distributor_address_ch2"]
     assert len(ch2) == 7 and all(r.status == S.PASS and "address_equivalents" in r.tolerance for r in ch2)
