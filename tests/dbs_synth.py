@@ -42,7 +42,9 @@ Q4 = Decimal("0.0001")
 TICKERS = ("ZDA UW", "ZDB UN", "ZDC UW", "ZDD UW", "ZDE UN")
 EXCHANGE = {"UN": "紐約證券交易所", "UW": "納斯達克證券交易所"}
 QUOTE = "美元"  # 標的都是美股
-MIN_UNITS = {"USD": 5, "AUD": 7, "JPY": 8}  # 最低申購單位數（審查標準 min_amount_multiples.dbs）
+MIN_UNITS = {"USD": 5, "AUD": 7, "JPY": 8, "CNH": 4}  # 最低申購單位數（審查標準 min_amount_multiples.dbs）
+# 人民幣：計價幣別括號後的定義（OOS 真實樣本的寫法，Issue #296）
+RMB_NOTE = "。「人民幣」是指大陸地區(PRC)的法定貨幣，並可於大陸地區以外離岸交割者。就此定義而言，大陸地區不包括香港特別行政區、澳門特別行政區及台灣"
 CN = ("一", "二", "三", "四", "五")
 
 
@@ -105,8 +107,18 @@ class Spec(ProductSpec):
     def quanto(self) -> bool:
         return self.ccy != "USD"
 
+    @property
+    def doc_ccy(self) -> str:
+        """文件上的幣別代碼（名稱與計價幣別括號內；人民幣寫 RMB）。"""
+        return NAME.get("ccy_aliases", {}).get(self.ccy, self.ccy)
+
+    @property
+    def currency_text(self) -> str:
+        """計價幣別：之後的寫法（不含句尾）；人民幣多一段定義。"""
+        return f"{self.currency_zh}({self.doc_ccy})" + (RMB_NOTE if self.ccy == "CNH" else "")
+
     def name_values(self, lang: str) -> dict[str, Any]:
-        out = {"tenor": self.tenor, "ccy_zh": self.currency_zh, "ccy": self.ccy}
+        out = {"tenor": self.tenor, "ccy_zh": self.currency_zh, "ccy": self.doc_ccy}
         out[f"quanto_{lang}"] = NAME[f"quanto_{lang}"] if self.quanto else ""
         out[f"ki_{lang}"] = NAME[f"ki_{lang}"] if self.ki != "none" else ""
         out[f"underlying_{lang}"] = NAME[f"basket_{lang}"]
@@ -239,7 +251,7 @@ def _cover(d: _Doc, s: Spec) -> None:
         ("商品中文名稱", f"{s.name_zh}(下稱「本商品」)"),
         ("商品英文名稱", s.name_en),
         ("商品種類", PRODUCT_TYPE),
-        ("計價幣別", f"{s.currency_zh}({s.ccy})"),
+        ("計價幣別", s.currency_text + ("。" if s.ccy == "CNH" else "")),
         ("發行機構之名稱", ISSUER),
         ("發行機構註冊地", "新加坡"),
         ("商品註冊地", "無(本商品之受託對象僅限於專業投資人及OSU客戶)"),
@@ -324,7 +336,7 @@ def _basic(d: _Doc, s: Spec) -> None:
     d.cell(
         "發行機構名稱及長期債務信用評等：", ["本商品發行機構為新加坡商星展銀行股份有限公司 (DBS Bank Ltd)。虛構評等。"]
     )
-    d.cell("計價幣別：", [f"{s.currency_zh}({s.ccy})"])
+    d.cell("計價幣別：", [s.currency_text + ("。" if s.ccy == "CNH" else "")])
     d.cell("商品面額：", [f"每單位{s.currency_zh}{s.denom:,}"])
     d.cell("發行價格：", ["商品面額的100.00%"])
     w = d.w
@@ -578,7 +590,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     for t in (
         "受託對象：專業投資人及OSU 客戶。",
         "本商品風險程度：RR4",
-        f"計價幣別：{s.currency_zh}({s.ccy})；計價貨幣本金保本率：不適用，本商品為不保障投資本金之境外結構型商品。",
+        f"計價幣別：{s.currency_text}；計價貨幣本金保本率：不適用，本商品為不保障投資本金之境外結構型商品。",
         f"連結標的資產：{uls}。",
     ):
         d.text(16, t, size=9)
