@@ -257,24 +257,24 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     old = f"(5) 到期日：{spec.date(spec.maturity_date)}"
     r = check(tmp_path, spec, edits=[Edit(old, "(5) 到期日：2031 年01 月20 日", "ts.art13")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     r = check(tmp_path, edits=[Edit("(1) 商品年期：6 個月", "(1) 商品年期：7 個月", "ts.art13")])
-    assert rule(r, "doc.coupon_periods", "coupon_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_daily_last_period_end_must_be_the_final_valuation_date(tmp_path):
     spec = Spec()
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030 年07 月10 日", "ts.art9.coupon")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_periodic_last_observation_must_be_the_final_valuation_date(tmp_path):
     spec = Spec(ko_obs="P")
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030 年07 月10 日", "ts.art9.ko")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_periodic_table_must_cover_non_call_to_the_last_period(tmp_path):
