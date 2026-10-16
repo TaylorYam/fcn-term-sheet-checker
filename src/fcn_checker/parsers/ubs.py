@@ -686,6 +686,7 @@ def _general(fields: dict[str, ParsedField], doc: UbsDocument, put: Callable) ->
     fields["distributor_phone_ch4"] = contact.capture(
         "distributor_phone_ch4", r"受託機構聯絡方式\s*[:：].*?電話\s*[:：]?\s*([+\d][\d\-() ]*\d)"
     )
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
 
 
 # ---------------------------------------------------------------- 出處清單

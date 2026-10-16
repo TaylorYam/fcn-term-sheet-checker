@@ -236,6 +236,7 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     put("issuer_name_ch2", ch2, r"發行機構[:：]\(1\)事業名稱[:：](.+?\))", legal_name)
     fields["issuer_name_ch1"] = standard_fields.absent("issuer_name_ch1", "第一章只寫中文的發行機構名稱")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
+    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
     fields["initial_pricing"] = standard_fields.absent("initial_pricing", "期初定價（收盤價／VWAP）字樣")
     fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     for name, pattern in [

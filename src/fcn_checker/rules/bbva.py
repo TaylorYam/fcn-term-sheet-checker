@@ -3,8 +3,8 @@
 
 參考條件表欄位、價格推算、審查標準（含 BBVA 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
 規則。說明書有年利率（KO 每期型在第 16 項情境假設），不讀參考條件表（REFERENCE_FIELDS 為空）。保證機構、總代理人名稱
-與期初定價依作業人員決定不核對；第 1 頁受託機構明細、第 14 項最佳表現值起算日、第 16 項情境與第 18 項重複寫出的值
-（Issue #305）要等於正式條款。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
+與期初定價依作業人員決定不核對；第 14 項最佳表現值起算日、第 16 項情境與第 18 項重複寫出的值（Issue #305）要等於
+正式條款（第 1 頁受託機構明細由 adapter 交出、共用審查標準規則核對）。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from ..schema import CheckStatus as S
 from ..text import squash
 from . import kit
 from .kit import Check, IssuerContext
-from .review_standard import chairman_text, distributor_text
 
 ISSUER = "BBVA"
 REFERENCE_FIELDS: tuple[str, ...] = ()
@@ -35,7 +34,7 @@ NOT_COVERED = [
     {
         "rule_id": "doc.guarantor_and_agent",
         "description": "保證機構（西班牙對外銀行）與總代理人（臺北分公司）的名稱、地址電話，第 1 頁受託機構明細 (ii) 設立日期"
-        "不核對（2026-10-15 作業人員決定；(i)、(iii)、(iv) 依 Issue #305 有就核對）",
+        "不核對（2026-10-15 作業人員決定；(i)、(iii)、(iv) 依 Issue #305 有就由共用審查標準規則核對）",
     },
     {
         "rule_id": "doc.initial_pricing",
@@ -324,52 +323,12 @@ def _cells(rows: list[dict]) -> list[str]:
 # ---------------------------------------------------------------- 重複寫出的值（Issue #305）
 
 
-def cover_details(ctx: IssuerContext) -> list[CheckResult]:
-    """第 1 頁 13. 後的受託機構明細：(i) 事業名稱、(iii) 營業所在地、(iv) 負責人 = 審查標準（共用比對）；範本沒有這段
-    （不適用）時不核對、不報缺漏。"""
-    f, std = ctx.ts.f, ctx.issuer_std
-    name, address, chairman = f("distributor_name_detail"), f("distributor_address_detail"), f("chairman_detail")
-    if all(pf.status == FieldStatus.NOT_APPLICABLE for pf in (name, address, chairman)):
-        return []
-    rid = "standard.distributor"
-    return [
-        distributor_text(
-            ctx,
-            rid,
-            "distributor_name_detail",
-            name,
-            std.distributor_name,
-            "第 1 頁受託機構明細 (i) 事業名稱",
-            "第 1 頁明細受託或銷售機構名稱",
-            kind="name",
-        ),
-        distributor_text(
-            ctx,
-            rid,
-            "distributor_address_detail",
-            address,
-            std.distributor_address,
-            "第 1 頁受託機構明細 (iii) 營業所在地",
-            "第 1 頁明細受託或銷售機構地址",
-            kind="address",
-        ),
-        chairman_text(ctx, "chairman_detail", chairman, "第 1 頁明細受託機構負責人"),
-    ]
-
-
 def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
     """重複寫出的值 = 正式條款：第 14 項最佳表現值的觀察起算日（記憶式才有）與情境觀察起算日 = 第 12 項 (10) 觀察期間
     起日；情境二～四第 1 期配息率 = 情境一（KO 每日型）；情境下限值 % = KI %（無 KI 時 = 轉換比例）；情境出場值 % = KO %；
     第 18 項 (1) 的 % = KO %。"""
     f = ctx.ts.f
-    period, memory, best = f("ko_period"), f("ko_memory"), f("best_value_start")
-    start = ParsedField(
-        "ko_period_start",
-        period.status,
-        period.value["start"] if period.ok else None,
-        list(period.evidence),
-        note=period.note,
-    )
+    start, memory, best = f("ko_period_start"), f("ko_memory"), f("best_value_start")
     out = []
     if best.status != FieldStatus.MISSING or (memory.ok and memory.value):
         out.append(
@@ -468,6 +427,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *schedule(ctx),
-        *cover_details(ctx),
         *repeated_terms(ctx),
     ]

@@ -134,12 +134,18 @@ def _codepoints(s: str) -> str:
     return " ".join(f"{c}U+{ord(c):04X}" for c in s)
 
 
-def _chairman(ctx: Context) -> CheckResult:
-    return chairman_text(ctx, "chairman", standard_field(ctx, "chairman"), "受託機構負責人")
+def _chairmen(ctx: Context) -> list[CheckResult]:
+    """受託機構負責人：第二章那一處與範本的其他出處（`chairman_others`，例：BBVA 第 1 頁明細）每一處 = 審查標準。"""
+    others, problem = occurrences_of(ctx, "standard.chairman", "chairman_others", Item.standard("受託機構負責人"))
+    return [
+        _chairman(ctx, "chairman", standard_field(ctx, "chairman"), "受託機構負責人"),
+        *([problem] if problem else []),
+        *(_chairman(ctx, occ.field, occ.value, occ.name) for occ in others),
+    ]
 
 
-def chairman_text(ctx: Context, field: str, pf: ParsedField, name: str) -> CheckResult:
-    """一處受託機構負責人姓名 = 審查標準，逐字（含字碼）相等（上手專屬規則的其他出處也用這個，例：BBVA 第 1 頁明細）。"""
+def _chairman(ctx: Context, field: str, pf: ParsedField, name: str) -> CheckResult:
+    """一處受託機構負責人姓名 = 審查標準，逐字（含字碼）相等。"""
     rid, exp = "standard.chairman", ctx.std.chairman
     check = Check(rid, field, Item.standard(name), ctx.document, expected=exp).needs(pf)
     if (problem := check.blocked) is not None:
@@ -314,7 +320,7 @@ def _issuer_name(ctx: Context) -> list[CheckResult]:
 
 
 def _distributor_info(ctx: Context) -> list[CheckResult]:
-    """受託或銷售機構名稱、電話、地址：封面與第二章每一處（範本另有第四章電話時含那一處）= 審查標準；
+    """受託或銷售機構名稱、電話、地址：封面與第二章每一處（範本另有第四章電話、其他名稱地址出處時含那幾處）= 審查標準；
     電話、地址另接受審查標準列出的等價寫法。範本沒有的出處（不適用）不核對。"""
     rid, std = "standard.distributor", ctx.issuer_std
     checks = (  # 標準欄位、種類、審查標準值、說明的開頭、項目名稱
@@ -352,17 +358,28 @@ def _distributor_info(ctx: Context) -> list[CheckResult]:
                 "第四章受託機構電話",
             ),  # 只有 BNP 範本有這處
         )
-    return [
-        distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)
+    out = [
+        _distributor_text(ctx, rid, name, standard_field(ctx, name), exp, what, zh, kind=kind)
         for name, kind, exp, what, zh in checks
     ]
+    for container, kind, exp, what in (  # 範本的其他出處（例：BBVA 第 1 頁明細；Issue #305）
+        ("distributor_names_others", "name", std.distributor_name, "受託或銷售機構名稱"),
+        ("distributor_addresses_others", "address", std.distributor_address, "受託或銷售機構地址"),
+    ):
+        others, problem = occurrences_of(ctx, rid, container, Item.standard(what))
+        out.extend([problem] if problem else [])
+        out.extend(
+            _distributor_text(ctx, rid, occ.field, occ.value, exp, f"{occ.where}的{what}", occ.name, kind=kind)
+            for occ in others
+        )
+    return out
 
 
-def distributor_text(
+def _distributor_text(
     ctx: Context, rid: str, field: str, pf: ParsedField, exp: str, what: str, name: str, *, kind: str
 ) -> CheckResult:
     """受託或銷售機構的一處文字（`kind`：name 名稱／phone 電話／address 地址）= 審查標準；
-    電話、地址另接受審查標準列出的等價寫法（忽略空白後相等）。上手專屬規則的其他出處也用這個（例：BBVA 第 1 頁明細）。"""
+    電話、地址另接受審查標準列出的等價寫法（忽略空白後相等）。"""
     std = ctx.issuer_std
     listed = {
         "phone": (std.distributor_phone_equivalents, "電話", "distributor.phone_equivalents"),
@@ -673,7 +690,7 @@ def _iis_occurrences(
             for occ in items
         ]
     return [
-        distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, kind=kind)
+        _distributor_text(ctx, rid, occ.field, occ.value, expected, f"{occ.where}的{what}", occ.name, kind=kind)
         for occ in items
     ]
 
@@ -778,7 +795,7 @@ def review_standard_rules(ctx: Context, *, reference_trade: ParsedField) -> list
         *_subscription_dates(ctx),
         *_print_dates(ctx),
         _approval_date(ctx),
-        _chairman(ctx),
+        *_chairmen(ctx),
         _fixed_warning(ctx),
         _risk_level(ctx),
         _forbidden_wording(ctx, reference_trade),
