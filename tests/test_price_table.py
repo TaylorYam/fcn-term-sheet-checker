@@ -237,9 +237,9 @@ def test_content_on_a_page_two_pages_after_the_last_row_is_not_dropped_silently(
     assert [e.page for e in far.evidence] == [3]
 
 
-def test_header_cell_ending_a_line_above_its_neighbour_continues_on_the_next_page():
-    """表頭跨頁、某欄在上一頁的最後一行比隔壁欄高一行（BARC：執行價格欄 3 行、KO 欄第 3 行起在下一頁）：
-    仍接到下一頁頁首同一欄的續行，續行裡的數字（`第4 位`）不會被當成價格。"""
+def test_header_cell_continued_on_the_next_page_is_not_read_as_a_row():
+    """表頭跨頁、某欄在上一頁的最後一行比隔壁欄高一行（BARC：執行價格欄 3 行、KO 欄第 3 行起在下一頁頁首）：
+    下一頁的續行接不到任何列，留在表頭，續行裡的數字（`第4 位`）不會被當成價格。"""
     spec = TableSpec(**{**PRICE_SPEC.__dict__, "pct": r"之(\d+(?:\.\d+)?)%"})
     lines = [
         centered(1, X["name"], 760, "連結標的"),
@@ -248,9 +248,9 @@ def test_header_cell_ending_a_line_above_its_neighbour_continues_on_the_next_pag
         centered(1, X["strike"], 760, "格之80.00%)"),
         centered(1, X["strike"], 772, "(第4 位)"),
         centered(1, X["ko"], 748, "自動提前出場價"),
-        centered(1, X["ko"], 760, "(期初價格之"),
-        centered(2, X["ko"], 40, "100.00%)"),
-        centered(2, X["ko"], 52, "(第4 位)"),
+        centered(1, X["ko"], 760, "(期初價格之100.00%)"),
+        centered(2, X["ko"], 40, "(四捨五入至小數點後"),
+        centered(2, X["ko"], 52, "第4 位)"),
         *row(2, 80, None, "甲公司", None, ROW1[:3]),
     ]
     table = read("t", lines, spec)

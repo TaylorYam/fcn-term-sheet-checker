@@ -334,7 +334,12 @@ def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, in
         return above, below
     start = min((ln.page, ln.y0) for c in keyed for ln in c)
     bottom = max((ln.page, ln.y1) for c in keyed for ln in c)
-    attached = [ln for c in cells if c not in keyed and (c[0].page, c[0].y0) > bottom for ln in c]
+    attached = [
+        ln
+        for c in cells
+        if c not in keyed and (c[0].page, c[0].y0) > bottom and (c[0].page == bottom[0] or _touches(c, below))
+        for ln in c
+    ]
     # 沒有關鍵字的格裡、和第 1 列錨點上下重疊的行（名稱第一行比代碼高、又緊貼表頭那一格：`中文名` / `稱` / `輝達公`）
     attached += [
         ln
@@ -345,6 +350,12 @@ def _split(lines: list[Line], first: Line, spec: TableSpec, origin: dict[int, in
     ]
     header = [ln for ln in above if ln not in attached and (ln.page, _yc(ln)) >= start]
     return header, below + attached
+
+
+def _touches(cell: list[Line], below: list[Line]) -> bool:
+    """表頭下一頁的格接到第 1 列錨點以下的某一行（例：代碼拆三行、上面那一行比列錨點高）：屬於列。接不到的是表頭
+    跨頁的續行（某欄在上一頁的最後一行比隔壁欄高、其餘在下一頁頁首），留在表頭。"""
+    return any(_adjacent(ln, b) for ln in cell for b in below)
 
 
 def _adjacent(upper: Line, lower: Line) -> bool:
@@ -376,11 +387,7 @@ def _cells(lines: list[Line]) -> list[list[Line]]:
 
     for i, a in enumerate(lines):
         for j in range(i + 1, len(lines)):
-            if (
-                _same_cell(a, lines[j], edges, lines)
-                and not _spans(a, lines[j], lines)
-                and not _spans(lines[j], a, lines)
-            ):
+            if _same_cell(a, lines[j], edges) and not _spans(a, lines[j], lines) and not _spans(lines[j], a, lines):
                 parent[find(i)] = find(j)
     groups: dict[int, list[Line]] = {}
     for i, ln in enumerate(lines):
@@ -396,18 +403,15 @@ def _spans(wide: Line, other: Line, lines: list[Line]) -> bool:
     return sum(_overlap(wide, x) > 0.5 for x in row) >= 2
 
 
-def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]], lines: list[Line]) -> bool:
+def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]]) -> bool:
     upper, lower = (a, b) if (a.page, a.y0) <= (b.page, b.y0) else (b, a)
     if upper.page == lower.page:
         return _adjacent(upper, lower)
     if lower.page != upper.page + 1 or not _same_column(upper, lower):
         return False
-    # 跨頁：上一頁那一欄的最後一行（離頁底的列不到兩行；隔壁欄可能多一行）接下一頁最上面的那一列
-    height = max(upper.y1 - upper.y0, lower.y1 - lower.y0)
-    last = not any(x.page == upper.page and x.y0 > upper.y0 and _same_column(x, upper) for x in lines)
-    return (
-        last and upper.y1 >= edges[upper.page][1] - 2 * height and lower.y0 <= edges[lower.page][0] + ADJACENT * height
-    )
+    # 跨頁：上一頁最下面的那一列接下一頁最上面的那一列
+    reach = ADJACENT * max(upper.y1 - upper.y0, lower.y1 - lower.y0)
+    return upper.y1 >= edges[upper.page][1] - reach and lower.y0 <= edges[lower.page][0] + reach
 
 
 def _text(cell: Sequence[Line]) -> str:
