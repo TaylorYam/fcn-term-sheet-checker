@@ -7,8 +7,8 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 22
-effective_date = 2026-10-15
+version = 23
+effective_date = 2026-10-16
 
 [distributor]
 # 受託或銷售機構審查通過之日期（說明書封面 p1）：歷次日期都保留，由舊到新。
@@ -423,6 +423,8 @@ ki_en = "European Knock-In "
 basket_zh = "一籃子中表現最差"
 basket_en = "Worst of Basket "
 single_unsupported = true
+# 人民幣在英文名稱與計價幣別括號內都寫 RMB（1 份 OOS 樣本，2026-10-16 確認，Issue #296）
+ccy_aliases = { CNH = "RMB" }
 normalize_brackets = true
 # 英文名稱跨行處可能多空白，比對時忽略所有空白
 ignore_whitespace_en = true
@@ -564,9 +566,10 @@ minimum_redemption = 1
 redemption_increment = 1
 
 # DBS：最低申購為單位面額的倍數依承作幣別（USD 5、AUD 7、JPY 8 單位；沒列的幣別轉人工覆核），最低加購、最低贖回、
-# 增加贖回單位 1 倍（2026-10-15 確認，Issue #280）。說明書寫單位數與金額，parser 交出金額。
+# 增加贖回單位 1 倍（2026-10-15 確認，Issue #280）。說明書寫單位數與金額，parser 交出金額。CNH 4 單位（1 份 OOS 樣本，
+# 2026-10-16 確認，Issue #296）。
 [min_amount_multiples.dbs]
-minimum_subscription = { USD = 5, AUD = 7, JPY = 8 }
+minimum_subscription = { USD = 5, AUD = 7, JPY = 8, CNH = 4 }
 minimum_additional = 1
 minimum_redemption = 1
 redemption_increment = 1

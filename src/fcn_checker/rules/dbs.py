@@ -152,6 +152,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
         )
     )
     mapped = ctx.std.currency_zh_to_iso.get(cz.value) if cz.ok else None
+    tpl = ctx.issuer_std.product_name
+    if mapped and tpl is not None:  # DBS 括號內的代碼和英文名稱同一套寫法（人民幣寫 RMB，Issue #296）
+        mapped = tpl.ccy_text(mapped)
     for field, name in (("currency_basic_iso", "商品基本資料計價幣別代碼"), ("currency_cover_iso", "封面計價幣別代碼")):
         pf = f(field)
         out.append(

@@ -13,17 +13,15 @@ import pytest
 from fcn_checker.issuers import UBS
 from fcn_checker.schema import CheckStatus as S
 from harness import check_all
-from real_data import TERM_SHEETS, pdfs, requires
+from real_data import ORDERS_CHECK_FORMAT, TERM_SHEETS, pdfs, requires
 
-ORDERS = TERM_SHEETS.parent / "orders" / "核對表格式..xlsx"
-
-pytestmark = [pytest.mark.real_samples, requires(TERM_SHEETS / "092*_TS.pdf", ORDERS)]
+pytestmark = [pytest.mark.real_samples, requires(TERM_SHEETS / "092*_TS.pdf", ORDERS_CHECK_FORMAT)]
 PROBLEMS = (S.MISMATCH, S.REVIEW_REQUIRED, S.ERROR)
 
 
 @pytest.fixture(scope="module")
 def items():
-    outcome = check_all(ORDERS, pdfs("092*.pdf"))
+    outcome = check_all(ORDERS_CHECK_FORMAT, pdfs("092*.pdf"))
     return [i for i in outcome.items if i.term_sheet.name.endswith("_TS.pdf")], [
         i for i in outcome.items if i.term_sheet.name.endswith("_IIS.pdf")
     ]

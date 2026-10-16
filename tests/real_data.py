@@ -5,8 +5,10 @@
     orders/FCN參考條件.xlsx          完整參考條件表
     orders/FCN參考條件_待回補.xlsx   同一張表，回填欄位與 VWAP 商品的價格欄空白
     核對表格式..xlsx                 公司原始待建檔格式的完整表（含 SG、BNP 列，回填欄位空白；2026-10-14 使用者提供）
-    term-sheets/                     說明書與投資人須知（<商品代號>_TS.pdf、<商品代號>_IIS.pdf）
+    orders/核對表格式..xlsx          同一格式、較新的完整表（CA、DBS、UBS 等後導入上手的列）
+    term-sheets/IS/                  樣本內的說明書與投資人須知（<商品代號>_TS.pdf、<商品代號>_IIS.pdf；Issue #300）
 
+樣本外（OOS）的 `term-sheets/OOS/<上手>/` 與 `orders/OOS/` 是驗證用，不在這裡讀、不放進測試斷言。
 缺檔時測試略過，略過原因寫出缺的路徑；CI 沒有 data/，一律略過。
 """
 
@@ -20,10 +22,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("FCN_TEST_DATA_DIR", ROOT / "data"))
 ORDERS = DATA / "orders"
-TERM_SHEETS = DATA / "term-sheets"
+TERM_SHEETS = DATA / "term-sheets" / "IS"
 REFERENCE = ORDERS / "FCN參考條件.xlsx"
 TO_FILL = ORDERS / "FCN參考條件_待回補.xlsx"
 CHECK_FORMAT = DATA / "核對表格式..xlsx"
+ORDERS_CHECK_FORMAT = ORDERS / "核對表格式..xlsx"
 
 
 def pdfs(pattern: str = "*.pdf") -> list[Path]:

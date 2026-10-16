@@ -39,6 +39,9 @@ VARIANTS = {
     "日圓 Quanto 9 個月、3 檔、KI 到期、非整數 K %": Spec(
         currency_zh="日圓", tenor=9, count=3, ki="AM", strike=Decimal("79.32")
     ),
+    "人民幣 Quanto 12 個月、KI 到期、計價幣別括號 RMB 與人民幣定義（Issue #296）": Spec(
+        currency_zh="人民幣", tenor=12, ki="AM"
+    ),
 }
 
 
