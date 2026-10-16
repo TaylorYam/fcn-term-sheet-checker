@@ -124,11 +124,11 @@
 
 2026-10-15 確認核對：
 
-- 設定參數：`年期` = 天期、`每單位商品面額` = 面額（含幣別）、`發行價格` = 100%（`issue_price_others`）、`固定配息率` = 第 7 項每期配息率。
+- 設定參數：`年期` = 天期、`每單位商品面額` = 面額（含幣別）、`發行價格` = 100%（`issue_price_others`）、`固定配息率` = 第 7 項每期配息率。年期、面額、固定配息率 Issue #294 起由共用情境規則 `scenario.params` 核對（[共用核對規則](shared-check-rules.md) §7.2）。
 - 百分比表 = 標的表表頭（§3.4）。
 - 情境一、二年化報酬率 = 說明書年利率，和參考條件表比（§3.3）。
 
-- 設定參數 `投資金額 a x b% x n = c`：a = 每單位商品面額、b = `發行價格`、n = `投資單位數`、c = a × b% × n（`doc.scenario_params`，Issue #316）。
+- 設定參數 `投資金額 a x b% x n = c`：a = 每單位商品面額、b = `發行價格`、n = `投資單位數`、c = a × b% × n（Issue #316）。Issue #294 起 a、b 由共用情境規則 `scenario.params` 和面額、第 7 項發行價格比；n、c 留在 Nomura（`doc.scenario_units`）。百分比表每列是表頭百分比、不是價格表的重印，仍由 Nomura 規則核對（`doc.scenario_table`）。
 
 不重算配息合計、交割股數、剩餘金額、損失率；情境三的假設價格與股數不核對（金額旁的幣別仍核對，§3.1）。設定參數或百分比表找不到、欄數不符時轉人工覆核。
 
@@ -200,14 +200,15 @@
 | 規則 | rule_id |
 |---|---|
 | 第 7 項每期配息率 = 年利率 ÷ 12（4 位）；日期表列數 ≠ 天期轉人工覆核（`coupon_frequency_unknown`） | `derive.monthly_coupon` |
-| 第 14 項設定參數、第 15 項(1) 每期配息率 = 第 7 項 | `doc.coupon_mentions` |
+| 第 15 項(1) 每期配息率 = 第 7 項 | `doc.coupon_mentions` |
 | 英文名稱後 TDCC No.；ISIN 三處；名稱（封面 = 第一章第 1 項）；幣別中文與 ISO 代碼 | `doc.product_code`、`doc.isin_consistency`、`doc.name_consistency`、`doc.currency_consistency` |
-| 期數（日期表、名稱月數、第 14 項年期） | `doc.coupon_periods` |
+| 期數（日期表、名稱月數） | `doc.coupon_periods` |
 | 記憶式句型 ⇔ 名稱；日期表自動提前出場價欄 = 表頭 KO % | `doc.ko_memory`、`doc.date_table_ko` |
 | 標的數（第 7 項句型、第 8 項檔數）；第 9 項彭博代碼 | `doc.underlying_count`、`doc.underlying_tickers` |
 | KI 條款 ⇔ 標的表下限觸發價欄 ⇔ 到期贖回款數；KI P 決定日表 = 自動提前出場決定日 | `doc.ki_consistency` |
 | 到期贖回 100% | `doc.redemption_pct` |
-| 第 14 項設定參數面額、投資金額；百分比表 = 標的表表頭（結果帶出每一格） | `doc.scenario_params`、`doc.scenario_table` |
+| 第 14 項設定參數年期、面額、固定配息率，投資金額算式的面額與發行價格（Issue #294） | 共用 `scenario.params` |
+| 第 14 項投資金額算式的單位數與金額；百分比表 = 標的表表頭（結果帶出每一格） | `doc.scenario_units`、`doc.scenario_table` |
 | 日期表末列、遞增、早於配息日；D 型開始日 = 前一期終止日後的下一個一籃子預定交易日、第 1 期 = 發行日（Issue #289 起核對） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | P 型「不適用」期別 | `schedule.autocall_dates` |
 
