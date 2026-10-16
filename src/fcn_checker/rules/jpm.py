@@ -212,8 +212,8 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
             if (diff := [c for c in b if a.get(c) != b[c]])
         ]
         result = check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #315，比照 BBVA #305）
-            _cells(table.value.prices),
-            _cells(scen.value.prices),
+            kit.price_cells(table.value.prices),
+            kit.price_cells(scen.value.prices),
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "逐格等於第 9 項價格表",
@@ -238,7 +238,7 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
         for occ in mentions.value:
             out.append(
                 kit.doc_check(ctx, "doc.scenario_table", occ.field, f"{occ.where}{occ.name}", denom, occ.value).compare(
-                    denom.value, occ.value.value, fail_message="情境裡重複寫出的本金須等於每單位面額（Issue #315）"
+                    denom.value, occ.value.value, fail_message="情境裡重複寫出的本金須等於每單位面額"
                 )
             )
     out.append(scenario_strike(ctx))
@@ -255,7 +255,7 @@ def scenario_strike(ctx: IssuerContext) -> CheckResult:
     )
     if (problem := check.blocked) is not None:
         return problem
-    n, value = strike.value
+    n, value = strike.value.underlying, strike.value.strike
     rows = table.value.prices
     if n is None and len(rows) == 1:
         n = 1
@@ -273,11 +273,6 @@ def scenario_strike(ctx: IssuerContext) -> CheckResult:
         tolerance="數值相等",
         fail_message=f"須等於第 9 項價格表第 {n} 檔執行價",
     )
-
-
-def _cells(rows: list[dict]) -> list[str]:
-    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值（同 BBVA，Issue #305）。"""
-    return [f"{v:,}" for row in rows for v in row.values()]
 
 
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）

@@ -127,6 +127,7 @@ def test_compare_dates_are_backfilled_from_the_date_table(tmp_path, spec, dates)
         (Spec(), Edit("x 12.34% x 1/12 x n/N", "x 12.43% x 1/12 x n/N", "ts.art8"), "derive.coupon_pa_mentions"),
         (Spec(), Edit("x 12.34% x 1/12 =", "x 12.43% x 1/12 =", "ts.art15"), "derive.coupon_pa_mentions"),
         (Spec(ko_obs="P"), Edit("x 12.34% x 1/12 =", "x 12.43% x 1/12 =", "ts.art15"), "derive.coupon_pa_mentions"),
+        (Spec(), Edit("每次配息金額 = 10,000美元", "每次配息金額 = 20,000美元", "ts.art15"), "doc.scenario_table"),
         (Spec(), Edit("到期贖回金額 = 10,000美元", "到期贖回金額 = 20,000美元", "ts.art15"), "doc.scenario_table"),
         (Spec(), Edit("適用匯率 = 10,000美元/", "適用匯率 = 20,000美元/", "ts.art15"), "doc.scenario_table"),
         (Spec(), Edit("/70.3500美元", "/70.4000美元", "ts.art15"), "doc.scenario_table"),
@@ -138,7 +139,7 @@ def test_compare_dates_are_backfilled_from_the_date_table(tmp_path, spec, dates)
         (Spec(), Edit("最差表現連結標的：", "表現最差之標的說明：", "ts.art8"), "doc.underlying_count"),
         (Spec(), Edit("(1) 若於最後評價日時最差表現連結標的之股票收盤價大於或等於其執行價：每單位面額 x 100%", "(1) 若於最後評價日時最差表現連結標的之股票收盤價大於或等於其執行價：每單位面額 x 99%", "ts.art8"), "doc.redemption_pct"),
     ],
-    ids=["scenario-price", "scenario-principal", "pro-rata-rate", "scenario-rate", "scenario-rate-P", "scenario-redemption", "scenario-shares-principal", "scenario-strike", "scenario-strike-1UL", "scenario-currency", "name", "currency", "trustee-code", "worst-of", "redemption"],
+    ids=["scenario-price", "scenario-principal", "pro-rata-rate", "scenario-rate", "scenario-rate-P", "scenario-coupon-principal", "scenario-redemption", "scenario-shares-principal", "scenario-strike", "scenario-strike-1UL", "scenario-currency", "name", "currency", "trustee-code", "worst-of", "redemption"],
 )  # fmt: skip
 def test_internal_rules_find_the_wrong_repeat(tmp_path, spec, edit, broken):
     """正式條款正確、但重複出現處錯誤：只有該規則不通過。"""
@@ -232,6 +233,13 @@ def test_unreadable_scenarios_require_review(tmp_path):
         ("doc.scenario_table", f, S.REVIEW_REQUIRED) for f in ("scenario_principal_mentions", "scenario_strike")
     } <= bad
     assert ("field.currency", "scenario_currency", S.REVIEW_REQUIRED) in bad
+
+
+def test_reworded_scenario_principal_requires_review(tmp_path):
+    """情境 (i)、(ii) 一定寫的到期贖回金額讀不到：轉人工覆核，不會默默略過。"""
+    r = check(tmp_path, edits=[Edit("到期贖回金額 = 10,000美元", "到期時贖回本金", "ts.art15")])
+    assert {(rid, s) for rid, _, s in problems(r)} == {("doc.scenario_table", S.REVIEW_REQUIRED)}
+    assert {f for _, f, _ in problems(r)} == {"scenario_principal_1_到期贖回金額", "scenario_principal_2_到期贖回金額"}
 
 
 def test_scenario_without_the_assumed_worst_underlying_requires_review(tmp_path):

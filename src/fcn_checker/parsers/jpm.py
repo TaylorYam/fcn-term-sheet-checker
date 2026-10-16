@@ -18,7 +18,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money, price_table
-from .common import NUM, Mention, derived, number
+from .common import NUM, Mention, dec, derived, number
 from .layout import DATE_RE, Document, LayoutSpec, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "jpm-zh-pd"
@@ -119,13 +119,25 @@ WORST_DEFINITION = "最差表現連結標的："  # 多標的才有的定義句
 SCENARIOS = (("(i)最佳情境", "情境 (i)"), ("(ii)一般情境", "情境 (ii)"), ("(iii)最差情境", "情境 (iii)"))
 SCENARIO_END = "請注意：情境分析結果不保證"
 SCENARIO_COUPON = r"每次配息金額=" + money.NUMBER + CCY + "x" + PCT + "x1/12="  # 年利率 Y
-SCENARIO_PRINCIPAL = {  # 情境裡重複寫出的本金（= 每單位面額）
+SCENARIO_PRINCIPAL = {  # 情境裡重複寫出的本金（= 每單位面額）；每種寫法出現在哪些情境見 PRINCIPAL_CASES
     "每次配息金額的本金": r"每次配息金額=(" + money.NUMBER + ")" + CCY,
     "到期贖回金額": r"到期贖回金額=(" + money.NUMBER + ")" + CCY,
     "交割股數算式的每單位面額": r"每單位面額/執行價x適用匯率=(" + money.NUMBER + ")" + CCY,
 }
+PRINCIPAL_CASES = {  # 情境 (i)～(iii) 各自一定有的本金句（27 份樣本都有，沒有就轉人工覆核）
+    "每次配息金額的本金": (1, 2, 3),
+    "到期贖回金額": (1, 2),
+    "交割股數算式的每單位面額": (3,),
+}
 SCENARIO_STRIKE = r"每單位面額/執行價x適用匯率=" + money.NUMBER + CCY + "/(" + money.NUMBER + ")" + CCY
-SCENARIO_WORST = r"此假設最差表現連結標的為連結標的(\d)"
+SCENARIO_WORST = r"此假設最差表現連結標的為連結標的(\d+)"
+
+
+class ScenarioStrike(NamedTuple):
+    """第 15 項情境 (iii) 交割股數算式的執行價（Issue #315）。"""
+
+    underlying: int | None  # 假設的最差表現連結標的是第幾檔；單一標的沒寫時為 None
+    strike: Decimal
 
 
 class KoWording(NamedTuple):
@@ -631,6 +643,11 @@ def _scenarios(fields: dict[str, ParsedField], annual: list[Mention], art15: lis
             field = f"scenario_principal_{i}_{n}"
             pf = ParsedField.present(field, number(m[1]), ti.lines_for(m.start(), m.end()))
             principals.append(Occurrence(field, label, f"第 15 項{case}", pf))
+        found = {label for _, label, _ in hits}
+        for label in (x for x, cases in PRINCIPAL_CASES.items() if i in cases and x not in found):
+            field = f"scenario_principal_{i}_{label}"
+            pf = ParsedField.missing(field, f"第 15 項{case}找不到{label}")
+            principals.append(Occurrence(field, label, f"第 15 項{case}", pf))
     fields["scenario_principal_mentions"] = (
         standard_fields.occurrences("scenario_principal_mentions", principals)
         if principals
@@ -661,7 +678,7 @@ def _scenario_strike(ti: TextIndex, span: tuple[str, int, int]) -> ParsedField:
     lns = ti.lines_for(m.start(), m.end())
     if len(worst) > 1:
         return ParsedField.invalid(name, lns, "第 15 項情境 (iii) 假設的最差表現連結標的出現多次")
-    return ParsedField.present(name, (int(worst[0][1]) if worst else None, Decimal(m[1].replace(",", ""))), lns)
+    return ParsedField.present(name, ScenarioStrike(int(worst[0][1]) if worst else None, dec(m[1])), lns)
 
 
 # ---------------------------------------------------------------- 第 12 項日期表
