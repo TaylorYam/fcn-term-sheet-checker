@@ -105,7 +105,7 @@ class PeriodStart:
 class DateTable:
     """說明書的日期表（CONTEXT.md「日期表」）：每期一列，加上表的位置與期始日的定義。"""
 
-    where: str  # 表在說明書的位置，用在項目名稱（例：第一章第 13 條配息表）
+    where: str  # 表在說明書的位置，用在項目名稱（例：第 13 條日期表）
     rows: tuple[DateRow, ...]
     start: PeriodStart | None = None  # None：表上沒有期始日欄，不查期始日
 

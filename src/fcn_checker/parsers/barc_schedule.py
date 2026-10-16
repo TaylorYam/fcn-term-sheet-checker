@@ -306,6 +306,12 @@ def date_table(coupon: ParsedField, ko: ParsedField, ko_observation: ParsedField
     periodic = ko.ok and ko.value.kind in ("ko_period", "combined")
     if not ko.ok and not (ko_observation.ok and ko_observation.value == "P"):
         return ParsedField(name, ko.status, None, list(ko.evidence), note=ko.note)
+    undated = [
+        r.t for r in coupon.value.rows if not all(isinstance(r.get(k), dt.date) for k in ("valuation", "payment"))
+    ]
+    if undated:  # 配息表每期都要有評價日與支付日（N/A 不算）
+        note = "配息表以下期別的評價日或支付日不是日期：" + "、".join(f"第 {t} 期" for t in undated)
+        return ParsedField(name, FieldStatus.INVALID, None, list(coupon.evidence), note=note)
     ko_rows = {r.t: r for r in ko.value.rows} if periodic else {}
     rows = []
     for r in coupon.value.rows:
@@ -345,7 +351,6 @@ def first_callable(f: Callable[[str], ParsedField]) -> ParsedField:
 
 
 def autocall_schedule(f: Callable[[str], ParsedField]) -> ParsedField:
-    """由日期表推得提前出場排程（`parsers/schedule.py` 共用推導）：D 的比價日為期末日，P 為評價日。"""
-    obs = f("ko_observation")
-    column = "end" if obs.ok and obs.value == "D" else "observation"
-    return shared_schedule(obs, first_callable(f), f("schedule_table"), column)["autocall_schedule"]
+    """由日期表推得提前出場排程（`parsers/schedule.py` 共用推導）：D 的比價日為期末日，P 為配息表評價日（定日型提前出場表的
+    自動提前出場評價日 = 同期配息評價日由 C1 檢查）。"""
+    return shared_schedule(f("ko_observation"), first_callable(f), f("schedule_table"))["autocall_schedule"]

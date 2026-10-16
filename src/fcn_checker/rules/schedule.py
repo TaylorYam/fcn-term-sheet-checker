@@ -1,6 +1,6 @@
 """日期表的結構檢查：各上手共用，只讀標準欄位 `schedule_table`（Issue #289；docs/rules/shared-check-rules.md §6.1）。
 
-六項檢查各自一個結果，項目名稱前加上上手交出的表位置（例：第一章第 13 條配息表期數）：
+六項檢查各自一個結果，項目名稱前加上上手交出的表位置（例：第 13 條日期表期數）：
 
 - `schedule.period_count`：期數 = 天期，期別依序為第 1～n 期。
 - `schedule.payment_order`：配息日逐期遞增。
@@ -25,7 +25,7 @@ from .kit import TRADING_DAY_TOLERANCE, Check, IssuerContext, StartVerdict, peri
 FIELD = "schedule_table"
 WHERE = "日期表"  # 讀不到日期表時（不知道表的位置）的項目名稱開頭
 
-NAMES = {
+NAMES = {  # rule_id → （欄位, 項目名稱）；期始日要看上手宣告，放最後
     "schedule.period_count": ("period_count", "期數"),
     "schedule.payment_order": ("payment_order", "配息日順序"),
     "schedule.observation_order": ("observation_order", "觀察日與配息日"),
@@ -33,17 +33,11 @@ NAMES = {
     "schedule.last_payment": ("last_payment", "末期配息日"),
     "schedule.period_start": ("period_start", "期始日"),
 }
+TABLE_CHECKS = tuple(rid for rid in NAMES if rid != "schedule.period_start")  # 讀不到日期表時轉人工覆核的項目
 
 RULE_TEXT = {
     "previous_end": "期始日 = 前一期期末日",
     "next_trading_day": "期始日 = 前一期期末日後的下一個一籃子預定交易日",
-}
-FIRST_TEXT = {
-    "issue_date": "第 1 期期始日 = 發行日",
-    "after_issue": {
-        "previous_end": "第 1 期期始日 = 發行日",
-        "next_trading_day": "第 1 期期始日 = 發行日後的下一個一籃子預定交易日",
-    },
 }
 
 
@@ -66,7 +60,7 @@ def run(ctx: IssuerContext) -> list[CheckResult]:
     if table.status == FieldStatus.NOT_APPLICABLE:
         return []
     if not table.ok:
-        return [_check(ctx, rid, WHERE).review(table) for rid in list(NAMES)[:5]]
+        return [_check(ctx, rid, WHERE).review(table) for rid in TABLE_CHECKS]
     t: DateTable = table.value
     return [
         period_count(ctx, table),
@@ -185,8 +179,8 @@ def period_starts(ctx: IssuerContext, table: ParsedField, decl: PeriodStart) -> 
         parts.append(f"第 1～{decl.blank} 期期始日空白")
     parts.append(RULE_TEXT[decl.rule])
     if decl.first is not None and decl.blank == 0:
-        text = FIRST_TEXT[decl.first]
-        parts.append(text if isinstance(text, str) else text[decl.rule])
+        from_issue = decl.first == "issue_date" or decl.rule == "previous_end"
+        parts.append("第 1 期期始日 = " + ("發行日" if from_issue else "發行日後的下一個一籃子預定交易日"))
     message = "；".join(parts)
     tolerance = TRADING_DAY_TOLERANCE if decl.rule == "next_trading_day" else None
     if decl.blank is None:

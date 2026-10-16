@@ -90,6 +90,13 @@ def test_coupon_payment_before_valuation(tmp_path):
     assert bad.actual == "第 3 期" and bad.item.name == "第 13 條日期表觀察日與配息日"
 
 
+def test_coupon_row_without_a_valuation_date_requires_review(tmp_path):
+    spec = Spec(ko_obs="P", memory=False)
+    report = check(tmp_path, spec, edits=[Edit("2030 年4 月8 日", "N/A", "ts.art13.coupon.3.valuation")])
+    r = results(report, "schedule.observation_order")[0]
+    assert r.status == REVIEW and "第 3 期" in r.message
+
+
 def test_last_valuation_must_equal_final_valuation_date(tmp_path):
     spec = Spec(ko_obs="P", memory=False)
     report = check(tmp_path, spec, edits=[Edit("2030 年7 月8 日", "2030 年7 月5 日", "ts.art13.coupon.6.valuation")])

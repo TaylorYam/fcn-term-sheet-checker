@@ -208,7 +208,7 @@ TABLE = present("schedule_table", table())
 
 
 def test_daily_schedule_keeps_only_the_first_callable_and_last_period():
-    out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 2), TABLE, "end")
+    out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 2), TABLE)
     assert out["autocall_schedule"].value == AutocallSchedule("D", 2, 3, {2: D(2030, 3, 4), 3: D(2030, 4, 4)})
     assert out["ko_observation"].value == "D" and out["first_callable_period"].value == 2
 

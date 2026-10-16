@@ -15,9 +15,8 @@ from . import money, price_table, schedule
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
-PARSER_VERSION = (
-    "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
-)
+# 2：價格表改由 parsers/price_table.py 讀（Issue #288）；3：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "3"
 # 條號自成一行（`9.`），也可能與標題同一行（`10. 發行價格：`，真實樣本第 10 條起是這種版面，Issue #185）
 LAYOUT = LayoutSpec(
     r"第{zh}章\s*{name}", re.compile(r"^(\d{1,2})\.(?:\s+\S.*)?$"), 100, re.compile(r"^\((\d{1,2})\)\s*(.*)$"), 110
@@ -367,10 +366,8 @@ def read(lines: Sequence[Line]) -> HsbcTermSheet:
     f = fields.get
     fields["first_callable_period"] = first_callable(lambda k: f(k, ParsedField.missing(k)))
     fields["schedule_table"] = schedule_table(lambda k: f(k, ParsedField.missing(k)), fields["first_callable_period"])
-    obs = fields["ko_observation"]
-    column = "end" if obs.ok and obs.value == "D" else "observation"
     fields["autocall_schedule"] = schedule.autocall_schedule(
-        obs, fields["first_callable_period"], fields["schedule_table"], column
+        fields["ko_observation"], fields["first_callable_period"], fields["schedule_table"]
     )["autocall_schedule"]
     return HsbcTermSheet(fields, TextIndex(doc.lines), doc, scenarios, ScenarioIndex(scenarios))
 
