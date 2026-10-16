@@ -164,7 +164,7 @@ class ScenarioSection:
     total: Hit[Total] | None  # 總投資金額 = U單位面額 = N 幣別
     tenor: Hit[int] | None  # 天期：N個月
     rate: Hit[Decimal] | None  # 配息率 = X %
-    table: ParsedField  # 重印標的表（sg_tables.price_table，含表頭百分比）
+    table: ParsedField  # 重印價格表（sg_tables.price_table，含表頭百分比）
     scenarios: list[Scenario]
     assumptions: list[Line] = field(default_factory=list)
 
@@ -286,7 +286,7 @@ def section(lines: list[Line], count: int | None) -> ScenarioSection:
     assumptions = lines[: rate_at + 1] if rate_at is not None else lines[:head_end]
     ti = TextIndex(assumptions)
     if rate_at is not None and heads:
-        table = sg_tables.price_table("scenario_table", lines[rate_at + 1 : head_end], count, reprint=True)
+        table = sg_tables.price_table("scenario_table", lines[rate_at + 1 : head_end], sg_tables.REPRINT_TABLE, count)
     else:
         table = ParsedField.missing("scenario_table", "找不到第 15 項重印標的表（「配息率 = X %」到情境一之前）")
     scenarios = []

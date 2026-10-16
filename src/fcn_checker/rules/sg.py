@@ -194,7 +194,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
     out.append(
         kit.doc_check(ctx, "doc.autocall_wording", "underlying_table", "標的表自動提前出場價欄", has, table).compare(
             label.get(has.value) if has.ok else None,
-            label.get("ko" in table.value["columns"]) if table.ok else None,
+            label.get("ko" in table.value.columns) if table.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
             fail_message="標的表有無自動提前出場價欄須與第 8 項有無自動提前出場事件一致",
@@ -257,7 +257,7 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
         out.append(
             kit.doc_check(ctx, "doc.ki_consistency", "underlying_table", "標的表下限價欄", ki, table).compare(
                 label[doc_ki != "none"],
-                label["ki" in table.value["columns"]] if table.ok else None,
+                label["ki" in table.value.columns] if table.ok else None,
                 fail=S.REVIEW_REQUIRED,
                 reason="document_inconsistent",
                 fail_message="標的表有無下限價欄須與 KI 型態一致",

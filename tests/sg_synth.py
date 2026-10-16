@@ -236,38 +236,35 @@ class _Doc:
             self.w.y += 13
 
 
+# 價格表各欄的左緣（真實樣本的欄序：連結標的(k)、名稱、彭博代碼、種類、期初價格、自動提前出場價、下限價、執行價）
+TABLE_X = {"k": 50.0, "name": 80.0, "code": 170.0, "type": 215.0, "prices": (255.0, 335.0, 415.0, 495.0)}
+
+
 def _price_table(d: _Doc, s: Spec, section: str, *, reprint: bool) -> None:
-    """第 8 項標的表（`reprint` 為第 15 項重印：表頭帶百分比、沒有名稱與代碼）。"""
+    """第 8 項標的表（`reprint` 為第 15 項重印：表頭帶百分比、沒有名稱與代碼），真實欄列版面；單一標的的第 8 項表沒有
+    k 欄的值。"""
     d.section = section
-    cols: list[tuple[str, Decimal | None, str]] = [("期初價格", None, "")]
+    x = TABLE_X
+    cols: list[tuple[str, Decimal | None, list[str]]] = [("期初價格", None, [])]
     if s.autocall:
-        cols.append(("自動提前出場價", s.ko, f"(期初價格的{s.ko:.2f}%)"))
+        cols.append(("自動提前出場價", s.ko, [f"(期初價格的{s.ko:.2f}%)"]))
     if s.ki != "none":
-        cols.append(("下限價", s.ki_pct, f"（期初價格的 {s.ki_pct:.2f}%)"))
-    cols.append(("執行價", s.strike, f"(期初價格的{s.strike:.2f}%)"))
+        cols.append(("下限價", s.ki_pct, [f"（期初價格的 {s.ki_pct:.2f}%)"]))
+    cols.append(("執行價", s.strike, [f"(期初價格的{s.strike:.2f}%)"]))
+    heads = [(x["k"], ["連結", "標的", "(k)"])]
     if not reprint:
-        for t in ("連結標的(k)", "連結標的資產", "彭博代碼", "連結標的資產種類"):
-            d.cell(60, t)
-    else:
-        d.cell(55, "連結標的(k)")
-    for label, _, pct in cols:
-        d.cell(290, label)
-        if reprint and pct:
-            d.cell(280, pct)
+        heads += [(x["name"], ["連結標的資產"]), (x["code"], ["彭博代碼"]), (x["type"], ["連結標的", "資產種類"])]
+    heads += [(px, [label, *(pct if reprint else [])]) for px, (label, _, pct) in zip(x["prices"], cols, strict=False)]
+    rows = []
     for i, u in enumerate(s.underlyings, 1):
-        if s.count > 1 or reprint:
-            d.cell(60, f"k={i}")
+        cells = [(x["k"], [f"k={i}"])] if s.count > 1 or reprint else []
         if not reprint:
-            d.cell(110, u.name)
-            code, exch = u.ticker.split(" ")
-            d.cell(200, code)
-            d.cell(206, exch)
-            d.cell(240, "股票")
-        for _, pct, _ in cols:
+            cells += [(x["name"], [u.name]), (x["code"], u.ticker.split(" ")), (x["type"], ["股票"])]
+        for px, (_, pct, _) in zip(x["prices"], cols, strict=False):
             value = u.initial if pct is None else price(u.initial, pct)
-            d.cell(290, s.money(value, s.underlying_ccy, 4))
-        if s.table_page_break and not reprint and i == 1:
-            d.w.new_page()
+            cells.append((px, [s.money(value, s.underlying_ccy, 4)]))
+        rows.append(cells)
+    d.w.grid(heads, rows, size=8, breaks=(2,) if s.table_page_break and not reprint else ())
 
 
 def _scenarios(d: _Doc, s: Spec) -> None:
@@ -493,30 +490,36 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
 
 
 def _iis_table(d: _Doc, s: Spec) -> None:
-    """商品簡介標的表：表頭每格拆成多行、表頭帶 %；期初價格與下一欄價格擠在同一行（同真實樣本）。"""
+    """商品簡介標的表（真實欄列版面）：表頭每格拆成多行、表頭帶 %；新版面期初價格與下一欄價格擠在同一行（同真實樣本）。"""
     d.section = "summary.table"
+    x = TABLE_X
     cols: list[tuple[str, Decimal | None]] = [("期初價格", None)]
     if s.autocall:
         cols.append(("自動提前出場價", s.ko))
     if s.ki != "none":
         cols.append(("下限價", s.ki_pct))
     cols.append(("執行價", s.strike))
-    for t in ("k", "連結標的資產", "彭博代碼", "連結標的資產種類"):
-        d.cell(40, t)
-    for head, pct in cols:
-        d.cell(300, head)
-        if pct is not None and (head != "執行價" or s.iis_strike_pct):
-            d.cell(300, f"(連結標的期初價格的{pct:.2f}%)")
+    heads = [
+        (x["k"], ["k"]),
+        (x["name"], ["連結標的資產"]),
+        (x["code"], ["彭博代碼"]),
+        (x["type"], ["連結標的", "資產種類"]),
+    ]
+    for px, (head, pct) in zip(x["prices"], cols, strict=False):
+        shown = pct is not None and (head != "執行價" or s.iis_strike_pct)
+        heads.append((px, [head, "(連結標的", f"期初價格的{pct:.2f}%)"] if shown else [head]))
+    rows = []
     for i, u in enumerate(s.underlyings, 1):
-        d.cell(40, str(i))
-        d.cell(60, u.name)
-        for part in u.ticker.split(" ") if s.iis_ticker_wrap else (u.ticker,):
-            d.cell(150, part)
-        d.cell(220, "股票")
+        code = u.ticker.split(" ") if s.iis_ticker_wrap else [u.ticker]
+        cells = [(x["k"], [str(i)]), (x["name"], [u.name]), (x["code"], code), (x["type"], ["股票"])]
         values = [s.money(u.initial if pct is None else price(u.initial, pct), s.underlying_ccy, 4) for _, pct in cols]
-        d.cell(300, values[0] + values[1])
-        for v in values[2:]:
-            d.cell(300, v)
+        if s.legacy:  # 舊版面各格分開；新版面期初價格與下一欄價格擠在同一行（同真實樣本）
+            cells += [(px, [v]) for px, v in zip(x["prices"], values, strict=False)]
+        else:
+            cells.append((x["prices"][0], [values[0] + values[1]]))
+            cells += [(px, [v]) for px, v in zip(x["prices"][2:], values[2:], strict=False)]
+        rows.append(cells)
+    d.w.grid(heads, rows, size=8)
 
 
 def _iis_coupon(d: _Doc, s: Spec, unit: str, worst: str) -> None:

@@ -2,7 +2,7 @@
 
 依 6 份真實樣本建立（同說明書 SG1–SG6）。頁底只有頁碼數字（擷取時已排除），沒有「共 M 頁」。一律在去空白的全文上讀，
 舊版面數字與單位、年月日之間的空白因此不影響。KO／KI 寫法只在「收益分配事項」段內判斷，句型同說明書第 8 項
-（parsers/sg.py 的 `ko_memory`、`ki_type`）；參、投資風險也有類似句子。標的表每格拆成多行，價格依標的列切段。
+（parsers/sg.py 的 `ko_memory`、`ki_type`）；參、投資風險也有類似句子。價格表以 parsers/price_table.py 讀。
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ from collections.abc import Sequence
 from decimal import Decimal
 
 from .. import standard_fields
-from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
+from ..schema import DetectionResult, Evidence, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import iis, money, sg, sg_tables
-from .layout import TextIndex, join_wrapped_tickers, parse_date
+from . import iis, money, price_table, sg, sg_tables
+from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "sg-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：價格表改由 parsers/price_table.py 讀（Issue #288）
 TITLE = "中文投資人須知"
 NAME_ZH_TAIL = "（不保本及無擔保）"
 NAME_EN_TAIL = squash(sg.NAME_EN_TAIL)
@@ -45,7 +45,19 @@ KO_D_EVENT = r"自動提前出場事件：若於(?:記憶事件)?觀察期間內
 KO_P = r"自動提前出場事件：若於任一評價日i\(i=(\d+)-(\d+)\)"
 P_RANGE = r"評價日i\(i=(\d+)-(\d+)\)"
 PRICE = rf"(\d[\d,]*\.\d{{4}})({money.CURRENCY})"
-PCT = r"\(連結標的期初價格的(\d+(?:\.\d+)?)%\)"
+IIS_TABLE = price_table.TableSpec(
+    where="商品簡介價格表",
+    initial="期初價格",
+    columns=(
+        price_table.Column("ko", "自動提前出場價", required=False, pct_optional=True),
+        price_table.Column("ki", "下限價", required=False, pct_optional=True),
+        price_table.Column("strike", "執行價", pct_optional=True),
+    ),
+    anchor="ticker",
+    pct=r"\(連結標的期初價格的(\d+(?:\.\d+)?)%\)",
+    pct_label="(連結標的期初價格的X%)",
+    code="彭博代碼",
+)
 PROVIDED = frozenset(
     {
         "product_codes",
@@ -106,47 +118,22 @@ def detect(lines: Sequence[Line]) -> DetectionResult:
 
 
 def _table(lines: list[Line], fields: dict[str, ParsedField]) -> None:
-    """商品簡介標的表（範本規格 §4.4）：代碼一列一個，價格依表頭欄序切到各列；表頭的 % 讀成 KO／KI／執行價 %。"""
+    """商品簡介價格表（範本規格 §4.4，`parsers/price_table.py` 讀，以彭博代碼切列）；表頭的 % 讀成 KO／KI／執行價 %，
+    表頭沒寫 % 的欄不核對 %（SG6 執行價）。"""
     start = next((i for i, ln in enumerate(lines) if squash(ln.text).startswith("連結標的資產：")), None)
     end = next((i for i, ln in enumerate(lines) if squash(ln.text).startswith("商品年期：")), None)
-    names = ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct")
     if start is None or end is None or end <= start:
-        fields.update({n: ParsedField.missing(n, "找不到商品簡介「連結標的資產」標的表") for n in names})
+        names = ("underlyings", "underlying_prices", "strike_pct", "ko_pct", "ki_pct")
+        fields.update({n: ParsedField.missing(n, "找不到商品簡介「連結標的資產」價格表") for n in names})
         return
-    region = join_wrapped_tickers(lines[start + 1 : end])
-    rows = [i for i, ln in enumerate(region) if sg.TICKER.fullmatch(ln.text.strip())]
-    header = TextIndex(region[: rows[0]] if rows else region)
-    cols = ["initial"]
-    if "自動提前出場價" in header.text:
-        cols.append("ko")
-    if "下限價" in header.text:
-        cols.append("ki")
-    cols.append("strike")
-    for name, label in (("ko_pct", "自動提前出場價"), ("ki_pct", "下限價"), ("strike_pct", "執行價")):
-        if label + "(連結標的期初價格的" in header.text:  # 表頭沒寫 % 的欄不核對 %（SG6 執行價）
-            fields[name] = iis.capture(name, header, re.escape(label) + PCT, Decimal)
-    if not rows or "期初價格" not in header.text or "執行價" not in header.text:
-        note = "標的表找不到彭博代碼（代號 空白 交易所碼）或表頭「期初價格」「執行價」"
-        fields.update({n: ParsedField.invalid(n, region, note) for n in ("underlyings", "underlying_prices")})
-        return
-    tickers = [re.sub(r"\s+", " ", region[i].text.strip()) for i in rows]
-    fields["underlyings"] = ParsedField.present("underlyings", tickers, [region[i] for i in rows])
-    out = []
-    for k, (a, ticker) in enumerate(zip(rows, tickers, strict=True)):
-        cells = region[a : rows[k + 1] if k + 1 < len(rows) else len(region)]
-        found = re.findall(PRICE, "|".join(squash(ln.text) for ln in cells))
-        if len(found) != len(cols):
-            fields["underlying_prices"] = ParsedField.invalid(
-                "underlying_prices",
-                cells,
-                f"標的表第 {k + 1} 列的價格數（{len(found)}）不等於表頭價格欄數（{len(cols)}）",
-            )
-            return
-        prices = {c: Decimal(v.replace(",", "")) for c, (v, _) in zip(cols, found, strict=True)}
-        out.append(standard_fields.PriceRow(ticker, prices, tuple(Evidence.of(ln) for ln in cells), name=f"k={k + 1}"))
-    fields["underlying_prices"] = ParsedField(
-        "underlying_prices", FieldStatus.PRESENT, tuple(out), [Evidence.of(ln) for ln in region]
-    )
+    table = price_table.read("underlying_table", lines[start + 1 : end], IIS_TABLE)
+    fields["underlyings"] = price_table.underlyings(table)
+    rows = len(table.value.rows) if table.ok else 0
+    fields["underlying_prices"] = price_table.price_rows(table, names=[f"k={k}" for k in range(1, rows + 1)])
+    if table.ok:
+        for name, col in (("ko_pct", "ko"), ("ki_pct", "ki"), ("strike_pct", "strike")):
+            if col in table.value.pcts:
+                fields[name] = ParsedField.present(name, table.value.pcts[col], list(table.value.head_lines[col]))
 
 
 def _ko_terms(sec: list[Line] | None, fields: dict[str, ParsedField]) -> None:
