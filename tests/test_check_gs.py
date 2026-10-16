@@ -254,13 +254,13 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     old = f"現預定為{spec.date(spec.maturity_date)}"
     r = check(tmp_path, spec, edits=[Edit(old, "現預定為2031年1月20日", "ts.art13")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     """年期寫 7 個月、觀察時程表 6 列：期數不符。"""
     r = check(tmp_path, edits=[Edit("則為6個月", "則為7個月", "ts.art13")])
-    assert rule(r, "doc.coupon_periods", "date_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_single_wording_with_a_basket_table_needs_review(tmp_path):

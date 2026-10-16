@@ -17,12 +17,13 @@ from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
-from . import money, price_table
+from . import money, price_table, schedule
 from .common import Mention, RawText, capture_group, dec, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "gs-zh-pd"
-PARSER_VERSION = "3"  # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #317）
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：重複寫出的值（Issue #317）；4：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -466,30 +467,25 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     fields["ko_memory"], fields["memory_style"] = memory, style
 
 
+SCHEDULE_WHERE = "第 13 項日期表"
+# 期始日 = 前一期結束日後的下一個一籃子預定交易日；第 1 期起始日有交易日次日、發行日次日兩種，不核對（範本規格 §4.4）
+SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", None)
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式（D）、第一個可提前出場期 k 與提前出場排程：k 須在觀察時程表期數內；比價日為第 k 期與末期的觀察期間結束日。"""
-    first, table = fields["ko_first_period"], fields["date_table"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
-    bad = next((p for p in (first, table) if not p.ok), None)
-    if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
-        return
-    rows, k = table.value["rows"], first.value
-    ev = list(first.evidence) + list(table.evidence)
-    n = len(rows)
-    if not 1 <= k <= n:
-        for key in keys:
-            fields[key] = ParsedField(
-                key, FieldStatus.INVALID, evidence=ev, note=f"第 {k} 個觀察期間不在觀察時程表（{n} 期）內"
-            )
-        return
-    dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, "D", list(first.evidence))
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, list(first.evidence))
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule("D", k, n, dates), ev
+    """日期表（第 13 項觀察時程表）與提前出場排程（`parsers/schedule.py`）：KO 只有每日觀察，k 取第 16 項，
+    比價日為第 k 期與末期的觀察期間結束日。"""
+    fields["schedule_table"] = schedule.table_field(
+        fields["date_table"],
+        lambda v: standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(v["rows"], "end"), SCHEDULE_START),
     )
+    first = fields["ko_first_period"]
+    obs = (
+        ParsedField("ko_observation", FieldStatus.PRESENT, "D", list(first.evidence))
+        if first.ok
+        else derived("ko_observation", first)
+    )
+    fields.update(schedule.autocall_schedule(obs, first, fields["schedule_table"], "end"))
 
 
 # ---------------------------------------------------------------- 第 17 項情境

@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
-from ..schema import FieldStatus, ParsedField
-from ..standard_fields import AutocallSchedule, DateTable
+from ..schema import Evidence, FieldStatus, Line, ParsedField
+from ..standard_fields import AutocallSchedule, DateRow, DateTable
 
 SCHEDULE_KEYS = ("ko_observation", "first_callable_period", "autocall_schedule")
 
@@ -66,3 +68,34 @@ def autocall_schedule(
         "first_callable_period": _renamed("first_callable_period", first),
         "autocall_schedule": ParsedField("autocall_schedule", FieldStatus.PRESENT, sched, ev),
     }
+
+
+def rows_of(
+    rows: Sequence[Mapping[str, Any]], observation: str | None, row_lines: Sequence[Sequence[Line]] = ()
+) -> tuple[DateRow, ...]:
+    """上手日期表的 dict 列（`period` 與 `start`／`end`／`payment`，沒有的鍵為空）→ `DateRow`；觀察日取 `observation` 這一欄
+    （例：`end`、`pricing`、`valuation`；None 為表上沒有觀察日）。`row_lines` 為各列原文行（證據），沒有時不帶。"""
+    lines = list(row_lines) or [()] * len(rows)
+    return tuple(
+        DateRow(
+            r["period"],
+            start=r.get("start"),
+            end=r.get("end"),
+            observation=r.get(observation) if observation else None,
+            payment=r.get("payment"),
+            evidence=tuple(Evidence.of(ln) for ln in ls),
+        )
+        for r, ls in zip(rows, lines, strict=True)
+    )
+
+
+def table_field(source: ParsedField, build: Callable[[Any], DateTable | ParsedField]) -> ParsedField:
+    """標準欄位 `schedule_table`：上手讀出的日期表（`source`）有問題時帶它的狀態與說明，否則以 `build(值)` 轉成 `DateTable`
+    （`build` 也可直接回傳有問題的欄位，例：依賴的另一張表讀不到）。"""
+    name = "schedule_table"
+    if not source.ok:
+        return ParsedField(name, source.status, None, list(source.evidence), source.candidates, source.note)
+    built = build(source.value)
+    if isinstance(built, ParsedField):
+        return ParsedField(name, built.status, built.value, list(built.evidence), built.candidates, built.note)
+    return ParsedField(name, FieldStatus.PRESENT, built, list(source.evidence))

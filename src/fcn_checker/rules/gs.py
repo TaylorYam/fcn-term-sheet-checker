@@ -14,7 +14,7 @@ from ..parsers import gs
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit
+from . import kit, schedule
 from .kit import Check, IssuerContext
 
 ISSUER = "GS"
@@ -150,9 +150,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 觀察時程表列數 = 中英文名稱月數。"""
+    """天期 = 中英文名稱月數（日期表期數 = 天期由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -163,9 +163,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
     zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)Months", "商品英文名稱")
     return [
-        kit.doc_check(ctx, rid, "date_table", "第 13 項觀察時程表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="觀察時程表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -351,31 +348,6 @@ def repeated(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 觀察時程表（核對規則 §3.5）
-
-
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """末列觀察期間結束日 = 評價日；末列預定付息日 = 到期日；各期連續（下一期起始日晚於前一期結束日）；結束日早於同列付息日。"""
-    f = ctx.ts.f
-    table, final, maturity = f("date_table"), f("final_valuation_date"), f("maturity_date")
-    name = "觀察時程表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "date_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    gaps = [b["period"] for a, b in zip(rows, rows[1:], strict=False) if b["start"] <= a["end"]]
-    if gaps:
-        issues.append(f"第 {'、'.join(map(str, gaps))} 期起始日沒有晚於前一期結束日")
-    late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-    if late:
-        issues.append(f"第 {'、'.join(map(str, late))} 期觀察期間結束日沒有早於預定付息日")
-    if final.ok and rows[-1]["end"] != final.value:
-        issues.append(f"末列觀察期間結束日 {rows[-1]['end']} 不等於評價日 {final.value}")
-    if maturity.ok and rows[-1]["payment"] != maturity.value:
-        issues.append(f"末列預定付息日 {rows[-1]['payment']} 不等於到期日 {maturity.value}")
-    return [kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity], issues)]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
@@ -387,5 +359,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *repeated(ctx),
-        *schedule(ctx),
+        *schedule.run(ctx),  # 日期表共用檢查（Issue #289）
     ]
