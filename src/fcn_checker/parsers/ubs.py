@@ -20,13 +20,15 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import money, price_table
+from . import schedule as ubs_schedule
 from .common import RawText, capture_group, derived, fee_rates, number, zh_number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
 # 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：非記憶式要有明確的提前出場事件句（Issue #297）；
-# 4：補讀發行價格金額、申購價金、十五設定參數的變動配息（Issue #303）；5：說明文字與十五情境重複寫出的值（Issue #320）
-PARSER_VERSION = "5"
+# 4：補讀發行價格金額、申購價金、十五設定參數的變動配息（Issue #303）；5：說明文字與十五情境重複寫出的值（Issue #320）；
+# 6：日期表標準欄位與共用排程推導（Issue #289）
+PARSER_VERSION = "6"
 SECTIONS = ("商品基本資料", "相關機構事業概況", "商品風險揭露", "投資風險警語", "一般交易事項", "特別記載事項")
 PRODUCT_TYPE = "股權結構型商品"
 OLD_PRODUCT_TYPE = "股權結構型債券"
@@ -583,44 +585,42 @@ def _dates(fields: dict[str, ParsedField], art12: list[Line], put: Callable) -> 
     fields["ko_wording_art12"] = ko_wording("ko_wording_art12", ti)
 
 
-def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前出場期與提前出場排程（範本規格 §4.1）：八與十二的寫法須相同、須和配息表種類一致。
+SCHEDULE_WHERE = "商品基本資料八日期表"
+# D 型配息觀察期間開始日 = 前一期結束日後的下一個一籃子預定交易日，第 1 期 = 發行日後的下一個一籃子預定交易日
+SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "after_issue")
 
-    D：比價日為第 k 期與末期的配息觀察期間結束日；P：第 k 期起每期的配息觀察日（含最後一期）。"""
+
+def _schedule_table(value: dict) -> standard_fields.DateTable:
+    """日期表：D 為配息觀察期間表（觀察日 = 結束日）；P 為配息觀察日表，沒有開始日欄。"""
+    if value["kind"] == "D":
+        return standard_fields.DateTable(SCHEDULE_WHERE, ubs_schedule.rows_of(value["rows"], "end"), SCHEDULE_START)
+    return standard_fields.DateTable(SCHEDULE_WHERE, ubs_schedule.rows_of(value["rows"], "observation"))
+
+
+def _schedule(fields: dict[str, ParsedField]) -> None:
+    """日期表、KO 觀察方式、第一個可提前出場期與提前出場排程（`parsers/schedule.py`，範本規格 §4.1）：八與十二的寫法須相同、
+    須和配息表種類一致。D：比價日為第 k 期與末期的配息觀察期間結束日；P：第 k 期起每期的配息觀察日（含最後一期）。"""
     w8, w12, table = fields["ko_wording_art8"], fields["ko_wording_art12"], fields["coupon_table"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = ubs_schedule.table_field(table, _schedule_table)
     bad = next((p for p in (w8, w12, table) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(ubs_schedule.failed(bad))
         return
     ev = list(w8.evidence) + list(w12.evidence) + list(table.evidence)
-
-    def invalid(note: str) -> None:
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
+    note = ""
     if w8.value != w12.value:
-        invalid("商品基本資料八與十二的提前出場觀察日寫法不同")
+        note = "商品基本資料八與十二的提前出場觀察日寫法不同"
+    elif w8.value[0] != table.value["kind"]:
+        note = "提前出場觀察日的寫法和配息表的種類不一致（每日型配息表要有配息觀察期間開始日、結束日）"
+    if note:
+        fields.update(
+            {key: ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note) for key in ubs_schedule.SCHEDULE_KEYS}
+        )
         return
     kind, k = w8.value
-    rows = table.value["rows"]
-    n = len(rows)
-    if kind != table.value["kind"]:
-        invalid("提前出場觀察日的寫法和配息表的種類不一致（每日型配息表要有配息觀察期間開始日、結束日）")
-        return
-    if not 1 <= k <= n:
-        invalid(f"提前出場觀察的起始期不在配息表（{n} 期）內")
-        return
-    if kind == "D":
-        dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
-    else:
-        dates = {r["period"]: r["observation"] for r in rows[k - 1 :]}
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(w8.evidence))
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(kind, k, n, dates), ev
-    )
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(w8.evidence))
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    fields.update(ubs_schedule.autocall_schedule(obs, first, fields["schedule_table"]))
 
 
 # ---------------------------------------------------------------- 商品基本資料十五：情境設定參數
