@@ -56,11 +56,19 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in DBS.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    # 情境最大利率值、情境二年化報酬率、情境一～三利息算式的最大利率值 4 處（Issue #321）
-    assert len(rule(r, "doc.coupon_mentions")) == 6
+    # 情境最大利率值、情境一～三利息算式的最大利率值 4 處（Issue #321、#294）
+    coupons = [x for x in rule(r, "scenario.params") if x.field.startswith("scenario_monthly_coupon")]
+    assert len(coupons) == 5
+    assert [x.status for x in rule(r, "scenario.params", "scenario_annualized_return_1")] == [S.PASS]  # 情境二
     assert len(rule(r, "doc.autocall_terms")) == 5  # 配息第1~k、情境第1~k、情境 KO 決定日、情境一利息第1~k、出場期
-    # 情境價格表、投資金額、情境三期初價格、情境三表現最差標的價格（Issue #321）
-    assert len(rule(r, "doc.scenario_table")) == 4
+    # 情境價格表、投資金額、情境三期初價格、情境三表現最差標的價格（Issue #321、#294）
+    assert (
+        len(rule(r, "scenario.reprint"))
+        == len(rule(r, "doc.scenario_units"))
+        == len(rule(r, "doc.scenario_table"))
+        == 1
+    )
+    assert len(rule(r, "scenario.strike")) == spec.count + 1  # 最終價格表每檔期初價格、表現最差標的的價格
     assert rule(r, "standard.fixed_warning")[0].actual == 2  # 封面警語 1.、商品主要風險揭露 五、1.
     assert rule(r, "standard.forbidden_wording")[0].status == S.PASS
     assert len(rule(r, "standard.issuer_name")) == 2  # 封面、相關機構事業概況 1.(1)
@@ -95,8 +103,8 @@ def test_ki_type_is_compared_with_the_sheet(tmp_path):
 @pytest.mark.parametrize(
     ("edit", "broken"),
     [
-        (Edit("最大利率值：0.8334%", "最大利率值：0.8335%", "ts.scenario"), "doc.coupon_mentions"),
-        (Edit("年化平均報酬率約為10.00%", "年化平均報酬率約為10.50%", "ts.scenario"), "doc.coupon_mentions"),
+        (Edit("最大利率值：0.8334%", "最大利率值：0.8335%", "ts.scenario"), "scenario.params"),
+        (Edit("年化平均報酬率約為10.00%", "年化平均報酬率約為10.50%", "ts.scenario"), "scenario.params"),
         (Edit("對於第1個觀察期間而言", "對於第1~2個觀察期間而言", "ts.basic.coupon"), "doc.autocall_terms"),
         (Edit("利率：第1個觀察期間之利率", "利率：第1~2個觀察期間之利率", "ts.scenario"), "doc.autocall_terms"),
         (Edit("自動提前出場決定日：從第1個", "自動提前出場決定日：從第2個", "ts.scenario"), "doc.autocall_terms"),
@@ -108,20 +116,19 @@ def test_ki_type_is_compared_with_the_sheet(tmp_path):
         ),
         (Edit("美元(USD)", "美元(JPY)", "ts.basic"), "doc.currency_consistency"),
         (Edit("計價幣別：美元(USD)", "計價幣別：美元(JPY)", "ts.cover"), "doc.currency_consistency"),
-        (Edit("假設：商品年期：6個月", "假設：商品年期：7個月", "ts.scenario"), "doc.coupon_periods"),
-        (Edit("70.3150", "70.3151", "ts.scenario.table"), "doc.scenario_table"),
-        (Edit("70.00%）", "75.00%）", "ts.scenario.table"), "doc.scenario_table"),
-        (Edit("商品面額 = 美元10,000", "商品面額 = 美元1,000", "ts.scenario"), "doc.scenario_table"),
-        (Edit("發行價格 = 100.00%", "發行價格 = 99.00%", "ts.scenario"), "doc.scenario_table"),
+        (Edit("假設：商品年期：6個月", "假設：商品年期：7個月", "ts.scenario"), "scenario.params"),
+        (Edit("70.3150", "70.3151", "ts.scenario.table"), "scenario.reprint"),
+        (Edit("70.00%）", "75.00%）", "ts.scenario.table"), "scenario.reprint"),
+        (Edit("商品面額 = 美元10,000", "商品面額 = 美元1,000", "ts.scenario"), "scenario.params"),
+        (Edit("發行價格 = 100.00%", "發行價格 = 99.00%", "ts.scenario"), "scenario.params"),
         # 情境重複寫出的值（Issue #321）
-        (Edit("10,000 X 0.8334% X 6個月)；", "10,000 X 0.8333% X 6個月)；", "ts.scenario"), "doc.coupon_mentions"),
-        (Edit("(10,000 X 0.8334% X 1個月)", "(10,000 X 0.8434% X 1個月)", "ts.scenario"), "doc.coupon_mentions"),
+        (Edit("10,000 X 0.8334% X 6個月)；", "10,000 X 0.8333% X 6個月)；", "ts.scenario"), "scenario.params"),
+        (Edit("(10,000 X 0.8334% X 1個月)", "(10,000 X 0.8434% X 1個月)", "ts.scenario"), "scenario.params"),
         (Edit("包括第1個觀察期間之利息金額", "包括第1~2個觀察期間之利息金額", "ts.scenario"), "doc.autocall_terms"),
-        (Edit("X 1= 美元10,000", "X 1= 美元1,000", "ts.scenario"), "doc.scenario_table"),
-        (Edit("美元 100.4500", "美元 100.5400", "ts.scenario.final"), "doc.scenario_table"),
+        (Edit("X 1= 美元10,000", "X 1= 美元1,000", "ts.scenario"), "doc.scenario_units"),
+        (Edit("美元 100.4500", "美元 100.5400", "ts.scenario.final"), "scenario.strike"),
         (Edit("其最終價格(50)", "其最終價格(55)", "ts.scenario"), "doc.scenario_table"),
-        (Edit("執行價格(70.3150)", "執行價格(70.3151)", "ts.scenario"), "doc.scenario_table"),
-        (Edit("執行價格(70.3150)", "下限觸發價格(70.3150)", "ts.scenario"), "doc.scenario_table"),
+        (Edit("執行價格(70.3150)", "執行價格(70.3151)", "ts.scenario"), "scenario.strike"),
         (Edit("利息總計91.67美元", "利息總計91.67澳幣", "ts.scenario"), "field.currency"),
         (
             Edit("即美元10,000。較原始投資金額獲利約5.000%", "即澳幣10,000。較原始投資金額獲利約5.000%", "ts.scenario"),
@@ -144,8 +151,8 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     [
         (
             Edit("最大損失情況：", "最大損失：", "ts.scenario"),  # 情境分不出來：整個出處清單缺漏
-            "doc.coupon_mentions",
-            "scenario_coupon_mentions",
+            "scenario.params",
+            "scenario_monthly_coupon_2",
         ),
         (
             Edit("包括第1個觀察期間之利息金額", "包括第1期之利息金額", "ts.scenario"),
@@ -154,10 +161,10 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
         ),
         (
             Edit("投資金額 = 10,000 X 100.00% X 1=", "投資金額 = 10,000 X 1=", "ts.scenario"),
-            "doc.scenario_table",
+            "doc.scenario_units",
             "scenario_investment",
         ),
-        (Edit("ZDB UN", "ZDX UN", "ts.scenario.final"), "doc.scenario_table", "scenario3_initial"),
+        (Edit("ZDB UN", "ZDX UN", "ts.scenario.final"), "scenario.strike", "scenario_price_1"),
         (Edit("表現最差連結標的為", "表現最差者為", "ts.scenario"), "doc.scenario_table", "scenario3_worst"),
         (Edit("依上所示", "如上所示", "ts.scenario"), "field.currency", "scenario_currency"),
     ],
@@ -186,9 +193,9 @@ def test_scenario_without_coupon_formula_needs_review(tmp_path):
         Edit("(10,000 X 0.8334% X 2 ÷ 20)", "(10,000 X 2 ÷ 20)", "ts.scenario"),
     ]
     r = check(tmp_path, edits=edits)
-    statuses = {x.field: x.status for x in rule(r, "doc.coupon_mentions")}
-    assert statuses["scenario_coupon_mentions_1"] == S.REVIEW_REQUIRED
-    assert statuses["scenario_coupon_mentions_2_1"] == S.PASS
+    statuses = {x.field: x.status for x in rule(r, "scenario.params")}
+    assert statuses["scenario_monthly_coupon_2"] == S.REVIEW_REQUIRED  # 情境一（第 1 處是基本假設）
+    assert statuses["scenario_monthly_coupon_3"] == S.PASS
 
 
 def test_quanto_scenario_stock_prices_are_not_currency_mentions(tmp_path):
@@ -202,7 +209,14 @@ def test_max_rate_rounds_up(tmp_path):
     """最大利率值寫成四捨五入（10.00 ÷ 12 = 0.8333…，應無條件進位為 0.8334）：推算與情境出處都不一致。"""
     r = check(tmp_path, edits=[Edit("為0.8334%（即", "為0.8333%（即", "ts.basic.coupon")])
     assert rule(r, "derive.monthly_coupon")[0].status == S.MISMATCH
-    assert rule(r, "doc.coupon_mentions", "scenario_monthly_pct")[0].status == S.MISMATCH
+    assert rule(r, "scenario.params", "scenario_monthly_coupon_1")[0].status == S.MISMATCH
+
+
+def test_worst_price_wording_must_follow_the_ki_type(tmp_path):
+    """無 KI 卻寫「下限觸發價格」：寫法判不一致；價格表沒有下限價，情境的價格轉人工覆核（Issue #321、#294）。"""
+    r = check(tmp_path, edits=[Edit("執行價格(70.3150)", "下限觸發價格(70.3150)", "ts.scenario")])
+    assert [x.status for x in rule(r, "doc.scenario_table", "scenario3_worst")] == [S.MISMATCH]
+    assert rule(r, "scenario.strike")[-1].status == S.REVIEW_REQUIRED
 
 
 def test_annual_coupon_must_match_the_max_rate(tmp_path):

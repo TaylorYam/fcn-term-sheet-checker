@@ -17,15 +17,16 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import full_brackets, squash
 from . import money, price_table, schedule
 from .common import RawText, capture_group, compat_normalized, derived, fee_rates, number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "dbs-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #321）；4：日期表標準欄位與共用排程推導（Issue #289）
-PARSER_VERSION = "4"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：情境重複寫出的值（Issue #321）；4：日期表標準欄位與共用排程推導（Issue #289）；
+# 5：情境價格表、基本假設與情境三的價格交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "5"
 TITLE = "中文產品說明書(最終版本)"
 SECTIONS = (
     "商品基本資料",
@@ -256,6 +257,7 @@ def _basic(fields: dict[str, ParsedField], basic: list[Line], put: Callable) -> 
     fields["ko_memory"] = memory(ti, "ko_memory")
     table = price_table.read("underlying_table", table_region(basic, "表1", "到期贖回計算公式，含"), PRICE_TABLE)
     fields["underlying_table"] = table
+    fields["main_price_table"] = price_table.at("main_price_table", table, PRICE_TABLE)
     fields["ki_type"] = ki_type(ti, table)
     _table_fields(fields)
 
@@ -453,7 +455,55 @@ def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) ->
     b = ti.text.find("較差情況", a)
     best = ti.lines_for(a, b) if a >= 0 and b > a else []
     put("scenario_best_annual_pct", best, r"年化平均報酬率約為" + PCT, Decimal)
-    return _scenario_mentions(fields, ti)
+    currencies = _scenario_mentions(fields, ti)
+    _shared_scenario(fields)
+    return currencies
+
+
+def _shared_scenario(fields: dict[str, ParsedField]) -> None:
+    """交給共用情境規則的標準欄位（Issue #294）：情境價格表；基本假設的年期、面額、發行價格、投資金額算式的面額與發行價格、
+    最大利率值，情境二年化平均報酬率，情境一～三利息算式的最大利率值（`scenario_params`）；情境三最終價格表的期初價格與
+    表現最差連結標的的執行價格／下限觸發價格（`scenario_prices`）。"""
+    fields["scenario_reprint_table"] = price_table.at(
+        "scenario_reprint_table", fields["scenario_table"], SCENARIO_TABLE
+    )
+    where, line = "情境分析基本假設", "情境分析基本假設投資金額算式的"
+    params = [
+        ScenarioParam("scenario_tenor", where, fields["scenario_tenor"]),
+        ScenarioParam("scenario_denomination", where, fields["scenario_denomination"]),
+        ScenarioParam("scenario_issue_price", where, fields["scenario_issue_price_pct"]),
+        ScenarioParam("scenario_denomination", line, fields["scenario_investment_principal"]),
+        ScenarioParam("scenario_issue_price", line, fields["scenario_investment_pct"]),
+        ScenarioParam("scenario_monthly_coupon", f"{where}最大利率值的", fields["scenario_monthly_pct"]),
+        ScenarioParam("scenario_annualized_return", "情境分析情境二", fields["scenario_best_annual_pct"]),
+    ]
+    mentions = fields["scenario_coupon_mentions"]
+    params += (
+        [ScenarioParam("scenario_monthly_coupon", f"{o.where}利息算式的", o.value) for o in mentions.value]
+        if mentions.ok
+        else [ScenarioParam("scenario_monthly_coupon", "情境分析利息算式的", mentions)]
+    )
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
+    initial, worst = fields["scenario3_initial"], fields["scenario3_worst"]
+    where = "情境分析情境三最終價格表"
+    prices = (
+        [
+            ScenarioPrice(
+                where, n, "initial", ParsedField(initial.name, FieldStatus.PRESENT, v, list(initial.evidence))
+            )
+            for n, v in enumerate(initial.value, start=1)
+        ]
+        if initial.ok
+        else [ScenarioPrice(where, None, "initial", initial)]
+    )
+    where = "情境分析情境三表現最差連結標的"
+    if worst.ok:
+        w, tickers = worst.value, fields["underlying_table"].value.tickers
+        value = ParsedField(worst.name, FieldStatus.PRESENT, w["price"], list(worst.evidence))
+        prices.append(ScenarioPrice(where, tickers.index(w["ticker"]) + 1, w["column"], value))
+    else:
+        prices.append(ScenarioPrice(where, None, "strike", worst))
+    fields["scenario_prices"] = standard_fields.occurrences("scenario_prices", prices)
 
 
 def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:

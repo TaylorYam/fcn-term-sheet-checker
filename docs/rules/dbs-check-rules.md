@@ -147,6 +147,8 @@
 
 不重算利息金額、股數、零股金額、總報酬率、情境一／三的年化報酬率；利息算式月數、贖回金額、假設匯率、n、表現最差是哪一檔不核對。找不到基本假設、情境價格表或上述句子 → 轉人工覆核。
 
+Issue #294 起，情境價格表（`scenario.reprint`）、基本假設的年期、面額、發行價格、最大利率值、投資金額算式的面額與 %、情境二年化報酬率、利息算式的 a（`scenario.params`），以及情境三最終價格表的期初價格與表現最差標的的 y（`scenario.strike`，接受期初價格 × % 依位數四捨五入或無條件捨去）由共用情境規則核對（[共用核對規則](shared-check-rules.md) §7）。DBS 規則留下投資金額 = 面額 × 發行價格 × 單位數（`doc.scenario_units`）、情境三的 x 與執行價格／下限觸發價格寫法（`doc.scenario_table`）、各處 k（`doc.autocall_terms`）。
+
 ### 3.8 最低申購與贖回（2026-10-15 確認）
 
 - 一般交易事項 4. `最低申購金額為m單位商品面額，即X幣別{金額}，並以1單位商品面額為最低加購金額。`：最低申購 = `即` 後的金額，須 = m × 面額；最低加購 = 1 × 面額。
@@ -222,17 +224,18 @@
 | 規則 | rule_id |
 |---|---|
 | 最大利率值 = 年利率 ÷ 12 無條件進位 4 位 | `derive.monthly_coupon` |
-| 情境基本假設最大利率值、情境一～三利息算式的 a% = 最大利率值；情境二年化報酬率 = 年利率 | `doc.coupon_mentions` |
+| 情境基本假設最大利率值、情境一～三利息算式的 a% = 最大利率值；情境二年化報酬率 = 年利率（Issue #294） | 共用 `scenario.params` |
 | 配息 `第1~k`、情境基本假設兩處 k、情境一利息 `第1~k`、情境一期別 − 1 = Non-Call | `doc.autocall_terms` |
 | 商品基本資料名稱 = 封面 | `doc.name_consistency` |
 | 封面兩個商品代號相同 | `doc.product_code_consistency` |
 | 商品基本資料中文幣別、ISO 代碼；封面幣別 ISO 代碼 | `doc.currency_consistency` |
-| 期數（表A 列數、中英文名稱月數、情境基本假設天期；不同判不一致） | `doc.coupon_periods` |
+| 期數（中英文名稱月數；不同判不一致；情境基本假設天期由共用 `scenario.params` 核對） | `doc.coupon_periods` |
 | 單一標的的名稱轉人工覆核 | `standard.product_name`（共用，`single_unsupported`） |
 | KO 型態、記憶式寫法不在範本規格內：parser 交出不合法（`field.ko_observation`、`field.ko_memory` 轉人工覆核） | （parser） |
 | 到期 `(a)`、下限觸發事件定義、價格表下限觸發價格欄不一致：parser 交出不合法（`field.ki_type` 轉人工覆核；說明書、投資人須知都是） | （parser） |
 | 表1 與標的表代碼、順序、列數不同：parser 交出不合法（`field.underlyings` 與價格欄轉人工覆核） | （parser） |
-| 情境價格表逐格與表頭 % = 表1；基本假設面額 = 商品面額；投資金額、情境三期初價格與表現最差標的價格（Issue #321） | `doc.scenario_table` |
+| 情境價格表逐格與表頭 % = 表1；基本假設面額、發行價格；情境三期初價格與表現最差標的的價格 = 表1（Issue #321、#294） | 共用 `scenario.reprint`、`scenario.params`、`scenario.strike` |
+| 投資金額 = 面額 × 發行價格 × 單位數；情境三最終價格 x 與執行價格／下限觸發價格寫法（Issue #321） | `doc.scenario_units`、`doc.scenario_table` |
 | 表A（列數、期別、遞增、結束日 < 支付日、末列 = 定價日／到期日；沒有開始日欄，不查期始日） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | 最低申購單位數 × 面額 ≠ `即` 後金額：parser 交出不合法（`field.min_amounts` 轉人工覆核） | （parser） |
 | 投資人須知每頁頁首刊印日期 = 說明書（沒有說明書時 = 第 1 頁頁首） | `iis.print_dates`（DBS 範本專屬） |
