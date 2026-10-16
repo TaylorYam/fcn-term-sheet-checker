@@ -110,11 +110,18 @@ def test_iis_rules_catch_errors(tmp_path, spec, edit, broken):
 
 
 def test_iis_coupon_is_compared_with_the_sheet(tmp_path):
-    """KO 每日型的年利率和參考條件表比；KO 每期型的每期配息率 × 12 也要等於表上年利率（共用 iis.coupon_pa）。"""
+    """KO 每日型的年利率和參考條件表比；KO 每期型的每期配息率要等於表上年利率 ÷ 12（共用 iis.coupon_pa）。"""
     r = check_iis(tmp_path, Spec(), **{"Coupon p.a. (%)": 17.0}).report
     assert rule(r, "field.coupon_pa_pct")[0].status == S.MISMATCH
     r = check_iis(_dir(tmp_path, "p"), Spec(ko_obs="P"), **{"Coupon p.a. (%)": 17.0}).report
     assert rule(r, "iis.coupon_pa")[0].status == S.MISMATCH
+
+
+def test_period_rate_must_be_the_sheet_annual_rate_divided_by_12(tmp_path):
+    """年利率 18.00%、每期配息率 1.5003%：× 12 四捨五入仍是 18.00%，但 ÷ 12 四捨五入到 4 位是 1.5000%，判不一致（Issue #297）。"""
+    edit = Edit("配息率（Rate of Interest）：1.5000%", "配息率（Rate of Interest）：1.5003%", "iis.coupon")
+    found = rule(check_iis(tmp_path, Spec(ko_obs="P"), edits=[edit]).report, "iis.coupon_pa")[0]
+    assert (found.status, found.expected, found.actual) == (S.MISMATCH, Decimal("1.5000"), Decimal("1.5003"))
 
 
 def test_forbidden_wording_follows_the_trade_date_exemption(tmp_path):

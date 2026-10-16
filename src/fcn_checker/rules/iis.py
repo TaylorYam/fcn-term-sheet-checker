@@ -28,8 +28,8 @@ from .kit import (
     Q4,
     Check,
     Context,
-    annual_of_period,
     cmp_pct,
+    monthly_of_annual,
     order_review,
     order_value,
     price_item,
@@ -213,23 +213,22 @@ def _monthly_coupons(ctx: Context) -> list[CheckResult]:
 
 
 def _coupon_per_period(ctx: Context) -> CheckResult:
-    """每期配息率（Nomura）× 12，四捨五入（half-up）到 2 位 = 參考條件表年利率（同 Nomura 說明書 §3.3）。"""
+    """每期配息率（Nomura、BBVA）= 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位後相等（同 Nomura 說明書 §3.3）。"""
     rid, key = "iis.coupon_pa", "coupon_per_period_pct"
     pf = read_iis(ctx.iis, key)
     annual, ov, problem = order_value(ctx, "coupon_pa_pct", rid, key, pf, to_decimal, "數字", name="年利率 %")
     if problem:
         return problem
-    item = Item.derived("年利率 %（每期配息率 × 12）", [ov])
+    item = Item.derived("每期配息率 %（年利率 ÷ 12）", [ov])
     check = Check(rid, key, item, ctx.document, ov=(ov,)).needs(pf)
     if (problem := check.blocked) is not None:
         return problem
-    derived = annual_of_period(pf.value)
+    expected = monthly_of_annual(annual)
     return check.compare(
-        annual,
-        derived,
-        ok=derived == annual,
-        tolerance="每期配息率 × 12 四捨五入（half-up）到 2 位後比數值",
-        message=f"推算：每期配息率 {pf.value}% × 12 = {derived}%",
+        expected,
+        pf.value,
+        tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位後比數值",
+        message=f"推算：年利率 {annual}% ÷ 12 = {expected}%",
     )
 
 

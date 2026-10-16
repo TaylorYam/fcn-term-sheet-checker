@@ -1,8 +1,8 @@
 """Nomura 專屬規則（docs/rules/nomura-check-rules.md）：每期配息率與年利率、說明書內部交叉驗證、日期表結構、情境設定參數。
 
 參考條件表欄位、價格推算、審查標準（含 Nomura 分節：保證機構與總代理人名稱、商品種類、發行不成立門檻、上手別的固定警語
-次數）與回填是各上手共用的規則。說明書沒有年利率（`coupon_pa_pct` 交 absent），每期配息率 × 12 與情境年化報酬率改由這裡
-讀參考條件表年利率核對（ADR 0009，見 REFERENCE_FIELDS）。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
+次數）、年利率（第 14 項情境一、二的年化報酬率，`field.coupon_pa_pct`）與回填是各上手共用的規則。抓不到、歧義或寫法
+不在範本規格內一律轉人工覆核。
 """
 
 from __future__ import annotations
@@ -18,8 +18,6 @@ from . import kit
 from .kit import Check, IssuerContext
 
 ISSUER = "NOMURA"
-# 本上手規則可讀的參考條件表欄位（ADR 0009，須在 reference_fields 宣告：說明書只有每期配息率，年利率由每期 × 12 與情境年化報酬率核對）
-REFERENCE_FIELDS = ("coupon_pa_pct",)
 NOT_COVERED = [
     {
         "rule_id": "doc.fixed_warnings_2_to_12",
@@ -55,47 +53,46 @@ MEMORY_ZH, MEMORY_EN = "(記憶式自動提前出場)", "with Memory Knock-Out"
 ISSUED_BY = f"issued by {ISSUER_EN}"
 
 
-# ---------------------------------------------------------------- 年利率（核對規則 §3.3，讀參考條件表）
+# ---------------------------------------------------------------- 每期配息率（核對規則 §3.3）
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 7 項每期配息率 × 12（四捨五入到 2 位）= 參考條件表年利率；日期表列數 = 天期（每月配息）才換算，否則轉人工覆核。
-    情境一、二年化報酬率 = 年利率（`kit.annualized_return`）。"""
+    """第 7 項每期配息率 = 年利率（第 14 項情境一、二年化報酬率）÷ 12，四捨五入（half-up）到 4 位；日期表列數 = 天期
+    （每月配息）才換算，否則轉人工覆核。"""
     f = ctx.ts.f
-    rid, field = "derive.coupon_pa", "coupon_pa_pct"
-    period, table, tenor = f("coupon_period_pct"), f("date_table"), f("tenor_months")
-    annual, ov, problem = kit.annual_rate(ctx, rid, field)
-    out: list[CheckResult] = []
-    if problem:
-        out.append(problem)
-    else:
-        check = Check(rid, field, Item.derived("年利率 %（第 7 項每期配息率 × 12）", [ov]), ctx.document, ov=(ov,))
-        check = check.needs(period, table, tenor)
-        if (blocked := check.blocked) is not None:
-            out.append(blocked)
-        elif len(table.value["rows"]) != tenor.value:
-            out.append(
-                check.result(
-                    S.REVIEW_REQUIRED,
-                    expected=annual,
-                    actual=period.value,
-                    reason="coupon_frequency_unknown",
-                    message=f"日期表有 {len(table.value['rows'])} 期、天期 {tenor.value} 個月，不是每月配息，無法由每期配息率換算年利率",
-                )
+    annual, period, table, tenor = f("coupon_pa_pct"), f("coupon_period_pct"), f("date_table"), f("tenor_months")
+    check = kit.doc_check(
+        ctx,
+        "derive.monthly_coupon",
+        "coupon_period_pct",
+        "第 7 項每期配息率 %（年利率 ÷ 12）",
+        annual,
+        period,
+        table,
+        tenor,
+    )
+    if (blocked := check.blocked) is not None:
+        return [blocked]
+    expected = kit.monthly_of_annual(annual.value)
+    if len(table.value["rows"]) != tenor.value:
+        return [
+            check.result(
+                S.REVIEW_REQUIRED,
+                expected=expected,
+                actual=period.value,
+                reason="coupon_frequency_unknown",
+                message=f"日期表有 {len(table.value['rows'])} 期、天期 {tenor.value} 個月，不是每月配息，無法由年利率換算每期配息率",
             )
-        else:
-            derived = kit.annual_of_period(period.value)
-            out.append(
-                check.compare(
-                    annual,
-                    derived,
-                    ok=derived == annual,
-                    evidence=list(period.evidence),
-                    tolerance="每期配息率 × 12 四捨五入（half-up）到 2 位後比數值",
-                    message=f"推算：每期配息率 {period.value}% × 12 = {derived}%",
-                )
-            )
-    return out + kit.annualized_return(ctx)
+        ]
+    return [
+        check.compare(
+            expected,
+            period.value,
+            evidence=list(period.evidence),
+            tolerance="年利率 ÷ 12 四捨五入（half-up）到 4 位後比數值",
+            fail_message="第 7 項每期配息率須等於第 14 項情境一、二年化報酬率（年利率）÷ 12 四捨五入到 4 位",
+        )
+    ]
 
 
 def coupon_mentions(ctx: IssuerContext) -> list[CheckResult]:

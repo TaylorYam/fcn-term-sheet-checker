@@ -701,6 +701,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     d = _Doc(edits, set() if used is None else used, "iis", width=575)
     w = d.w
     worst = "表現最差之連結標的" if s.basket else "連結標的"
+    indiv = "個別" if s.basket else ""
     w.line(255, "中文投資人須知", gap=12)
     d.text(17, s.name_zh.replace(f"{ISSUER}發行", f"{ISSUER} 發行"))
     d.text(22, s.name_en)
@@ -807,6 +808,18 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
         f"1. 到期贖回計算公式：(1) 如於最終評價日，{worst}之最終價格等於或高於執行價時，每單位商品面額x100.00%。",
         gap=11,
     )
+    if s.ki == "none":
+        d.text(
+            14,
+            f"(2) 如於最終評價日，{worst}之最終價格低於{indiv}執行價時，每單位商品面額之到期贖回金額應等於：",
+            gap=11,
+        )
+    else:
+        d.text(
+            14,
+            f"(2) 如於最終評價日，{worst}之最終價格低於{indiv}執行價但下限觸發事件未有發生時，每單位商品面額x100.00%。",
+            gap=11,
+        )
     w.line(14, "第五 受託不成立之處理：", gap=12)
     d.text(
         14,

@@ -1,7 +1,7 @@
 """Nomura 投資人須知專屬規則（docs/rules/iis-check-rules.md §3 B12、B16、D34、D36 的 Nomura 欄）：每期配息率、D 型 KO 起日、
 標的英文名稱、開始／後續受理贖回日期文字都要等於同商品說明書。
 
-只用投資人須知讀出結果與同商品 Nomura 說明書的讀出結果，不碰參考條件表（每期配息率 × 12 = 年利率是共用規則
+只用投資人須知讀出結果與同商品 Nomura 說明書的讀出結果，不碰參考條件表（每期配息率 = 年利率 ÷ 12 是共用規則
 `rules/iis.py`）；其他檢查點都是各上手共用的投資人須知規則。
 """
 
@@ -47,7 +47,7 @@ def _vs_term_sheet(
 
 
 def coupon(ctx: IisIssuerContext) -> CheckResult:
-    """收益分配事項每期配息率 = 說明書第 7 項（B16；× 12 = 年利率另由共用規則核對）。"""
+    """收益分配事項每期配息率 = 說明書第 7 項（B16；= 年利率 ÷ 12 另由共用規則核對）。"""
     return _vs_term_sheet(
         ctx, "iis.coupon_per_period", "coupon_per_period_pct", "每期配息率 %", lambda v: v, "coupon_period_pct"
     )

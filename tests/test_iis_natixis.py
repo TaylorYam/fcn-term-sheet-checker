@@ -106,3 +106,11 @@ def test_old_version_blank_distributor_code_needs_review(tmp_path):
 def test_items_are_checked(tmp_path, edit, broken):
     r = check_iis(tmp_path, edits=[edit]).report
     assert broken in {rid for rid, _, _ in problems(r)}, problems(r)
+
+
+def test_ki_type_without_the_no_ki_redemption_wording_needs_review(tmp_path):
+    """投資人須知沒有觸及事件定義、情況二也不是只有實物交割：KI 型態轉人工覆核（Issue #297）。"""
+    spec = VARIANTS["KO 每期非記憶式、Non-Call = 天期、無 KI"]
+    edit = Edit("則於到期日發行機構將依下列所述情況", "則於到期日發行機構將依下列方式", "iis.coupon")
+    r = check_iis(tmp_path, spec, edits=[edit]).report
+    assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED

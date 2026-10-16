@@ -104,7 +104,7 @@ class Issuer:
     # 說明書內部規則：只用讀出結果與審查標準，拿不到參考條件表的列與格式設定
     rules: Callable[[IssuerContext], list[CheckResult]]
     # 說明書內部規則可讀的參考條件表欄位（ADR 0009，須逐一宣告：BARC 月配息率推算的年利率與天期（Issue #54）、
-    # MS 月配息率與年化報酬率的年利率（說明書沒有年利率，Issue #135）；Nomura 同 MS（每期配息率 × 12，Issue #239））
+    # MS 月配息率與年化報酬率的年利率（說明書沒有年利率，Issue #135））
     reference_fields: tuple[str, ...] = ()
     # 投資人須知範本；None → 這家上手的投資人須知是未支援上手
     iis: IisTemplate | None = None
@@ -268,7 +268,6 @@ NOMURA = Issuer(
     detect=nomura_parser.detect,
     read=nomura_parser.read,
     rules=nomura_rules.run_all,
-    reference_fields=nomura_rules.REFERENCE_FIELDS,
     iis=IisTemplate(
         template_id=nomura_iis.TEMPLATE_ID,
         label="Nomura 中文投資人須知",

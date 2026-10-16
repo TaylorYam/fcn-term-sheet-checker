@@ -132,13 +132,9 @@ Q2 = Decimal("0.01")  # 金額（情境配息與損益）四捨五入到 2 位
 
 
 def monthly_of_annual(annual: Decimal) -> Decimal:
-    """月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位：GS、Natixis 說明書的月配息率推算（Issue #248、#261）。"""
+    """月配息率 = 年利率 ÷ 12，四捨五入（half-up）到 4 位：GS、Natixis、CA、BBVA、UBS、Nomura 說明書與 Nomura、BBVA
+    投資人須知的月配息率推算（Issue #248、#261、#297）。"""
     return (annual / 12).quantize(Q4, ROUND_HALF_UP)
-
-
-def annual_of_period(period: Decimal) -> Decimal:
-    """每期（每月）配息率 × 12，四捨五入（half-up）到 2 位：Nomura 說明書與投資人須知的年利率推算（Issue #239）。"""
-    return (period * 12).quantize(Q2, ROUND_HALF_UP)
 
 
 TRADING_DAY_TOLERANCE = "一籃子預定交易日：跳過週末與所有標的交易所的休市日（交易所假日表）"

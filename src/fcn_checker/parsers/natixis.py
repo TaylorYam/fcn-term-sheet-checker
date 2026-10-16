@@ -23,8 +23,9 @@ from .common import RawText, capture_group, derived, fee_rates, number
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
-# 2：第一章條號中途重編、新版受託機構標籤（Issue #270）；3：價格表改由 parsers/price_table.py 讀（Issue #287）
-PARSER_VERSION = "3"
+# 2：第一章條號中途重編、新版受託機構標籤（Issue #270）；3：價格表改由 parsers/price_table.py 讀（Issue #287）；
+# 4：無 KI 要有到期贖回情況二只有實物交割的寫法（Issue #297）
+PARSER_VERSION = "4"
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -72,6 +73,8 @@ KO_DEF = r"自動提前到期贖回價格為期初進場價格之" + PCT
 STRIKE_DEF = r"「執行價格」係指就任一連結標的而言，各該連結標的之期初進場價格之" + PCT
 KI_DEF = r"「界限價格」係指就任一連結標的而言，各該連結標的之期初進場價格之" + PCT
 KI_EVENT = "「觸及事件」係指"
+# 無 KI 的到期贖回情況二：低於執行價格就實物交割（有 KI 時寫「依下列2.a或2.b所述情況」）；投資人須知貳、2. 同句
+NO_KI_CASE = r"最終價格低於其執行價格，則於到期日發行機構將依下列所述情況贖回本商品：實物交割"
 KI_PERIOD = r"「觸及事件判定期間」係指(最終評價日|期初進場日\(含\)起至最終評價日\(含\)止之期間)"
 KI_PERIOD_WHOLE = "期初進場日(含)起至最終評價日(含)止之期間"
 # 觸及事件判定日（第 12 項 `觸及事件判定日：…`；投資人須知舊版只有第 15 項定義 `「觸及事件判定日」係指於…`）
@@ -442,14 +445,19 @@ def ko_memory(ti: TextIndex, lns: list[Line], where: str = "第一章第 14 項"
 
 def ki_type(day: ParsedField, ti: TextIndex, lns: list[Line], where: str = "第一章第 15 項") -> ParsedField:
     """KI 型態（範本規格 §4.4）：觸及事件判定日（`day`，值為 AM／D／P）與「觸及事件判定期間」須一致；沒有「觸及事件」
-    與「界限價格」定義 → none（以 present「none」交出）。"""
+    與「界限價格」定義，且到期贖回情況二只有實物交割（`NO_KI_CASE`）→ none（以 present「none」交出）。"""
     name, text = "ki_type", ti.text
     event = KI_EVENT in text
     period = list(ti.finditer(KI_PERIOD))
     if not event and "「界限價格」" not in text:
-        if day.status == FieldStatus.MISSING and not period:
-            return ParsedField.present(name, "none", lns[:1])
-        return ParsedField.invalid(name, lns, f"{where}沒有「觸及事件」定義，但有觸及事件判定日或判定期間")
+        if day.status != FieldStatus.MISSING or period:
+            return ParsedField.invalid(name, lns, f"{where}沒有「觸及事件」定義，但有觸及事件判定日或判定期間")
+        case = re.search(NO_KI_CASE, text)
+        if case is None:
+            return ParsedField.invalid(
+                name, lns, f"{where}沒有「觸及事件」定義，也找不到無觸及事件時的到期贖回寫法（情況二只有實物交割）"
+            )
+        return ParsedField.present(name, "none", ti.lines_for(case.start(), case.end()))
     if len(period) != 1:
         return ParsedField.invalid(name, lns, f"{where}「觸及事件判定期間」缺漏、重複或不在範本規格內")
     if not day.ok:

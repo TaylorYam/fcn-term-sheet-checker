@@ -12,14 +12,14 @@ from dataclasses import replace
 from decimal import Decimal
 
 from .. import standard_fields
-from ..schema import DetectionResult, Evidence, Line, ParsedField
+from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence
 from ..text import squash
 from . import citi, iis, money
 from .layout import TextIndex, join_text, parse_date
 
 TEMPLATE_ID = "citi-zh-iis"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"  # 2：KI 商品讀不到 KI % 時轉人工覆核，不再略過（Issue #297）
 TITLE = "中文投資人須知"
 NAME_EN_ISSUER = squash(citi.NAME_EN_ISSUER)
 SECTIONS = (
@@ -238,7 +238,15 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     ki = iis.capture("ki_pct", ti, r"下限價：係指相關連結標的之期初股價的" + PCT, Decimal)
     _ko_terms(ti, fields)
     provided = set(PROVIDED)
-    if ki.ok:
+    ki_type = fields["ki_type"]
+    if ki.status != FieldStatus.MISSING or not (ki_type.ok and ki_type.value == "none"):  # 有下限價或讀不出無 KI
+        if ki.status == FieldStatus.MISSING:  # 句子缺漏是寫法問題（不是整段找不到）
+            red = iis.section(ti, REDEMPTION)
+            ki = ParsedField.invalid(
+                "ki_pct",
+                red or ti.lines,
+                "贖回價金之計算「下限價：係指相關連結標的之期初股價的X%」的寫法缺漏或不在範本規格內",
+            )
         fields["ki_pct"] = ki
         provided.add("ki_pct")
     if fields["has_autocall"].ok and fields["has_autocall"].value:

@@ -261,6 +261,21 @@ def test_only_one_memory_sentence_needs_review(tmp_path):
     assert rule(r, "field.ko_memory")[0].status == S.REVIEW_REQUIRED
 
 
+@pytest.mark.parametrize("count", [2, 1], ids=["多標的", "單一標的"])
+def test_ko_memory_without_any_ko_event_sentence_needs_review(tmp_path, count):
+    """記憶式兩句與非記憶式的提前出場事件句都不在：記憶式轉人工覆核，不推定為非記憶式（Issue #297）。"""
+    old = "收盤價皆高於或等於其提前出場價" if count > 1 else "收盤價高於或等於提前出場價"
+    spec = Spec(ko_obs="P", memory=False, count=count)
+    r = check(tmp_path, spec, edits=[Edit(old, "收盤價達到提前出場價", "ts.art8")])
+    assert rule(r, "field.ko_memory")[0].status == S.REVIEW_REQUIRED
+
+
+def test_memory_and_non_memory_ko_sentences_together_need_review(tmp_path):
+    plain = "若所有連結標的股票在任一提前出場觀察日*之收盤價皆高於或等於其提前出場價，則提前出場事件視同在該提前出場觀察日發生。"
+    r = check(tmp_path, edits=[Edit(MEMORY, MEMORY + plain, "ts.art8")])
+    assert rule(r, "field.ko_memory")[0].status == S.REVIEW_REQUIRED
+
+
 def test_price_table_names_must_match_the_ticker_table(tmp_path):
     r = check(tmp_path, edits=[Edit("虛構控股三公司", "虛構控股參公司", "ts.art9.table")])
     assert rule(r, "field.underlyings")[0].status == S.REVIEW_REQUIRED
