@@ -169,6 +169,13 @@ def test_previous_end_rule_and_first_period_equals_issue_date():
     assert "第 1 期期始日應為 2030-01-04" in r.message and "第 3 期期始日應為 2030-03-04" in r.message
 
 
+def test_after_previous_end_rule():
+    decl = PeriodStart("after_previous_end", "issue_date")
+    assert starts(ISSUE, D(2030, 2, 6), D(2030, 3, 5), start=decl).status == PASS, "跳過幾天都可以"
+    r = starts(ISSUE, D(2030, 2, 4), D(2030, 3, 5), start=decl)
+    assert r.status == MISMATCH and "第 2 期期始日應晚於 2030-02-04" in r.message
+
+
 def test_first_period_needs_the_issue_date():
     r = run(issue_date=missing("issue_date"))["schedule.period_start"]
     assert r.status == REVIEW

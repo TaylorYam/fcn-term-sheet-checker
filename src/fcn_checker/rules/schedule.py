@@ -38,6 +38,7 @@ TABLE_CHECKS = tuple(rid for rid in NAMES if rid != "schedule.period_start")  # 
 RULE_TEXT = {
     "previous_end": "期始日 = 前一期期末日",
     "next_trading_day": "期始日 = 前一期期末日後的下一個一籃子預定交易日",
+    "after_previous_end": "期始日晚於前一期期末日",
 }
 
 
@@ -165,6 +166,8 @@ def last_date(ctx: IssuerContext, table: ParsedField, rid: str, key: str, field:
 def _verdict(ctx: IssuerContext, rule: str, prev: dt.date, start: dt.date) -> StartVerdict:
     if rule == "next_trading_day":
         return period_start(ctx, prev, start)
+    if rule == "after_previous_end":
+        return StartVerdict(S.PASS) if start > prev else StartVerdict(S.MISMATCH, f"應晚於 {prev}")
     return StartVerdict(S.PASS) if start == prev else StartVerdict(S.MISMATCH, f"應為 {prev}")
 
 

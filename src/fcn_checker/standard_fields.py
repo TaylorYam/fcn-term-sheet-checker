@@ -87,14 +87,16 @@ class DateRow:
     evidence: tuple[Evidence, ...] = ()
 
 
-StartRule = Literal["previous_end", "next_trading_day"]
+StartRule = Literal["previous_end", "next_trading_day", "after_previous_end"]
 
 
 @dataclass(frozen=True)
 class PeriodStart:
     """期始日的定義，由上手依範本宣告（Issue #289 決定 5）。"""
 
-    rule: StartRule  # previous_end：= 前一期期末日（範本寫「開始日（不含當日）」）；next_trading_day：前一期期末後的下一個一籃子預定交易日
+    # previous_end：= 前一期期末日（範本寫「開始日（不含當日）」）；next_trading_day：前一期期末後的下一個一籃子預定交易日；
+    # after_previous_end：只要晚於前一期期末日（BBVA：起始日跳過美股開市的銀行假日，交易所假日表沒有，2026-10-16 使用者決定）
+    rule: StartRule
     first: (
         Literal["issue_date", "after_issue"] | None
     )  # 第 1 期有期始日時和發行日怎麼比：= 發行日／依 `rule` 由發行日推；None 不比

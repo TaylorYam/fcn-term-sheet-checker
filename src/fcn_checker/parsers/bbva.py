@@ -471,8 +471,9 @@ def _article12(fields: dict[str, ParsedField], art12: list[Line]) -> None:
 
 
 SCHEDULE_WHERE = "第 12 項日期表"
-# 下一期起始日 = 前一期終止日後的第一個預定交易日；第 1 期起始日 = 發行日（範本規格 §4.4）
-SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
+# 下一期起始日 = 前一期終止日後的第一個預定交易日，但會跳過美股開市的銀行假日（例：哥倫布日、退伍軍人節），交易所假日表
+# 推不出來，只查晚於前一期終止日（2026-10-16 使用者決定，Issue #289）；第 1 期起始日 = 發行日（範本規格 §4.4）
+SCHEDULE_START = standard_fields.PeriodStart("after_previous_end", "issue_date")
 
 
 def _schedule_table(fields: dict[str, ParsedField]) -> ParsedField:
