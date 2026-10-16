@@ -60,12 +60,30 @@ def test_supported_types_pass(tmp_path, spec):
         (Edit("包含於6個月後始返還本金", "包含於7個月後始返還本金", "iis.rest"), "iis.tenor_mentions"),
         (Edit("通路服務費率於6個月間", "通路服務費率於7個月間", "iis.fees"), "iis.tenor_mentions"),
         (Edit("每單位面額 × 100%;", "每單位面額 × 99%;", "iis.redeem"), "iis.redemption_pct"),
+        (Edit("受到計價幣別（美元）", "受到計價幣別（日圓）", "iis.rest"), "field.currency"),
+        (Edit("假設申購5單位(50,000美元)", "假設申購5單位(50,000日圓)", "iis.fees"), "field.currency"),
+        (Edit("降至48,500美元", "降至48,500日圓", "iis.fees"), "field.currency"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )
 def test_items_are_checked(tmp_path, edit, broken):
     r = check_iis(tmp_path, edits=[edit]).report
     assert broken in {rid for rid, _, _ in problems(r)}, problems(r)
+
+
+@pytest.mark.parametrize(
+    ("edit", "broken"),
+    [
+        (Edit("包含於6個月後始返還本金", "包含返還本金", "iis.rest"), "iis.tenor_mentions"),
+        (Edit("每單位面額 × 100%;", "每單位面額;", "iis.redeem"), "iis.redemption_pct"),
+        (Edit("本商品係以美元計價", "本商品係以外幣計價", "iis.rest"), "field.currency"),
+    ],
+    ids=lambda x: x if isinstance(x, str) else x.old[:12],
+)
+def test_unreadable_repeats_need_review(tmp_path, edit, broken):
+    """重複寫出處讀不到（Issue #317）：轉人工覆核。"""
+    r = check_iis(tmp_path, edits=[edit]).report
+    assert S.REVIEW_REQUIRED in {x.status for x in rule(r, broken)}, problems(r)
 
 
 def test_monthly_coupon_is_rounded_half_up_to_four_places(tmp_path):

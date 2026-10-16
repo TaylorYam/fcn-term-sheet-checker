@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from ..investor_sheet import read_iis
+from ..parsers import gs
 from ..schema import CheckResult, Item, ParsedField
 from .iis import IisIssuerContext
 from .kit import Check
@@ -26,7 +27,7 @@ def _mentions(ctx: IisIssuerContext, rid: str, name: str, source: ParsedField, f
 
 
 def run_all(ctx: IisIssuerContext) -> list[CheckResult]:
-    hundred = ParsedField.present("redemption_pct", 100, [])
+    hundred = ParsedField.present("redemption_pct", gs.REDEMPTION_PCT, [])
     return [
         *_mentions(
             ctx, "iis.tenor_mentions", "tenor_mentions", read_iis(ctx.sheet, "tenor_months"), "須等於二.1.(11) 商品年期"

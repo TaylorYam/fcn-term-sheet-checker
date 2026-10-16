@@ -326,7 +326,7 @@ def repeated(ctx: IssuerContext) -> list[CheckResult]:
         if units.ok and unit.ok
         else next(p for p in (units, unit) if not p.ok)
     )
-    hundred = ParsedField.present("redemption_pct", 100, [])
+    hundred = ParsedField.present("redemption_pct", gs.REDEMPTION_PCT, [])
     rules = {  # 種類 → (rule_id, 欄位, 正式條款, 不符說明)
         "denomination": ("doc.denomination_mentions", "denomination", denom, "須等於第一章第 6 項每單位面額"),
         "redemption_pct": ("doc.redemption_pct", "redemption_pct", hundred, "到期買回金額須為每單位面額 × 100%"),
@@ -342,11 +342,7 @@ def repeated(ctx: IssuerContext) -> list[CheckResult]:
     out = []
     for kind, (rid, field, source, fail) in rules.items():
         for m in ctx.ts.repeated.get(kind, []):
-            pf = (
-                ParsedField(field, FieldStatus.PRESENT, m.value, list(m.evidence))
-                if m.value is not None
-                else ParsedField.missing(field, f"找不到{m.where}或出現多個")
-            )
+            pf = m.parsed(field)
             out.append(
                 kit.doc_check(ctx, rid, field, m.where, source, pf).compare(
                     source.value, m.value, evidence=list(m.evidence), fail_message=fail

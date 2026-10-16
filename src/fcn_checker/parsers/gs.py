@@ -100,6 +100,17 @@ SCENARIO_RETURN = rf"×(\d+)/({AMOUNT}){CCY}\]"  # 情境總報酬率：× 申�
 SCENARIO_PAR = rf"=\[\(({AMOUNT}){CCY}\+"  # 情境 1～3 總報酬率：(每單位面額 + 配息總額)
 SCENARIO_PRINCIPAL = rf"假設期初本金金額為({AMOUNT}){CCY}"
 SCENARIO_INITIAL = rf"最低申購單位數（\d+單位）=({AMOUNT}){CCY}"
+REDEMPTION_PCT = 100  # 到期買回「每單位面額 × X%」的 X
+DENOM_CURRENCY = rf"每單位面額（{AMOUNT}({CCY})）"
+# 說明書與投資人須知同寫法的說明文字幣別字（第 1 組）與天期（第 1 組）
+ODD_LOT_CURRENCY = rf"以({CCY})計價之畸零現金金額"
+RISK_CURRENCY = rf"計價幣別（({CCY})）"  # 第三章利率風險、匯兌風險（3 處）
+RISK_BASED_CURRENCY = rf"本商品係以({CCY})計價"
+FEE_EXAMPLE_CURRENCY = rf"假設申購\d+單位[（(]{AMOUNT}({CCY})[）)]"  # 投資人須知是半形括號
+FEE_NAV_CURRENCY = rf"期初淨值自{AMOUNT}({CCY})降至"
+FEE_NAV_AFTER_CURRENCY = rf"期初淨值自{AMOUNT}{CCY}降至{AMOUNT}({CCY})"
+TENOR_FX = r"於(\d+)個月後始返還本金"
+TENOR_FEE = r"通路服務費率於(\d+)個月間"
 
 
 def _is_noise(ln: Line) -> bool:
@@ -175,7 +186,7 @@ class GsTermSheet:
     document: Document
     # 年利率主來源（第 14 項）以外、須等於年利率的出處：第 15 項(2) 最低保證收益率、第 17 項情境假設與各配息金額算式
     coupon_mentions: list[Mention]
-    # 其他重複寫出的值（Issue #317）：種類（見 `REPEATED`）→ 各出處
+    # 其他重複寫出的值（Issue #317）：種類 → 各出處；每種須等於的正式條款見 rules/gs.py `repeated`
     repeated: dict[str, list[Mention]]
 
     def f(self, name: str) -> ParsedField:
@@ -634,28 +645,24 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
 
 # ---------------------------------------------------------------- 重複寫出的值（Issue #317）
 
-# 種類 → 名稱；每種須等於的正式條款見 rules/gs.py `repeated`
-REPEATED = {
-    "denomination": "每單位面額",
-    "redemption_pct": "每單位面額 × X% 的百分比",
-    "units": "情境申購單位數",
-    "investment": "情境初始投資金額",
-    "tenor": "天期（月）",
-}
-
 
 def _mention(where: str, value, ti: TextIndex, m: re.Match) -> Mention:
     return Mention(where, value, tuple(Evidence.of(ln) for ln in ti.lines_for(m.start(), m.end())))
 
 
-def mentions(lns: list[Line], pattern: str, where: str, convert: Callable, *, group: int = 1) -> list[Mention]:
-    """`lns` 裡每一處 `pattern`（值取第 `group` 組）各一個出處；多處時位置加「第 n 處」，一處都沒有時一個讀不到的出處。"""
+def pattern_mentions(
+    lns: list[Line], pattern: str, where: str, convert: Callable, *, group: int = 1, minimum: int = 1
+) -> list[Mention]:
+    """`lns` 裡每一處 `pattern`（值取第 `group` 組）各一個出處，多處時位置加「第 n 處」；少於 `minimum` 處時另加一個
+    讀不到的出處（由規則轉人工覆核）。"""
     ti = TextIndex(lns)
     hits = list(ti.finditer(pattern))
-    if not hits:
-        return [Mention.missing(where, lns[:1])]
     label = lambda n: f"{where}（第 {n} 處）" if len(hits) > 1 else where  # noqa: E731
-    return [_mention(label(n), convert(m[group]), ti, m) for n, m in enumerate(hits, start=1)]
+    out = [_mention(label(n), convert(m[group]), ti, m) for n, m in enumerate(hits, start=1)]
+    if len(hits) < minimum:
+        short = f"（應有 {minimum} 處，只讀到 {len(hits)} 處）" if minimum > 1 else ""
+        out.append(Mention.missing(where + short, lns[:1]))
+    return out
 
 
 def _scenarios(art17: list[Line]) -> tuple[TextIndex, list[int]]:
@@ -667,21 +674,21 @@ def _scenarios(art17: list[Line]) -> tuple[TextIndex, list[int]]:
     return ti, starts
 
 
-def _scenario_mentions(art17: list[Line], pattern: str, what: str, convert: Callable, group: int = 1) -> list[Mention]:
-    """情境裡每一處 `pattern`，位置寫出第幾個情境（同一情境多處時加「第 n 處」）；一處都沒有時一個讀不到的出處。"""
+def _scenario_mentions(
+    art17: list[Line], pattern: str, what: str, convert: Callable, scenarios: Sequence[int], group: int = 1
+) -> list[Mention]:
+    """情境裡每一處 `pattern`，位置寫出第幾個情境（同一情境多處時加「第 n 處」）；`scenarios` 裡的情境一處都沒有時，
+    該情境一個讀不到的出處。"""
     ti, starts = _scenarios(art17)
     hits = list(ti.finditer(pattern))
-    if not hits:
-        return [Mention.missing(f"第一章第 17 項情境{what}", art17[:1])]
-    labels = []
-    for m in hits:
-        k = max((n for n in range(1, 6) if 0 <= starts[n] <= m.start()), default=0)
-        labels.append(f"第一章第 17 項情境 {k} {what}" if k else f"第一章第 17 項情境假設{what}")
+    found = [max((n for n in range(1, 6) if 0 <= starts[n] <= m.start()), default=0) for m in hits]
+    labels = [f"第一章第 17 項情境 {k} {what}" if k else f"第一章第 17 項情境假設{what}" for k in found]
     out = []
     for i, (m, label) in enumerate(zip(hits, labels, strict=True)):
         many = labels.count(label) > 1
         where = f"{label}（第 {labels[: i + 1].count(label)} 處）" if many else label
         out.append(_mention(where, convert(m[group]), ti, m))
+    out += [Mention.missing(f"第一章第 17 項情境 {k} {what}", art17[:1]) for k in scenarios if k not in found]
     return out
 
 
@@ -694,34 +701,40 @@ def _repeated(
         *(
             m
             for n in (9, 14, 15, 16)
-            for m in mentions(article(n), DENOM_MENTION, f"第一章第 {n} 項每單位面額", number)
+            for m in pattern_mentions(  # 第 9 項 (1)～(3) 各一處
+                article(n), DENOM_MENTION, f"第一章第 {n} 項每單位面額", number, minimum=3 if n == 9 else 1
+            )
         ),
-        *mentions(art17, DENOM_MENTION, "第一章第 17 項情境假設初始投資金額的每單位面額", number),
-        *_scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的每單位面額", number),
-        *_scenario_mentions(art17, SCENARIO_PAR, "總報酬率算式的每單位面額", number),
-        *mentions(ch4[5], DENOM_MENTION, "第四章第 5 項申購價金之計算的每單位面額", number),
-        *mentions(ch4[9], DENOM_MENTION, "第四章第 9 項提前贖回價金的每單位面額", number),
+        *pattern_mentions(art17, DENOM_MENTION, "第一章第 17 項情境假設初始投資金額的每單位面額", number),
+        *_scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的每單位面額", number, (1, 2, 3, 4)),
+        *_scenario_mentions(art17, SCENARIO_PAR, "總報酬率算式的每單位面額", number, (1, 2, 3)),
+        *pattern_mentions(ch4[5], DENOM_MENTION, "第四章第 5 項申購價金之計算的每單位面額", number),
+        *pattern_mentions(ch4[9], DENOM_MENTION, "第四章第 9 項提前贖回價金的每單位面額", number),
     ]
     redemption = [
-        *(m for n in (9, 15) for m in mentions(article(n), REDEMPTION, f"第一章第 {n} 項到期買回金額", Decimal)),
-        *_scenario_mentions(art17, REDEMPTION, "總報酬率算式的買回金額", Decimal),
+        *(
+            m
+            for n in (9, 15)
+            for m in pattern_mentions(article(n), REDEMPTION, f"第一章第 {n} 項到期買回金額", Decimal)
+        ),
+        *_scenario_mentions(art17, REDEMPTION, "總報酬率算式的買回金額", Decimal, (1, 2, 3)),
     ]
     investment = [
-        *mentions(art17, SCENARIO_PRINCIPAL, "第一章第 17 項(3) 假設期初本金金額", number),
-        *mentions(art17, SCENARIO_INITIAL, "第一章第 17 項情境假設初始投資金額", number),
-        *_scenario_mentions(art17, SCENARIO_RETURN, "總報酬率算式的初始投資金額", number, group=2),
+        *pattern_mentions(art17, SCENARIO_PRINCIPAL, "第一章第 17 項(3) 假設期初本金金額", number),
+        *pattern_mentions(art17, SCENARIO_INITIAL, "第一章第 17 項情境假設初始投資金額", number),
+        *_scenario_mentions(art17, SCENARIO_RETURN, "總報酬率算式的初始投資金額", number, (1, 2, 3, 4), group=2),
     ]
     repeated = {
         "denomination": denom,
         "redemption_pct": redemption,
-        "units": _scenario_mentions(art17, SCENARIO_RETURN, "總報酬率算式的申購單位數", int),
+        "units": _scenario_mentions(art17, SCENARIO_RETURN, "總報酬率算式的申購單位數", int, (1, 2, 3, 4)),
         "investment": investment,
         "tenor": [
-            *mentions(ch3, r"於(\d+)個月後始返還本金", "第三章匯兌風險「於N個月後始返還本金」", int),
-            *mentions(ch4[2], r"通路服務費率於(\d+)個月間", "第四章第 2 項通路服務費說明「於N個月間」", int),
+            *pattern_mentions(ch3, TENOR_FX, "第三章匯兌風險「於N個月後始返還本金」", int),
+            *pattern_mentions(ch4[2], TENOR_FEE, "第四章第 2 項通路服務費說明「於N個月間」", int),
         ],
     }
-    return repeated, _scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的年利率", Decimal, group=3)
+    return repeated, _scenario_mentions(art17, SCENARIO_COUPON, "配息金額算式的年利率", Decimal, (1, 2, 3, 4), group=3)
 
 
 def _currency_mentions(
@@ -732,7 +745,7 @@ def _currency_mentions(
     第四章第 5 項申購價金的面額幣別原本就是出處（`subscription_price_currency`），第 17 項情境假設的面額幣別在情境
     金額裡，都不重複列。情境 4 的價格段（初始參考價格、執行價格、交付股數與畸零金額）跟著標的走，不列入。"""
     words = money.currency_words
-    denom = rf"每單位面額（{AMOUNT}({CCY})）"
+    denom = DENOM_CURRENCY
     out = [
         occ
         for n in (9, 14, 15, 16)
@@ -745,12 +758,12 @@ def _currency_mentions(
     if re.search(pay, TextIndex(article(9)).text):
         out += words(article(9), pay, "payment_currency", "說明文字幣別", "第一章第 9 項主要給付項目")
     for lns, pattern, field, where in (
-        (article(15), rf"以({CCY})計價之畸零現金金額", "odd_lot_currency", "第一章第 15 項可交付資產"),
-        (ch3, rf"計價幣別（({CCY})）", "risk_currency", "第三章利率風險、匯兌風險「計價幣別（X）」"),
-        (ch3, rf"本商品係以({CCY})計價", "risk_based_currency", "第三章匯兌風險「本商品係以X計價」"),
-        (ch4[2], rf"假設申購\d+單位（{AMOUNT}({CCY})）", "fee_example_currency", "第四章第 2 項通路服務費說明"),
-        (ch4[2], rf"期初淨值自{AMOUNT}({CCY})降至", "fee_nav_currency", "第四章第 2 項通路服務費說明期初淨值"),
-        (ch4[2], rf"期初淨值自{AMOUNT}{CCY}降至{AMOUNT}({CCY})", "fee_nav_after_currency", "第四章第 2 項期初淨值降至"),
+        (article(15), ODD_LOT_CURRENCY, "odd_lot_currency", "第一章第 15 項可交付資產"),
+        (ch3, RISK_CURRENCY, "risk_currency", "第三章利率風險、匯兌風險「計價幣別（X）」"),
+        (ch3, RISK_BASED_CURRENCY, "risk_based_currency", "第三章匯兌風險「本商品係以X計價」"),
+        (ch4[2], FEE_EXAMPLE_CURRENCY, "fee_example_currency", "第四章第 2 項通路服務費說明"),
+        (ch4[2], FEE_NAV_CURRENCY, "fee_nav_currency", "第四章第 2 項通路服務費說明期初淨值"),
+        (ch4[2], FEE_NAV_AFTER_CURRENCY, "fee_nav_after_currency", "第四章第 2 項期初淨值降至"),
     ):
         out += words(lns, pattern, field, "說明文字幣別", where)
     ti, starts = _scenarios(article(17))

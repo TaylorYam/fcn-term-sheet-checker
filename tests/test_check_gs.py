@@ -174,6 +174,19 @@ def test_unknown_initial_pricing_wording_needs_review(tmp_path):
         (Edit("以美元計價之畸零現金金額", "以日圓計價之畸零現金金額", "ts.art15"), "field.currency"),
         (Edit("本商品係以美元計價", "本商品係以日圓計價", "ts.ch三"), "field.currency"),
         (Edit("期初淨值自50,000美元", "期初淨值自50,000日圓", "ts.ch四"), "field.currency"),
+        (Edit("降至48,500美元", "降至48,500日圓", "ts.ch四"), "field.currency"),
+        (Edit("假設申購5單位（50,000美元）", "假設申購5單位（50,000日圓）", "ts.ch四"), "field.currency"),
+        (Edit("之價值將受到計價幣別（美元）", "之價值將受到計價幣別（日圓）", "ts.ch三"), "field.currency"),
+        (
+            Edit("每單位面額（10,000美元）以計價幣別", "每單位面額（20,000美元）以計價幣別", "ts.art16"),
+            "doc.denomination_mentions",
+        ),
+        (
+            Edit("每單位面額（10,000 美元）× 100%；或", "每單位面額（10,000 美元）× 99%；或", "ts.art9"),
+            "doc.redemption_pct",
+        ),
+        (Edit("(每單位面額 × 100.00% +", "(每單位面額 × 99.00% +", "ts.art17"), "doc.redemption_pct"),
+        (Edit("（5單位）= 50,000 美元", "（5單位）= 40,000 美元", "ts.art17"), "doc.scenario_params"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )
@@ -200,6 +213,8 @@ def test_payment_currency_wording_of_a_non_usd_product_is_checked(tmp_path):
         (Edit("= 10,000 美元 × 12.00% / 12 × 20 / 20", "", "ts.art17"), "doc.coupon_mentions"),
         (Edit("包含於6個月後始返還本金", "包含返還本金", "ts.ch三"), "doc.tenor_mentions"),
         (Edit("本商品係以美元計價", "本商品係以外幣計價", "ts.ch三"), "field.currency"),
+        # 第 9 項 (1)～(3) 應有 3 處面額，只讀到 2 處
+        (Edit("計價之每單位面額（10,000 美元）", "計價之每單位面額", "ts.art9"), "doc.denomination_mentions"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.old[:12],
 )
