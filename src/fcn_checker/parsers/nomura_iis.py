@@ -14,7 +14,7 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, Line, ParsedField
 from ..text import squash
-from . import iis, nomura
+from . import iis, money, nomura
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "nomura-zh-iis"
@@ -51,6 +51,7 @@ PROVIDED = frozenset(
         "product_type",
         "risk_level_summary",
         "currency_zh",
+        "currency_others",
         "tenor_months",
         "trade_date",
         "issue_date",
@@ -192,6 +193,12 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     # 商品簡介
     put("risk_level_summary", r"本商品風險程度：(RR\d)")
     put("currency_zh", rf"計價幣別：({nomura.ZH_CCY})\([A-Z]{{3}}\)")
+    fields["currency_others"] = standard_fields.occurrences(  # 說明文字的幣別字（Issue #316）
+        "currency_others",
+        money.currency_words(
+            text_lines, rf"以({nomura.CCY})為計價單位", "payment_currency", "說明文字幣別", "收益分配事項"
+        ),
+    )
     fields["underlying_names_en"] = _underlying_names(ti)
     put("tenor_months", r"本商品年期：(\d+)個月", int)
     put("trade_date", r"\d{1,2}\.交易日：" + iis.DATE, parse_date)

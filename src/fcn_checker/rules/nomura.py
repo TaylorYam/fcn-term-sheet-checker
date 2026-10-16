@@ -35,7 +35,7 @@ NOT_COVERED = [
     {
         "rule_id": "doc.scenario_calculations",
         "description": "第 14 項情境三、四（假設價格、股數、剩餘金額、損失率）與情境二的算式不核對；只核對設定參數、百分比表、"
-        "情境一／二年化報酬率（2026-10-15 確認）",
+        "情境一／二年化報酬率（2026-10-15 確認）與情境三金額旁的幣別（Issue #316）",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -385,6 +385,35 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
             ctx, "doc.scenario_params", "scenario_denomination", "第 14 項設定參數每單位商品面額", denom, scen
         ).compare(denom.value, scen.value)
     ]
+    principal, rate, units, amount = (
+        f("scenario_investment"),
+        f("scenario_issue_price"),
+        f("scenario_units"),
+        f("scenario_investment_amount"),
+    )
+    check = kit.doc_check(
+        ctx,
+        "doc.scenario_params",
+        "scenario_investment",
+        "第 14 項設定參數投資金額",
+        denom,
+        principal,
+        rate,
+        units,
+        amount,
+    )
+    if (problem := check.blocked) is not None:
+        out.append(problem)
+    else:
+        expected = denom.value * rate.value / 100 * units.value
+        out.append(
+            check.compare(
+                f"{denom.value:,} x {rate.value}% x {units.value} = {expected:,}",
+                f"{principal.value:,} x {rate.value}% x {units.value} = {amount.value:,}",
+                ok=principal.value == denom.value and amount.value == expected,
+                fail_message="投資金額須為每單位商品面額 x 發行價格 x 投資單位數（Issue #316）",
+            )
+        )
     table, pcts = f("underlying_table"), f("scenario_table")
     check = kit.doc_check(ctx, "doc.scenario_table", "scenario_table", "第 14 項百分比表", table, pcts)
     if table.ok and pcts.ok:
@@ -398,9 +427,9 @@ def scenario(ctx: IssuerContext) -> list[CheckResult]:
         if bad:
             issues.append(f"第 {'、'.join(map(str, bad))} 列百分比不等於價格表表頭 {[str(x) for x in expected_row]}")
         out.append(
-            check.compare(
-                None,
-                None,
+            check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #316，比照 BBVA #305）
+                [str(x) for _ in pcts.value["rows"] for x in expected_row],
+                [str(x) for row in pcts.value["rows"] for x in row],
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "每列等於價格表表頭百分比",

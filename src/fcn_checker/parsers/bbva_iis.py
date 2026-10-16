@@ -17,7 +17,7 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
-from . import bbva, iis
+from . import bbva, iis, money
 from .common import RawText, compat_normalized, fee_rates
 from .layout import TextIndex, parse_date
 
@@ -287,7 +287,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         [
             occ
             for field, where, pattern in CURRENCY_WORDS
-            for occ in bbva.currency_words(iis.section(ti, PRODUCT) or [], pattern, field, "說明文字幣別", where)
+            for occ in money.currency_words(iis.section(ti, PRODUCT) or [], pattern, field, "說明文字幣別", where)
         ],
     )
     fees = iis.section(ti, ("四、費用", "五、"))

@@ -241,14 +241,16 @@ def read(lines: Sequence[Line]) -> BbvaTermSheet:
     _chapter4(fields, doc, put)
     _occurrences(fields)
     wording = (  # 「以X為計價單位」等說明文字的幣別字（Issue #305）
-        *currency_words(
+        *money.currency_words(
             article(8), rf"以({CCY})為計價單位", "payment_currency", "說明文字幣別", "第一章第 8 項主要給付項目"
         ),
-        *currency_words(article(15), rf"以({CCY})為計價單位", "autocall_currency", "說明文字幣別", "第一章第 15 項"),
-        *currency_words(
+        *money.currency_words(
+            article(15), rf"以({CCY})為計價單位", "autocall_currency", "說明文字幣別", "第一章第 15 項"
+        ),
+        *money.currency_words(
             doc.chapter_lines(3), rf"本商品屬({CCY})計價之產品", "risk_currency", "說明文字幣別", "第三章匯率風險"
         ),
-        *currency_words(
+        *money.currency_words(
             doc.chapter_lines(3),
             rf"轉換成({CCY})來投資本商品",
             "risk_conversion_currency",
@@ -633,23 +635,6 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line]) -> list[Occurr
             )
         )
     return out
-
-
-def currency_words(lns: list[Line], pattern: str, field: str, name: str, where: str) -> list[Occurrence]:
-    """說明文字裡每一處幣別字（`pattern` 第 1 組；Issue #305）：每處一筆，沒有任何一處時一筆缺漏。"""
-    ti = TextIndex(lns)
-    hits = list(ti.finditer(pattern))
-    if not hits:
-        return [Occurrence(field, name, where, ParsedField.missing(field, f"{where}找不到幣別說明文字"))]
-    return [
-        Occurrence(
-            f"{field}_{n}" if len(hits) > 1 else field,
-            name,
-            where,
-            ParsedField.present(field, m[1], ti.lines_for(m.start(), m.end())),
-        )
-        for n, m in enumerate(hits, start=1)
-    ]
 
 
 # ---------------------------------------------------------------- 第二章、第四章
