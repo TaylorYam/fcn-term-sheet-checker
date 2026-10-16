@@ -465,7 +465,8 @@ def _trading(fields: dict[str, ParsedField], sec: list[Line], put: Callable) -> 
 
 def distribution_fee(lines: list[Line], shared: ParsedField) -> ParsedField:
     """說明書分銷費用的子列標籤（報酬／費用／折讓）佔了「費率」欄，費率在右邊一欄：取「費用」子列、子列標籤右邊到
-    「收取方式」欄之前的文字（範本規格 §5.3）。共用 `fee_rates` 讀得到（投資人須知的版面）時用它。"""
+    「收取方式」欄之前的文字（範本規格 §5.3）；下一個子列可能在下一頁（Issue #295）。共用 `fee_rates` 讀得到（投資人
+    須知的版面）時用它。"""
     if shared.ok:
         return shared
     name = shared.name
@@ -487,7 +488,7 @@ def distribution_fee(lines: list[Line], shared: ParsedField) -> ParsedField:
             if ln.page == top.page
             and top.x1 < ln.x0 < way.x0 - 5
             and ln.y0 + 3 >= top.y0
-            and (bottom is None or ln.y0 + 3 < bottom.y0)
+            and (bottom is None or (ln.page, ln.y0 + 3) < (bottom.page, bottom.y0))
         ),
         key=lambda x: (x.y0, x.x0),
     )

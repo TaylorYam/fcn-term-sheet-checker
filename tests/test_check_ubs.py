@@ -131,6 +131,13 @@ def test_observation_in_brackets_is_the_same_name(tmp_path, where):
     assert item.report.status == S.PASS, problems(item.report)
 
 
+def test_no_ki_maturity_payoff_compared_with_its_strike(tmp_path):
+    """無 KI 的到期日給付寫「收盤價低於其轉換價」（OOS 真實樣本，Issue #295）：和「低於轉換價」一樣是無 KI。"""
+    edit = Edit("收盤價低於轉換價，則投資人", "收盤價低於其轉換價，則投資人", "ts")
+    item = check_item(tmp_path, edits=[edit])
+    assert item.report.status == S.PASS, problems(item.report)
+
+
 def test_name_without_ki_wording_is_a_mismatch(tmp_path):
     r = check(tmp_path, Spec(ki="D"), edits=[Edit("（含觸及下限價事件）", "", "ts.cover")])
     assert rule(r, "standard.product_name", "name_zh")[0].status == S.MISMATCH

@@ -4,15 +4,18 @@ y 座標、跨頁、換行、擠格都在這裡處理（Issue #287）。
 一張價格表：表頭在上（每欄一格、可拆成多行，常帶「(期初價格的 X%)」），每檔標的一列；欄依表頭各格的 x 位置排序。
 讀法：
 
-1. 相鄰幾格擷取成同一行時，先依字座標切回各欄（`split_at_columns`）。
+1. 相鄰幾格擷取成同一行時，先依字座標切回各欄（`split_at_columns`）；表頭同一行有兩個價格欄名、又對不到欄的左緣時，
+   在第二個欄名切開（一格不會有兩個欄名）。
 2. 找列錨點（`TableSpec.anchor`）：左欄列號（`number`）、彭博代碼（`ticker`，代號與交易所碼換成兩行時取代號那一行）
    或執行價格欄的價格（`price`）。
-3. 第 1 列錨點以上是表頭；表頭的格是同一欄上下相接的行（可跨到下一頁；橫跨兩格以上的說明文字不算；只有表頭
-   百分比的那一格歸到正上方的欄名）。表頭從第一個兩格並排的列、有關鍵字的格的上緣起，更上面的文字不算；第 1 列
-   那一頁的表頭已齊全時不往上一頁找。從表頭最後一行之下才開始的格（例：代碼拆三行、中間一行和列號齊平）屬於列。
+3. 第 1 列錨點以上是表頭；表頭的格是同一欄上下相接的行（可跨到下一頁：上一頁頁底接下一頁頁首，百分比的續行也接
+   上一頁該欄最下面的一行；橫跨兩格以上的說明文字不算；只有表頭百分比的那一格歸到正上方的欄名）。表頭從第一個兩格
+   並排的列、有關鍵字的格的上緣起，更上面的文字不算；第 1 列那一頁的表頭已齊全時不往上一頁找。從表頭最後一行之下
+   才開始的格（例：代碼拆三行、中間一行和列號齊平）屬於列。
 4. 其餘每行歸到同一頁 y 中心最近的列錨點；價格欄裡換行的值（`23,425.0000` / `日圓`）跟著第一行的列；最後一列
-   下方、和該列不相接的表後說明不算進表。所在頁沒有列錨點時，只有緊接最後一列的下一頁算最後一列溢過來的部分，
-   隔更遠就讀不出（轉人工覆核，不悄悄丟掉或接上）。表頭同樣只接到緊接的下一頁。
+   下方、和該列不相接的表後說明不算進表（例外：價格欄裡單獨一個值、而該列這一欄還沒有值，是格內位置較低的那一格）。
+   所在頁沒有列錨點時，只有緊接最後一列的下一頁算最後一列溢過來的部分，隔更遠就讀不出（轉人工覆核，不悄悄丟掉或
+   接上）。表頭同樣只接到緊接的下一頁。
 5. 每行依空白切成詞、逐詞依 x 歸到表頭的欄；同一格裡換行接下來的部分（數字或幣別字）接回，其他上下或並排的都是
    不同的值。一列的價格依欄序排成一串，個數須等於價格欄數（相鄰幾格擠成一行、切不開時仍依序對到各欄）。
 
@@ -23,7 +26,7 @@ y 座標、跨頁、換行、擠格都在這裡處理（Issue #287）。
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Literal, NamedTuple
@@ -149,7 +152,7 @@ def read(name: str, lines: Sequence[Line], spec: TableSpec) -> ParsedField:
     if not lines:
         return ParsedField.missing(name, f"找不到{spec.where}")
     origin: dict[int, int] = {}  # 每一段（id）→ 來自 `lines` 的第幾行
-    pieces = split_at_columns(list(lines), origin=origin)
+    pieces = _split_column_words(split_at_columns(list(lines), origin=origin), spec, origin)
     try:
         table = _read(pieces, spec, origin)
     except _Unreadable as e:
@@ -195,6 +198,28 @@ def underlyings(table: ParsedField) -> ParsedField:
 
 
 # ---------------------------------------------------------------- 讀法
+
+
+def _split_column_words(lines: list[Line], spec: TableSpec, origin: dict[int, int]) -> list[Line]:
+    """表頭相鄰兩格擷取成同一行、`split_at_columns` 又找不到對齊的左緣時（`轉換價 （即期初價格的提前出場價 （即期初價`）：
+    一格不會有兩個價格欄名，從第二個起在每個欄名的第一個字切開（和前一個字之間須有空白或間隙；Issue #295）。"""
+    out: list[Line] = []
+    for ln in lines:
+        spans = ln.aligned_char_spans
+        hits = sorted({(m.start(), m.end()) for c in spec.columns for m in re.finditer(re.escape(c.word), ln.text)})
+        starts = [a for a, b in hits if not any(x <= a and b <= y and (x, y) != (a, b) for x, y in hits)]
+        cuts = [i for i in starts[1:] if spans and (ln.text[i - 1].isspace() or spans[i][0] - spans[i - 1][1] >= GAP)]
+        if not cuts:
+            out.append(ln)
+            continue
+        for a, b in zip([0, *cuts], [*cuts, len(spans)], strict=True):
+            keep = [i for i in range(a, b) if not ln.text[i].isspace()]
+            if keep:
+                i, j = keep[0], keep[-1] + 1
+                piece = replace(ln, x0=spans[i][0], x1=spans[j - 1][1], text=ln.text[i:j], char_spans=spans[i:j])
+                out.append(piece)
+                origin[id(piece)] = origin[id(ln)]
+    return out
 
 
 def _read(lines: list[Line], spec: TableSpec, origin: dict[int, int]) -> PriceTable:
@@ -325,11 +350,15 @@ def _same_column(a: Line, b: Line) -> bool:
 
 
 def _cells(lines: list[Line]) -> list[list[Line]]:
-    """表頭的格：同一欄上下相接的行；可跨到下一頁（上一頁頁底的一行接下一頁頁首的一行）。每格的行依頁與 y 排序。"""
+    """表頭的格：同一欄上下相接的行；可跨到下一頁（上一頁頁底的一行接下一頁頁首的一行；百分比的續行也接上一頁該欄最下面的一行）。
+    每格的行依頁與 y 排序。"""
     edges = {}
     for ln in lines:
         lo, hi = edges.get(ln.page, (ln.y0, ln.y1))
         edges[ln.page] = (min(lo, ln.y0), max(hi, ln.y1))
+    bottoms = {  # 該頁這一欄最下面的一行
+        id(ln) for ln in lines if all(x.y0 <= ln.y0 for x in lines if x.page == ln.page and _same_column(x, ln))
+    }
     parent = list(range(len(lines)))
 
     def find(i: int) -> int:
@@ -340,7 +369,11 @@ def _cells(lines: list[Line]) -> list[list[Line]]:
 
     for i, a in enumerate(lines):
         for j in range(i + 1, len(lines)):
-            if _same_cell(a, lines[j], edges) and not _spans(a, lines[j], lines) and not _spans(lines[j], a, lines):
+            if (
+                _same_cell(a, lines[j], edges, bottoms)
+                and not _spans(a, lines[j], lines)
+                and not _spans(lines[j], a, lines)
+            ):
                 parent[find(i)] = find(j)
     groups: dict[int, list[Line]] = {}
     for i, ln in enumerate(lines):
@@ -356,15 +389,18 @@ def _spans(wide: Line, other: Line, lines: list[Line]) -> bool:
     return sum(_overlap(wide, x) > 0.5 for x in row) >= 2
 
 
-def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]]) -> bool:
+def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]], bottoms: set[int]) -> bool:
     upper, lower = (a, b) if (a.page, a.y0) <= (b.page, b.y0) else (b, a)
     if upper.page == lower.page:
         return _adjacent(upper, lower)
     if lower.page != upper.page + 1 or not _same_column(upper, lower):
         return False
-    # 跨頁：上一頁最下面的那一列接下一頁最上面的那一列
+    # 跨頁：上一頁最下面的那一列接下一頁最上面的那一列。下一頁那一行是表頭百分比的續行（有「%」）時，上一頁這一欄
+    # 最下面的一行也可以接（同一頁其他欄的格比較低，例：左欄「籃子中連結標的 / 股票名稱」兩行置中；Issue #295）；
+    # 其他欄不放寬，下一頁頁首可能是第 1 列比列錨點高的代碼（`AMAT`）
     reach = ADJACENT * max(upper.y1 - upper.y0, lower.y1 - lower.y0)
-    return upper.y1 >= edges[upper.page][1] - reach and lower.y0 <= edges[lower.page][0] + reach
+    at_bottom = upper.y1 >= edges[upper.page][1] - reach or (id(upper) in bottoms and "%" in lower.text)
+    return at_bottom and lower.y0 <= edges[lower.page][0] + reach
 
 
 def _text(cell: Sequence[Line]) -> str:
@@ -537,18 +573,22 @@ def _rows(
     rows: list[list[Line]] = [[] for _ in anchors]
     for i, ln in enumerate(body):
         rows[row_of[i]].append(ln)
-    rows[-1] = _last_row(rows[-1], anchors[-1])
+    rows[-1] = _last_row(rows[-1], anchors[-1], lambda ln: c if (c := _column_of(ln, cols, others)) in prices else None)
     return rows
 
 
-def _last_row(lines: list[Line], anchor: Line) -> list[Line]:
+def _last_row(lines: list[Line], anchor: Line, price_column: Callable[[Line], str | None]) -> list[Line]:
     """最後一列在列錨點那一頁、錨點以下的行，要和這一列上下相接（一路接下去）才算；表後的說明文字不算進表。
-    溢到下一頁的部分照收。"""
+    溢到下一頁的部分照收。例外：價格欄裡單獨一個值、而且這一列這一欄還沒有值時，是格內位置較低的那一格（例：列名
+    直書、一列很高，某一欄的價格靠下；Issue #295），也算這一列。"""
     kept = [ln for ln in lines if ln.page != anchor.page or ln.y0 < anchor.y1]
     rest = sorted((ln for ln in lines if ln not in kept), key=_page_key)
     for ln in rest:
         reach = ADJACENT * (ln.y1 - ln.y0)
-        if any(x.page == ln.page and x.y0 <= ln.y0 and ln.y0 - x.y1 <= reach for x in kept):
+        col = price_column(ln)
+        if any(x.page == ln.page and x.y0 <= ln.y0 and ln.y0 - x.y1 <= reach for x in kept) or (
+            col and VALUE.fullmatch(squash(ln.text)) and all(price_column(x) != col for x in kept)
+        ):
             kept.append(ln)
     return kept
 

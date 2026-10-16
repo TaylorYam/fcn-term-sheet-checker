@@ -1,6 +1,7 @@
 """DBS 投資人須知黑箱回歸（Issue #280）：合成說明書＋投資人須知經批量入口；不直接測擷取或解析的內部函式。
 
-真實投資人須知寫異體字「視爲」，合成字型畫不出來，合成文件寫「視為」；最後一個測試直接用擷取後的行測兩種寫法。
+真實投資人須知寫異體字「視爲」，合成字型畫不出來，合成文件寫「視為」；最後兩個測試直接用擷取後的行測兩種寫法，以及
+合成器排不出的價格表版面（表頭在上一頁、前一句換行後以彭博代碼開頭，Issue #295）。
 """
 
 from __future__ import annotations
@@ -123,3 +124,32 @@ def test_memory_wording_accepts_the_variant_character(word):
     lines = [Line(1, 30.0, 100.0 + 15 * i, 560.0, 112.0 + 15 * i, t) for i, t in enumerate(texts)]
     sheet = dbs_iis.read(lines)
     assert sheet.f("ko_memory").ok and sheet.f("ko_memory").value is True
+
+
+def test_price_table_after_the_underlying_sentence_wrapping_onto_a_ticker():
+    """「連結標的資產：…，彭博代碼為」換行後下一行以彭博代碼開頭（`ZBBB UN。`），表頭整個在上一頁、各列在下一頁
+    （OOS 真實樣本版面，Issue #295）：那一行不是價格表第 1 列。"""
+    texts = [
+        (1, 16.5, 750.0, 560.0, "連結標的資產：甲公司 (Alpha Inc)，彭博代碼為ZAAA UW、乙公司 (Beta Inc)，彭博代碼為"),
+        (1, 16.5, 762.7, 80.0, "ZBBB UN。"),
+        (1, 46.8, 776.0, 94.8, "彭博代碼"),
+        (1, 155.1, 779.0, 203.1, "期初價格"),
+        (1, 290.4, 779.0, 338.4, "執行價格"),
+        (1, 258.6, 793.4, 370.2, "(期初價格的80.00%)"),
+        (1, 428.8, 779.0, 524.8, "自動提前出場價格"),
+        (1, 417.6, 793.4, 536.0, "(期初價格的100.00%)"),
+        (2, 41.8, 26.4, 99.8, "ZAAA UW"),
+        (2, 140.4, 26.4, 217.8, "美元 100.0000"),
+        (2, 275.7, 26.4, 353.1, "美元 80.0000"),
+        (2, 438.1, 26.4, 515.5, "美元 100.0000"),
+        (2, 43.8, 38.9, 97.8, "ZBBB UN"),
+        (2, 140.4, 38.9, 217.8, "美元 50.0000"),
+        (2, 275.7, 38.9, 353.1, "美元 40.0000"),
+        (2, 438.1, 38.9, 515.5, "美元 50.0000"),
+        (2, 16.5, 52.0, 400.0, "商品面額：每單位美元10,000, 發行價格：商品面額的100.00%。"),
+    ]
+    lines = [Line(p, x0, y0, x1, y0 + 12, t) for p, x0, y0, x1, t in texts]
+    sheet = dbs_iis.read(lines)
+    assert sheet.f("price_table").ok, sheet.f("price_table").note
+    assert sheet.f("price_table").value.tickers == ["ZAAA UW", "ZBBB UN"]
+    assert sheet.f("strike_pct").value == 80
