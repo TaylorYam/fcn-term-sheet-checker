@@ -378,6 +378,82 @@ def test_first_line_of_a_taller_header_cell_above_the_first_header_row_is_kept()
     assert table.value.pcts["ki"] == Decimal("60.00")
 
 
+def test_k_equals_row_labels_anchor_rows_like_row_numbers():
+    """左欄列標籤寫成 `k=1`、`k=2`（SG、MS）：和列號一樣是列錨點，不算進名稱。"""
+    spec = TableSpec(**{**SPEC.__dict__, "code": None})
+    lines = [*header(code=False)]
+    for y, k, prices in ((150, 1, ROW1), (170, 2, ROW2)):
+        lines += [ln for ln in row(1, y, None, f"{k}號", None, prices) if ln.text != f"{k}號"]
+        lines.append(centered(1, X["n"], y, f"k={k}"))
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.names == ["", ""]
+    assert [p["strike"] for p in table.value.prices] == [Decimal("80.0000"), Decimal("40.0000")]
+
+
+def test_symbol_wrapped_in_the_middle_of_the_word_is_joined_back():
+    """代號在字中間換行（`ZBA` / `B UQ`，HSBC #252）接回 `ZBAB UQ`；代號與交易所碼之間換行（`ZA` / `UQ`）照舊加空白。"""
+    spec = TableSpec(**{**SPEC.__dict__, "anchor": "ticker"})
+    lines = [*header()]
+    for y, top, bottom, prices in ((150, "ZA", "UQ", ROW1), (180, "ZBA", "B UQ", ROW2)):
+        lines += [ln for ln in row(1, y + 5, None, "公司", None, prices)]
+        lines += [centered(1, X["code"], y, top), centered(1, X["code"], y + 10, bottom)]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.tickers == ["ZA UQ", "ZBAB UQ"]
+
+
+def test_two_letter_symbol_right_below_the_exchange_code_of_the_row_above():
+    """上一列交易所碼（`UQ`）緊接下一列兩碼代號（`MU` / `UQ`）：`UQ` 已配給上一列的代號，不和 `MU` 配成另一檔。"""
+    spec = TableSpec(**{**SPEC.__dict__, "anchor": "ticker"})
+    lines = [*header()]
+    for y, symbol, prices in ((150, "NVDA", ROW1), (167, "MU", ROW2)):
+        lines += row(1, y + 4, None, "公司", None, prices)
+        lines += [centered(1, X["code"], y, symbol), centered(1, X["code"], y + 8, "UQ")]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.tickers == ["NVDA UQ", "MU UQ"]
+
+
+def test_text_columns_are_read_per_row():
+    """其他文字欄（HSBC 的幣別、交易所）：每列讀出該欄的文字，格內換行接回（`US` / `D`、`NASDA` / `Q`）；
+    沒有宣告必要的文字欄表頭沒有時略過。"""
+    spec = TableSpec(
+        **{
+            **SPEC.__dict__,
+            "texts": (Column("currency", "幣別"), Column("exchange", "交易所"), Column("label", "中文名稱", False)),
+        }
+    )
+    lines = [*header(), centered(1, 560, 100, "幣別"), centered(1, 620, 100, "交易所")]
+    lines += [*row(1, 150, 1, "甲公司", "AAA UW", ROW1), centered(1, 560, 145, "US"), centered(1, 560, 155, "D")]
+    lines += [centered(1, 620, 145, "NASDA"), centered(1, 620, 155, "Q")]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.rows[0].texts == {"currency": "USD", "exchange": "NASDAQ"}
+    assert table.value.prices[0]["ki"] == Decimal("60.0000")
+    missing = read("t", [ln for ln in lines if ln.text != "交易所"], spec)
+    assert missing.note == "測試價格表表頭找不到「交易所」欄"
+
+
+def test_header_percentage_may_be_left_out_for_an_optional_column():
+    """欄頭百分比可選的欄（BARC 記憶式 KO 欄頭「為最初價格乘以自動提前出場觸發百分比」）：沒寫 % 時不含該欄。"""
+    spec = TableSpec(
+        **{
+            **SPEC.__dict__,
+            "columns": (
+                Column("strike", "執行價"),
+                Column("ko", "自動提前出場價", pct_optional=True),
+                Column("ki", "下限價", required=False),
+            ),
+        }
+    )
+    lines = [ln for ln in header() if ln.text != "100.00%)"] + row(1, 150, 1, "甲公司", "AAA UW", ROW1)
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.pcts == {"strike": Decimal("80.00"), "ki": Decimal("60.00")}
+    assert [ln.text for ln in table.value.head_lines["strike"]] == ["執行價", "(期初價格之", "80.00%)"]
+
+
 # ---------------------------------------------------------------- 錯訊句型
 
 
