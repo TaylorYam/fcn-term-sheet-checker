@@ -53,7 +53,9 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert len(rule(r, "doc.coupon_mentions")) == 9
     assert len(rule(r, "doc.redemption_pct")) == 6  # 第 9 項 (b)、(c)；情境一、二贖回金額行各 2 處
     assert len(rule(r, "doc.scenario_params")) == 5  # 情境配息金額行 3 處、贖回金額行 2 處代入的面額
-    assert len(rule(r, "doc.coupon_periods")) == 6  # 配息表、名稱 2 處、基本假設天期、情境二／三配息月數
+    assert (
+        len(rule(r, "doc.coupon_periods")) == 5
+    )  # 名稱 2 處、基本假設天期、情境二／三配息月數（日期表期數是共用檢查）
     assert len(rule(r, "doc.autocall_terms")) == 2  # 最低保證配息率月數、情境一配息月數
     assert len(rule(r, "doc.isin_consistency")) == 2
     assert rule(r, "standard.fixed_warning")[0].actual == 3  # 封面、第一章第 2 項（去【】）、第三章

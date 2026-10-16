@@ -82,11 +82,8 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2) + 1
     variable = spec.ko_obs == "D"  # 八與十五的變動配息率與年化
     assert len(rule(r, "doc.coupon_mentions")) == 2 + (4 if variable else 0) + 1
-    assert {x.field for x in rule(r, "doc.coupon_periods")} == {
-        "coupon_table",
-        "scenario_tenor",
-        "scenario_coupon_count",
-    }
+    assert {x.field for x in rule(r, "doc.coupon_periods")} == {"scenario_tenor", "scenario_coupon_count"}
+    assert rule(r, "schedule.period_count")[0].status == S.PASS  # 配息表期數是共用檢查（Issue #289）
     currency = {x.field for x in rule(r, "field.currency")}  # 說明文字與情境的幣別字（Issue #320）
     words = {"residual_conversion_currency", "scenario_residual_currency", "scenario_residual_paid_currency"}
     scenarios = {"scenario1_currency", "scenario2_currency", "scenario3_currency"}
