@@ -91,7 +91,7 @@ python -m pip install -c constraints.txt -e ".[dev]"
 在專案根目錄執行（設定檔預設讀 `config/`）：
 
 ```bash
-fcn-batch data/orders/FCN參考條件.xlsx data/term-sheets/IS/029*.pdf --out runtime/reports
+fcn-batch data/orders/核對表格式..xlsx data/term-sheets/IS/029*.pdf --out runtime/reports
 ```
 
 | 參數 | 說明 |
@@ -200,7 +200,7 @@ ruff check src tests
 
 ## 資料管理
 
-真實 PDF、下單檔、擷取文字、OCR 影像、核對結果檔與核對紀錄放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：說明書與投資人須知 PDF 分兩組——樣本內（建立範本與規則用）放 `data/term-sheets/IS/`，樣本外（OOS，驗證規則與回填用）依上手放 `data/term-sheets/OOS/<上手>/`、對應的參考條件表放 `data/orders/OOS/`（回填欄空白的核對用表，以及作業人員手填正確回填值的「回填後核對」表）；參考條件表放 `data/orders/`（完整表 `FCN參考條件.xlsx`、回填欄位空白的 `FCN參考條件_待回補.xlsx`；公司原始待建檔格式的完整表另放 `data/核對表格式..xlsx`，SG、BNP 真實樣本測試用）、探勘輸出與暫存檔放 `data/tmp/`、CLI 核對結果檔預設輸出到 `runtime/reports/`、核對紀錄在 `runtime/核對紀錄/`。本機真實樣本測試照這個結構讀檔；樣本放在其他資料夾時，設定環境變數 `FCN_TEST_DATA_DIR` 指向該資料夾（底下一樣是 `orders/`、`term-sheets/IS/` 與 `核對表格式..xlsx`）；OOS 樣本不進本機真實樣本測試。`data/` 不進 Git，多台電腦之間依公司規定自行同步。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
+真實 PDF、下單檔、擷取文字、OCR 影像、核對結果檔與核對紀錄放在被 Git 忽略的 `data/` 或 `runtime/`。目前慣例：說明書與投資人須知 PDF 分兩組——樣本內（建立範本與規則用）放 `data/term-sheets/IS/`，樣本外（OOS，驗證規則與回填用）依上手放 `data/term-sheets/OOS/<上手>/`、對應的參考條件表放 `data/orders/OOS/`（回填欄空白的核對用表，以及作業人員手填正確回填值的「回填後核對」表）；樣本內的參考條件表放 `data/orders/核對表格式..xlsx`（公司原始待建檔格式，涵蓋樣本內全部上手，回填欄位空白）、探勘輸出與暫存檔放 `data/tmp/`、CLI 核對結果檔預設輸出到 `runtime/reports/`、核對紀錄在 `runtime/核對紀錄/`。本機真實樣本測試照這個結構讀檔；樣本放在其他資料夾時，設定環境變數 `FCN_TEST_DATA_DIR` 指向該資料夾（底下一樣是 `orders/核對表格式..xlsx` 與 `term-sheets/IS/`）；OOS 樣本不進本機真實樣本測試。`data/` 不進 Git，多台電腦之間依公司規定自行同步。不要把客戶資料、交易細節或憑證貼到公開文件、Issue、PR、測試快照及 CI artifact。資料保存期限與存取權限於導入前確認。
 
 ## 範本來源
 

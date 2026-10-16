@@ -2,7 +2,7 @@
 
 斷言與探勘結論一致（docs/rules/jpm-check-rules.md §5）：5 份說明書與 5 份投資人須知都辨識為 JPM 範本，全部通過、
 全部回填。表上標的排序和說明書不同的多標的商品依代號配對後通過（說明書依英文公司名稱字母順序排列；期初定價 VWAP 的
-那份價格不比對）。參考條件表用含 JPM 列的公司原始待建檔表 data/核對表格式..xlsx。
+那份價格不比對）。參考條件表用含 JPM 列的公司原始待建檔表 data/orders/核對表格式..xlsx。
 """
 
 from collections import Counter

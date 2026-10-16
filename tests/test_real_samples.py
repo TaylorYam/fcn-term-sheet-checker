@@ -87,7 +87,7 @@ def test_no_other_issuer_is_recognised_as_dbs(reports):
 
 def test_document_rules_only_flag_old_format_documents(reports):
     barc = {k: i.report for k, i in reports.items() if i.report.template == "barc-zh-pd"}
-    assert len(barc) == 14
+    assert len(barc) == 6
     flagged: Counter[tuple[str, str]] = Counter()
     for r in barc.values():
         for x in r.results:
@@ -96,12 +96,12 @@ def test_document_rules_only_flag_old_format_documents(reports):
                 CheckStatus.NOT_APPLICABLE,
             ):
                 flagged[(x.rule_id, x.field)] += 1
-    # 探勘結論：較早 7 份中文名稱尚未加「（不保本）」；舊系列 6 份寫的是交易日當時的審查通過日期，依交易日核對成立（#120）
-    assert flagged == Counter({("standard.product_name", "name_zh"): 7})
+    # 探勘結論：較早 3 份中文名稱尚未加「（不保本）」；寫交易日當時審查通過日期的依交易日核對成立（#120）
+    assert flagged == Counter({("standard.product_name", "name_zh"): 3})
 
 
 def test_every_barc_sample_yields_isin_and_compare_dates_or_explicit_review(reports):
-    """ISIN 一律可擷取；比價日除 D 型第 1 期即開始比價（2 份）外都推得出來。"""
+    """ISIN 一律可擷取；比價日都推得出來（D 型第 1 期即開始比價的轉人工確認，樣本內沒有）。"""
     barc = [i for i in reports.values() if i.report.template == "barc-zh-pd"]
     review = Counter()
     for item in barc:
@@ -110,4 +110,4 @@ def test_every_barc_sample_yields_isin_and_compare_dates_or_explicit_review(repo
         dates = next(r for r in item.report.results if r.rule_id == "backfill.compare_dates")
         if dates.status == CheckStatus.REVIEW_REQUIRED:
             review[dates.reason_code] += 1
-    assert review == Counter({"document_invalid": 2})
+    assert len(barc) == 6 and review == Counter()

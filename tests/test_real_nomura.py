@@ -3,7 +3,7 @@
 斷言與探勘結論一致（docs/rules/nomura-check-rules.md §5）：8 份說明書與 8 份投資人須知都辨識為 Nomura 範本；只有一份的
 參考條件表到期日比說明書早 1 天（說明書跳過美國假日，表填錯，2026-10-15 確認），說明書與投資人須知都判不一致；其餘 7 組
 通過並回填。2025 年文件 2 份的審查通過日期 2025-06-24 依交易日通過（Issue #239 加入審查標準）。參考條件表用
-data/核對表格式..xlsx（與 data/orders/ 下同名檔相同，含 8 列 Nomura）。
+data/orders/核對表格式..xlsx（含 8 列 Nomura）。
 """
 
 import datetime as dt
