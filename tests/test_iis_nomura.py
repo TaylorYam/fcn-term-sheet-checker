@@ -141,6 +141,11 @@ def test_fixed_warning_appears_once(tmp_path):
         ),
         (
             Spec(),
+            Edit("之最終價格低於個別執行價時", "之最終價格跌破個別執行價時", "iis.redeem"),
+            {("field.ki_type", "ki_type", REVIEW)},
+        ),
+        (
+            Spec(),
             Edit(WARNING[:20], WARNING[:19] + "X", "iis.warn"),
             {("standard.fixed_warning", "fixed_warning", MISMATCH)},
         ),
@@ -163,6 +168,7 @@ def test_fixed_warning_appears_once(tmp_path):
         "後續受理贖回日期",
         "KO 觀察方式寫法",
         "KI 寫法",
+        "無 KI 的到期贖回款",
         "固定警語",
         "保證機構",
         "發行不成立門檻",
@@ -175,9 +181,16 @@ def test_iis_rules_find_the_wrong_value(tmp_path, spec, edit, expected):
 
 
 def test_annual_rate_is_checked_against_the_sheet(tmp_path):
-    """表上年利率和每期配息率 × 12 不同：投資人須知判不一致（每期配息率仍 = 說明書）。"""
+    """每期配息率不等於表上年利率 ÷ 12：投資人須知判不一致（每期配息率仍 = 說明書）。"""
     _, iis = pair(tmp_path, Spec(), **{"Coupon p.a. (%)": 10.5})
     assert bad(iis) == {("iis.coupon_pa", "coupon_per_period_pct", MISMATCH)}
+
+
+def test_period_rate_must_be_the_sheet_annual_rate_divided_by_12(tmp_path):
+    """年利率 10.00%、每期配息率 0.8337%：× 12 四捨五入仍是 10.00%，但 ÷ 12 四捨五入到 4 位是 0.8333%，判不一致（Issue #297）。"""
+    _, iis = pair(tmp_path, edits=[Edit("就每配息日而言，0.8333%。*", "就每配息日而言，0.8337%。*", "iis.coupon")])
+    found = next(r for r in iis.report.results if r.rule_id == "iis.coupon_pa")
+    assert (found.status, found.expected, found.actual) == (MISMATCH, Decimal("0.8333"), Decimal("0.8337"))
 
 
 def test_page_count_is_checked(tmp_path):
