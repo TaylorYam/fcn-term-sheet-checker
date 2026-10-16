@@ -146,7 +146,7 @@ def test_hsbc_investor_sheets_only_differ_where_their_term_sheets_do(outcome):
     # 第七節「受託投資本商品」：交易日在審查標準 wording.exempt_until 以前，特例通過（Issue #247）
     wording = [r for i in sheets for r in i.report.results if r.rule_id == "standard.forbidden_wording"]
     assert len(wording) == 7 and all(r.status == CheckStatus.PASS and "特例通過" in r.tolerance for r in wording)
-    # 和同商品說明書相同的那 1 處標的代碼差異（test_real_hsbc.py，待查 #310）
+    # 同商品說明書有相同的標的代碼差異；依使用者確認仍逐字比對尾碼（test_real_hsbc.py，Issue #310）
     assert sum((problems(i) for i in sheets), Counter()) == Counter({("field.underlyings", "value_mismatch"): 1})
 
 

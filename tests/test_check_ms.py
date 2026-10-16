@@ -29,6 +29,8 @@ from reference_synth import build_reference_sheet, reference_row
         Spec(ko_obs="D", memory=True, ki="P", count=3),
         Spec(ko_obs="D", memory=True, ki="none", count=4, tenor=3),
         Spec(ko_obs="D", memory=False, ki="AM", count=1),
+        # D 型 Non-Call 5：第 15 項 j 係為6 至8（Issue #310）
+        Spec(ko_obs="D", memory=True, ki="AM", count=3, tenor=8, first_callable=5),
         Spec(ko_obs="D", memory=True, ki="AM", count=3, tenor=12, annual=Decimal("15")),
         Spec(ko_obs="P", memory=True, ki="AM", count=4),
         Spec(ko_obs="P", memory=True, ki="AM", count=2, first_callable=2),
@@ -312,6 +314,20 @@ def test_periodic_autocall_dates_follow_non_call(tmp_path):
     spec = Spec(ko_obs="P", count=2, first_callable=2)
     r = check(tmp_path, spec, edits=[Edit("無", zh_date(spec.payments[0]), "ts.art14.table")])
     assert rule(r, "schedule.autocall_dates")[0].status == S.MISMATCH
+
+
+def test_d_type_coupon_range_starts_after_non_call(tmp_path):
+    """D 型第 15 項期別起點 = Non-Call + 1；照 Non-Call 1 的寫法（從 2 起）是錯的（Issue #310）。"""
+    spec = Spec(ko_obs="D", tenor=8, first_callable=5)
+    r = check(tmp_path, spec, edits=[Edit("j 係為6 至8", "j 係為2 至8", "ts.art15")])
+    assert [x.status for x in rule(r, "doc.coupon_periods") if x.field == "coupon_range"] == [S.MISMATCH]
+
+
+def test_fee_rates_are_read_under_a_centred_two_line_header(tmp_path):
+    """表頭「費率」置中拆成兩行、比費率格右移時費率仍讀得到（Issue #310）。"""
+    r = check(tmp_path, Spec(fee_header_split=True))
+    fees = rule(r, "standard.fees")
+    assert fees and all(x.status == S.PASS for x in fees), problems(r)
 
 
 def test_tables_split_across_pages_are_still_read(tmp_path):
