@@ -15,7 +15,7 @@ from fcn_checker.parsers.schedule import autocall_schedule
 from fcn_checker.rules import schedule
 from fcn_checker.schema import FieldStatus, ParsedField
 from fcn_checker.standard_fields import AutocallSchedule, DateRow, DateTable, PeriodStart
-from harness import MISMATCH, PASS, REVIEW
+from harness import MISMATCH, NA, PASS, REVIEW
 from rule_fixtures import issuer_context, term_sheet
 
 D = dt.date
@@ -119,6 +119,11 @@ def test_observation_order():
 
 
 # ---------------------------------------------------------------- 末期觀察日、末期配息日
+
+
+def test_table_without_observation_dates_does_not_check_the_last_one():
+    rows = tuple(replace(r, observation=None) for r in ROWS)
+    assert run(schedule_table=table(rows))["schedule.last_observation"].status == NA
 
 
 @pytest.mark.parametrize(

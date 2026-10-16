@@ -151,6 +151,10 @@ def last_date(ctx: IssuerContext, table: ParsedField, rid: str, key: str, field:
     t: DateTable = table.value
     pf = ctx.ts.f(field)
     last = t.rows[-1]
+    if all(getattr(r, key) is None for r in t.rows):  # 表上沒有這一欄（例：Citi 無自動提前出場只有配息日）
+        return _check(ctx, rid, t.where).result(
+            S.NOT_APPLICABLE, evidence=list(table.evidence), message=f"{t.where}沒有這一欄，不核對"
+        )
     return (
         _check(ctx, rid, t.where)
         .needs(table, pf)

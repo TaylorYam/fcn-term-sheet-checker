@@ -83,7 +83,7 @@
 | `schedule.period_count` | 期數 | 列數 = 天期，期別依序為第 1～n 期 |
 | `schedule.payment_order` | 配息日順序 | 每期都有配息日，且逐期遞增 |
 | `schedule.observation_order` | 觀察日與配息日 | 有觀察日的期別：同期觀察日早於配息日，觀察日逐期遞增（不可提前出場而沒有觀察日的期別不比） |
-| `schedule.last_observation` | 末期觀察日 | = 最終評價日 |
+| `schedule.last_observation` | 末期觀察日 | = 最終評價日；表上沒有觀察日欄（例：Citi 無自動提前出場只有配息日）時不適用 |
 | `schedule.last_payment` | 末期配息日 | = 到期日 |
 | `schedule.period_start` | 期始日 | 依上手宣告的定義（`standard_fields.PeriodStart`）；表上沒有期始日欄時不查 |
 
