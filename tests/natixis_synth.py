@@ -415,8 +415,9 @@ def _article15(d: _Doc, s: Spec) -> None:
     d.text(72, "(1) 若自動提前到期事件未發生，則持有至到期日贖回之公式如下：")
     d.text(
         72,
-        "情況一：現金交割：如績效表現最差之連結標的於最終評價日的最終價格高於或等於其執行價格，則以每單位商品面額之100%贖回。",
+        "情況一：現金交割：如績效表現最差之連結標的於最終評價日的最終價格高於或等於其執行價格，則本商品於到期日將以每單位商品面額之100%贖回：",
     )
+    d.text(72, "到期贖回金額 =到期日持有之商品單位數x 每單位商品面額 x 100%")
     if s.ki == "none":
         d.text(
             72,
@@ -428,7 +429,8 @@ def _article15(d: _Doc, s: Spec) -> None:
             72,
             "情況二：如績效表現最差之連結標的於最終評價日的最終價格低於其執行價格，則依下列2.a 或2.b 所述情況贖回本商品：",
         )
-        d.text(72, "2.a：現金交割：若未發生觸及事件，則本商品將以每單位商品面額之100%贖回。")
+        d.text(72, "2.a：現金交割：若未發生觸及事件，則本商品將以每單位商品面額之100%贖回：")
+        d.text(72, "到期贖回金額 =到期日持有之商品單位數x 每單位商品面額 x 100%")
         d.text(72, "2.b：實物交割(或稱實物交付)：若曾經發生觸及事件，將以實物交付「可交付連結標的整數」。")
     d.text(
         72,
@@ -447,6 +449,12 @@ def _article15(d: _Doc, s: Spec) -> None:
             72,
             f"「界限價格」係指就任一連結標的而言，各該連結標的之期初進場價格之{s.ki_pct}%，惟可能因第一章第11 項之規定而調整。",
         )
+    rounding = "並無條件捨去到整數位" if s.ccy == "JPY" else "並四捨五入至小數點後第二位"
+    d.text(
+        72,
+        f"「剩餘現金金額」係指就每單位本商品而言，可交付連結標的剩餘數額乘以可交付連結標的最終價格除以即期匯率(如有)，"
+        f"{rounding}所得之{s.currency_zh}金額。",
+    )
 
 
 def _article16(d: _Doc, s: Spec) -> None:
@@ -471,24 +479,91 @@ def _article16(d: _Doc, s: Spec) -> None:
     d.section = "art16.table"
     _table(d, s, codes=False)
     d.section = "art16"
-    d.text(36, "情境一 (較佳情況)：")
     coupon = (Decimal(s.denom) * s.annual / 100 / 12).quantize(Decimal("0.01"), ROUND_HALF_UP)
-    for t in range(1, s.first_callable + 1):
-        event = f"於第{CN[s.first_callable - 1]}個配息觀察期間結束日發生" if t == s.first_callable else "未發生"
-        d.w.row(
-            [
-                (72, str(t)),
-                (140, f"{s.money(s.denom)} x ({s.annual}%/12) = {coupon:,.2f} {s.currency_zh}"),
-                (380, event),
-            ],
-            gap=13,
+
+    def rows(case: int, n: int, ko: bool) -> None:
+        d.section = f"art16.s{case}"
+        d.w.row([(72, "配息"), (140, "配息金額(t)"), (380, "自動提前到期事件")], gap=13)
+        for t in range(1, n + 1):
+            event = f"於第{CN[n - 1]}個配息觀察期間結束日發生" if ko and t == n else "未發生"
+            d.section = f"art16.s{case}.r{t}"
+            d.w.row(
+                [
+                    (72, str(t)),
+                    (140, f"{s.money(s.denom)} x ({s.annual}%/12) = {coupon:,.2f} {s.currency_zh}"),
+                    (380, event),
+                ],
+                gap=13,
+            )
+        d.section = f"art16.s{case}"
+
+    def cash(n: int, maturity: str) -> None:
+        total = coupon * n
+        d.text(
+            36,
+            f"• 投資人可於投資期間收到總額為{total:,.2f} {s.currency_zh}之累積配息，並於{maturity}收到{s.money(s.denom)}的原始投資本金。",
         )
+        d.text(
+            36,
+            f"• 平均年化報酬率為{s.annual}%，即[({s.denom + total:,.2f} {s.currency_zh}/{s.money(s.denom)})-1] x 12.00={s.annual}%。",
+        )
+
+    u = s.underlyings[0]
+    worst, strike = u.name.split("(")[0], price(u.initial, s.strike)
+    quote = QUOTE[s.market]
+    d.text(36, "情境一 (較佳情況)：")
+    rows(1, s.first_callable, True)
     d.text(
         36,
         f"• 在較佳情況下，自動提前到期事件於第{CN[s.first_callable - 1]}個配息觀察期間結束日發生，自動提前到期贖回金額為原始投資本金乘以100%。",
     )
-    d.text(36, "情境二 (一般情況)：")
-    d.text(36, "• 在一般情況下，於商品存續期間從未發生自動提前到期事件。")
+    cash(s.first_callable, "自動提前到期日")
+    cases = [("二 (一般情況(a))", "高於其執行價格，到期贖回金額為原始投資本金乘以100%。")]
+    if s.ki != "none":
+        cases.append(
+            (
+                "三(一般情況(b))",
+                "低於其執行價格，但於觸及事件判定期間不曾發生觸及事件，到期贖回金額為原始投資本金乘以100%。",
+            )
+        )
+    for case, (head, outcome) in enumerate(cases, start=2):
+        d.section = "art16"
+        d.text(36, f"情境{head}：")
+        rows(case, s.tenor, False)
+        d.text(
+            36,
+            f"• 在一般情況下，於商品存續期間從未發生自動提前到期事件。在最終評價日，績效表現最差之連結標的為{worst}且其於"
+            f"最終評價日的最終價格為{price(u.initial, s.strike + 1):,.2f} {quote}，{outcome}",
+        )
+        cash(s.tenor, "到期日")
+    d.section = "art16"
+    d.text(36, f"情境{'四' if s.ki != 'none' else '三'}(最差情況)：：")
+    rows(len(cases) + 2, s.tenor, False)
+    shares = int(Decimal(s.denom) / strike)
+    d.text(
+        36,
+        f"• 在最差情況下，於商品存續期間從未發生自動提前到期事件。在最終評價日，績效表現最差之連結標的為{worst}且其於"
+        f"最終評價日的最終價格為1 {quote}，低於其執行價格；到期日將以實物交付「可交付連結標的整數」，並支付「剩餘現金金額」。",
+    )
+    d.text(
+        36,
+        f"• 投資人可於投資期間收到總額為{coupon * s.tenor:,.2f} {s.currency_zh}之累積配息，並於到期日收到{shares} 股績效表現最差之"
+        f"連結標的({worst})，再加上剩餘現金金額0.50 {s.currency_zh}。",
+    )
+    d.text(36, "實物交割之計算：")
+    d.text(
+        36,
+        f"(1) 每一單位可交付連結標的相關數量=每單位商品面額/績效表現最差之連結標的({worst})執行價格 = {s.money(s.denom)}/ "
+        f"{strike:,.4f} {quote} = {Decimal(s.denom) / strike:.3f} 股(進位到小數點後第三位)",
+    )
+    d.text(36, f"(2) 每一單位可交付連結標的整數= {shares} 股")
+    d.text(36, "• 實物交割之換算：")
+    d.text(
+        36,
+        f"=1 {quote}x {shares}+ 0.50 {s.currency_zh} = {shares + Decimal('0.5'):,.2f} {s.currency_zh} (四捨五入到小數點後第二位)",
+    )
+    d.section = "art16"
+    d.text(36, "關於上述情境分析之警語：本情境分析解說由發行機構及/或其關係企業所提供，僅供投資人參考之用。")
 
 
 ARTICLE_TITLES = {
@@ -534,6 +609,20 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             d.text(90, f"(1) 計價幣別：{s.currency_zh} ({s.ccy})")
             d.text(90, f"(2) 每單位商品面額：{s.money(s.denom)}")
             d.text(90, "(3) 發行價格：100%")
+        elif n == 6:
+            d.text(
+                72,
+                "不保本，保本率為0.00%。此外，若投資人在到期日前贖回本商品，將可能導致可領回的金額低於100% "
+                f"{s.currency_zh}投資本金(在最差情形下，領回金額甚至可能為零)。",
+            )
+        elif n == 8:
+            for t in (
+                f"(1) 配息金額：發行機構應依第一章第13 項之條款以{s.currency_zh}計算及支付配息予投資人。",
+                f"(2) 自動提前到期贖回金額：發行機構應依第一章第14 項之條款以{s.currency_zh}計算及支付自動提前到期贖回金額予投資人。",
+                "(3) 到期贖回金額：發行機構應依第一章第15(1)項之條款現金交割或實物交割。",
+                f"(4) 提前贖回金額：發行機構應依第一章第18 項之條款以{s.currency_zh}支付計算代理機構所決定之公平市價予投資人。",
+            ):
+                d.text(72, t, 90)
         elif n == 9:
             d.text(72, "「投資組合」於本商品發行日將由下表所列連結標的所組成，惟於發生第一章第11 項之情形")
             d.text(72, "時可能會變更及調整；各連結標的之相關敘述列於第一章第10 項：")
@@ -545,7 +634,12 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             _article12(d, s)
         elif n == 13:
             d.text(72, f"(1) 月配息率：{s.monthly}% (即年利率{s.annual}%)")
-            d.text(72, "(2) 配息金額：配息金額 = 配息觀察期間結束日持有之商品單位數x 每單位商品面額 x 月配息率")
+            if s.ccy == "JPY":  # 日圓商品才寫配息金額的捨入幣別
+                d.text(
+                    72,
+                    "(2) 配息金額：發行機構將依下列公式計算配息金額，並就每單位本商品而言，無條件捨去至整數位之日圓金額：",
+                )
+            d.text(72, "配息金額 = 配息觀察期間結束日持有之商品單位數x 每單位商品面額 x 月配息率")
         elif n == 14:
             word = "皆曾經 高於或等於" if s.memory else "皆高於或等於"
             d.text(
@@ -554,6 +648,10 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             )
             d.text(
                 72, f"「自動提前到期贖回價格」，係指就任一連結標的而言，自動提前到期贖回價格為期初進場價格之{s.ko}%。"
+            )
+            d.text(
+                72,
+                "自動提前到期贖回金額 =發生自動提前到期事件之自動提前到期觀察日持有之商品單位數x 每單位商品面額 x 100%",
             )
         elif n == 15:
             _article15(d, s)
@@ -634,8 +732,19 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         f"8. 最低贖回金額或單位數：本商品最低贖回金額為1 單位商品面額，即{m}；並以1 單位商品面額，即{m}為累加贖回金額。",
         54,
     )
+    dist = f"{s.distributor}({DIST['name']})"
     for n in range(9, 18):
-        d.text(36, f"{n}. 第{n}項說明（不核對）")
+        if n == 10:
+            d.text(
+                36,
+                f"10. 投資人申請贖回之方式：投資人應向{dist}提出贖回指示，並經發行機構受理其贖回申請，{dist}需俟實際收到"
+                "發行機構支付之款項後，再支付予投資人。",
+                54,
+            )
+        elif n == 14:
+            d.text(36, f"14. 本金及收益給付之方式：{dist}於實際收到發行機構支付之款項後，再支付予投資人。", 54)
+        else:
+            d.text(36, f"{n}. 第{n}項說明（不核對）")
 
     d.chapter("五", "特別記載事項")
     d.text(36, "1. 本商品於任何時候皆不得直接或間接於美國境內募集或銷售。")
@@ -691,6 +800,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
         f"• {WARNING}",
         f"• 計價幣別：{s.currency_zh}({s.ccy}) ●每單位商品面額：{m}●最低申購金額：1單位商品面額，即{s.denom:,}{s.currency_zh}",
         "• 發行價格：100%",
+        f"• 計價貨幣本金保本率：不保本。若投資人在到期日前贖回本商品，將可能導致可領回的金額低於100%{s.currency_zh}投資本金。",
         "• 連結標的資產：" + "、".join(u.name for u in s.underlyings) + "。●相對權重：不適用。",
         f"• 商品年期：{s.tenor}個月(惟受中文產品說明書所述事件之限制)",
         f"• 交易日/期初進場日：{dt_(s.trade_date)}，並依「中斷日」進行調整●發行日：{dt_(s.issue_date)}●到期日：最終評價日後的第三個營業日，即{dt_(s.maturity_date)}，並依營業日慣例調整",
@@ -710,6 +820,11 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     word = "皆曾經高於或等於" if s.memory else "皆高於或等於"
     for t in (
         f"配息：月配息率：{s.monthly}% (即年利率{s.annual}%)",
+        *(  # 日圓商品才寫配息金額的捨入幣別
+            ["配息金額：發行機構將依下列公式計算配息金額，並就每單位本商品而言，無條件捨去至整數位之日圓金額："]
+            if s.ccy == "JPY"
+            else []
+        ),
         f"自動提前到期事件：若所有連結標的在任一自動提前到期觀察日(含)之收盤價{word}其自動提前到期贖回價格，則「自動提前到期事件」視同發生。"
         f"「自動提前到期贖回價格」，係指就任一連結標的而言，自動提前到期贖回價格為期初進場價格之{s.ko}%。",
         f"「執行價格」係指就任一連結標的而言，各該連結標的之期初進場價格之{s.strike}%",

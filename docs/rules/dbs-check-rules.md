@@ -233,7 +233,7 @@
 | 到期 `(a)`、下限觸發事件定義、價格表下限觸發價格欄不一致：parser 交出不合法（`field.ki_type` 轉人工覆核；說明書、投資人須知都是） | （parser） |
 | 表1 與標的表代碼、順序、列數不同：parser 交出不合法（`field.underlyings` 與價格欄轉人工覆核） | （parser） |
 | 情境價格表逐格與表頭 % = 表1；基本假設面額 = 商品面額；投資金額、情境三期初價格與表現最差標的價格（Issue #321） | `doc.scenario_table` |
-| 表A（列數、期別、遞增、結束日 < 支付日、末列 = 定價日／到期日） | `schedule.coupon_dates` |
+| 表A（列數、期別、遞增、結束日 < 支付日、末列 = 定價日／到期日；沒有開始日欄，不查期始日） | 共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289） |
 | 最低申購單位數 × 面額 ≠ `即` 後金額：parser 交出不合法（`field.min_amounts` 轉人工覆核） | （parser） |
 | 投資人須知每頁頁首刊印日期 = 說明書（沒有說明書時 = 第 1 頁頁首） | `iis.print_dates`（DBS 範本專屬） |
 | 投資人須知最大利率值 = 括號內年利率 ÷ 12 無條件進位 4 位 | `iis.monthly_coupon`（DBS 範本專屬） |

@@ -16,16 +16,17 @@ from decimal import Decimal
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
-from ..standard_fields import Occurrence
+from ..standard_fields import Occurrence, ScenarioParam
 from ..text import squash
-from . import money, price_table
+from . import money, price_table, schedule
 from .common import RawText, capture_group, compat_normalized, derived, fee_rates, number
 from .layout import Document, LayoutSpec, TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-pd"
 # 2：價格表幣別字換行的那格仍歸到同一列（Issue #278）；3：價格表改由 parsers/price_table.py 讀（Issue #287）；
-# 4：重複寫出處（情境、贖回 %、說明文字幣別、警語的受託機構名稱；Issue #319）
-PARSER_VERSION = "4"
+# 4：重複寫出處（情境、贖回 %、說明文字幣別、警語的受託機構名稱；Issue #319）；5：日期表標準欄位與共用排程推導（Issue #289）；
+# 6：情境價格表與假設值交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "6"
 # 第七章章名在部分文件拆成兩行（「第七章、股權連結商」／「品的額外條款及條件」），只用前六章定位；辨識另查第七章全文
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
@@ -280,6 +281,7 @@ def _article9(fields: dict[str, ParsedField], art9: list[Line]) -> None:
         "underlying_table", table_region(art9, "(2)連結標的：", "投資人請注意：本商品之收益"), PRICE_TABLE
     )
     fields["underlying_table"] = table
+    fields["main_price_table"] = price_table.at("main_price_table", table, PRICE_TABLE)
     fields["ki_type"] = ki_type(ti, c, e, table)
 
 
@@ -469,50 +471,59 @@ def guaranteed_coupon(art15: list[Line]) -> dict[str, ParsedField]:
 # ---------------------------------------------------------------- KO 排程
 
 
+SCHEDULE_WHERE = "第 9 項日期表"
+
+
+def _schedule_table(fields: dict[str, ParsedField]) -> ParsedField:
+    """日期表：D 為配息表（觀察日 = 配息期結束日）；P 為配息日表，觀察日取自動提前出場觀察日表裡自動提前出場日 = 該期
+    配息日的那一列（對不到的期別沒有觀察日）。表上沒有開始日欄（首期自發行日開始），不查期始日。"""
+    wording = fields["ko_wording"]
+
+    def build(value: dict) -> standard_fields.DateTable | ParsedField:
+        if value["kind"] == "D":
+            return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "end"))
+        if not wording.ok:
+            return wording
+        rows = schedule.mapped_rows(value["rows"], wording.value[2] or ())
+        return standard_fields.DateTable(SCHEDULE_WHERE, rows)
+
+    return schedule.table_field(fields["coupon_table"], build)
+
+
 def _schedule(fields: dict[str, ParsedField]) -> None:
-    """KO 觀察方式、第一個可提前出場期與提前出場排程（範本規格 §4.1）。
+    """日期表與提前出場排程（`parsers/schedule.py`，範本規格 §4.1）。
 
     D：k = 「自第k 個配息期結束日」，比價日為第 k 期與末期的配息期結束日（配息表須是 D 型）。
-    P：k = 觀察日表第 1 列自動提前出場日在配息日表的期別（觀察日表的 i 不是期別）；比價日為每列的觀察日。"""
+    P：k = 觀察日表第 1 列自動提前出場日在配息日表的期別（觀察日表的 i 不是期別），各列須依序對到第 k～n 期；
+    比價日為每期的觀察日。"""
     wording, table = fields["ko_wording"], fields["coupon_table"]
-    keys = ("ko_observation", "first_callable_period", "autocall_schedule")
+    fields["schedule_table"] = _schedule_table(fields)
     bad = next((p for p in (wording, table) if not p.ok), None)
     if bad is not None:
-        for key in keys:
-            fields[key] = derived(key, bad)
+        fields.update(schedule.failed(bad))
         return
     kind, k, ko_rows = wording.value
     rows = table.value["rows"]
-    n = len(rows)
     ev = list(wording.evidence) + list(table.evidence)
-
-    def invalid(note: str) -> None:
-        for key in keys:
-            fields[key] = ParsedField(key, FieldStatus.INVALID, evidence=ev, note=note)
-
+    note = ""
     if kind != table.value["kind"]:
-        invalid("第 9 項 (b) 的 KO 觀察寫法和配息表的種類不一致（每日型配息表要有「配息期結束日」欄）")
-        return
-    if kind == "D":
-        if not 1 <= k <= n:
-            invalid(f"自動提前出場觀察日的起始期不在配息表（{n} 期）內")
-            return
-        dates = {k: rows[k - 1]["end"], n: rows[-1]["end"]}
-    else:
+        note = "第 9 項 (b) 的 KO 觀察寫法和配息表的種類不一致（每日型配息表要有「配息期結束日」欄）"
+    elif kind == "P":
         period_of = {r["payment"]: r["period"] for r in rows}
-        mapped = [(period_of.get(r["autocall"]), r["observation"]) for r in ko_rows]
-        if any(p is None for p, _ in mapped):
-            invalid("自動提前出場觀察日表的自動提前出場日不在配息日表內")
-            return
-        k = mapped[0][0]
-        if [p for p, _ in mapped] != list(range(k, n + 1)):
-            invalid(f"自動提前出場觀察日表的期別不是第 {k} 期到第 {n} 期連續")
-            return
-        dates = dict(mapped)
-    fields["ko_observation"] = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
-    fields["first_callable_period"] = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
-    fields["autocall_schedule"] = ParsedField(
-        "autocall_schedule", FieldStatus.PRESENT, standard_fields.AutocallSchedule(kind, k, n, dates), ev
+        mapped = [period_of.get(r["autocall"]) for r in ko_rows]
+        if any(p is None for p in mapped):
+            note = "自動提前出場觀察日表的自動提前出場日不在配息日表內"
+        elif mapped != list(range(mapped[0], len(rows) + 1)):
+            note = f"自動提前出場觀察日表的期別不是第 {mapped[0]} 期到第 {len(rows)} 期連續"
+        else:
+            k = mapped[0]
+    if note:
+        fields.update(schedule.invalid(ev, note))
+        return
+    obs = ParsedField("ko_observation", FieldStatus.PRESENT, kind, list(wording.evidence))
+    first = ParsedField("first_callable_period", FieldStatus.PRESENT, k, ev)
+    fields.update(
+        schedule.autocall_schedule(obs, first, fields["schedule_table"], "end" if kind == "D" else "observation")
     )
 
 
@@ -522,19 +533,27 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     """基本假設（天期、面額、配息率與年化配息率）、情境價格表、情境一配息月數（範本規格 §4.9）。"""
     ti = TextIndex(art16)
-    fields["scenario_tenor"] = capture("scenario_tenor", ti, r"基本假設天期：(\d+)個月", int, whole_match=True)
+    tenor = capture("scenario_tenor", ti, r"基本假設天期：(\d+)個月", int, whole_match=True)
     denom = rf"每單位面額：([\d,]+)({CCY})初始投資金額"
-    fields["scenario_denomination"] = capture("scenario_denomination", ti, denom, number, whole_match=True)
+    denomination = capture("scenario_denomination", ti, denom, number, whole_match=True)
     fields["scenario_denomination_currency"] = capture_group(art16, denom, 2, "scenario_denomination_currency")
     invest = rf"初始投資金額：([\d,]+)({CCY})配息率"
     fields["scenario_investment_currency"] = capture_group(art16, invest, 2, "scenario_investment_currency")
     coupon = r"配息率：" + PCT + r"\(年化配息率為" + PCT + r"\)"
-    fields["scenario_monthly_pct"] = capture_group(art16, coupon, 1, "scenario_monthly_pct", Decimal)
+    monthly = capture_group(art16, coupon, 1, "scenario_monthly_pct", Decimal)
     fields["coupon_pa_pct"] = capture_group(art16, coupon, 2, "coupon_pa_pct", Decimal)
-    fields["scenario_table"] = price_table.read(
+    scenario_table = price_table.read(
         "scenario_table", table_region(art16, "(年化配息率為", "情境分析一"), SCENARIO_TABLE
     )
-    _scenarios(fields, ti)
+    fields["scenario_reprint_table"] = price_table.at("scenario_reprint_table", scenario_table, SCENARIO_TABLE)
+    # 情境三的執行價不核對（未涵蓋清單 doc.scenario_calculations）
+    fields["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
+    assumed = [
+        ScenarioParam("scenario_tenor", "第 16 項基本假設", tenor),
+        ScenarioParam("scenario_denomination", "第 16 項基本假設", denomination),
+        ScenarioParam("scenario_monthly_coupon", "第 16 項基本假設", monthly),
+    ]
+    _scenarios(fields, ti, assumed)
     found = list(
         ti.finditer(
             r"情境分析一：較佳情況假設於第1個自動提前出場觀察日發生自動提前出場事件。[•‧]第1(?:~(\d+))?個月配息金額"
@@ -564,12 +583,12 @@ SCENARIO_REDEMPTIONS = (
 )
 
 
-def _scenarios(fields: dict[str, ParsedField], ti: TextIndex) -> None:
+def _scenarios(fields: dict[str, ParsedField], ti: TextIndex, assumed: list[ScenarioParam]) -> None:
     """情境分析一～三重複寫出的值（Issue #319，比照 BBVA #305）→ 出處清單，由規則逐處比對正式條款：
 
-    - `scenario_coupon_mentions`：配息金額行的配息率兩處（= 配息表配息率）
-    - `scenario_denomination_mentions`：配息金額、贖回金額行代入的面額（= 第 6 項面額）
-    - `scenario_months_mentions`：情境二、三「第 1~n 個月」的 n（= 天期；情境一的月數另由 `scenario_first_months` 核對）
+    - 共用情境規則的 `scenario_params`（Issue #294）：基本假設 `assumed`，加上配息金額行的配息率兩處（= 配息表配息率）、
+      配息金額與贖回金額行代入的面額（= 第 6 項面額）、情境二、三「第 1~n 個月」的 n（= 天期；情境一的月數另由
+      `scenario_first_months` 核對）
     - `scenario_ko_redemption_mentions`／`scenario_maturity_redemption_mentions`：贖回金額行的 % 兩處（= 第 9 項 (b)／(c)）
     - `scenario_currencies`：各情境金額旁的幣別（股價、股數與剩餘金額算式所在的行不列入）與情境三「以X支付剩餘金額」
 
@@ -653,8 +672,20 @@ def _scenarios(fields: dict[str, ParsedField], ti: TextIndex) -> None:
         "剩餘金額幣別",
         "第一章第 16 項情境分析三「以X支付剩餘金額」",
     )
+    params = list(assumed)
+    for name, code in SCENARIO_PARAMS.items():
+        params += [ScenarioParam(code, f"{occ.where}的", occ.value) for occ in lists.pop(name)]
+    fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
     for name, items in lists.items():
         fields[name] = standard_fields.occurrences(name, items)
+
+
+# 情境重複寫出的值交給共用情境規則的出處清單 → 出處代號
+SCENARIO_PARAMS = {
+    "scenario_coupon_mentions": "scenario_monthly_coupon",
+    "scenario_denomination_mentions": "scenario_denomination",
+    "scenario_months_mentions": "scenario_coupon_months",
+}
 
 
 def _months(x: str | None) -> int:

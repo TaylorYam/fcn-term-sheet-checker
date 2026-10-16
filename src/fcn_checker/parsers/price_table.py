@@ -199,6 +199,11 @@ def price_rows(
     return ParsedField(name, FieldStatus.PRESENT, rows, list(table.evidence))
 
 
+def at(name: str, table: ParsedField, spec: TableSpec) -> ParsedField:
+    """價格表 → 標準欄位 `main_price_table`／`scenario_reprint_table`（位置為 `spec.where`，Issue #294）；表有問題時沿用它的狀態。"""
+    return derived(name, table, standard_fields.TableAt(spec.where, table.value) if table.ok else None)
+
+
 def underlyings(table: ParsedField) -> ParsedField:
     """表上的彭博代碼 → 標準欄位 `underlyings`（依表上順序）；表有問題時沿用它的狀態。"""
     if not table.ok:

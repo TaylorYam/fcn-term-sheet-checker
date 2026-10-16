@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import re
 
 from ..schema import CheckResult, Evidence, FieldStatus, Item, ParsedField
@@ -41,7 +40,6 @@ NOT_COVERED = [
         "範本以外的寫法會轉人工覆核",
     },
 ]
-START_GAP = dt.timedelta(days=4)  # D 型配息期開始日最晚在前期結束日後 4 個日曆天（遇假日順延，工具沒有假日曆）
 BASE_PROSPECTUS_PLACES = 3  # 基本公開說明書日期：封面警語 (7)、第三章 §6(7)、第五章 §2(1)
 
 
@@ -123,18 +121,15 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 商品名稱「N 個月期」。"""
+    """天期 = 商品名稱「N 個月期」（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh = f("tenor_months"), f("date_table"), f("name_zh")
+    tenor, zh = f("tenor_months"), f("name_zh")
     rid = "doc.coupon_periods"
     months = re.search(r"法國巴黎銀行(\d+)個月期", squash(zh.value)) if zh.ok else None
     name_months = ParsedField("name_months", zh.status, int(months[1]) if months else None, zh.evidence, note=zh.note)
     if zh.ok and months is None:
         name_months = ParsedField.invalid("name_months", [], "商品名稱找不到「N 個月期」")
     return [
-        kit.doc_check(ctx, rid, "date_table", "第 14 項日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months", "商品名稱月數", tenor, name_months).compare(
             tenor.value, name_months.value
         ),
@@ -235,66 +230,14 @@ def page_count(ctx: IssuerContext) -> CheckResult:
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）
 
 
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
+def autocall_dates(ctx: IssuerContext) -> CheckResult:
+    """自動提前贖回評價日：第 14 項(8) 的 k 在期數內；P 型「不適用」列 = 第 1～k−1 期、第 k 期起每期都有日期。
+    日期表的期數、順序、末期日期與開始日由共用規則（rules/schedule.py）檢查。"""
     f = ctx.ts.f
-    table, final, maturity, issue = (
-        f(x) for x in ("date_table", "final_valuation_date", "maturity_date", "issue_date")
-    )
-    k = f("first_callable_period")
-    names = {
-        "schedule.coupon_dates": "日期表配息日與期末日期",
-        "schedule.period_starts": "日期表配息期開始日",
-        "schedule.autocall_dates": "自動提前贖回評價日",
-    }
-    if not table.ok:
-        return [Check(rid, "date_table", Item.expected(n), ctx.document).review(table) for rid, n in names.items()]
-    kind, rows = table.value["type"], table.value["rows"]
-    observed = "end" if kind == "D" else "pricing"
-    label = "配息期結束日" if kind == "D" else "自動提前贖回評價日"
-    out = []
-
+    table, k = f("date_table"), f("first_callable_period")
     issues = []
-    payments = [r["payment"] for r in rows]
-    if any(a >= b for a, b in zip(payments, payments[1:], strict=False)):
-        issues.append("配息日沒有逐期遞增")
-    late = [r["period"] for r in rows if r[observed] is not None and r[observed] >= r["payment"]]
-    if late:
-        issues.append(f"第 {'、'.join(map(str, late))} 期{label}沒有早於配息日")
-    deps = [table, final, maturity]
-    if kit.first_bad(deps) is None:
-        if payments[-1] != maturity.value:
-            issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
-        if rows[-1][observed] != final.value:
-            issues.append(f"末期{label} {rows[-1][observed] or '不適用'} 不等於期末評價日 {final.value}")
-    out.append(
-        kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], deps, issues)
-    )
-
-    if kind == "D":  # 第 1 期開始日 = 發行日；前期結束日 < 開始日 ≤ 前期結束日 + 4 個日曆天
-        issues = []
-        if issue.ok and rows[0]["start"] != issue.value:
-            issues.append(f"第 1 期開始日 {rows[0]['start']} 不等於發行日 {issue.value}")
-        for prev, row in zip(rows, rows[1:], strict=False):
-            if not prev["end"] < row["start"] <= prev["end"] + START_GAP:
-                issues.append(
-                    f"第 {row['period']} 期開始日 {row['start']} 不在前期結束日 {prev['end']} 後 4 個日曆天內"
-                )
-        out.append(
-            kit.structure_check(
-                ctx,
-                "schedule.period_starts",
-                "period_starts",
-                names["schedule.period_starts"],
-                [table, issue],
-                issues,
-                tolerance="前期結束日 < 開始日 ≤ 前期結束日 + 4 個日曆天（遇假日順延；工具沒有假日曆）",
-            )
-        )
-
-    # 自動提前贖回評價日：D 型第 14 項(8) 的 k 在期數內；P 型「不適用」列 = 第 1～k−1 期、第 k 期起每期都有日期
-    issues = []
-    if k.ok:
-        n = k.value
+    if table.ok and k.ok:
+        kind, rows, n = table.value["type"], table.value["rows"], k.value
         if not 1 <= n <= len(rows):
             issues.append(f"第一個可提前出場期 {n} 不在第 1～{len(rows)} 期之間")
         elif kind == "P":
@@ -303,12 +246,9 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
                 if (r["pricing"] is not None) != want:
                     shown = "應有日期" if want else "應為「不適用」"
                     issues.append(f"第 {r['period']} 期自動提前贖回評價日{shown}")
-    out.append(
-        kit.structure_check(
-            ctx, "schedule.autocall_dates", "autocall_dates", names["schedule.autocall_dates"], [table, k], issues
-        )
+    return kit.structure_check(
+        ctx, "schedule.autocall_dates", "autocall_dates", "自動提前贖回評價日", [table, k], issues
     )
-    return out
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
@@ -321,7 +261,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *periods(ctx),
         *ko_terms(ctx),
         *redemption(ctx),
-        *schedule(ctx),
+        autocall_dates(ctx),
         base_prospectus(ctx),
         page_count(ctx),
         *bnp_scenario.run(ctx),

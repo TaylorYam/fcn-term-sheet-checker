@@ -34,8 +34,8 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表與情境重複寫出的配息率、給付 100%、小表表頭 %、金額幣別"
-        "（Issue #314）；情境算式、配息金額、投資單位數、股數、假設收盤價、小表的期初股價與門檻價、總報酬率與年化報酬率"
+        "description": "第 15 項情境分析只核對假設價格表 = 第 9 項價格表、假設 a)、c) 的幣別、假設 d) 的配息率與年息，以及各情境"
+        "重複寫出的配息率、給付 100%、小表表頭 %、金額幣別（Issue #314、#294）；情境算式、配息金額、投資單位數、股數、假設收盤價、小表的期初股價與門檻價、總報酬率與年化報酬率"
         "不核對（2026-10-14 確認）",
     },
     {
@@ -166,9 +166,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 中英文名稱月數。"""
+    """天期 = 中英文名稱月數（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -180,9 +180,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     zh_months = months(zh, r"CGMHI(\d+)個月", "商品中文名稱")
     en_months = months(en, r"^(\d+)-Month", "商品英文名稱")
     return [
-        kit.doc_check(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -388,60 +385,25 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def schedule(ctx: IssuerContext) -> list[CheckResult]:
+    """日期表提前出場期別：D 型開始日與結束日都是「不適用」的期別 = 第 1～k−1 期、第 k 期有結束日。日期表的期數、順序、
+    末期日期與開始日（= 前一期結束日）由共用規則（rules/schedule.py）檢查。"""
     f = ctx.ts.f
-    table, final, maturity, k = (
-        f(x) for x in ("date_table", "final_valuation_date", "maturity_date", "first_callable_period")
-    )
-    names = {"schedule.coupon_dates": "日期表配息日與末列", "schedule.autocall_dates": "日期表提前出場期別"}
+    table, k = f("date_table"), f("first_callable_period")
+    name = "日期表提前出場期別"
     if not table.ok:
-        return [Check(rid, "date_table", Item.expected(n), ctx.document).review(table) for rid, n in names.items()]
+        return [Check("schedule.autocall_dates", "date_table", Item.expected(name), ctx.document).review(table)]
     kind, rows = table.value["type"], table.value["rows"]
-    observed = {"D": "end", "P": "observation"}.get(kind)
-    out = []
-    issues = []
-    payments = [r["payment"] for r in rows]
-    if any(a >= b for a, b in zip(payments, payments[1:], strict=False)):
-        issues.append("配息日沒有逐期遞增")
-    if observed:
-        late = [r["period"] for r in rows if r[observed] is not None and r[observed] >= r["payment"]]
-        if late:
-            issues.append(
-                f"第 {'、'.join(map(str, late))} 期{'配息觀察期間結束日' if kind == 'D' else '觀察日'}沒有早於配息日"
-            )
-        if final.ok and rows[-1][observed] != final.value:
-            issues.append(
-                f"末列{'結束日' if kind == 'D' else '觀察日'} {rows[-1][observed]} 不等於期末評價日 {final.value}"
-            )
-    if maturity.ok and payments[-1] != maturity.value:
-        issues.append(f"末列配息日 {payments[-1]} 不等於到期日 {maturity.value}")
-    out.append(
-        kit.structure_check(
-            ctx,
-            "schedule.coupon_dates",
-            "coupon_dates",
-            names["schedule.coupon_dates"],
-            [table, final, maturity],
-            issues,
-        )
-    )
     issues = []
     if kind == "D" and k.ok:
         n = k.value
         blank = [r["period"] for r in rows if r["start"] is None and r["end"] is None]
         if blank != list(range(1, n)):
             issues.append(f"開始日與結束日都是「不適用」的期別應為第 1～{n - 1} 期，實際為 {blank or '無'}")
-        if rows[n - 1]["end"] is None:
+        if not 1 <= n <= len(rows) or rows[n - 1]["end"] is None:
             issues.append(f"第 {n} 期沒有配息觀察期間結束日")
-        for prev, row in zip(rows, rows[1:], strict=False):
-            if row["period"] > n and row["start"] != prev["end"]:
-                issues.append(f"第 {row['period']} 期開始日 {row['start']} 不等於前期結束日 {prev['end']}")
     if kind == "D" or (kind == "P" and k.ok):
-        out.append(
-            kit.structure_check(
-                ctx, "schedule.autocall_dates", "autocall_dates", names["schedule.autocall_dates"], [table, k], issues
-            )
-        )
-    return out
+        return [kit.structure_check(ctx, "schedule.autocall_dates", "autocall_dates", name, [table, k], issues)]
+    return []
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:

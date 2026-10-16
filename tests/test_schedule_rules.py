@@ -11,11 +11,12 @@ from dataclasses import replace
 
 import pytest
 
+from fcn_checker.parsers import schedule as schedule_parser
 from fcn_checker.parsers.schedule import autocall_schedule
 from fcn_checker.rules import schedule
-from fcn_checker.schema import FieldStatus, ParsedField
+from fcn_checker.schema import Evidence, FieldStatus, ParsedField
 from fcn_checker.standard_fields import AutocallSchedule, DateRow, DateTable, PeriodStart
-from harness import MISMATCH, PASS, REVIEW
+from harness import MISMATCH, NA, PASS, REVIEW
 from rule_fixtures import issuer_context, term_sheet
 
 D = dt.date
@@ -121,6 +122,11 @@ def test_observation_order():
 # ---------------------------------------------------------------- 末期觀察日、末期配息日
 
 
+def test_table_without_observation_dates_does_not_check_the_last_one():
+    rows = tuple(replace(r, observation=None) for r in ROWS)
+    assert run(schedule_table=table(rows))["schedule.last_observation"].status == NA
+
+
 @pytest.mark.parametrize(
     "rid,field,value,status",
     [
@@ -167,6 +173,13 @@ def test_previous_end_rule_and_first_period_equals_issue_date():
     r = starts(D(2030, 1, 7), D(2030, 2, 4), D(2030, 3, 5), start=decl)
     assert r.status == MISMATCH
     assert "第 1 期期始日應為 2030-01-04" in r.message and "第 3 期期始日應為 2030-03-04" in r.message
+
+
+def test_after_previous_end_rule():
+    decl = PeriodStart("after_previous_end", "issue_date")
+    assert starts(ISSUE, D(2030, 2, 6), D(2030, 3, 5), start=decl).status == PASS, "跳過幾天都可以"
+    r = starts(ISSUE, D(2030, 2, 4), D(2030, 3, 5), start=decl)
+    assert r.status == MISMATCH and "第 2 期期始日應晚於 2030-02-04" in r.message
 
 
 def test_first_period_needs_the_issue_date():
@@ -218,6 +231,9 @@ def test_periodic_schedule_has_every_period_from_k_and_final_overrides_the_last(
     obs, first = present("ko_observation", "P"), present("first_callable_period", 1)
     sched = autocall_schedule(obs, first, TABLE, "observation", final)["autocall_schedule"].value
     assert sched.dates == {1: D(2030, 2, 4), 2: D(2030, 3, 4), 3: D(2030, 4, 5)}
+    start = present("ko_start", D(2030, 2, 1))
+    daily = autocall_schedule(present("ko_observation", "D"), first, TABLE, first_date=start)["autocall_schedule"]
+    assert daily.value.dates == {1: D(2030, 2, 1), 3: D(2030, 4, 4)}, "第 k 期取 first_date"
 
 
 def test_derivation_failures_pass_the_status_through_all_three_fields():
@@ -227,9 +243,26 @@ def test_derivation_failures_pass_the_status_through_all_three_fields():
     assert out["autocall_schedule"].candidates == [2, 3]
 
     out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 4), TABLE, "end")
-    assert {pf.status for pf in out.values()} == {FieldStatus.INVALID}
+    assert out["autocall_schedule"].status == FieldStatus.INVALID
     assert "不在第 13 項日期表的第 1～3 期之間" in out["autocall_schedule"].note
+    assert (out["ko_observation"].value, out["first_callable_period"].value) == ("D", 4), (
+        "照說明書交出，Non-Call 仍可比"
+    )
 
     blank = present("schedule_table", table((ROWS[0], replace(ROWS[1], end=None), ROWS[2])))
     out = autocall_schedule(present("ko_observation", "D"), present("first_callable_period", 2), blank, "end")
     assert out["autocall_schedule"].status == FieldStatus.INVALID and "第 2 期" in out["autocall_schedule"].note
+
+
+def test_shared_helpers_for_issuer_tables():
+    ev = [Evidence(page=1, bbox=(0, 0, 1, 1), text="x")]
+    assert {pf.status for pf in schedule_parser.invalid(ev, "寫法不一致").values()} == {FieldStatus.INVALID}
+    pay = [{"period": p, "payment": D(2030, p + 1, 7)} for p in (1, 2, 3)]
+    ko = [
+        {"autocall": D(2030, 3, 7), "observation": D(2030, 3, 4)},
+        {"autocall": D(2030, 4, 7), "observation": D(2030, 4, 4)},
+    ]
+    rows = schedule_parser.mapped_rows(pay, ko)
+    assert [r.observation for r in rows] == [None, D(2030, 3, 4), D(2030, 4, 4)], "對不到出場日的期別沒有觀察日"
+    assert schedule_parser.blank_starts(rows) == 3, "整張表沒有期始日"
+    assert schedule_parser.blank_starts((replace(ROWS[0], start=None), *ROWS[1:])) == 1

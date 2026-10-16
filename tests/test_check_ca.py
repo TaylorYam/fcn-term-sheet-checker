@@ -49,11 +49,14 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in CA.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    # 最低保證配息率、情境基本假設配息率、第 9 項 (a) 舉例的月配息率、情境一～三配息金額行各 2 處（Issue #319）
-    assert len(rule(r, "doc.coupon_mentions")) == 9
+    assert len(rule(r, "doc.coupon_mentions")) == 2  # 最低保證配息率、第 9 項 (a) 舉例的月配息率（Issue #319）
     assert len(rule(r, "doc.redemption_pct")) == 6  # 第 9 項 (b)、(c)；情境一、二贖回金額行各 2 處
-    assert len(rule(r, "doc.scenario_params")) == 5  # 情境配息金額行 3 處、贖回金額行 2 處代入的面額
-    assert len(rule(r, "doc.coupon_periods")) == 6  # 配息表、名稱 2 處、基本假設天期、情境二／三配息月數
+    # 共用情境規則（Issue #294）：基本假設天期、面額、配息率；情境一～三配息金額行的配息率各 2 處；配息金額行 3 處、
+    # 贖回金額行 2 處代入的面額；情境二／三配息月數
+    params = [x.field for x in rule(r, "scenario.params")]
+    assert len(params) == 16 and params.count("scenario_monthly_coupon_7") == 1
+    assert len(rule(r, "scenario.reprint")) == 1
+    assert len(rule(r, "doc.coupon_periods")) == 2  # 名稱 2 處（日期表期數是共用檢查）
     assert len(rule(r, "doc.autocall_terms")) == 2  # 最低保證配息率月數、情境一配息月數
     assert len(rule(r, "doc.isin_consistency")) == 2
     assert rule(r, "standard.fixed_warning")[0].actual == 3  # 封面、第一章第 2 項（去【】）、第三章
@@ -110,22 +113,22 @@ def test_ki_type_is_compared_with_the_sheet(tmp_path):
             Edit("(4)最低保證配息率：第一個月配息 0.7500%", "(4)最低保證配息率：第一個月配息 0.7600%", "ts.art15"),
             "doc.coupon_mentions",
         ),
-        (Edit("配息率：0.7500%(年化", "配息率：0.7600%(年化", "ts.art16"), "doc.coupon_mentions"),
+        (Edit("配息率：0.7500%(年化", "配息率：0.7600%(年化", "ts.art16"), "scenario.params"),
         (Edit("第一個月配息", "前二個月配息", "ts.art15"), "doc.autocall_terms"),
         (Edit("• 第 1 個月配息金額", "• 第 1~2 個月配息金額", "ts.art16"), "doc.autocall_terms"),
         # Issue #319：情境與第 9 項重複寫出的值
         (Edit("月配息率為0.7500%", "月配息率為0.7600%", "ts.art9"), "doc.coupon_mentions"),
-        (Edit("每單位面額 × 0.7500%＝", "每單位面額 × 0.7600%＝", "ts.art16"), "doc.coupon_mentions"),
-        (Edit("＝10,000 × 0.7500%", "＝10,000 × 0.7600%", "ts.art16"), "doc.coupon_mentions"),
-        (Edit("＝10,000 × 0.7500%", "＝1,000 × 0.7500%", "ts.art16"), "doc.scenario_params"),
-        (Edit("＝10,000 × 100%", "＝1,000 × 100%", "ts.art16"), "doc.scenario_params"),
-        (Edit("• 第 1~6 個月配息金額", "• 第 1~5 個月配息金額", "ts.art16"), "doc.coupon_periods"),
+        (Edit("每單位面額 × 0.7500%＝", "每單位面額 × 0.7600%＝", "ts.art16"), "scenario.params"),
+        (Edit("＝10,000 × 0.7500%", "＝10,000 × 0.7600%", "ts.art16"), "scenario.params"),
+        (Edit("＝10,000 × 0.7500%", "＝1,000 × 0.7500%", "ts.art16"), "scenario.params"),
+        (Edit("＝10,000 × 100%", "＝1,000 × 100%", "ts.art16"), "scenario.params"),
+        (Edit("• 第 1~6 個月配息金額", "• 第 1~5 個月配息金額", "ts.art16"), "scenario.params"),
         (Edit("出場贖回金額＝每單位面額 × 100%", "出場贖回金額＝每單位面額 × 99%", "ts.art16"), "doc.redemption_pct"),
         (Edit("到期贖回金額＝每單位面額 × 100%", "到期贖回金額＝每單位面額 × 99%", "ts.art16"), "doc.redemption_pct"),
-        (Edit("天期：6 個月", "天期：7 個月", "ts.art16"), "doc.coupon_periods"),
-        (Edit("70.3150 美元", "70.3151 美元", "ts.art16.table"), "doc.scenario_table"),
-        (Edit("70.00% )", "75.00% )", "ts.art16.table"), "doc.scenario_table"),
-        (Edit("每單位面額：10,000 美元", "每單位面額：1,000 美元", "ts.art16"), "doc.scenario_table"),
+        (Edit("天期：6 個月", "天期：7 個月", "ts.art16"), "scenario.params"),
+        (Edit("70.3150 美元", "70.3151 美元", "ts.art16.table"), "scenario.reprint"),
+        (Edit("70.00% )", "75.00% )", "ts.art16.table"), "scenario.reprint"),
+        (Edit("每單位面額：10,000 美元", "每單位面額：1,000 美元", "ts.art16"), "scenario.params"),
         (Edit("6 個月美元計價", "7 個月美元計價", "ts.art1"), "doc.name_consistency"),
         (Edit(f"(ISIN：{ISIN})", "(ISIN：XS1999900087)", "ts.cover"), "doc.isin_consistency"),
         (Edit(f"(ISIN：{ISIN} ) 。", "(ISIN：XS1999900087 ) 。", "ts.art1"), "doc.isin_consistency"),
@@ -221,8 +224,8 @@ def test_redemption_pct_must_be_100(tmp_path):
         ),
         (
             Edit("• 第 1~6 個月配息金額 ＝每單位面額", "• 第 1~6 個月配息金額 ＝面額", "ts.art16"),
-            "doc.coupon_periods",
-            "scenario2_months",
+            "scenario.params",
+            "scenario_coupon_months_1",
         ),
         (Edit("低於100%美元投資本金", "低於投資本金", "ts.ch四"), "field.currency", "principal_currency_ch4"),
         (Edit("而非由", "並非由", "ts.ch三"), "standard.distributor", "distributor_name_ch3_w5"),
@@ -245,36 +248,35 @@ def test_unreadable_repeated_mentions_need_review(tmp_path, edit, rid, field):
 
 
 def test_scenario_table_result_lists_every_cell(tmp_path):
-    """情境價格表結果的預期值／實際值帶出各格與面額（Issue #319，比照 BBVA #305）。"""
+    """情境價格表結果的預期值／實際值帶出各格（Issue #319，比照 BBVA #305）。"""
     r = check(tmp_path)
-    result = rule(r, "doc.scenario_table")[0]
+    result = rule(r, "scenario.reprint")[0]
     assert result.status == S.PASS
     assert "70.3150" in result.expected and result.expected == result.actual
-    assert result.expected[-1] == "10,000"
 
 
 def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     old = f"(5) 到期日：{spec.date(spec.maturity_date)}"
     r = check(tmp_path, spec, edits=[Edit(old, "(5) 到期日：2031 年01 月20 日", "ts.art13")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     r = check(tmp_path, edits=[Edit("(1) 商品年期：6 個月", "(1) 商品年期：7 個月", "ts.art13")])
-    assert rule(r, "doc.coupon_periods", "coupon_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_daily_last_period_end_must_be_the_final_valuation_date(tmp_path):
     spec = Spec()
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030 年07 月10 日", "ts.art9.coupon")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_periodic_last_observation_must_be_the_final_valuation_date(tmp_path):
     spec = Spec(ko_obs="P")
     r = check(tmp_path, spec, edits=[Edit(spec.date(spec.ends[-1]), "2030 年07 月10 日", "ts.art9.ko")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_observation")[0].status == S.MISMATCH
 
 
 def test_periodic_table_must_cover_non_call_to_the_last_period(tmp_path):
@@ -286,8 +288,8 @@ def test_periodic_table_must_cover_non_call_to_the_last_period(tmp_path):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("自第1 個配息期結束日", "自第9 個配息期結束日", "ts.art9")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_ki_definition_must_match_the_maturity_wording(tmp_path):

@@ -3,7 +3,7 @@
 - 文件側：[Citi 範本規格](../templates/citi-zh-product-description.md)；投資人須知見 [Citi 投資人須知範本規格](../templates/citi-zh-iis.md)與[投資人須知核對規則](iis-check-rules.md) §3 Citi 欄
 - 下單側：參考條件表，見[參考條件表格式](../order-formats/reference-sheet.md)與 [Citi 下單資料格式](../order-formats/citi-fcn-reference.md)
 - 會隨時間改變的基準見[審查標準](review-standard.md) §2.9（設定檔 `config/review_standard.toml`）
-- 狀態：核對範圍與規則已與作業人員確認（2026-10-14，Issue #220）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 Citi 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對；期初定價 `field.initial_pricing`）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.monthly_coupon`（第 13 項各處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 與各情境）、`derive.coupon_pa_mentions`（第 13 項其他處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 的年化配息率）；§3.4 `derive.prices`（共用）、`doc.table_header_pct`、`doc.scenario_header_pct`（情境小表表頭）、`doc.scenario_table`；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`（含 ISO 代碼）、`doc.initial_valuation_date`、`doc.date_mentions`、`doc.denomination_mentions`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_memory`、`doc.memory_wording`、`doc.ki_consistency`（含 KI 每期觀察 t=1-n）、`doc.redemption_pct`、`schedule.coupon_dates`、`schedule.autocall_dates`；§3.6 共用 `standard.*`（Citi 分節）。第 12 項(9)、第 13 項與日期表的 KO 觀察寫法不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
+- 狀態：核對範圍與規則已與作業人員確認（2026-10-14，Issue #220）；說明書與投資人須知都已實作（投資人須知見[投資人須知核對規則](iis-check-rules.md) §3 Citi 欄）。rule_id 對照：§3.1 共用 `field.*`（標的不看順序：`field.underlyings`、`field.underlying_prices` 依代號配對；期初定價 `field.initial_pricing`）、`backfill.underlying_prices`（依代號覆寫）；§3.3 `derive.monthly_coupon`（第 13 項各處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 與各情境）、`derive.coupon_pa_mentions`（第 13 項其他處、第 14 項(2)、第 13 項末段舉例、第 15 項假設 d) 的年化配息率）；§3.4 `derive.prices`（共用）、`doc.table_header_pct`、`doc.scenario_header_pct`（情境小表表頭）、`doc.scenario_table`；§3.5 `doc.trustee_product_code`、`doc.name_consistency`、`doc.currency_consistency`（含 ISO 代碼）、`doc.initial_valuation_date`、`doc.date_mentions`、`doc.denomination_mentions`、`doc.coupon_periods`、`doc.autocall_wording`、`doc.ko_memory`、`doc.memory_wording`、`doc.ki_consistency`（含 KI 每期觀察 t=1-n）、`doc.redemption_pct`、共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（Issue #289）、`schedule.autocall_dates`；§3.6 共用 `standard.*`（Citi 分節）。第 12 項(9)、第 13 項與日期表的 KO 觀察寫法不一致時 parser 判讀不到，KO 觀察方式與 Non-Call 轉人工覆核
 - 本文件只寫與 [BARC](barc-check-rules.md)、[HSBC](hsbc-check-rules.md)、[MS](ms-check-rules.md)、[BNP](bnp-check-rules.md)、[SG 核對規則](sg-check-rules.md)不同或 Citi 特有的部分；未提到的原則（判定原則、數值處理、期初價格本身不核對等）見[共用核對規則](shared-check-rules.md)
 
 ## 1. 範圍
@@ -94,7 +94,7 @@
 | 自動提前出場 | §13 有 `自動提前出場界限` ⇔ 名稱中文有 `自動提前出場`、英文有 `Autocall` ⇔ §9 表有自動提前出場界限欄 ⇔ 日期表為 D 型三欄或 P 型觀察日 ⇔ §8 有 (4) |
 | KI | §8(3) 有無 `下限價：` 與 `觸及下限事件：` 寫法、到期給付款一致（範本規格 §4.4）；§9 表有無下限價欄一致；P 型 `(t=1-n)` 的 n = 天期 |
 | 標的數 | 名稱 `單一連結標的`／`一籃子連結標的中表現最差`（英文 `Single Underlying`／`the Worst Performing Underlying in the basket`）與 §9 列數一致（1 檔／2 檔以上） |
-| D 型日期表 | 第 1～k−1 期開始／結束日 `不適用`；第 k 期結束日有日期；開始日_i = 結束日_{i−1}（i > k）；結束日 < 配息日；末列結束日 = 期末評價日；末列配息日 = 到期日；配息日遞增 |
+| D 型日期表 | （期數、順序、末列、開始日為共用 `schedule.period_count`／`payment_order`／`observation_order`／`last_observation`／`last_payment`／`period_start`（[共用核對規則](shared-check-rules.md) §6.1，Issue #289））第 1～k−1 期開始／結束日 `不適用`；第 k 期結束日有日期；開始日_i = 結束日_{i−1}（i > k）；結束日 < 配息日；末列結束日 = 期末評價日；末列配息日 = 到期日；配息日遞增 |
 | P 型日期表 | 每期觀察日 < 配息日；末列觀察日 = 期末評價日；末列配息日 = 到期日；配息日遞增 |
 | 無自動提前出場日期表 | 只有配息日；末列配息日 = 到期日；配息日遞增 |
 | 到期給付 | §8(3)(a) `每單位商品面額的100%` 固定；§8(3)(b) `每單位商品面額的100% ÷ 執行價`、§8(4) `每單位商品面額100%之金額`、§13 與 §17(C) 強制買回 `每單位商品面額的100%之金額`、§15 各情境給付算式的 100% 也都是 100%（Issue #314） |
@@ -145,7 +145,7 @@ Issue #314（比照 BBVA #305）加上各情境重複寫出的值（範本規格
 | 期初定價欄 | 核對（表頭收盤價格／VWAP） |
 | 發行不成立門檻、保證機構、總代理人名稱 | 固定值核對；地址電話不核對 |
 | 最低申購／加購／贖回 | = 面額 |
-| 情境 | 只核對假設價格表 = §9 |
+| 情境 | 只核對假設價格表 = §9、假設 a)、c) 的幣別、假設 d) 的配息率與年息、各情境重複寫出的配息率、給付 100%、小表表頭 %、金額幣別（Issue #314；未涵蓋清單的說明 2026-10-16 依此更正，Issue #294） |
 | 舊文件 CT1 | 判不通過屬預期 |
 | CT2 表上價格 1/100 | 表填錯，照常判不一致 |
 

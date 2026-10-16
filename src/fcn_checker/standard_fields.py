@@ -12,10 +12,13 @@ import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from .parsers.layout import TextIndex
 from .schema import Evidence, FieldStatus, ParsedField
+
+if TYPE_CHECKING:
+    from .parsers.price_table import PriceTable
 
 
 class TermSheet(Protocol):
@@ -87,14 +90,16 @@ class DateRow:
     evidence: tuple[Evidence, ...] = ()
 
 
-StartRule = Literal["previous_end", "next_trading_day"]
+StartRule = Literal["previous_end", "next_trading_day", "after_previous_end"]
 
 
 @dataclass(frozen=True)
 class PeriodStart:
     """期始日的定義，由上手依範本宣告（Issue #289 決定 5）。"""
 
-    rule: StartRule  # previous_end：= 前一期期末日（範本寫「開始日（不含當日）」）；next_trading_day：前一期期末後的下一個一籃子預定交易日
+    # previous_end：= 前一期期末日（範本寫「開始日（不含當日）」）；next_trading_day：前一期期末後的下一個一籃子預定交易日；
+    # after_previous_end：只要晚於前一期期末日（BBVA：起始日跳過美股開市的銀行假日，交易所假日表沒有，2026-10-16 使用者決定）
+    rule: StartRule
     first: (
         Literal["issue_date", "after_issue"] | None
     )  # 第 1 期有期始日時和發行日怎麼比：= 發行日／依 `rule` 由發行日推；None 不比
@@ -129,7 +134,58 @@ class Occurrence:
     value: ParsedField
 
 
-def occurrences(name: str, items: list[Occurrence]) -> ParsedField:
+@dataclass(frozen=True)
+class TableAt:
+    """說明書上的一張價格表：位置（用在項目名稱與錯訊，例：第 9 項價格表）與 parsers/price_table.py 讀出的表。"""
+
+    where: str
+    table: PriceTable
+
+
+# 情境假設值的出處代號 → （出處名稱, 要等於的正式值標準欄位）；名稱只在這裡定義（Issue #294 決定 2b）
+SCENARIO_TARGETS: dict[str, tuple[str, str]] = {
+    "scenario_denomination": ("每單位面額", "denomination"),
+    "scenario_principal": ("本金", "denomination"),
+    "scenario_investment": ("總投資金額", "denomination"),  # 面額 × 倍數（同一處寫的單位數）
+    "scenario_tenor": ("天期", "tenor_months"),
+    "scenario_coupon_months": ("配息月數", "tenor_months"),
+    "scenario_coupon_pa": ("年利率", "coupon_pa_pct"),
+    "scenario_annualized_return": ("年化報酬率", "coupon_pa_pct"),
+    "scenario_monthly_coupon": ("配息率", "monthly_coupon_pct"),
+    "scenario_issue_price": ("發行價格", "issue_price_pct"),
+    "scenario_strike_pct": ("執行價 %", "strike_pct"),
+}
+
+
+@dataclass(frozen=True)
+class ScenarioParam:
+    """情境假設值的一處（Issue #294 (b)）：出處代號（`SCENARIO_TARGETS` 的鍵，決定名稱與正式值）、位置、值。"""
+
+    code: str
+    where: str  # 項目名稱的開頭（例：第 16 項基本假設、第 15 項情境 (i) 到期贖回金額的）
+    value: ParsedField
+    times: ParsedField | None = None  # 倍數：值 = 正式值 × 倍數（例：總投資金額 = 單位數 × 面額，倍數是同一處的單位數）
+
+    @property
+    def name(self) -> str:
+        return SCENARIO_TARGETS[self.code][0]
+
+    @property
+    def target(self) -> str:
+        return SCENARIO_TARGETS[self.code][1]
+
+
+@dataclass(frozen=True)
+class ScenarioPrice:
+    """較差情境寫出的一個價格（Issue #294 (c)）：對到主價格表 `underlying_prices` 第幾檔（從 1 起）的哪一欄。"""
+
+    where: str  # 項目名稱的開頭（例：第 15 項情境 (iii) 交割股數算式的）
+    row: int | None  # 第幾檔；上手認不出是哪一檔時為 None（轉人工覆核）
+    column: str  # initial／strike／ko／ki
+    value: ParsedField  # 情境寫的價格（Decimal）
+
+
+def occurrences(name: str, items: Sequence[Occurrence | ScenarioParam | ScenarioPrice]) -> ParsedField:
     """把上手的各出處包成一個標準欄位（清單本身一定存在，各出處自帶狀態與證據）。"""
     return ParsedField(name, FieldStatus.PRESENT, tuple(items))
 
@@ -171,6 +227,13 @@ STANDARD_FIELDS: dict[str, str] = {
     "倍數依審查標準 min_amount_multiples.<上手>.<出處欄位>，沒設定為 1",
     "subscription_dates": "tuple[Occurrence, ...]：須等於交易日的受理申購日出處（開始、結束）",
     "print_dates": "tuple[Occurrence, ...]：須在交易日當天至允許天數內的刊印日期出處",
+    "monthly_coupon_pct": "Decimal：說明書正式的月配息率 %（例：配息表、條款寫的每月配息率），保留說明書顯示位數；"
+    "只有情境假設值要比它時才讀（rules/scenario.py）；範本沒有時交出 absent",
+    # 情境分析（docs/rules/shared-check-rules.md §7，Issue #294）；範本沒有時交出 absent
+    "main_price_table": "TableAt：說明書主價格表的位置與讀出的表；情境重印價格表要等於它",
+    "scenario_reprint_table": "TableAt：情境分析重印的價格表；逐格、表頭百分比、代碼、列數 = `main_price_table`",
+    "scenario_params": "tuple[ScenarioParam, ...]：情境假設值的各出處（出處代號、位置、值、倍數），每處 = 對應的正式值",
+    "scenario_prices": "tuple[ScenarioPrice, ...]：較差情境寫出的價格（對到 `underlying_prices` 第幾檔的哪一欄）",
     # 審查標準規則（docs/rules/review-standard.md）
     "name_zh": "str：商品中文名稱",
     "name_en": "str：商品英文名稱",
@@ -196,11 +259,11 @@ STANDARD_FIELDS: dict[str, str] = {
     "minimum_issue_size": "str：第四章發行不成立門檻的金額寫法（審查標準 minimum_issue_size.<上手> 有固定值時核對）",
     "distributor_phone_ch4": "str：第四章受託機構聯絡電話（BNP 第四章第 16 項）；範本沒有這處時交出 absent",
     "distributor_names_others": "tuple[Occurrence, ...]：受託機構名稱的其他出處（值為 str，例：BBVA 第 1 頁 13. 後的明細 (i)；"
-    "Issue #305）；範本沒有時交出 absent",
+    "Issue #305；Natixis 封面與第三章警語、第四章 10.、14.，Issue #318）；範本沒有時交出 absent",
     "distributor_addresses_others": "tuple[Occurrence, ...]：受託機構地址的其他出處（BBVA 第 1 頁明細 (iii)）；範本沒有時交出 absent",
     "chairman_others": "tuple[Occurrence, ...]：受託機構負責人的其他出處（BBVA 第 1 頁明細 (iv)），保留原字碼；範本沒有時交出 absent",
 }
-# 受託機構名稱、地址、負責人的其他出處（Issue #305）：只有 BBVA 範本有，其他上手一起交出 absent（`absent_all`）
+# 受託機構名稱、地址、負責人的其他出處（Issue #305）：BBVA 範本有、Natixis 有名稱（Issue #318），其他上手一起交出 absent（`absent_all`）
 DISTRIBUTOR_OTHERS = ("distributor_names_others", "distributor_addresses_others", "chairman_others")
 
 # 保證機構名稱的出處（審查標準 guarantor_name.<上手> 的鍵）→ 標準欄位、說明的開頭、項目名稱；設定檔與審查標準規則共用這一份

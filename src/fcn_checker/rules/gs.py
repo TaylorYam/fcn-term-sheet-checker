@@ -1,5 +1,6 @@
 """GS 專屬規則（docs/rules/gs-check-rules.md）：每月配息率與年利率其他出處、說明書內部交叉驗證、觀察時程表、價格表表頭、
-情境 1 與情境 4。
+情境 1 期別與情境的申購單位數。情境重複寫出的年利率、面額與情境 4 第 1 檔價格由共用情境規則（rules/scenario.py，
+Issue #294）核對。
 
 參考條件表欄位（含期初定價、標的依代號配對）、價格推算、審查標準（含 GS 分節：發行機構名稱、商品種類、最低申購依幣別
 倍數）與回填是各上手共用的規則。說明書有年利率，不讀參考條件表（REFERENCE_FIELDS 為空）。保證機構、總代理人名稱與
@@ -14,7 +15,7 @@ from ..parsers import gs
 from ..schema import CheckResult, FieldStatus, Item, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
-from . import kit
+from . import kit, scenario
 from .kit import Check, IssuerContext
 
 ISSUER = "GS"
@@ -55,7 +56,8 @@ MEMORY_ZH, MEMORY_EN = "記憶式", "Memory"
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 14 項「約為Y%」= 年利率 ÷ 12（4 位）；第 15 項(2) 最低保證收益率、第 17 項情境假設的年利率 = 第 14 項。"""
+    """第 14 項「約為Y%」= 年利率 ÷ 12（4 位）；第 15 項(2) 最低保證收益率 = 第 14 項（第 17 項情境的年利率由共用情境規則
+    `scenario.params` 核對，Issue #294）。"""
     f = ctx.ts.f
     annual, monthly = f("coupon_pa_pct"), f("monthly_coupon_pct")
     expected = kit.monthly_of_annual(annual.value) if annual.ok else None
@@ -150,9 +152,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 觀察時程表列數 = 中英文名稱月數。"""
+    """天期 = 中英文名稱月數（日期表期數 = 天期由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -163,9 +165,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
     zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)Months", "商品英文名稱")
     return [
-        kit.doc_check(ctx, rid, "date_table", "第 13 項觀察時程表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="觀察時程表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -266,7 +265,8 @@ def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def tables(ctx: IssuerContext) -> list[CheckResult]:
-    """價格表表頭 K／KI % = 第 15 項定義；情境 4 第 1 檔的初始參考價格、執行價格與 K % = 價格表第 1 檔。"""
+    """價格表表頭 K／KI % = 第 15 項定義；情境假設的最低申購單位數 = 第四章第 4 項（情境 4 第 1 檔的初始參考價格、執行價格
+    與 K % 由共用情境規則核對，Issue #294）。"""
     f = ctx.ts.f
     table = f("underlying_table")
     out = []
@@ -282,34 +282,12 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
                 pf.value, table.value.pcts.get(col) if table.ok else None
             )
         )
-    scen, strike = f("scenario_first_underlying"), f("strike_pct")
-    check = kit.doc_check(
-        ctx, "doc.scenario_table", "scenario_first_underlying", "第 17 項情境 4 第 1 檔", table, scen, strike
+    units, ch4 = f("scenario_units"), f("minimum_subscription_units")
+    out.append(  # 讀不到任一邊轉人工覆核（Issue #294 決定 6）
+        kit.doc_check(
+            ctx, "doc.scenario_units", "scenario_units", "第 17 項情境假設最低申購單位數", ch4, units
+        ).compare(ch4.value, units.value, fail_message="須等於第四章第 4 項最低申購單位數")
     )
-    if table.ok and scen.ok and strike.ok:
-        row = table.value.prices[0]
-        issues = [
-            f"{what} {scen.value[key]} 不等於價格表第 1 檔 {row[col]}"
-            for key, col, what in (("initial", "initial", "初始參考價格"), ("strike", "strike", "執行價格"))
-            if scen.value[key] != row[col]
-        ]
-        if scen.value["strike_pct"] != strike.value:
-            issues.append(f"執行價格的 % {scen.value['strike_pct']} 不等於 K % {strike.value}")
-        units, ch4 = f("scenario_units"), f("minimum_subscription_units")  # 情境假設的最低申購單位數 = 第四章 4.
-        if not (units.ok and ch4.ok) or units.value != ch4.value:
-            shown = units.value if units.ok else "讀不到"
-            issues.append(f"情境假設最低申購單位數 {shown} 不等於第四章第 4 項 {ch4.value if ch4.ok else '讀不到'}")
-        out.append(
-            check.compare(  # 預期值／實際值帶出各格，看得出比了哪些值（Issue #317，比照 BBVA #305）
-                [str(row["initial"]), str(row["strike"]), str(strike.value), ch4.value if ch4.ok else None],
-                [str(scen.value["initial"]), str(scen.value["strike"]), str(scen.value["strike_pct"]), units.value],
-                ok=not issues,
-                reason="value_mismatch",
-                message="；".join(issues) or "等於價格表第 1 檔與 K %",
-            )
-        )
-    else:
-        out.append(check.compare(None, None))
     return out
 
 
@@ -330,9 +308,9 @@ def repeated(ctx: IssuerContext) -> list[CheckResult]:
     rules = {  # 種類 → (rule_id, 欄位, 正式條款, 不符說明)
         "denomination": ("doc.denomination_mentions", "denomination", denom, "須等於第一章第 6 項每單位面額"),
         "redemption_pct": ("doc.redemption_pct", "redemption_pct", hundred, "到期買回金額須為每單位面額 × 100%"),
-        "units": ("doc.scenario_params", "scenario_units", units, "須等於第四章第 4 項最低申購單位數"),
+        "units": ("doc.scenario_units", "scenario_units", units, "須等於第四章第 4 項最低申購單位數"),
         "investment": (
-            "doc.scenario_params",
+            "doc.scenario_units",
             "scenario_investment",
             investment,
             "須等於第四章第 4 項最低申購單位數 × 每一單位金額",
@@ -351,31 +329,6 @@ def repeated(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 觀察時程表（核對規則 §3.5）
-
-
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """末列觀察期間結束日 = 評價日；末列預定付息日 = 到期日；各期連續（下一期起始日晚於前一期結束日）；結束日早於同列付息日。"""
-    f = ctx.ts.f
-    table, final, maturity = f("date_table"), f("final_valuation_date"), f("maturity_date")
-    name = "觀察時程表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "date_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    gaps = [b["period"] for a, b in zip(rows, rows[1:], strict=False) if b["start"] <= a["end"]]
-    if gaps:
-        issues.append(f"第 {'、'.join(map(str, gaps))} 期起始日沒有晚於前一期結束日")
-    late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-    if late:
-        issues.append(f"第 {'、'.join(map(str, late))} 期觀察期間結束日沒有早於預定付息日")
-    if final.ok and rows[-1]["end"] != final.value:
-        issues.append(f"末列觀察期間結束日 {rows[-1]['end']} 不等於評價日 {final.value}")
-    if maturity.ok and rows[-1]["payment"] != maturity.value:
-        issues.append(f"末列預定付息日 {rows[-1]['payment']} 不等於到期日 {maturity.value}")
-    return [kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity], issues)]
-
-
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
     return [
@@ -387,5 +340,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *ki_terms(ctx),
         *tables(ctx),
         *repeated(ctx),
-        *schedule(ctx),
+        *scenario.run(ctx),  # 第 17 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
     ]

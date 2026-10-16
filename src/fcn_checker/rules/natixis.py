@@ -1,4 +1,4 @@
-"""Natixis 專屬規則（docs/rules/natixis-check-rules.md）：月配息率與年利率其他出處、說明書內部交叉驗證、日期表（KO 每日／
+"""Natixis 專屬規則（docs/rules/natixis-check-rules.md）：月配息率與年利率其他出處、說明書內部交叉驗證、重複寫出的值、日期表（KO 每日／
 每期兩種）、第 9 項價格表表頭、情境假設與情境價格表、空白的受託機構商品代號。
 
 參考條件表欄位、價格推算、審查標準（含 Natixis 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
@@ -40,8 +40,9 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 16 項情境只核對假設、情境價格表與情境一的期別；配息金額、股數、剩餘現金、報酬率不重算，"
-        "情境二～四不核對（2026-10-15 確認）",
+        "description": "第 16 項情境的配息金額、股數、剩餘現金、報酬率不重算，情境的假設最終價格與實物交割算式（匯率、股價）"
+        "的幣別不核對（2026-10-15 確認）；各情境重複寫出的年利率、面額、贖回 %、執行價格、配息列數與金額幣別逐處核對"
+        "（Issue #318）",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -159,9 +160,9 @@ def distributor_code(ctx: IssuerContext | IisIssuerContext, code: ParsedField) -
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 中英文名稱月數 = 情境假設 c. 天期與 d. 配息觀察期間數。"""
+    """天期 = 中英文名稱月數 = 情境假設 c. 天期與 d. 配息觀察期間數（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
-    tenor, table, zh, en = f("tenor_months"), f("date_table"), f("name_zh"), f("name_en")
+    tenor, zh, en = f("tenor_months"), f("name_zh"), f("name_en")
     rid = "doc.coupon_periods"
 
     def months(pf: ParsedField, pattern: str, what: str) -> ParsedField:
@@ -172,9 +173,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
     zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)-Month", "商品英文名稱")
     out = [
-        kit.doc_check(ctx, rid, "date_table", "第 12 項日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value
         ),
@@ -285,9 +283,9 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         if scen_denom.value != denom.value:
             issues.append(f"情境假設面額 {scen_denom.value} 不等於每單位商品面額 {denom.value}")
         out.append(
-            check.compare(
-                None,
-                None,
+            check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #318，比照 BBVA #305）
+                kit.price_cells(own),
+                kit.price_cells(rows),
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於第 9 項價格表與每單位商品面額",
@@ -298,47 +296,85 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
-# ---------------------------------------------------------------- 日期表（核對規則 §3.5）
-
-
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
-    """D：第 1 期開始日 = 發行日、各期連續、結束日早於同列配息日、末列結束日 = 最終評價日、末列配息日 = 到期日。
-    P：配息日遞增、末列 = 到期日；觀察日表末列 = 最終評價日／到期日、觀察日早於同列自動提前到期日。"""
+def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
+    """重複寫出的值 = 正式條款（Issue #318，比照 BBVA #305）：情境一自動提前到期贖回 % = 第 14 項；第 15 項情況一公式、
+    2.a 與情境的到期贖回 % = 第 15 項情況一；情境配息算式、原始投資本金、實物交割算式的面額 = 每單位商品面額；
+    實物交割算式的執行價格 = 情境價格表該標的的執行價格；情境一配息列數 = Non-Call（第一個可提前到期期），其他情境 = 天期。"""
     f = ctx.ts.f
-    table, final, maturity, issue = f("date_table"), f("final_valuation_date"), f("maturity_date"), f("issue_date")
-    name = "日期表"
-    if not table.ok:
-        return [Check("schedule.coupon_dates", "date_table", Item.expected(name), ctx.document).review(table)]
-    rows = table.value["rows"]
-    issues = []
-    if table.value["kind"] == "D":
-        if issue.ok and rows[0]["start"] != issue.value:
-            issues.append(f"第 1 期配息觀察期間開始日 {rows[0]['start']} 不等於發行日 {issue.value}")
-        gaps = [b["period"] for a, b in zip(rows, rows[1:], strict=False) if b["start"] != a["end"]]
-        if gaps:
-            issues.append(f"第 {'、'.join(map(str, gaps))} 期開始日不等於前一期結束日")
-        late = [r["period"] for r in rows if r["end"] >= r["payment"]]
-        if late:
-            issues.append(f"第 {'、'.join(map(str, late))} 期配息觀察期間結束日沒有早於配息日")
-        if final.ok and rows[-1]["end"] != final.value:
-            issues.append(f"末列配息觀察期間結束日 {rows[-1]['end']} 不等於最終評價日 {final.value}")
+    tenor, first = f("tenor_months"), f("first_callable_period")
+    out = []
+    for container, rid, expected, what in (
+        (
+            "autocall_redemption_mentions",
+            "doc.redemption_pct",
+            f("autocall_redemption_pct"),
+            "第 14 項自動提前到期贖回金額 %",
+        ),
+        (
+            "maturity_redemption_mentions",
+            "doc.redemption_pct",
+            f("maturity_redemption_pct"),
+            "第 15 項情況一到期贖回 %",
+        ),
+        ("scenario_denomination_mentions", "doc.scenario_params", f("denomination"), "第一章第 5 項每單位商品面額"),
+    ):
+        pf = f(container)
+        if not pf.ok:
+            out.append(Check(rid, container, Item.expected(what), ctx.document).review(pf))
+            continue
+        for occ in pf.value:
+            got = occ.value.value if occ.value.ok else None
+            out.append(
+                kit.doc_check(ctx, rid, occ.field, f"{occ.where}{occ.name}", expected, occ.value).compare(
+                    [expected.value] * len(got) if expected.ok and got else None,
+                    list(got) if got else None,
+                    fail_message=f"每一處都須等於{what}",
+                )
+            )
+    rows = f("scenario_row_counts")
+    if not rows.ok:
+        out.append(
+            Check("doc.coupon_periods", "scenario_row_counts", Item.expected("情境配息列數"), ctx.document).review(rows)
+        )
     else:
-        pays = [r["payment"] for r in rows]
-        if any(b <= a for a, b in zip(pays, pays[1:], strict=False)):
-            issues.append("配息日沒有逐期遞增")
-        ko = table.value["ko_rows"]
-        late = [r["t"] for r in ko if r["observation"] >= r["autocall"]]
-        if late:
-            issues.append(f"自動提前到期觀察日表第 {'、'.join(map(str, late))} 列觀察日沒有早於自動提前到期日")
-        if final.ok and ko[-1]["observation"] != final.value:
-            issues.append(f"自動提前到期觀察日表末列 {ko[-1]['observation']} 不等於最終評價日 {final.value}")
-        if maturity.ok and ko[-1]["autocall"] != maturity.value:
-            issues.append(f"自動提前到期觀察日表末列自動提前到期日 {ko[-1]['autocall']} 不等於到期日 {maturity.value}")
-    if maturity.ok and rows[-1]["payment"] != maturity.value:
-        issues.append(f"末列配息日 {rows[-1]['payment']} 不等於到期日 {maturity.value}")
-    return [
-        kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", name, [table, final, maturity, issue], issues)
-    ]
+        for n, occ in enumerate(rows.value, start=1):
+            base, what = (first, "Non-Call（第一個可提前到期期）") if n == 1 else (tenor, "天期")
+            out.append(
+                kit.doc_check(ctx, "doc.coupon_periods", occ.field, f"{occ.where}{occ.name}", base, occ.value).compare(
+                    base.value, occ.value.value, fail_message=f"情境各期配息的列數須等於{what}"
+                )
+            )
+    scen, worst = f("scenario_table"), f("scenario_worst_strike")
+    check = kit.doc_check(
+        ctx, "doc.scenario_table", "scenario_worst_strike", "第 16 項實物交割算式的執行價格", scen, worst
+    )
+    if not scen.ok:
+        pass  # 情境價格表讀不到已由 `tables` 轉人工覆核，不重複報
+    elif (problem := check.blocked) is not None:
+        out.append(problem)
+    else:
+        name, strike = worst.value
+        # 情境價格表的名稱可能和期初進場價格擠在同一行（`特斯拉公司 195.92`），比名稱時去掉結尾的數字
+        found = [r.prices.get("strike") for r in scen.value.rows if squash(re.sub(r"[\d,.\s]+$", "", r.name)) == name]
+        if len(found) != 1:
+            out.append(
+                check.result(
+                    S.REVIEW_REQUIRED,
+                    actual=f"{name} {strike}",
+                    reason="document_inconsistent",
+                    message=f"情境價格表找不到或有多列「{name}」，請人工確認實物交割算式的執行價格",
+                )
+            )
+        else:
+            out.append(
+                check.compare(
+                    f"{name} {found[0]}",
+                    f"{name} {strike}",
+                    ok=found[0] == strike,
+                    fail_message="實物交割算式的執行價格須等於情境價格表該標的的執行價格",
+                )
+            )
+    return out
 
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
@@ -350,5 +386,5 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
-        *schedule(ctx),
+        *repeated_terms(ctx),
     ]

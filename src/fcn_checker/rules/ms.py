@@ -7,15 +7,14 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import re
 
 from ..parsers.ms_wording import MEMORY_NAME
-from ..schema import CheckResult, Item, ParsedField
+from ..schema import CheckResult, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
 from . import kit, ms_scenario
-from .kit import Check, IssuerContext
+from .kit import IssuerContext
 
 ISSUER = "MS"
 # 本上手規則可讀的參考條件表欄位（ADR 0009，須在 reference_fields 宣告：說明書沒有年利率，月配息率與年化報酬率依表上年利率核對）
@@ -42,9 +41,6 @@ PRODUCT_TYPES = {  # 封面第 6 項商品種類：依標的數（範本規格 �
 def product_type_for(underlying_count: int) -> str:
     """商品種類依標的數：1 檔與 2 檔以上寫法不同（說明書封面第 6 項與投資人須知封面同一套，範本規格 §4.5）。"""
     return PRODUCT_TYPES[underlying_count >= 2]
-
-
-START_GAP = dt.timedelta(days=4)  # D 型配息週期起始日最晚在前期終止日後 4 個日曆天（遇美國假日順延，工具沒有假日曆）
 
 
 # ---------------------------------------------------------------- 年利率與月配息率（核對規則 §3.3，讀參考條件表）
@@ -111,7 +107,8 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 日期表列數 = 名稱月數 = 第 15 項期別終點；第 15 項期別起點 D 型為 2、P 型為 1。"""
+    """天期 = 名稱月數 = 第 15 項期別終點；第 15 項期別起點 D 型為 2、P 型為 1（日期表期數由共用規則 `schedule.period_count`
+    檢查）。"""
     f = ctx.ts.f
     tenor, table, zh, rng = f("tenor_months"), f("date_table"), f("name_zh"), f("coupon_range")
     rid = "doc.coupon_periods"
@@ -120,9 +117,6 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
     if zh.ok and months is None:
         name_months = ParsedField.invalid("name_months", [], "商品名稱找不到「N 個月期」")
     out = [
-        kit.doc_check(ctx, rid, "date_table", "第 14 項(6) 日期表期數", tenor, table).compare(
-            tenor.value, len(table.value["rows"]) if table.ok else None, fail_message="日期表列數須等於天期"
-        ),
         kit.doc_check(ctx, rid, "name_months", "商品名稱月數", tenor, name_months).compare(
             tenor.value, name_months.value
         ),
@@ -186,69 +180,20 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
 # ---------------------------------------------------------------- 日期表（核對規則 §3.5）
 
 
-def schedule(ctx: IssuerContext) -> list[CheckResult]:
+def autocall_dates(ctx: IssuerContext) -> CheckResult:
+    """提前出場觀察日：D 型第 17 項觀察起日 = 第 k 期配息週期終止日、觀察訖日 = 期末定價日；P 型自動提前出場日欄
+    第 k 期起（最後一期除外）= 同列配息日、之前為空。日期表的期數、順序、末期日期與起始日由共用規則（rules/schedule.py）檢查。"""
     f = ctx.ts.f
-    table, final, maturity, issue = (
-        f(x) for x in ("date_table", "final_valuation_date", "maturity_date", "issue_date")
+    table, final, obs, k = (
+        f("date_table"),
+        f("final_valuation_date"),
+        f("ko_observation_art17"),
+        f("first_callable_period"),
     )
-    obs, k = f("ko_observation_art17"), f("first_callable_period")
-    names = {
-        "schedule.coupon_dates": "日期表配息日與期末日期",
-        "schedule.period_starts": "日期表配息週期起始日",
-        "schedule.autocall_dates": "提前出場觀察日",
-    }
-    problem = kit.first_bad([table])
-    if problem is not None:
-        return [Check(rid, "date_table", Item.expected(n), ctx.document).review(problem) for rid, n in names.items()]
-    kind, rows = table.value["type"], table.value["rows"]
-    observed = "end" if kind == "D" else "pricing"
-    label = "配息週期終止日" if kind == "D" else "定價日"
-    out = []
-
-    # 配息日遞增、末期配息日 = 到期日、終止日／定價日 < 配息日、末期終止日／定價日 = 期末定價日
-    issues = []
-    payments = [r["payment"] for r in rows]
-    if any(a >= b for a, b in zip(payments, payments[1:], strict=False)):
-        issues.append("配息日沒有逐期遞增")
-    late = [r["period"] for r in rows if r[observed] >= r["payment"]]
-    if late:
-        issues.append(f"第 {'、'.join(map(str, late))} 期{label}沒有早於配息日")
-    deps = [table, final, maturity]
-    if kit.first_bad(deps) is None:
-        if payments[-1] != maturity.value:
-            issues.append(f"末期配息日 {payments[-1]} 不等於到期日 {maturity.value}")
-        if rows[-1][observed] != final.value:
-            issues.append(f"末期{label} {rows[-1][observed]} 不等於期末定價日 {final.value}")
-    out.append(
-        kit.structure_check(ctx, "schedule.coupon_dates", "coupon_dates", names["schedule.coupon_dates"], deps, issues)
-    )
-
-    if kind == "D":  # 第 1 期起始日 = 發行日；前期終止日 < 起始日 ≤ 前期終止日 + 4 個日曆天
-        issues = []
-        if issue.ok and rows[0]["start"] != issue.value:
-            issues.append(f"第 1 期起始日 {rows[0]['start']} 不等於發行日 {issue.value}")
-        for prev, row in zip(rows, rows[1:], strict=False):
-            if not prev["end"] < row["start"] <= prev["end"] + START_GAP:
-                issues.append(
-                    f"第 {row['period']} 期起始日 {row['start']} 不在前期終止日 {prev['end']} 後 4 個日曆天內"
-                )
-        out.append(
-            kit.structure_check(
-                ctx,
-                "schedule.period_starts",
-                "period_starts",
-                names["schedule.period_starts"],
-                [table, issue],
-                issues,
-                tolerance="前期終止日 < 起始日 ≤ 前期終止日 + 4 個日曆天（遇美國假日順延；工具沒有假日曆）",
-            )
-        )
-
-    # 提前出場：D 型第 17 項觀察起訖日；P 型自動提前出場日欄
     deps = [table, obs, k, final]
     issues = []
-    if kit.first_bad(deps) is None and obs.value["type"] == kind:
-        n = k.value
+    if kit.first_bad(deps) is None and obs.value["type"] == table.value["type"]:
+        kind, rows, n = table.value["type"], table.value["rows"], k.value
         if not 1 <= n <= len(rows):
             issues.append(f"第一個可提前出場期 {n} 不在第 1～{len(rows)} 期之間")
         elif kind == "D":
@@ -264,12 +209,7 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
                 if r["autocall"] != want:
                     shown = want or "無"
                     issues.append(f"第 {r['period']} 期自動提前出場日應為 {shown}，說明書為 {r['autocall'] or '無'}")
-    out.append(
-        kit.structure_check(
-            ctx, "schedule.autocall_dates", "autocall_dates", names["schedule.autocall_dates"], deps, issues
-        )
-    )
-    return out
+    return kit.structure_check(ctx, "schedule.autocall_dates", "autocall_dates", "提前出場觀察日", deps, issues)
 
 
 def redemption_start(ctx: IssuerContext) -> CheckResult:
@@ -292,7 +232,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *document_info(ctx),
         *periods(ctx),
         *ko_terms(ctx),
-        *schedule(ctx),
+        autocall_dates(ctx),
         redemption_start(ctx),
         *ms_scenario.run(ctx),
     ]

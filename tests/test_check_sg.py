@@ -157,15 +157,15 @@ S0 = Spec()
         # 日期表與提前出場
         (
             ("art12.table", S0.date(S0.ends[1]), S0.date(S0.ends[1] + dt.timedelta(days=1))),
-            "schedule.period_starts",
+            "schedule.autocall_dates",  # 第 k+1 期起始日 = 第 8 項觀察期間起始日（第 k 期沒有終止日，共用規則不比）
             S.MISMATCH,
         ),
         (
             ("art12.table", S0.date(S0.payments[-1]), S0.date(S0.payments[-1] + dt.timedelta(days=1))),
-            "schedule.coupon_dates",
+            "schedule.last_payment",
             S.MISMATCH,
         ),
-        (("art12.table", "（到期日）", ""), "schedule.coupon_dates", S.MISMATCH),
+        (("art12.table", "（到期日）", ""), "schedule.row_labels", S.MISMATCH),
         (("art8", "第3-6個配息週期", "第4-6個配息週期"), "schedule.autocall_dates", S.MISMATCH),
         (("art12", "事件後第3個營業日", "事件後第5個營業日"), "schedule.autocall_dates", S.MISMATCH),
         # 標的表
@@ -338,7 +338,7 @@ def test_tables_split_across_pages_still_read(tmp_path):
 
 def test_end_labels_on_a_non_final_row_are_a_mismatch(tmp_path):
     r = check(tmp_path, Spec(label_row=5))
-    x = rule(r, "schedule.coupon_dates")[0]
+    x = rule(r, "schedule.row_labels")[0]
     assert x.status == S.MISMATCH
     assert "末列沒有標「（最終評價日）」" in problem_message(x) and "第 5 期不是末列" in problem_message(x)
 

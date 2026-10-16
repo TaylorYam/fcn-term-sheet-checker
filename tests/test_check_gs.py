@@ -66,8 +66,16 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert own and all(x.document_evidence for x in own if x.status == S.PASS)
     assert {x["rule_id"] for x in r.not_covered} == {x["rule_id"] for x in GS.not_covered}
     assert [x.status for x in rule(r, "derive.monthly_coupon")] == [S.PASS]
-    # 第 15 項(2) 最低保證收益率、第 17 項情境假設與情境 1～4 各配息金額算式（情境 2 兩列；Issue #317）
-    assert len(rule(r, "doc.coupon_mentions")) == 2 + 4
+    assert len(rule(r, "doc.coupon_mentions")) == 1  # 第 15 項(2) 最低保證收益率
+    # 共用情境規則（Issue #294）：第 17 項情境假設與情境 1～4 各配息金額算式的年利率（Issue #317）、
+    # 情境裡的每單位面額、情境 4 第 1 檔的 K %；情境 4 第 1 檔的初始參考價格與執行價格
+    params = [x.field for x in rule(r, "scenario.params")]
+    assert params.count("scenario_coupon_pa_5") == 1 and "scenario_coupon_pa_6" not in params
+    assert params.count("scenario_strike_pct_1") == 1
+    assert [x.item.name for x in rule(r, "scenario.strike")] == [
+        "第一章第 17 項情境 4 第 1 檔期初價格",
+        "第一章第 17 項情境 4 第 1 檔執行價",
+    ]
     assert rule(r, "doc.denomination_mentions") and rule(r, "doc.tenor_mentions") and rule(r, "doc.redemption_pct")
     assert len(rule(r, "doc.tenor_mentions")) == 2
     assert rule(r, "standard.fixed_warning")[0].actual == 3
@@ -139,10 +147,10 @@ def test_unknown_initial_pricing_wording_needs_review(tmp_path):
     [
         (Edit("（約為1.0000%）", "（約為1.0100%）", "ts.art14"), "derive.monthly_coupon"),
         (Edit("觀察期間年利率12.00%", "觀察期間年利率12.50%", "ts.art15"), "doc.coupon_mentions"),
-        (Edit("配息率:年利率12.00%", "配息率:年利率12.50%", "ts.art17"), "doc.coupon_mentions"),
+        (Edit("配息率:年利率12.00%", "配息率:年利率12.50%", "ts.art17"), "scenario.params"),
         (Edit("首3個觀察期間", "首2個觀察期間", "ts.art15"), "doc.autocall_terms"),
         (Edit("（且落在第3個觀察期間結束日）", "（且落在第2個觀察期間結束日）", "ts.art17"), "doc.autocall_terms"),
-        (Edit("初始參考價格(1): 100.4500", "初始參考價格(1): 100.5500", "ts.art17"), "doc.scenario_table"),
+        (Edit("初始參考價格(1): 100.4500", "初始參考價格(1): 100.5500", "ts.art17"), "scenario.strike"),
         (Edit("格(i)之65.00", "格(i)之66.00", "ts.art15.table"), "doc.table_header_pct"),
         (Edit("本商品名稱:6個月", "本商品名稱:7個月", "ts.art1"), "doc.name_consistency"),
         (Edit("TDCC Product Code: 148199990001", "TDCC Product Code: 148199990002", "ts.cover"), "doc.product_code"),
@@ -159,14 +167,14 @@ def test_unknown_initial_pricing_wording_needs_review(tmp_path):
             Edit("每單位面額（10,000美元）× 每單位提前", "每單位面額（1,000美元）× 每單位提前", "ts.ch四"),
             "doc.denomination_mentions",
         ),
-        (Edit("= 10,000 美元 × 12.00% / 12", "= 1,000 美元 × 12.00% / 12", "ts.art17"), "doc.denomination_mentions"),
+        (Edit("= 10,000 美元 × 12.00% / 12", "= 1,000 美元 × 12.00% / 12", "ts.art17"), "scenario.params"),
         (
             Edit("時:每單位面額（10,000 美元）× 100%", "時:每單位面額（10,000 美元）× 99%", "ts.art15"),
             "doc.redemption_pct",
         ),
-        (Edit("× 12.00% / 12", "× 12.50% / 12", "ts.art17"), "doc.coupon_mentions"),
-        (Edit("× 5 / 50,000.00", "× 4 / 50,000.00", "ts.art17"), "doc.scenario_params"),
-        (Edit("假設期初本金金額為50,000美元", "假設期初本金金額為40,000美元", "ts.art17"), "doc.scenario_params"),
+        (Edit("× 12.00% / 12", "× 12.50% / 12", "ts.art17"), "scenario.params"),
+        (Edit("× 5 / 50,000.00", "× 4 / 50,000.00", "ts.art17"), "doc.scenario_units"),
+        (Edit("假設期初本金金額為50,000美元", "假設期初本金金額為40,000美元", "ts.art17"), "doc.scenario_units"),
         (Edit("包含於6個月後始返還本金", "包含於7個月後始返還本金", "ts.ch三"), "doc.tenor_mentions"),
         (Edit("通路服務費率於6個月間", "通路服務費率於7個月間", "ts.ch四"), "doc.tenor_mentions"),
         (Edit("每單位面額（10,000 美元）× 配息率", "每單位面額（10,000 日圓）× 配息率", "ts.art14"), "field.currency"),
@@ -186,7 +194,7 @@ def test_unknown_initial_pricing_wording_needs_review(tmp_path):
             "doc.redemption_pct",
         ),
         (Edit("(每單位面額 × 100.00% +", "(每單位面額 × 99.00% +", "ts.art17"), "doc.redemption_pct"),
-        (Edit("（5單位）= 50,000 美元", "（5單位）= 40,000 美元", "ts.art17"), "doc.scenario_params"),
+        (Edit("（5單位）= 50,000 美元", "（5單位）= 40,000 美元", "ts.art17"), "doc.scenario_units"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:10],
 )
@@ -210,7 +218,7 @@ def test_payment_currency_wording_of_a_non_usd_product_is_checked(tmp_path):
 @pytest.mark.parametrize(
     ("edit", "broken"),
     [
-        (Edit("= 10,000 美元 × 12.00% / 12 × 20 / 20", "", "ts.art17"), "doc.coupon_mentions"),
+        (Edit("= 10,000 美元 × 12.00% / 12 × 20 / 20", "", "ts.art17"), "scenario.params"),
         (Edit("包含於6個月後始返還本金", "包含返還本金", "ts.ch三"), "doc.tenor_mentions"),
         (Edit("本商品係以美元計價", "本商品係以外幣計價", "ts.ch三"), "field.currency"),
         # 第 9 項 (1)～(3) 應有 3 處面額，只讀到 2 處
@@ -226,8 +234,8 @@ def test_unreadable_repeats_need_review(tmp_path, edit, broken):
 
 def test_ko_start_outside_the_schedule_needs_review(tmp_path):
     r = check(tmp_path, edits=[Edit("自第3個觀察期間結束日開始", "自第9個觀察期間結束日開始", "ts.art16")])
-    assert rule(r, "field.ko_observation")[0].status == S.REVIEW_REQUIRED
-    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED
+    assert rule(r, "field.ko_observation")[0].status == S.PASS, "KO 觀察方式照說明書交出"
+    assert rule(r, "field.first_callable_period")[0].status == S.REVIEW_REQUIRED, "排程推不出來"
 
 
 def test_memory_wording_in_the_name_must_match_article_16(tmp_path):
@@ -254,13 +262,13 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     spec = Spec()
     old = f"現預定為{spec.date(spec.maturity_date)}"
     r = check(tmp_path, spec, edits=[Edit(old, "現預定為2031年1月20日", "ts.art13")])
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_schedule_rows_must_equal_the_tenor(tmp_path):
     """年期寫 7 個月、觀察時程表 6 列：期數不符。"""
     r = check(tmp_path, edits=[Edit("則為6個月", "則為7個月", "ts.art13")])
-    assert rule(r, "doc.coupon_periods", "date_table")[0].status == S.MISMATCH
+    assert rule(r, "schedule.period_count")[0].status == S.MISMATCH
 
 
 def test_single_wording_with_a_basket_table_needs_review(tmp_path):
@@ -280,7 +288,26 @@ def test_indexed_table_header_with_one_underlying_needs_review(tmp_path):
 
 def test_scenario_units_must_equal_the_minimum_subscription_units(tmp_path):
     r = check(tmp_path, edits=[Edit("最低申購單位數（5單位）", "最低申購單位數（1單位）", "ts.art17")])
-    assert rule(r, "doc.scenario_table")[0].status == S.MISMATCH
+    assert rule(r, "doc.scenario_units", "scenario_units")[0].status == S.MISMATCH
+
+
+def test_unreadable_scenario_units_need_review(tmp_path):
+    """情境假設的最低申購單位數讀不到：轉人工覆核，不是判不一致（Issue #294 決定 6）。"""
+    r = check(tmp_path, edits=[Edit("最低申購單位數（5單位）", "最低申購單位數", "ts.art17")])
+    found = [x for x in rule(r, "doc.scenario_units", "scenario_units") if x.item.name.startswith("第 17 項情境假設")]
+    assert [x.status for x in found] == [S.REVIEW_REQUIRED], problems(r)
+
+
+def test_scenario_4_strike_accepts_rounded_or_truncated_initial_times_k(tmp_path):
+    """情境 4 執行價格寫成初始參考價格 × K % 無條件捨去也通過（Issue #259，#294 補上 GS）：100.45 × 65.55% = 65.844975，
+    價格表四捨五入為 65.8450，情境寫 65.8449 通過，寫 65.8448 不一致。"""
+    spec = Spec(strike=Decimal("65.55"))
+    for shown, status in (("65.8449", S.PASS), ("65.8448", S.MISMATCH)):
+        (tmp_path / shown).mkdir()
+        edit = Edit("執行價格(1): 65.8450", f"執行價格(1): {shown}", "ts.art17")
+        found = rule(check(tmp_path / shown, spec, edits=[edit]), "scenario.strike")
+        [strike] = [x for x in found if x.item.name.endswith("執行價")]
+        assert strike.status == status, shown
 
 
 def test_sheet_non_call_is_compared_with_article_16(tmp_path):

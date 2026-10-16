@@ -275,7 +275,7 @@ def test_last_payment_date_must_be_the_maturity_date(tmp_path):
     r = check(
         tmp_path, spec, edits=[Edit(f"到期日：{zh_date(spec.maturity_date)}", "到期日：2031 年1 月20 日", "ts.art12")]
     )
-    assert rule(r, "schedule.coupon_dates")[0].status == S.MISMATCH
+    assert rule(r, "schedule.last_payment")[0].status == S.MISMATCH
 
 
 def test_ki_periods_must_equal_the_tenor(tmp_path):

@@ -244,7 +244,8 @@ def _first_callable(ctx: Context) -> CheckResult:
 
 
 def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
-    """期間每日觀察的觀察起日 = 同商品說明書提前出場排程第 k 期的比價日（k 取投資人須知）；迄日 = 參考條件表最終比價日。"""
+    """期間每日觀察的觀察起日 = 同商品說明書提前出場排程第 k 期的比價日（k 取投資人須知；排程沒有這一期時取說明書日期表第 k 期
+    的期末日）；迄日 = 參考條件表最終比價日。"""
     rid = "iis.ko_observation_dates"
     start, k = read_iis(ctx.iis, "ko_observation_start"), read_iis(ctx.iis, "first_callable_period")
     check = Check(rid, "ko_observation_start", Item.term_sheet("KO 觀察起日"), ctx.document)
@@ -253,6 +254,10 @@ def _ko_observation_dates(ctx: Context) -> list[CheckResult]:
     else:
         schedule, why = _term_sheet_field(ctx, "autocall_schedule", "提前出場排程")
         expected = None if why else schedule.dates.get(k.value)
+        if expected is None and not why:  # D 型排程只放說明書的第 k 期與末期：k 不同時取說明書日期表該期的期末日
+            table, _ = _term_sheet_field(ctx, "schedule_table", "日期表")
+            row = next((r for r in table.rows if r.period == k.value), None) if table is not None else None
+            expected = row.end if row is not None else None
         if expected is None:
             why = why or f"同商品說明書提前出場排程沒有第 {k.value} 期，無法比對"
             out = [ts_unavailable(rid, "ko_observation_start", "KO 觀察起日", why, start.value, document=ctx.document)]

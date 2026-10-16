@@ -15,13 +15,13 @@ from decimal import Decimal
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..text import squash
-from . import iis, natixis
+from . import iis, money, natixis
 from .common import RawText, fee_rates, number
 from .layout import TextIndex, parse_date
 
 TEMPLATE_ID = "natixis-zh-iis"
 # 2：計價幣別「● 」（Issue #270）；3：KO 定義沒寫 % 視為參照說明書（Issue #272）；4：無 KI 要有明確寫法（Issue #297）
-PARSER_VERSION = "5"  # 5：警語的受託機構名稱（Issue #306）
+PARSER_VERSION = "6"  # 5：警語的受託機構名稱（Issue #306）；6：說明文字幣別（Issue #318）
 # 貳 2. KO 定義的兩種寫法：寫出 %，或沒寫 %（參照說明書第一章第 14 項，投資人須知不核對 KO %）
 KO_DEF_PCT = r"期初進場價格之(\d+(?:\.\d+)?)%"
 KO_DEF_INITIAL = "中文產品說明書第一章第14項所列之期初進場價格"
@@ -41,10 +41,11 @@ NOISE = re.compile(r"^(第\d+頁/共\d+頁|C[12] - (?:Inter ?nal|Public) Natixis
 D = natixis.D
 PCT = natixis.PCT
 # 警語裡寫受託機構名稱的地方（Issue #306：每處都算受託機構名稱出處）：(欄位, 位置, pattern)
-WARNING_NAMES = (
-    ("distributor_name_w5", "警語 (5)「而非由…所保證」", rf"而非由{natixis.DISTRIBUTOR}[(（](.+?)[)）]所保證"),
-    ("distributor_name_w6a", "警語 (6)「由…另行訂定」", rf"及由{natixis.DISTRIBUTOR}[(（](.+?)[)）]另行訂定者"),
-    ("distributor_name_w6b", "警語 (6)「係由…負責」", rf"係由{natixis.DISTRIBUTOR}[(（](.+?)[)）]負責外"),
+WARNING_NAMES = tuple((f"distributor_name_{key}", where, pattern) for key, where, pattern in natixis.WARNING_NAMES)
+# 說明文字的幣別字（Issue #318）：(欄位, pattern, 位置, 依型態可有可無)；配息金額的捨入幣別只有日圓商品才寫
+CURRENCY_WORDING = (
+    ("principal_currency", rf"低於\d+(?:\.\d+)?%({natixis.CCY})投資本金", "貳 1. 計價貨幣本金保本率", False),
+    ("coupon_rounding_currency", rf"整數位之({natixis.CCY})金額", "貳 2. 配息金額", True),
 )
 PROVIDED = frozenset(
     {
@@ -240,6 +241,15 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
                 minimum.replace("([\\d,]+)", "[\\d,]+"),
             ),
         ),
+    )
+    wording = [  # 說明文字的幣別字（Issue #318）；依型態可有可無的句子沒有就不核對
+        occ
+        for field, pattern, where, optional in CURRENCY_WORDING
+        if not optional or any(ti.finditer(pattern))
+        for occ in money.currency_words(text_lines, pattern, field, "說明文字幣別", where)
+    ]
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [*fields["currency_others"].value, *wording]
     )
     put("issue_price_pct", r"[•‧]發行價格：" + PCT, Decimal)
     put("tenor_months", r"[•‧]商品年期：(\d+)個月", int)
