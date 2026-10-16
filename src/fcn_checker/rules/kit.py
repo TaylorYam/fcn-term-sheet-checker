@@ -508,6 +508,12 @@ def structure_check(
     )
 
 
+def cells(rows: Sequence[dict]) -> list[str]:
+    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值，看得出逐格比了哪些價格（BBVA #305、
+    DBS #321）。"""
+    return [f"{v:,}" for row in rows for v in row.values()]
+
+
 def evidence(lines) -> list[Evidence]:
     """原文行 → 證據。"""
     return [Evidence.of(ln) for ln in lines]

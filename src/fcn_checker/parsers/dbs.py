@@ -423,17 +423,17 @@ def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) ->
     fields["scenario_denomination_currency"] = capture_group(sec, denom, 1, "scenario_denomination_currency")
     fields["scenario_issue_price_pct"] = capture_group(sec, denom, 3, "scenario_issue_price_pct", Decimal)
     invest = rf"投資金額=([\d,]+){TIMES}(\d+(?:\.\d+)?)%{TIMES}(\d+)=({CCY})([\d,]+)利率："
-    for n, (key, convert) in enumerate(
-        (
-            ("scenario_investment_principal", number),
-            ("scenario_investment_pct", Decimal),
-            ("scenario_units", int),
-            ("scenario_investment_currency", str),
-            ("scenario_investment", number),
-        ),
-        start=1,
+    for group, key, convert in (
+        (1, "scenario_investment_principal", number),
+        (2, "scenario_investment_pct", Decimal),
+        (3, "scenario_units", int),
+        (5, "scenario_investment", number),
     ):
-        fields[key] = capture_group(sec, invest, n, key, convert)
+        fields[key] = capture_group(sec, invest, group, key, convert)
+    # 幣別照舊寬鬆讀（Issue #170）：算式寫法變了只影響投資金額的核對，不連帶幣別出處讀不到
+    fields["scenario_investment_currency"] = capture_group(
+        sec, rf"投資金額=[^=]+=({CCY})[\d,]+利率：", 1, "scenario_investment_currency"
+    )
     fields["scenario_full_rate_periods"] = full_rate_periods(
         "scenario_full_rate_periods", ti, r"利率：第1(?:~(\d{1,2}))?個觀察期間之利率為最大利率值"
     )
@@ -452,7 +452,7 @@ def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) ->
     b = ti.text.find("較差情況", a)
     best = ti.lines_for(a, b) if a >= 0 and b > a else []
     put("scenario_best_annual_pct", best, r"年化平均報酬率約為" + PCT, Decimal)
-    return _repeated(fields, ti)
+    return _scenario_mentions(fields, ti)
 
 
 def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
@@ -465,7 +465,7 @@ def _scenario_spans(ti: TextIndex) -> list[tuple[str, int, int]]:
     return [("情境一", one, two), ("情境二", two, worse), ("情境三", after, end)]
 
 
-def _repeated(fields: dict[str, ParsedField], ti: TextIndex) -> list[Occurrence]:
+def _scenario_mentions(fields: dict[str, ParsedField], ti: TextIndex) -> list[Occurrence]:
     """情境一～三重複寫出的值（Issue #321，比照 BBVA #305）：利息算式 `面額 X a% X` 的 a（= 最大利率值）、情境一
     `第1~k個觀察期間之利息金額` 的 k、情境三最終價格表的期初價格與「表現最差連結標的為…其最終價格(x)低於其執行價格／
     下限觸發價格(y)」；回傳各情境金額旁的幣別出處。利息金額、股數、零股金額、報酬率與假設匯率不重算。"""
@@ -476,21 +476,18 @@ def _repeated(fields: dict[str, ParsedField], ti: TextIndex) -> list[Occurrence]
             fields[name] = ParsedField.missing(name, note)
         missing = ParsedField.missing("scenario_currency", note)
         return [Occurrence("scenario_currency", "情境金額幣別", "情境分析", missing)]
-    items = [
-        Occurrence(
-            f"scenario_coupon_mentions_{n}_{k}",
-            "利息算式最大利率值",
-            f"情境分析{case}",
-            ParsedField.present(f"scenario_coupon_mentions_{n}_{k}", Decimal(m[1]), ti.lines_for(m.start(), m.end())),
-        )
-        for n, (case, a, b) in enumerate(spans, start=1)
-        for k, m in enumerate((m for m in ti.finditer(SCENARIO_COUPON) if a <= m.start() < b), start=1)
-    ]
-    fields["scenario_coupon_mentions"] = (
-        standard_fields.occurrences("scenario_coupon_mentions", items)
-        if items
-        else ParsedField.missing("scenario_coupon_mentions", "情境一～三找不到利息算式「面額 X a% X」")
-    )
+    items = []
+    for n, (case, a, b) in enumerate(spans, start=1):  # 情境一～三都有利息算式（33 份成立），某一情境沒有就缺漏
+        hits = [m for m in ti.finditer(SCENARIO_COUPON) if a <= m.start() < b]
+        if not hits:
+            missing = ParsedField.missing(f"scenario_coupon_mentions_{n}", f"{case}找不到利息算式「面額 X a% X」")
+            items.append(Occurrence(missing.name, "利息算式最大利率值", f"情境分析{case}", missing))
+        for k, m in enumerate(hits, start=1):
+            pf = ParsedField.present(
+                f"scenario_coupon_mentions_{n}_{k}", Decimal(m[1]), ti.lines_for(m.start(), m.end())
+            )
+            items.append(Occurrence(pf.name, "利息算式最大利率值", f"情境分析{case}", pf))
+    fields["scenario_coupon_mentions"] = standard_fields.occurrences("scenario_coupon_mentions", items)
     _, a, b = spans[0]
     ks = [m for m in ti.finditer(SCENARIO_K) if a <= m.start() < b]
     fields["scenario_k_mention"] = (
@@ -498,7 +495,9 @@ def _repeated(fields: dict[str, ParsedField], ti: TextIndex) -> list[Occurrence]
         if len(ks) == 1
         else ParsedField.missing("scenario_k_mention", "情境一找不到或有多處「第1~k個觀察期間之利息金額」")
     )
-    fields["scenario3_initial"], fields["scenario3_worst"] = _scenario3(fields["underlying_table"], ti, spans[2][1])
+    fields["scenario3_initial"], fields["scenario3_worst"] = _scenario3(
+        fields["underlying_table"], ti, spans[1][2], *spans[2][1:]
+    )
     out = []
     for n, (case, a, b) in enumerate(spans, start=1):
         found = [  # 情境一～三的金額都以承作幣別寫（股價、匯率在最終價格表與括號內，沒有幣別字）
@@ -513,18 +512,19 @@ def _repeated(fields: dict[str, ParsedField], ti: TextIndex) -> list[Occurrence]
     return out
 
 
-def _scenario3(table: ParsedField, ti: TextIndex, end: int) -> tuple[ParsedField, ParsedField]:
-    """情境三最終價格表（「假設於定價日」到「依上所示」）每列的期初價格（依表1 代碼順序）與最終價格，及「表現最差
-    連結標的為X，其最終價格(x)低於其執行價格／下限觸發價格(y)」（Issue #321）。"""
+def _scenario3(table: ParsedField, ti: TextIndex, lo: int, end: int, hi: int) -> tuple[ParsedField, ParsedField]:
+    """情境三（`ti.text[lo:hi]`，「較差情況：」到「最大損失情況：」）最終價格表（「假設於定價日」到 `end`「依上所示」）
+    每列的期初價格（依表1 代碼順序）與最終價格，及 `end` 之後「表現最差連結標的為X，其最終價格(x)低於其執行價格／下限
+    觸發價格(y)」（Issue #321）；價格欄名對成表1 的欄（`strike`／`ki`）。"""
     names = ("scenario3_initial", "scenario3_worst")
     if not table.ok:
         return derived(names[0], table), derived(names[1], table)
-    start = ti.text.find("假設於定價日")
-    if not 0 <= start < end:
+    start = ti.text.find("假設於定價日", lo, end)
+    if start < 0:
         return tuple(ParsedField.missing(x, "情境三找不到「假設於定價日」最終價格表") for x in names)
     initial, final, ev = [], {}, []
     for code in table.value.tickers:
-        tk = re.escape(squash(code or ""))
+        tk = re.escape(squash(code or "")) or "(?!)"  # 表1 一定有代碼（以代碼切列）；保險起見不讓空字串配到每一列
         hits = [
             m
             for m in ti.finditer(rf"(?<![A-Z0-9]){tk}(?:{CCY})?({money.NUMBER})(?:{CCY})?({money.NUMBER})=")
@@ -532,21 +532,22 @@ def _scenario3(table: ParsedField, ti: TextIndex, end: int) -> tuple[ParsedField
         ]
         if len(hits) != 1:
             return (
-                ParsedField.invalid(names[0], ti.lines_for(start, end), f"情境三最終價格表找不到或有多列 {code}"),
+                ParsedField.missing(names[0], f"情境三最終價格表找不到或有多列 {code}"),
                 ParsedField.missing(names[1], "情境三最終價格表讀不到"),
             )
         m = hits[0]
         initial.append(number(m[1]))
         final[squash(code)] = (code, number(m[2]))
         ev += ti.lines_for(m.start(), m.end())
-    worst = list(ti.finditer(SCENARIO3_WORST))
-    hit = worst[0] if len(worst) == 1 and end <= worst[0].start() else None
+    worst = [m for m in ti.finditer(SCENARIO3_WORST) if end <= m.start() < hi]
+    hit = worst[0] if len(worst) == 1 else None
     if hit is None or hit[1] not in final:
         return ParsedField.present(names[0], initial, ev), ParsedField.missing(
             names[1], "情境三找不到或有多處「表現最差連結標的為…其最終價格(x)低於其執行價格／下限觸發價格(y)」"
         )
     code, shown = final[hit[1]]
-    value = {"ticker": code, "table_final": shown, "final": number(hit[2]), "column": hit[3], "price": number(hit[4])}
+    column = {"執行價格": "strike", "下限觸發價格": "ki"}[hit[3]]
+    value = {"ticker": code, "table_final": shown, "final": number(hit[2]), "column": column, "price": number(hit[4])}
     return ParsedField.present(names[0], initial, ev), ParsedField.present(
         names[1], value, ti.lines_for(hit.start(), hit.end())
     )

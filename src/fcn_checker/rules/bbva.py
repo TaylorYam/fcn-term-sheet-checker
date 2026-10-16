@@ -303,8 +303,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
             issues.append(f"情境假設總投資金額 {amount.value} 不等於 {units.value} 單位 × 每單位面額 {denom.value}")
         out.append(
             check.compare(
-                _cells(own),
-                _cells(rows),
+                kit.cells(own),
+                kit.cells(rows),
                 ok=not issues,
                 reason="value_mismatch",
                 message="；".join(issues) or "等於第 14 項價格表與每單位面額",
@@ -313,11 +313,6 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     else:
         out.append(check.compare(None, None))
     return out
-
-
-def _cells(rows: list[dict]) -> list[str]:
-    """價格表各格依列、欄順序（千分位、保留小數位），放進結果的預期值／實際值（Issue #305：看得出逐格比了哪些價格）。"""
-    return [f"{v:,}" for row in rows for v in row.values()]
 
 
 # ---------------------------------------------------------------- 重複寫出的值（Issue #305）

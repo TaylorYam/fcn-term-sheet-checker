@@ -143,7 +143,7 @@ def test_internal_rules_find_the_wrong_repeat(tmp_path, edit, broken):
     ("edit", "rid", "field"),
     [
         (
-            Edit("10,000 X 0.8334% X", "10,000 X 0.8334 X", "ts.scenario"),
+            Edit("最大損失情況：", "最大損失：", "ts.scenario"),  # 情境分不出來：整個出處清單缺漏
             "doc.coupon_mentions",
             "scenario_coupon_mentions",
         ),
@@ -167,6 +167,28 @@ def test_unreadable_scenario_repeats_need_review(tmp_path, edit, rid, field):
     """情境重複寫出處讀不到（Issue #321）：該項轉人工覆核，不判通過。"""
     r = check(tmp_path, edits=[edit])
     assert [x.status for x in rule(r, rid, field)] == [S.REVIEW_REQUIRED], problems(r)
+
+
+def test_scenario_without_amounts_needs_review(tmp_path):
+    """情境一的金額都沒有寫幣別（讀不到金額）：情境一幣別轉人工覆核，其他情境照常（Issue #321）。"""
+    edits = [Edit(f"{x}美元", x, "ts.scenario") for x in ("91.67", "83.34", "8.33")] + [
+        Edit("即美元10,000。較原始投資金額獲利約0.917%", "即10,000。較原始投資金額獲利約0.917%", "ts.scenario")
+    ]
+    r = check(tmp_path, edits=edits)
+    assert [x.status for x in rule(r, "field.currency", "scenario1_currency")] == [S.REVIEW_REQUIRED]
+    assert [x.status for x in rule(r, "field.currency", "scenario2_currency")] == [S.PASS]
+
+
+def test_scenario_without_coupon_formula_needs_review(tmp_path):
+    """情境一沒有利息算式「面額 X a% X」（其他情境有）：情境一那一筆轉人工覆核，不是靜靜略過（Issue #321）。"""
+    edits = [
+        Edit("(10,000 X 0.8334% X 1個月)", "(10,000 X 1個月)", "ts.scenario"),
+        Edit("(10,000 X 0.8334% X 2 ÷ 20)", "(10,000 X 2 ÷ 20)", "ts.scenario"),
+    ]
+    r = check(tmp_path, edits=edits)
+    statuses = {x.field: x.status for x in rule(r, "doc.coupon_mentions")}
+    assert statuses["scenario_coupon_mentions_1"] == S.REVIEW_REQUIRED
+    assert statuses["scenario_coupon_mentions_2_1"] == S.PASS
 
 
 def test_quanto_scenario_stock_prices_are_not_currency_mentions(tmp_path):

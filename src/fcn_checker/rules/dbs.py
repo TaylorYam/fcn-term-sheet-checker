@@ -246,8 +246,8 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
         issues.append(f"基本假設發行價格 {scen_price.value}% 不等於 {price.value}%")
     return [
         check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #321，比照 BBVA #305）
-            _cells(own),
-            _cells(rows),
+            kit.cells(own),
+            kit.cells(rows),
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "等於表1 與商品面額、發行價格",
@@ -255,15 +255,9 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     ]
 
 
-def _cells(rows: list[dict]) -> list[str]:
-    """價格表各格依列、欄順序（千分位、保留小數位）。"""
-    return [f"{v:,}" for row in rows for v in row.values()]
-
-
-def scenario_mentions(ctx: IssuerContext) -> list[CheckResult]:
-    """情境重複寫出的值（Issue #321）：基本假設投資金額 = 商品面額 X 發行價格 X 投資單位數；情境三最終價格表的期初價格
-    = 表1；「表現最差連結標的為X，其最終價格(x)低於其執行價格／下限觸發價格(y)」的 x = 最終價格表 X 那一列、y = 表1 X 的
-    執行價格（無 KI）或下限觸發價格（KI 到期觀察）。表現最差是哪一檔、股數與金額不重算。"""
+def scenario_investment(ctx: IssuerContext) -> list[CheckResult]:
+    """情境基本假設投資金額 `{面額} X {發行價格}% X {單位數}= X幣別{金額}`：面額 = 商品面額、% = 發行價格、金額 = 面額
+    X 發行價格 X 單位數（Issue #321，比照 Nomura #316）。"""
     f = ctx.ts.f
     denom, pct, units = f("denomination"), f("issue_price_pct"), f("scenario_units")
     principal, shown_pct, amount = (
@@ -283,47 +277,53 @@ def scenario_mentions(ctx: IssuerContext) -> list[CheckResult]:
         shown_pct,
         amount,
     )
-    out = []
     if (problem := check.blocked) is not None:
-        out.append(problem)
-    else:
-        expected = denom.value * pct.value / 100 * units.value
-        if expected == expected.to_integral_value():  # 整數金額照說明書寫法不帶小數
-            expected = int(expected)
-        out.append(
-            check.compare(
-                f"{denom.value:,} X {pct.value}% X {units.value} = {expected:,}",
-                f"{principal.value:,} X {shown_pct.value}% X {units.value} = {amount.value:,}",
-                ok=principal.value == denom.value and shown_pct.value == pct.value and amount.value == expected,
-                fail_message="投資金額須為商品面額 X 發行價格 X 投資單位數",
-            )
+        return [problem]
+    expected = denom.value * pct.value / 100 * units.value
+    if expected == expected.to_integral_value():  # 整數金額照說明書寫法不帶小數
+        expected = int(expected)
+    return [
+        check.compare(
+            f"{denom.value:,} X {pct.value}% X {units.value} = {expected:,}",
+            f"{principal.value:,} X {shown_pct.value}% X {units.value} = {amount.value:,}",
+            ok=principal.value == denom.value and shown_pct.value == pct.value and amount.value == expected,
+            fail_message="投資金額須為商品面額 X 發行價格 X 投資單位數",
         )
+    ]
+
+
+def scenario3(ctx: IssuerContext) -> list[CheckResult]:
+    """情境三重複寫出的價格（Issue #321）：最終價格表的期初價格 = 表1；「表現最差連結標的為X，其最終價格(x)低於其執行
+    價格／下限觸發價格(y)」的 x = 最終價格表 X 那一列、y = 表1 X 的執行價格（無 KI）或下限觸發價格（KI 到期觀察）。
+    表現最差是哪一檔、股數與金額不重算。"""
+    f = ctx.ts.f
     table, initial = f("underlying_table"), f("scenario3_initial")
-    out.append(
+    out = [
         kit.doc_check(
             ctx, "doc.scenario_table", "scenario3_initial", "情境三最終價格表的期初價格", table, initial
-        ).compare(
-            [f"{r['initial']:,}" for r in table.value.prices] if table.ok else None,
-            [f"{v:,}" for v in initial.value] if initial.ok else None,
+        ).compare(  # compare 的引數先算，依賴欄位有問題時不能取 value
+            kit.cells([{"initial": r["initial"]} for r in table.value.prices]) if table.ok else None,
+            kit.cells([{"initial": v} for v in initial.value]) if initial.ok else None,
             ok=table.ok and initial.ok and [r["initial"] for r in table.value.prices] == initial.value,
             fail_message="須等於表1 各列期初價格",
         )
-    )
+    ]
     worst, ki = f("scenario3_worst"), f("ki_type")
     check = kit.doc_check(
         ctx, "doc.scenario_table", "scenario3_worst", "情境三表現最差連結標的的價格", table, ki, worst
     )
     if (problem := check.blocked) is not None:
-        out.append(problem)
-        return out
+        return [*out, problem]
     w = worst.value
-    column, word = ("ki", "下限觸發價格") if ki.value == "AM" else ("strike", "執行價格")
+    column = "ki" if ki.value == "AM" else "strike"
+    words = {"strike": "執行價格", "ki": "下限觸發價格"}
     row = table.value.prices[table.value.tickers.index(w["ticker"])]
     out.append(
         check.compare(
-            f"{w['ticker']} 最終價格 {w['table_final']:,}（最終價格表）、{word} {row[column]:,}（表1）",
-            f"{w['ticker']} 最終價格 {w['final']:,}、{w['column']} {w['price']:,}",
-            ok=w["final"] == w["table_final"] and w["column"] == word and w["price"] == row[column],
+            f"{w['ticker']} 最終價格 {w['table_final']:,}（最終價格表）、{words[column]} {row[column]:,}（表1）",
+            f"{w['ticker']} 最終價格 {w['final']:,}、{words[w['column']]} {w['price']:,}",
+            ok=w["final"] == w["table_final"] and w["column"] == column and w["price"] == row[column],
+            fail_message="最終價格須等於最終價格表；無 KI 寫執行價格、KI 到期觀察寫下限觸發價格，且等於表1",
         )
     )
     return out
@@ -359,6 +359,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *document_info(ctx),
         *periods(ctx),
         *tables(ctx),
-        *scenario_mentions(ctx),
+        *scenario_investment(ctx),
+        *scenario3(ctx),
         *schedule(ctx),
     ]
