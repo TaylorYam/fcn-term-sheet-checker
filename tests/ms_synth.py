@@ -74,6 +74,7 @@ class Spec(ProductSpec):
     iis_pages: int = 4  # 投資人須知頁數（多的頁只有頁底）
     iis_page_total: int | None = None  # 投資人須知頁底「共 M頁」的 M；None 同實際頁數
     integer_amounts: bool = False  # 第 18 項情境算式金額寫到整數位（日圓樣本的寫法，Issue #181）
+    fee_header_split: bool = False  # 費用表表頭「費率」置中拆成兩行、比費率格右移約 20 pt（樣本的寫法，Issue #310）
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count)
@@ -377,7 +378,8 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
                     f"於每月配息日，每單位配息金額 = 每單位商品面額 × 固定配息率 ({s.monthly}%) ，但如發生自動提前出場事件：",
                 )
                 d.text(72, f"每單位配息金額(j) = 每單位商品面額 ×{{{s.monthly}%×n(j)/N(j)}}")
-                d.text(72, f"j 係為2 至{s.tenor} 的數字，代表第2 至{s.tenor} 個配息觀察期間")
+                a = s.first_callable + 1  # 比例配息最早在 Non-Call 的下一期
+                d.text(72, f"j 係為{a} 至{s.tenor} 的數字，代表第{a} 至{s.tenor} 個配息觀察期間")
             else:
                 d.sub(2, "於每月配息日，發行機構將依下列計算公式給付配息金額：")
                 d.text(72, f"每單位配息金額(j) = 每單位商品面額 ×固定配息率 ({s.monthly}%)")
@@ -485,7 +487,11 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     d.text(36, "2. 投資人應負擔的各項費用及金額或計算基準之表列：")
     w.need(260)
     d.cell(103, "費用項目")
-    d.cell(226, "費率 (百分")
+    if s.fee_header_split:
+        d.cell(244, "費率")
+        d.cell(232, "(百分比)")
+    else:
+        d.cell(226, "費率 (百分")
     d.cell(310, "收取時點")
     for label, rate in [
         ("申購費用", "0%~5%"),
@@ -584,7 +590,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
             49,
             "若於相對應配息觀察期間內未發生自動提前出場事件，則每單位配息金額 = 每單位商品面額 × 固定配息率 "
             f"({s.monthly}%)，但如發生自動提前出場事件，每單位配息金額(j) = 每單位商品面額×{{{s.monthly}%×n(j)/N(j)}}。"
-            f"j 係為2 至第{s.tenor} 的數字。",
+            f"j 係為{s.first_callable + 1} 至第{s.tenor} 的數字。",
         )
     else:
         d.text(49, f"每單位配息金額(j) = 每單位商品面額 × 固定配息率 ({s.monthly}%)。j 係為1 至第{s.tenor} 的數字。")
