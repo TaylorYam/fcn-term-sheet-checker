@@ -55,6 +55,8 @@ IIS_FIELDS: dict[str, str] = {
     "day_count": "str：計息天數慣例（BBVA KO 每期型，例：1/1；= 說明書第 13 項）",
     "issuing_branch": "str：相關機構「發行機構：」的完整寫法（UBS；發行分行須是倫敦分行，同說明書）",
     "monthly_coupon_ceiling_pct": "Decimal：最大利率值 %（DBS；= 括號內年利率 ÷ 12 無條件進位到 4 位）",
+    "tenor_mentions": "tuple[Occurrence, ...]：天期（月）的其他出處（GS 匯兌風險、費用說明；每處 = 商品年期）",
+    "redemption_pct_mentions": "tuple[Occurrence, ...]：到期買回「每單位面額 × X%」的 X（GS；每處 = 100）",
 }
 
 
