@@ -44,6 +44,8 @@ D = r"(\d{4}年\d{1,2}月\d{1,2}日)"
 PCT = r"(\d+(?:\.\d+)?)%"
 CCY = money.CURRENCY
 ZH_CCY = "(?:" + "|".join(sorted(money.CURRENCY_WORDS, key=len, reverse=True)) + ")"
+# 人民幣商品在計價幣別括號後多一段定義（`。「人民幣」是指大陸地區(PRC)的法定貨幣…台灣。`），內容不核對（Issue #296）
+CCY_NOTE = rf"(?:。「{ZH_CCY}」是指[^•；]+?)?"
 TICKER = re.compile(r"^([A-Z0-9][A-Z0-9./-]*)\s+([A-Z]{2})$")
 # 強制贖回、配息資料（範本規格 §4.1、§4.2、§4.6）
 OBSERVATION_DAY = "觀察日：就一觀察期間而言，指該觀察期間內所有連結標的的所有交易所的每一個規劃交易日"
@@ -199,8 +201,8 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line], put: Callable) -> 
     fields["name_zh"] = raw.capture("name_zh", r"•\s*商品中文名稱\s*：\s*(.+?)\s*\(下稱「本商品」\)")
     fields["name_en"] = raw.capture("name_en", r"•\s*商品英文名稱\s*：\s*(.+?)\s*•")
     put("product_type", cover, r"•商品種類：(.+?)•")
-    put("currency_zh", cover, rf"•計價幣別：({ZH_CCY})\([A-Z]{{3}}\)•")
-    put("currency_cover_iso", cover, rf"•計價幣別：{ZH_CCY}\(([A-Z]{{3}})\)•")
+    put("currency_zh", cover, rf"•計價幣別：({ZH_CCY})\([A-Z]{{3}}\){CCY_NOTE}•")
+    put("currency_cover_iso", cover, rf"•計價幣別：{ZH_CCY}\(([A-Z]{{3}})\){CCY_NOTE}•")
     fields["issuer_name_cover"] = raw.capture("issuer_name_cover", r"•\s*發行機構之名稱\s*：\s*(.+?)\s*•")
     dist = (
         r"•\s*受託或銷售機構之名稱、電話及地址\s*：\s*(.+?)\s*、\s*電話\s*：\s*(.+?)\s*、\s*地址\s*：\s*(.+?)\s*。?\s*•"
@@ -218,8 +220,8 @@ def _cover(fields: dict[str, ParsedField], cover: list[Line], put: Callable) -> 
 def _basic(fields: dict[str, ParsedField], basic: list[Line], put: Callable) -> None:
     ti = TextIndex(basic, separate_digits=True)
     fields["name_basic"] = RawText(basic).capture("name_basic", r"商品名稱\s*：\s*(.+?)\s*商品風險程度\s*：")
-    put("currency_basic", basic, rf"計價幣別：({ZH_CCY})\([A-Z]{{3}}\)商品面額：")
-    put("currency_basic_iso", basic, rf"計價幣別：{ZH_CCY}\(([A-Z]{{3}})\)商品面額：")
+    put("currency_basic", basic, rf"計價幣別：({ZH_CCY})\([A-Z]{{3}}\){CCY_NOTE}商品面額：")
+    put("currency_basic_iso", basic, rf"計價幣別：{ZH_CCY}\(([A-Z]{{3}})\){CCY_NOTE}商品面額：")
     denom = rf"商品面額：每單位({CCY})([\d,]+)發行價格："
     fields["denomination"] = capture_group(basic, denom, 2, "denomination", number)
     fields["denomination_currency"] = capture_group(basic, denom, 1, "denomination_currency")
@@ -465,7 +467,8 @@ def _trading(fields: dict[str, ParsedField], sec: list[Line], put: Callable) -> 
 
 def distribution_fee(lines: list[Line], shared: ParsedField) -> ParsedField:
     """說明書分銷費用的子列標籤（報酬／費用／折讓）佔了「費率」欄，費率在右邊一欄：取「費用」子列、子列標籤右邊到
-    「收取方式」欄之前的文字（範本規格 §5.3）。共用 `fee_rates` 讀得到（投資人須知的版面）時用它。"""
+    「收取方式」欄之前的文字（範本規格 §5.3）；下一個子列可能在下一頁（Issue #295）。共用 `fee_rates` 讀得到（投資人
+    須知的版面）時用它。"""
     if shared.ok:
         return shared
     name = shared.name
@@ -487,7 +490,7 @@ def distribution_fee(lines: list[Line], shared: ParsedField) -> ParsedField:
             if ln.page == top.page
             and top.x1 < ln.x0 < way.x0 - 5
             and ln.y0 + 3 >= top.y0
-            and (bottom is None or ln.y0 + 3 < bottom.y0)
+            and (bottom is None or (ln.page, ln.y0 + 3) < (bottom.page, bottom.y0))
         ),
         key=lambda x: (x.y0, x.x0),
     )

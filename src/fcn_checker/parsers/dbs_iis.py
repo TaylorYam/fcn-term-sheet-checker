@@ -171,7 +171,7 @@ def _terms(ti: TextIndex, fields: dict[str, ParsedField]) -> None:
 
 def _prices(fields: dict[str, ParsedField], lines: list[Line]) -> set[str]:
     """商品簡介價格表（同說明書表1）→ 各標的價格與 K／KO／KI %；回傳額外交出的欄位（有下限觸發價格欄時的 ki_pct）。"""
-    table = price_table.read("price_table", dbs.table_region(lines, "連結標的資產：", "商品面額："), dbs.IIS_TABLE)
+    table = price_table.read("price_table", _table_region(lines), dbs.IIS_TABLE)
     uls = fields["underlyings"]
     if table.ok and uls.ok and table.value.tickers != uls.value:
         note = f"價格表的彭博代碼 {table.value.tickers} 和「連結標的資產：」{uls.value} 不同"
@@ -184,6 +184,17 @@ def _prices(fields: dict[str, ParsedField], lines: list[Line]) -> set[str]:
         fields["ki_pct"] = derived("ki_pct", table, table.value.pcts["ki"])
         return {"ki_pct"}
     return set()
+
+
+def _table_region(lines: list[Line]) -> list[Line]:
+    """價格表的範圍：「連結標的資產：…。」那一句結束的下一行起、「商品面額：」之前。這句換行後的下一行可能以彭博代碼
+    開頭（`TSM UN。`），不能算進表（Issue #295）。"""
+    region = dbs.table_region(lines, "連結標的資產：", "商品面額：")
+    a = next((i for i, ln in enumerate(lines) if squash(ln.text).startswith("連結標的資產：")), None)
+    if a is None or "。" in lines[a].text:
+        return region
+    end = next((ln for ln in region if "。" in ln.text), None)
+    return region[region.index(end) + 1 :] if end is not None else region
 
 
 def read(lines: Sequence[Line]) -> iis.IisSheet:
@@ -217,7 +228,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
         ),
     )
     # 商品簡介
-    put("currency_zh", rf"計價幣別：({dbs.ZH_CCY})\([A-Z]{{3}}\)；")
+    put("currency_zh", rf"計價幣別：({dbs.ZH_CCY})\([A-Z]{{3}}\){dbs.CCY_NOTE}；")
     denom = rf"商品面額：每單位({dbs.CCY})([\d,]+),發行價格：商品面額的" + PCT
     fields["denomination"] = capture_group(text_lines, denom, 2, "denomination", number)
     fields["issue_price_pct"] = capture_group(text_lines, denom, 3, "issue_price_pct", Decimal)
