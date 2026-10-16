@@ -65,10 +65,10 @@
 
 | 檢查 | 規則 |
 |---|---|
-| 配息期數 | `配息期數 = N` = 配息表列數 = 天期 = 封面名稱月數 |
-| 付息日 | 逐期遞增；末期付息日 = 到期日 |
-| D 型配息表 | 終止日 < 付息日；末期終止日 = 最後評價日；第一個可提前出場期（含）以前起始日與 Nt 為 `-`，之後有值；起始日 = 前期終止日後的下一個一籃子預定交易日（跳過週末與標的交易所休市日，見 `config/exchange_holidays.toml`；標的交易所不在假日表或超出涵蓋範圍時，比推算結果晚才轉人工覆核，Issue #208） |
-| P 型提前出場表 | 決定日 < 付款日；付款日 = 同期付息日；末列決定日 = 最後評價日 |
+| 配息期數 | `配息期數 = N` = 天期（配息表列數 = 天期由共用日期表規則檢查） |
+| 日期表（共用，[共用核對規則](shared-check-rules.md) §6.1，Issue #289） | `第一章第 11 條日期表`：配息表每期一列。期數 = 天期；付息日逐期遞增、末期付息日 = 到期日；觀察日逐期遞增、早於同期付息日，末期觀察日 = 最後評價日。D 型觀察日 = 終止日，第 1～k 期起始日為 `-`，之後起始日 = 前期終止日後的下一個一籃子預定交易日（交易所假日表，Issue #208）；P 型觀察日 = 定期 KO 表對到該期的決定日，沒有起始日欄 |
+| D 型 Nt 欄 | 第一個可提前出場期（含）以前 Nt 為 `-`，之後有值 |
+| P 型提前出場表 | 每列付款日依序對到第 k～n 期付息日（各對到唯一一期） |
 | 百分比 | §12(1) 表頭 `(即期初股價的X%)` = §11 定義句；有「觸及不保本價格」欄 ⇔ §11(3) 有 KI 定義 |
 | 記憶式 | 名稱含「記憶式」⇔ §11(2) 為「鎖定股票」寫法 |
 | 情境分析 | §18 重印價格表 = §12(1)（代號與各價格逐格相等）；§18 月配息率 = 年利率 ÷ 12。算式只認數字，金額前的幣別字任一已知寫法都讀得到（寫錯幣別由 `field.currency` 逐處報不一致，不是讀不到算式；Issue #170） |
@@ -189,7 +189,9 @@
 | `field.initial_pricing`、`backfill.underlying_prices` | 期初定價為允許值或空白（空白時價格照常比對，Issue #246）；`VWAP` 時價格欄不比對、通過後以說明書覆寫（共用，Issue #122） |
 | `derive.prices` | 價格 = 期初股價 × 百分比（half-up 4 位）；價格表列數須等於標的數、有無下限價欄須與 KI 型態一致，否則轉人工覆核（各上手共用 `rules/derivation.py`，BARC 語意，Issue #94；兩項表格檢查為此新增，項目名稱為「UL_n 執行價／KO價／下限價」；HSBC 的標的清單取自價格表各列，列數檢查在現行範本上不會觸發，保留給讀出不一致時） |
 | `doc.price_header_pct` | 表頭百分比 = 定義句（HSBC 說明書內部；價格表讀不到時與情境表一起轉人工覆核） |
-| `doc.coupon_periods`、`schedule.coupon_dates`、`schedule.autocall_dates` | D／P 日期表結構及內部關係 |
+| `doc.coupon_periods` | 第 11 條(1)「配息期數」= 天期 |
+| `schedule.period_count`、`schedule.payment_order`、`schedule.observation_order`、`schedule.last_observation`、`schedule.last_payment`、`schedule.period_start` | 日期表結構（各上手共用 `rules/schedule.py`，Issue #289；日期表與排程在擷取端 `parsers/hsbc.py` 的 `schedule_table`，排程由共用推導 `parsers/schedule.py` 推得，D 型比價日只放第 k 期與末期） |
+| `schedule.autocall_dates` | D 型 Nt 欄；P 型定期 KO 表付款日對到第 k～n 期 |
 | `doc.denomination`、`field.min_amounts`、`doc.subscription_start_date`、`doc.print_date` | 面額預設值、最低金額 = 參考條件表單位面額、受理申購開始／結束日 ≤ 交易日、兩個刊印日期在交易日（含）至發行日（不含）之間（#254）（各上手共用，BARC 語意，Issue #55；每處出處各一筆結果） |
 | `doc.currency_consistency`、`doc.name_consistency` | 文件重複欄位 |
 | `field.currency`（其他出處） | 面額與最低金額、情境假設與各情境金額前的幣別字 = 參考條件表承作幣別（共用，Issue #170；欄位 `denomination_currency`、`minimum_trade_currency`、`minimum_subscription_currency`、`minimum_additional_currency`、`scenario_assumption_currency`、`scenario_n_currency`） |

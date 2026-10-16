@@ -396,7 +396,7 @@ def test_scenario_table_is_independently_compared(tmp_path, old, new, rule):
         ("固定配息率=12%×1/12", "固定配息率=12%×1/12固定配息率=13%×1/12", "field.coupon_pa_pct"),
         ("固定配息率=12%×1/12", "", "field.coupon_pa_pct"),
         ("每單位面額：美元10,000元", "每單位面額：美元20,000元", "doc.denomination"),
-        ("註1：假設日期", "未知表格結尾", "schedule.coupon_dates"),
+        ("註1：假設日期", "未知表格結尾", "schedule.period_count"),
         ("固定配息金額=美元10,000×1.0000%=美元100.00", "未知算式", "doc.scenario_calculations"),
     ],
 )
@@ -555,7 +555,8 @@ def test_each_required_scenario_formula_or_reference_must_be_present(tmp_path, o
 def test_daily_schedule_end_must_not_precede_start(tmp_path):
     # Third period's start follows period 2, but its end is moved before that start.
     r = check(tmp_path, edits=[Edit("2030 年4 月7 日", "2030 年3 月6 日", "ts")])
-    assert any(x.rule_id == "schedule.autocall_dates" and x.status == S.MISMATCH for x in r.results)
+    start = only(r, "schedule.period_start")
+    assert start.status == S.MISMATCH and "第 3 期期始日" in start.message and "晚於期末日" in start.message
 
 
 @pytest.mark.parametrize(
