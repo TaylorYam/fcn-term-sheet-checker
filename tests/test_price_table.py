@@ -237,6 +237,28 @@ def test_content_on_a_page_two_pages_after_the_last_row_is_not_dropped_silently(
     assert [e.page for e in far.evidence] == [3]
 
 
+def test_header_cell_ending_a_line_above_its_neighbour_continues_on_the_next_page():
+    """表頭跨頁、某欄在上一頁的最後一行比隔壁欄高一行（BARC：執行價格欄 3 行、KO 欄第 3 行起在下一頁）：
+    仍接到下一頁頁首同一欄的續行，續行裡的數字（`第4 位`）不會被當成價格。"""
+    spec = TableSpec(**{**PRICE_SPEC.__dict__, "pct": r"之(\d+(?:\.\d+)?)%"})
+    lines = [
+        centered(1, X["name"], 760, "連結標的"),
+        centered(1, X["initial"], 760, "期初價格"),
+        centered(1, X["strike"], 748, "執行價(期初價"),
+        centered(1, X["strike"], 760, "格之80.00%)"),
+        centered(1, X["strike"], 772, "(第4 位)"),
+        centered(1, X["ko"], 748, "自動提前出場價"),
+        centered(1, X["ko"], 760, "(期初價格之"),
+        centered(2, X["ko"], 40, "100.00%)"),
+        centered(2, X["ko"], 52, "(第4 位)"),
+        *row(2, 80, None, "甲公司", None, ROW1[:3]),
+    ]
+    table = read("t", lines, spec)
+    assert table.ok, table.note
+    assert table.value.pcts == {"strike": Decimal("80.00"), "ko": Decimal("100.00")}
+    assert table.value.prices[0]["ko"] == Decimal("100.0000")
+
+
 def test_header_more_than_one_page_before_the_first_row_is_not_read():
     lines = [*header(page=1), *row(3, 150, 1, "甲公司", "AAA UW", ROW1)]
     table = read("t", lines, SPEC)

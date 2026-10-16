@@ -376,7 +376,11 @@ def _cells(lines: list[Line]) -> list[list[Line]]:
 
     for i, a in enumerate(lines):
         for j in range(i + 1, len(lines)):
-            if _same_cell(a, lines[j], edges) and not _spans(a, lines[j], lines) and not _spans(lines[j], a, lines):
+            if (
+                _same_cell(a, lines[j], edges, lines)
+                and not _spans(a, lines[j], lines)
+                and not _spans(lines[j], a, lines)
+            ):
                 parent[find(i)] = find(j)
     groups: dict[int, list[Line]] = {}
     for i, ln in enumerate(lines):
@@ -392,15 +396,18 @@ def _spans(wide: Line, other: Line, lines: list[Line]) -> bool:
     return sum(_overlap(wide, x) > 0.5 for x in row) >= 2
 
 
-def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]]) -> bool:
+def _same_cell(a: Line, b: Line, edges: dict[int, tuple[float, float]], lines: list[Line]) -> bool:
     upper, lower = (a, b) if (a.page, a.y0) <= (b.page, b.y0) else (b, a)
     if upper.page == lower.page:
         return _adjacent(upper, lower)
     if lower.page != upper.page + 1 or not _same_column(upper, lower):
         return False
-    # 跨頁：上一頁最下面的那一列接下一頁最上面的那一列
-    reach = ADJACENT * max(upper.y1 - upper.y0, lower.y1 - lower.y0)
-    return upper.y1 >= edges[upper.page][1] - reach and lower.y0 <= edges[lower.page][0] + reach
+    # 跨頁：上一頁那一欄的最後一行（離頁底的列不到兩行；隔壁欄可能多一行）接下一頁最上面的那一列
+    height = max(upper.y1 - upper.y0, lower.y1 - lower.y0)
+    last = not any(x.page == upper.page and x.y0 > upper.y0 and _same_column(x, upper) for x in lines)
+    return (
+        last and upper.y1 >= edges[upper.page][1] - 2 * height and lower.y0 <= edges[lower.page][0] + ADJACENT * height
+    )
 
 
 def _text(cell: Sequence[Line]) -> str:

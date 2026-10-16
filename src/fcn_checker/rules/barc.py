@@ -322,14 +322,12 @@ def scenario_price_table(ctx: IssuerContext) -> CheckResult:
     check = Check(rid, "scenario_price_table", Item.expected("情境試算價格表"), ctx.document).needs(s15, s16)
     if (problem := check.blocked) is not None:
         return problem
-    a, b = ctx.ts.price_rows, ctx.ts.scenario_rows
+    a, b = s15.value.prices, s16.value.prices
     diffs = [] if len(a) == len(b) else [f"列數 {len(a)} ≠ {len(b)}"]
     for k, (r15, r16) in enumerate(zip(a, b, strict=False), 1):
-        for col in sorted(set(r15.values) | set(r16.values)):
-            if r15.values.get(col) != r16.values.get(col):
-                diffs.append(
-                    f"第 {k} 檔 {PRICE_LABEL.get(col, '最初價格')}：§15 {r15.values.get(col)}／§16 {r16.values.get(col)}"
-                )
+        for col in sorted(set(r15) | set(r16)):
+            if r15.get(col) != r16.get(col):
+                diffs.append(f"第 {k} 檔 {PRICE_LABEL.get(col, '最初價格')}：§15 {r15.get(col)}／§16 {r16.get(col)}")
     return check.compare(
         None,
         diffs or None,
