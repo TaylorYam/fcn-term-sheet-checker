@@ -24,8 +24,9 @@ from .common import RawText, capture_group, derived, fee_rates, number, zh_numbe
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
-# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：非記憶式要有明確的提前出場事件句（Issue #297）
-PARSER_VERSION = "3"
+# 2：價格表改由 parsers/price_table.py 讀（Issue #287）；3：非記憶式要有明確的提前出場事件句（Issue #297）；
+# 4：補讀發行價格金額、申購價金、十五設定參數的變動配息（Issue #303）
+PARSER_VERSION = "4"
 SECTIONS = ("商品基本資料", "相關機構事業概況", "商品風險揭露", "投資風險警語", "一般交易事項", "特別記載事項")
 PRODUCT_TYPE = "股權結構型商品"
 OLD_PRODUCT_TYPE = "股權結構型債券"
@@ -296,15 +297,34 @@ def _rows(text: str, pattern: str) -> list[re.Match[str]]:
     return out
 
 
+def _variable_coupon(fields: dict[str, ParsedField], lns: list[Line], prefix: str) -> None:
+    """KO 每日型的「變動配息率：x%X（nt/Nt）（年化配息率為y%）」與「t 係為a 至b 的數字」（八，及十五設定參數的重複）。"""
+    variable = r"配息率[:：]" + PCT + r"[xX×]（nt/Nt）（年化配息率為" + PCT + r"）"
+    fields[f"{prefix}variable_coupon_pct"] = capture_group(lns, variable, 1, f"{prefix}variable_coupon_pct", Decimal)
+    fields[f"{prefix}variable_coupon_pa_pct"] = capture_group(
+        lns, variable, 2, f"{prefix}variable_coupon_pa_pct", Decimal
+    )
+    name = f"{prefix}variable_periods"
+    ti = TextIndex(lns, separate_digits=True)
+    t = list(ti.finditer(r"t係為(\d{1,2})至(\d{1,2})的數字"))
+    if len(t) == 1:
+        fields[name] = ParsedField.present(name, (int(t[0][1]), int(t[0][2])), ti.lines_for(t[0].start(), t[0].end()))
+    elif t:
+        fields[name] = ParsedField.invalid(name, lns, "「t 係為a 至b 的數字」出現多處")
+    else:
+        fields[name] = ParsedField.missing(name, "找不到「t 係為a 至b 的數字」")
+
+
 def _article8(fields: dict[str, ParsedField], art8: list[Line], put: Callable) -> None:
     ti = TextIndex(art8, separate_digits=True)
     issue = r"發行價格[:：](?:每單位面額之)?" + PCT
     put("issue_price_pct", art8, issue, Decimal)
-    fields["issue_price_currency"] = capture_group(
-        art8, r"發行價格[:：]\d+(?:\.\d+)?%，即[\d,]+\.\d{2}(" + CCY + ")", 1, "issue_price_currency"
-    )
-    if fields["issue_price_currency"].status == FieldStatus.MISSING:
-        fields["issue_price_currency"] = standard_fields.absent("issue_price_currency", "發行價格的金額")
+    amount = r"發行價格[:：]\d+(?:\.\d+)?%，即" + AMOUNT
+    fields["issue_price_amount"] = capture_group(art8, amount, 1, "issue_price_amount", number)
+    fields["issue_price_currency"] = capture_group(art8, amount, 2, "issue_price_currency")
+    if re.search(r"發行價格[:：]每單位面額之", ti.text):  # 寫「每單位面額之100%」時沒有金額；其他讀不到的寫法照常缺漏
+        for name in ("issue_price_amount", "issue_price_currency"):
+            fields[name] = standard_fields.absent(name, "發行價格的金額")
     denom = rf"每單位面額[:：]{AMOUNT}。"
     put("denomination", art8, denom, number)
     fields["denomination_currency"] = capture_group(art8, denom, 2, "denomination_currency")
@@ -318,18 +338,7 @@ def _article8(fields: dict[str, ParsedField], art8: list[Line], put: Callable) -
     coupon = r"固定配息率[:：]" + PCT + r"。?（年化配息率(?:為)?" + PCT + r"）"
     fields["monthly_coupon_pct"] = capture("monthly_coupon_pct", ti, coupon, Decimal, whole_match=True)
     fields["coupon_pa_pct"] = capture_group(art8, coupon, 2, "coupon_pa_pct", Decimal)
-    variable = r"配息率[:：]" + PCT + r"[xX×]（nt/Nt）（年化配息率為" + PCT + r"）"
-    fields["variable_coupon_pct"] = capture_group(art8, variable, 1, "variable_coupon_pct", Decimal)
-    fields["variable_coupon_pa_pct"] = capture_group(art8, variable, 2, "variable_coupon_pa_pct", Decimal)
-    t = list(ti.finditer(r"t係為(\d{1,2})至(\d{1,2})的數字"))
-    if len(t) == 1:
-        fields["variable_periods"] = ParsedField.present(
-            "variable_periods", (int(t[0][1]), int(t[0][2])), ti.lines_for(t[0].start(), t[0].end())
-        )
-    elif t:
-        fields["variable_periods"] = ParsedField.invalid("variable_periods", art8, "「t 係為a 至b 的數字」出現多處")
-    else:
-        fields["variable_periods"] = ParsedField.missing("variable_periods", "找不到「t 係為a 至b 的數字」")
+    _variable_coupon(fields, art8, "")
     fields["ko_wording_art8"] = ko_wording("ko_wording_art8", ti)
     _memory(fields, ti)
     ko_pct = list(ti.finditer(r"提前出場價（即期初價格的" + PCT + r"）"))
@@ -602,6 +611,8 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
         fields["scenario_issue_price_pct"] = ParsedField.missing("scenario_issue_price_pct", "找不到「設定參數」")
         fields["scenario_investment"] = ParsedField.missing("scenario_investment", "找不到「設定參數」")
         fields["scenario_coupon_pa_pct"] = ParsedField.missing("scenario_coupon_pa_pct", "找不到「設定參數」")
+        for name in ("scenario_variable_coupon_pct", "scenario_variable_coupon_pa_pct", "scenario_variable_periods"):
+            fields[name] = ParsedField.missing(name, "找不到「設定參數」")
         return
     pt = TextIndex(params)
     fields["scenario_tenor"] = capture("scenario_tenor", pt, r"天期[:：](\d+)個月", int, whole_match=True)
@@ -628,6 +639,7 @@ def _article15(fields: dict[str, ParsedField], art15: list[Line]) -> None:
         note = "情境設定參數找不到或有多處「固定配息率：x%」"
         fields["scenario_monthly_pct"] = ParsedField.missing("scenario_monthly_pct", note)
         fields["scenario_coupon_pa_pct"] = ParsedField.missing("scenario_coupon_pa_pct", note)
+    _variable_coupon(fields, params, "scenario_")
     fields["scenario_table"] = price_table.read(
         "scenario_table", table_region(params, r"設定參數[:：]?", "固定配息率"), SCENARIO_TABLE
     )
@@ -662,6 +674,7 @@ def _general(fields: dict[str, ParsedField], doc: UbsDocument, put: Callable) ->
     fields.update(fee_rates(fees[: next((i for i, ln in enumerate(fees) if squash(ln.text).startswith("附註")), None)]))
     for name, lns, pattern in (
         ("denomination_ch4", item(4), rf"每單位面額[:：]{AMOUNT}"),
+        ("subscription_amount_ch5", item(5), rf"申購價金之計算[:：]{AMOUNT}"),
         ("minimum_subscription", item(4), rf"最低申購金額[:：]{AMOUNT}"),
         ("minimum_additional", item(4), rf"最低累加申購金額[:：]{AMOUNT}"),
         ("minimum_redemption", item(8), rf"最低投資人提前贖回(?:單位數|金額)[:：]{AMOUNT}"),
@@ -715,6 +728,7 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         ("redemption_currency", "剩餘金額幣別", "商品基本資料八到期日給付「以X支付剩餘金額」"),
         ("denomination_ch4_currency", "每單位面額幣別", "一般交易事項四每單位面額"),
         ("minimum_subscription_currency", "最低申購金額幣別", "一般交易事項四最低申購金額"),
+        ("subscription_amount_ch5_currency", "申購價金幣別", "一般交易事項五申購價金之計算"),
         ("minimum_additional_currency", "累加申購金額幣別", "一般交易事項四最低累加申購金額"),
         ("minimum_redemption_currency", "最低贖回金額幣別", "一般交易事項八最低投資人提前贖回單位數"),
         ("redemption_increment_currency", "累加贖回金額幣別", "一般交易事項八最低累加投資人提前贖回單位數"),

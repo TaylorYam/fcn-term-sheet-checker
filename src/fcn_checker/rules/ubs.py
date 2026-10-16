@@ -1,5 +1,5 @@
 """UBS 專屬規則（docs/rules/ubs-check-rules.md）：配息率與其他出處、說明書內部交叉驗證（受託機構商品代號、名稱、幣別、
-發行分行）、KO 每日型固定／變動配息期別、KO 條款的 KO %、情境設定參數與情境價格表、配息表。
+發行分行、面額的其他出處）、KO 每日型固定／變動配息期別、KO 條款的 KO %、情境設定參數與情境價格表、配息表。
 
 參考條件表欄位、價格推算、審查標準（含 UBS 分節：固定警語、名稱樣板、發行機構名稱、商品種類、最低金額倍數）與回填是
 各上手共用的規則。說明書有年利率（商品基本資料八「年化配息率」），不讀參考條件表（REFERENCE_FIELDS 為空）。發行人、
@@ -59,7 +59,8 @@ NOT_COVERED = [
 
 
 def coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """固定配息率 = 年利率 ÷ 12（4 位）；KO 每日的變動配息率與年化、情境固定配息率與年化 = 八的固定配息率與年利率。"""
+    """固定配息率 = 年利率 ÷ 12（4 位）；KO 每日的變動配息率與年化（八與十五設定參數）、情境固定配息率與年化 = 八的固定
+    配息率與年利率。"""
     f = ctx.ts.f
     annual, monthly = f("coupon_pa_pct"), f("monthly_coupon_pct")
     out = [
@@ -80,6 +81,8 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
         mentions += [
             ("variable_coupon_pct", "商品基本資料八變動配息率", monthly),
             ("variable_coupon_pa_pct", "商品基本資料八變動配息率的年化配息率", annual),
+            ("scenario_variable_coupon_pct", "商品基本資料十五設定參數變動配息率", monthly),
+            ("scenario_variable_coupon_pa_pct", "商品基本資料十五設定參數變動配息率的年化配息率", annual),
         ]
     for field, name, base in mentions:
         pf = f(field)
@@ -127,6 +130,34 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     return out
 
 
+def denomination_mentions(ctx: IssuerContext) -> list[CheckResult]:
+    """面額的其他出處 = 八的每單位面額：八「發行價格：N%，即X」的 X = 面額 × N%（寫「每單位面額之N%」時沒有金額，不產生
+    結果）、一般交易事項四「每單位面額」、五「申購價金之計算」的金額（Issue #303）。"""
+    f = ctx.ts.f
+    denom, price, amount = f("denomination"), f("issue_price_pct"), f("issue_price_amount")
+    rid = "doc.denomination_mentions"
+    out = []
+    if amount.status != FieldStatus.NOT_APPLICABLE:
+        out.append(
+            kit.doc_check(ctx, rid, "issue_price_amount", "商品基本資料八發行價格金額", denom, price, amount).compare(
+                denom.value * price.value / 100 if denom.ok and price.ok else None,
+                amount.value,
+                fail_message="須等於每單位面額 × 發行價格 %",
+            )
+        )
+    for field, name in (
+        ("denomination_ch4", "一般交易事項四每單位面額"),
+        ("subscription_amount_ch5", "一般交易事項五申購價金之計算的金額"),
+    ):
+        pf = f(field)
+        out.append(
+            kit.doc_check(ctx, rid, field, name, denom, pf).compare(
+                denom.value, pf.value, fail_message="須等於商品基本資料八的每單位面額"
+            )
+        )
+    return out
+
+
 def issuing_branch(check: Check, pf: ParsedField) -> CheckResult:
     """發行機構寫法裡的發行分行是倫敦分行（三種寫法等價）；其他分行轉人工覆核（說明書與投資人須知共用）。"""
     return check.needs(pf).compare(
@@ -156,9 +187,10 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KO 每日：配息表「固定配息率」期數 = Non-Call，「t 係為a 至b」= Non-Call+1 至天期（核對規則 §3.3）。"""
+    """KO 每日：配息表「固定配息率」期數 = Non-Call，八與十五設定參數的「t 係為a 至b」= Non-Call+1 至天期（核對規則
+    §3.3）。"""
     f = ctx.ts.f
-    k, table, tenor, t = f("first_callable_period"), f("coupon_table"), f("tenor_months"), f("variable_periods")
+    k, table, tenor = f("first_callable_period"), f("coupon_table"), f("tenor_months")
     if not (table.ok and table.value["kind"] == "D"):
         return []
     rid = "doc.autocall_terms"
@@ -171,13 +203,18 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
         )
     ]
     if k.ok and tenor.ok and k.value < tenor.value:
-        out.append(
-            kit.doc_check(ctx, rid, "variable_periods", "「t 係為a 至b 的數字」", k, tenor, t).compare(
-                (k.value + 1, tenor.value),
-                t.value,
-                fail_message="變動配息率的期別須是第一個可提前出場期的下一期到天期",
+        for field, name in (
+            ("variable_periods", "「t 係為a 至b 的數字」"),
+            ("scenario_variable_periods", "商品基本資料十五設定參數「t 係為a 至b 的數字」"),
+        ):
+            pf = f(field)
+            out.append(
+                kit.doc_check(ctx, rid, field, name, k, tenor, pf).compare(
+                    (k.value + 1, tenor.value),
+                    pf.value,
+                    fail_message="變動配息率的期別須是第一個可提前出場期的下一期到天期",
+                )
             )
-        )
     return out
 
 
@@ -298,6 +335,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
     return [
         *coupon(ctx),
         *document_info(ctx),
+        *denomination_mentions(ctx),
         *periods(ctx),
         *autocall_terms(ctx),
         *ko_pct_mentions(ctx),

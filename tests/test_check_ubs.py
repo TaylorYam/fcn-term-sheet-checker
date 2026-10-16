@@ -71,6 +71,10 @@ def test_supported_types_pass_and_are_filled(tmp_path, spec):
     assert rule(r, "field.ki_type")[0].status == S.PASS
     assert bool([x for x in r.results if x.rule_id == "doc.autocall_terms"]) == (spec.ko_obs == "D")
     assert bool([x for x in r.results if x.rule_id == "doc.ko_pct_mentions"]) == spec.ko_pct_in_clause
+    # 八的發行價格金額（有寫時）、一般交易事項四每單位面額、五申購價金之計算（Issue #303）
+    assert len(rule(r, "doc.denomination_mentions")) == (3 if spec.issue_price_amount else 2)
+    variable = spec.ko_obs == "D"  # 八與十五的變動配息率與年化
+    assert len(rule(r, "doc.coupon_mentions")) == 2 + (4 if variable else 0)
 
 
 def test_wrapped_underlying_name_stays_in_its_row(tmp_path):
@@ -171,6 +175,16 @@ def test_name_without_memory_wording_is_a_mismatch(tmp_path):
         (Edit("每單位面額：10,000.00 美元 /", "每單位面額：1,000.00 美元 /", "ts.art15"), "doc.scenario_table"),
         (Edit("初始投資金額：10,000.00 美元", "初始投資金額：1,000.00 美元", "ts.art15"), "doc.scenario_table"),
         (Edit("發行價格：100% /", "發行價格：99% /", "ts.art15"), "doc.scenario_table"),
+        (Edit("變動配息率：1.0000%X", "變動配息率：1.0100%X", "ts.art15"), "doc.coupon_mentions"),
+        (
+            Edit("（nt/Nt）（年化配息率為12.00%）", "（nt/Nt）（年化配息率為12.50%）", "ts.art15"),
+            "doc.coupon_mentions",
+        ),
+        (Edit("t 係為2 至6", "t 係為2 至5", "ts.art15"), "doc.autocall_terms"),
+        (Edit("發行價格：100%，即10,000.00", "發行價格：100%，即1,000.00", "ts.art8"), "doc.denomination_mentions"),
+        (Edit("• 每單位面額：10,000.00", "• 每單位面額：1,000.00", "ts.general"), "doc.denomination_mentions"),
+        (Edit("申購價金之計算：10,000.00", "申購價金之計算：1,000.00", "ts.general"), "doc.denomination_mentions"),
+        (Edit("申購價金之計算：10,000.00 美元", "申購價金之計算：10,000.00 日圓", "ts.general"), "field.currency"),
     ],
     ids=lambda x: x if isinstance(x, str) else x.where + " " + x.old[:12],
 )
