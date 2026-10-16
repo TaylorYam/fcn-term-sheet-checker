@@ -23,8 +23,9 @@ from .common import RawText, capture_group, compat_normalized, derived, fee_rate
 from .layout import Document, LayoutSpec, TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ca-zh-pd"
-# 2：價格表幣別字換行的那格仍歸到同一列（Issue #278）；3：價格表改由 parsers/price_table.py 讀（Issue #287）
-PARSER_VERSION = "3"
+# 2：價格表幣別字換行的那格仍歸到同一列（Issue #278）；3：價格表改由 parsers/price_table.py 讀（Issue #287）；
+# 4：重複寫出處（情境、贖回 %、說明文字幣別、警語的受託機構名稱；Issue #319）
+PARSER_VERSION = "4"
 # 第七章章名在部分文件拆成兩行（「第七章、股權連結商」／「品的額外條款及條件」），只用前六章定位；辨識另查第七章全文
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
@@ -70,6 +71,12 @@ KI_AM = "界限事件：若於期末訂價日"
 KI_D = "界限事件：若於界限事件觀察期間之任何預定交易日"
 KI_D_PERIOD = "界限事件觀察期間：從期初訂價日(含)至期末訂價日(含)"
 KI_MATURITY = "若未發生界限事件"
+# 第 9 項 (b)、(c) 贖回金額「商品面額x N%」（Issue #319；投資人須知二、2. 同句型）
+KO_REDEMPTION = r"「自動提前出場贖回金額」：[^「]*?商品面額x" + PCT
+MATURITY_REDEMPTION = r"「到期贖回金額」：[^「]*?商品面額x" + PCT
+# 說明文字的幣別字（Issue #319）：到期交付股票時「以X支付剩餘金額」、提前贖回「可能低於100%X投資本金」
+REMAINDER_CURRENCY = rf"以({CCY})支付剩餘金額"
+PRINCIPAL_CURRENCY = rf"可能低於\d+(?:\.\d+)?%({CCY})投資本金"
 # 價格表（第 9 項 (2)、第 16 項情境）：第 16 項沒有列號，兩張表都以價格切列；表內沒有代碼（第 10 項的代碼依列序
 # 對到）。欄序 K → KI → KO，價格後接報價幣別字（可能換行）
 PRICE_TABLE = price_table.TableSpec(
@@ -201,6 +208,7 @@ def read(lines: Sequence[Line]) -> CaTermSheet:
     _chapter2(fields, doc)
     _chapter4(fields, doc, put)
     _occurrences(fields)
+    _repeated(fields, doc, article)
     fields["initial_pricing"] = standard_fields.absent(
         "initial_pricing", "說明書沒有寫期初定價方式（開盤價／收盤價／VWAP）"
     )
@@ -247,6 +255,13 @@ def _rows(text: str, pattern: str) -> list[tuple]:
 
 
 def _article9(fields: dict[str, ParsedField], art9: list[Line]) -> None:
+    plain = TextIndex(art9)  # 贖回 %、(a) 舉例的月配息率（Issue #319）
+    for name, pattern in (
+        ("ko_redemption_pct", KO_REDEMPTION),
+        ("maturity_redemption_pct", MATURITY_REDEMPTION),
+        ("coupon_note_pct", r"月配息率為" + PCT),
+    ):
+        fields[name] = capture(name, plain, pattern, Decimal, whole_match=True)
     ti = TextIndex(art9, separate_digits=True)
     text = ti.text
     a = text.find("(a)「配息金額」")
@@ -518,11 +533,7 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
     fields["scenario_table"] = price_table.read(
         "scenario_table", table_region(art16, "(年化配息率為", "情境分析一"), SCENARIO_TABLE
     )
-    a = ti.text.find("情境分析一")
-    one = art16[ti.line_at(a) : ti.line_at(ti.text.find("情境分析二", a))] if a >= 0 else []
-    fields["scenario_coupon_currency"] = capture(  # 情境一的累積配息金額（配息金額 = 承作幣別，2026-10-15 確認）
-        "scenario_coupon_currency", TextIndex(one), rf"累積配息金額＝[\d,]+(?:\.\d+)?({CCY})", whole_match=True
-    )
+    _scenarios(fields, ti)
     found = list(
         ti.finditer(
             r"情境分析一：較佳情況假設於第1個自動提前出場觀察日發生自動提前出場事件。[•‧]第1(?:~(\d+))?個月配息金額"
@@ -537,6 +548,133 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> None:
         fields["scenario_first_months"] = ParsedField.missing(
             "scenario_first_months", "情境分析一找不到或有多處「假設於第1 個自動提前出場觀察日…第 1(~k) 個月配息金額」"
         )
+
+
+SCENARIOS = ("一", "二", "三")
+SCENARIO_END = "※請注意"
+EQ = "[=＝]"
+# 情境的配息金額、贖回金額行：「每單位面額 × x% ＝ 面額 × x% ＝ 金額」（Issue #319：x 兩處與面額是重複寫出的值）
+SCENARIO_COUPON = rf"第1(?:~(\d+))?個月配息金額{EQ}每單位面額×{PCT}{EQ}([\d,]+)×{PCT}{EQ}"
+SCENARIO_REDEMPTION = rf"{{}}{EQ}每單位面額×{PCT}{EQ}([\d,]+)×{PCT}{EQ}"
+# 情境一自動提前出場、情境二到期的贖回金額行 → (情境序號, 句首, 出處清單)；% 對應第 9 項 (b)／(c)
+SCENARIO_REDEMPTIONS = (
+    (1, "自動提前出場贖回金額", "scenario_ko_redemption_mentions"),
+    (2, "到期贖回金額", "scenario_maturity_redemption_mentions"),
+)
+
+
+def _scenarios(fields: dict[str, ParsedField], ti: TextIndex) -> None:
+    """情境分析一～三重複寫出的值（Issue #319，比照 BBVA #305）→ 出處清單，由規則逐處比對正式條款：
+
+    - `scenario_coupon_mentions`：配息金額行的配息率兩處（= 配息表配息率）
+    - `scenario_denomination_mentions`：配息金額、贖回金額行代入的面額（= 第 6 項面額）
+    - `scenario_months_mentions`：情境二、三「第 1~n 個月」的 n（= 天期；情境一的月數另由 `scenario_first_months` 核對）
+    - `scenario_ko_redemption_mentions`／`scenario_maturity_redemption_mentions`：贖回金額行的 % 兩處（= 第 9 項 (b)／(c)）
+    - `scenario_currencies`：各情境金額旁的幣別（股價、股數與剩餘金額算式所在的行不列入）與情境三「以X支付剩餘金額」
+
+    配息金額、累積配息、股數、剩餘金額、報酬率不重算；情境三的執行價、收盤價跟著標的走，不列入。
+    """
+    starts = [ti.text.find(f"情境分析{k}：") for k in SCENARIOS]
+    bounds = [*starts, ti.text.find(SCENARIO_END, max(starts))]
+    found = all(b >= 0 for b in bounds) and bounds == sorted(bounds)
+    lists: dict[str, list[Occurrence]] = {
+        name: []
+        for name in (
+            "scenario_coupon_mentions",
+            "scenario_denomination_mentions",
+            "scenario_months_mentions",
+            "scenario_ko_redemption_mentions",
+            "scenario_maturity_redemption_mentions",
+            "scenario_currencies",
+        )
+    }
+    for n, k in enumerate(SCENARIOS, start=1):
+        where = f"第一章第 16 項情境分析{k}"
+        lo, hi = (bounds[n - 1], bounds[n]) if found else (-1, -1)
+        coupon = _one_match(ti, lo, hi, SCENARIO_COUPON, f"{where}配息金額行")
+        mentions = [
+            (
+                "scenario_coupon_mentions",
+                f"scenario{n}_coupon_pct",
+                "配息率",
+                "配息金額「每單位面額 × x%」",
+                2,
+                Decimal,
+            ),
+            (
+                "scenario_coupon_mentions",
+                f"scenario{n}_coupon_pct_calc",
+                "配息率",
+                "配息金額算式「面額 × x%」",
+                4,
+                Decimal,
+            ),
+            (
+                "scenario_denomination_mentions",
+                f"scenario{n}_coupon_denomination",
+                "每單位面額",
+                "配息金額算式",
+                3,
+                number,
+            ),
+        ]
+        if n > 1:
+            mentions.append(
+                ("scenario_months_mentions", f"scenario{n}_months", "配息月數", "「第 1~n 個月配息金額」", 1, _months)
+            )
+        for container, field, label, place, group, convert in mentions:
+            lists[container].append(Occurrence(field, label, f"{where}{place}", coupon(field, group, convert)))
+        for m, label, container in SCENARIO_REDEMPTIONS:
+            if m != n:
+                continue
+            line = _one_match(ti, lo, hi, SCENARIO_REDEMPTION.format(label), f"{where}{label}行")
+            for field, place, group in (
+                (f"scenario{n}_redemption_pct", f"{label}「每單位面額 × x%」", 1),
+                (f"scenario{n}_redemption_pct_calc", f"{label}算式「面額 × x%」", 3),
+            ):
+                lists[container].append(Occurrence(field, "贖回 %", f"{where}{place}", line(field, group, Decimal)))
+            field = f"scenario{n}_redemption_denomination"
+            lists["scenario_denomination_mentions"].append(
+                Occurrence(field, "每單位面額", f"{where}{label}算式", line(field, 2, number))
+            )
+        amounts = money.amounts(ti, money.AMOUNT_THEN_CURRENCY, currency_group=2, start=lo, end=hi) if found else ()
+        lists["scenario_currencies"].append(
+            money.scenario_occurrence(
+                f"scenario{n}_currency", "情境金額幣別", where, amounts, ti.lines_for(max(lo, 0), max(lo, 0) + 1)
+            )
+        )
+    lo = bounds[2] if found else -1
+    lists["scenario_currencies"] += money.currency_words(
+        ti.lines_for(lo, bounds[3]) if found else [],
+        REMAINDER_CURRENCY,
+        "scenario3_remainder_currency",
+        "剩餘金額幣別",
+        "第一章第 16 項情境分析三「以X支付剩餘金額」",
+    )
+    for name, items in lists.items():
+        fields[name] = standard_fields.occurrences(name, items)
+
+
+def _months(x: str | None) -> int:
+    """「第1~n個月」的 n；只寫「第1個月」時為 1。"""
+    return int(x) if x else 1
+
+
+def _one_match(ti: TextIndex, lo: int, hi: int, pattern: str, what: str) -> Callable[[str, int, Callable], ParsedField]:
+    """`ti.text[lo:hi]` 內 `pattern` 恰好一處時，`get(name, group, convert)` 交出該組的值；沒有或有多處時每組都轉人工覆核。"""
+    hits = [m for m in ti.finditer(pattern) if lo <= m.start() < hi] if lo >= 0 else []
+    lns = [ln for m in hits for ln in ti.lines_for(m.start(), m.end())]
+
+    def get(name: str, group: int, convert: Callable) -> ParsedField:
+        if len(hits) != 1:
+            note = f"{what}找不到已知寫法" if not hits else f"{what}有 {len(hits)} 處"
+            return ParsedField.missing(name, note) if not hits else ParsedField.invalid(name, lns, note)
+        try:
+            return ParsedField.present(name, convert(hits[0][group]), lns)
+        except (ValueError, TypeError, ArithmeticError):
+            return ParsedField.invalid(name, lns, f"{what}「{hits[0][group]}」無法辨識")
+
+    return get
 
 
 # ---------------------------------------------------------------- 第二章、第四章
@@ -579,6 +717,34 @@ def _chapter4(fields: dict[str, ParsedField], doc: Document, put: Callable) -> N
 # ---------------------------------------------------------------- 出處清單
 
 
+# 寫受託機構名稱的其他地方（Issue #319，比照投資人須知 #306）：(欄位, 位置, pattern)。第三章 6.(4) 第三處
+# 「…依法不得承諾擔保」多「綜合」，依 #274 第 5 題特例放行，不列入
+COVER_WARNING_NAMES = (
+    ("distributor_name_w4a", "封面警語 4「本商品雖經…審查」", r"本商品雖經(.+?)審查"),
+    ("distributor_name_w4b", "封面警語 4「…不負本商品投資盈虧之責」", r"之價值，(.+?)不負本商品投資盈虧之責"),
+    ("distributor_name_w4c", "封面警語 4「…依法不得承諾擔保」", r"盈虧之責。(.+?)依法不得承諾"),
+    ("distributor_name_w5", "封面警語 5「而非由…所保證」", r"而非由(.+?)所保證"),
+    ("distributor_name_w6", "封面警語 6「(即…)負責」", r"受託或銷售機構[(（]即(.+?)[)）]負責外"),
+)
+CH3_WARNING_NAMES = (
+    ("distributor_name_ch3_w4a", "第三章 6.(4)「本商品雖經…審查」", r"本商品雖經(.+?)審查"),
+    ("distributor_name_ch3_w4b", "第三章 6.(4)「…不負本商品投資盈虧之責」", r"之價值，(.+?)不負本商品投資盈虧之責"),
+    ("distributor_name_ch3_w5", "第三章 6.(5)「而非由…所保證」", r"而非由(.+?)所保證"),
+)
+STRUCTURE_NAMES = (
+    (
+        "distributor_name_structure_osu",
+        "第二章 4. 交易架構（OSU）「投資人透過與…之受託買賣關係」",
+        r"受託買賣時：本商品由發行機構發行，投資人透過與(.+?)之受託買賣關係",
+    ),
+    (
+        "distributor_name_structure",
+        "第二章 4. 交易架構「投資人透過與…之受託買賣關係」",
+        r"總代理人為發行機構之總代理人。投資人透過與(.+?)之受託買賣關係",
+    ),
+)
+
+
 def _occurrences(fields: dict[str, ParsedField]) -> None:
     occ = Occurrence
     fields["min_amounts"] = standard_fields.occurrences(
@@ -601,7 +767,11 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
     )
     fields["issue_price_others"] = standard_fields.absent("issue_price_others", "發行價格的其他出處")
     fields["distributor_phone_ch4"] = standard_fields.absent("distributor_phone_ch4", "第四章受託機構電話")
-    fields.update(standard_fields.absent_all(standard_fields.DISTRIBUTOR_OTHERS, "受託機構的其他出處"))
+    fields.update(
+        standard_fields.absent_all(
+            ("distributor_addresses_others", "chairman_others"), "受託機構地址、負責人的其他出處"
+        )
+    )
     currencies = (  # 金額旁的幣別字（Issue #170）：價格表幣別字（標的報價幣別）、情境三股價與股數算式不列入
         ("denomination_currency", "每單位商品面額幣別", "第一章第 6 項商品面額"),
         ("issue_price_currency", "發行價格金額幣別", "第一章第 6 項發行價格"),
@@ -610,8 +780,68 @@ def _occurrences(fields: dict[str, ParsedField]) -> None:
         ("minimum_redemption_currency", "最低贖回金額幣別", "第四章第 8 項最低贖回金額"),
         ("scenario_denomination_currency", "情境假設每單位面額幣別", "第一章第 16 項基本假設每單位面額"),
         ("scenario_investment_currency", "情境假設初始投資金額幣別", "第一章第 16 項基本假設初始投資金額"),
-        ("scenario_coupon_currency", "情境一累積配息金額幣別", "第一章第 16 項情境分析一累積配息金額"),
     )
     fields["currency_others"] = standard_fields.occurrences(
-        "currency_others", [occ(key, label, where, fields[key]) for key, label, where in currencies]
+        "currency_others",
+        [
+            *(occ(key, label, where, fields[key]) for key, label, where in currencies),
+            *fields["scenario_currencies"].value,
+        ],
     )
+
+
+def _repeated(fields: dict[str, ParsedField], doc: Document, article: Callable[[int], list[Line]]) -> None:
+    """說明文字的幣別字併入 `currency_others`；警語與交易架構的受託機構名稱 → `distributor_names_others`（Issue #319）。"""
+    words = money.currency_words
+    ch3, ch4 = doc.articles(3), doc.articles(4)
+    principal = "可能低於100%X投資本金"
+    wording = (
+        *words(
+            article(9),
+            REMAINDER_CURRENCY,
+            "redemption_currency",
+            "剩餘金額幣別",
+            "第一章第 9 項 (c)「以X支付剩餘金額」",
+        ),
+        *words(
+            article(15),
+            PRINCIPAL_CURRENCY,
+            "principal_currency_art15",
+            "投資本金幣別",
+            f"第一章第 15 項「{principal}」",
+        ),
+        *words(
+            doc.chapter_lines(3),
+            rf"(?:受|當)({CCY})利率",
+            "interest_rate_currency",
+            "利率幣別",
+            "第三章 1.(3) 利率風險",
+        ),
+        *words(
+            doc.chapter_lines(3),
+            rf"直接導致({CCY})投資本金損失之虞",
+            "risk_principal_currency",
+            "投資本金幣別",
+            "第三章 3.、4.「直接導致X投資本金損失之虞」",
+        ),
+        *words(
+            doc.span_lines(ch4.get(9)),
+            PRINCIPAL_CURRENCY,
+            "principal_currency_ch4",
+            "投資本金幣別",
+            f"第四章 9.「{principal}」",
+        ),
+    )
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", [*fields["currency_others"].value, *wording]
+    )
+    names = [
+        Occurrence(field, label, where, capture(field, TextIndex(lns), pattern))
+        for lns, label, specs in (
+            (doc.before_chapter1(), "受託機構名稱（警語）", COVER_WARNING_NAMES),
+            (doc.span_lines(ch3.get(6)), "受託機構名稱（警語）", CH3_WARNING_NAMES),
+            (doc.span_lines(doc.articles(2).get(4)), "受託機構名稱（交易架構）", STRUCTURE_NAMES),
+        )
+        for field, where, pattern in specs
+    ]
+    fields["distributor_names_others"] = standard_fields.occurrences("distributor_names_others", names)

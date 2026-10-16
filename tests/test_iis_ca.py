@@ -26,6 +26,8 @@ def test_supported_types_pass(tmp_path, spec):
     assert rule(r, "iis.page_totals")[0].status == S.PASS
     assert rule(r, "iis.monthly_coupon")[0].status == S.PASS
     assert rule(r, "iis.has_ki")[0].status == S.PASS
+    assert [x.status for x in rule(r, "iis.redemption_pct")] == [S.PASS, S.PASS]  # (b)、(c)（Issue #319）
+    assert len(rule(r, "field.currency")) == 6  # 計價幣別、剩餘金額、投資本金、利率風險 3 處
     assert rule(r, "standard.fixed_warning")[0].actual == 1  # 警語 1.
     assert rule(r, "standard.forbidden_wording")[0].status == S.PASS  # 警語 6.「受託投資或銷售時」是允許片語
     assert [x.status for x in rule(r, "doc.print_date")] == [S.PASS]
@@ -80,6 +82,11 @@ def test_ki_on_the_term_sheet_must_appear_on_the_investor_sheet(tmp_path):
         (Edit("刊印日期：2030 年01 月08 日", "刊印日期：2030 年01 月20 日", "iis.cover"), "doc.print_date"),
         (Edit("(6) 計價幣別：美元(USD)", "(6) 計價幣別：日圓(JPY)", "iis.summary"), "field.currency"),
         (Edit("以美元支付剩餘金額", "以日圓支付剩餘金額", "iis.coupon"), "field.currency"),
+        # Issue #319：說明文字的幣別字、贖回 %
+        (Edit("低於100%美元投資本金", "低於100%日圓投資本金", "iis.coupon"), "field.currency"),
+        (Edit("當美元利率下跌", "當日圓利率下跌", "iis.rest"), "field.currency"),
+        (Edit("商品面額x100%", "商品面額x99%", "iis.coupon"), "iis.redemption_pct"),
+        (Edit("商品面額x 100%", "商品面額x 99%", "iis.coupon"), "iis.redemption_pct"),
         (Edit("(TDCC 商品代號：086199990001)", "(TDCC 商品代號：086199990002)", "iis.cover"), "iis.product_code"),
         (
             Edit("(Unsecured)(Non-principal protected)", "(Secured)(Non-principal protected)", "iis.cover"),

@@ -1,5 +1,5 @@
 """CA 專屬規則（docs/rules/ca-check-rules.md）：月配息率與其他出處、說明書內部交叉驗證、配息表與 KO 觀察日表（KO 每日／
-每期兩種）、多標的非記憶式、情境基本假設與情境價格表。
+每期兩種）、多標的非記憶式、情境基本假設與情境價格表、贖回 % 與情境重複寫出的值（Issue #319）。
 
 參考條件表欄位、價格推算、審查標準（含 CA 分節：固定警語、名稱樣板、發行機構名稱、商品種類、允許片語）與回填是各上手
 共用的規則。說明書有年利率（第 16 項年化配息率），不讀參考條件表（REFERENCE_FIELDS 為空）。保證機構、總代理人名稱、
@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 
 from ..schema import CheckResult, Item, ParsedField
 from ..schema import CheckStatus as S
@@ -40,7 +41,8 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "第 16 項情境只核對基本假設、情境價格表與情境一的配息月數；配息金額、股數、剩餘金額、報酬率、假設匯率不重算，"
+        "description": "第 16 項情境只核對基本假設、情境價格表、配息月數與重複寫出的配息率、面額、贖回 %、幣別（Issue #319）；"
+        "配息金額、累積配息、股數、剩餘金額、報酬率、情境三的執行價與收盤價、假設匯率不重算，"
         "KO 每日的 n/N 比例配息不推算（2026-10-15 確認）",
     },
     {
@@ -84,6 +86,12 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
         kit.doc_check(
             ctx, "doc.coupon_mentions", "scenario_monthly_pct", "第 16 項基本假設配息率", monthly, scen
         ).compare(monthly.value, scen.value, fail_message="情境基本假設的配息率須等於配息表的配息率")
+    )
+    note = f("coupon_note_pct")
+    out.append(
+        kit.doc_check(
+            ctx, "doc.coupon_mentions", "coupon_note_pct", "第 9 項 (a) 投資人請注意的月配息率", monthly, note
+        ).compare(monthly.value, note.value, fail_message="舉例的月配息率須等於配息表的配息率（Issue #319）")
     )
     return out
 
@@ -217,14 +225,60 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     if scen_denom.value != denom.value:
         issues.append(f"基本假設每單位面額 {scen_denom.value} 不等於商品面額 {denom.value}")
     return [
-        check.compare(
-            None,
-            None,
+        check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #319，比照 BBVA #305）
+            [*_cells(own), f"{denom.value:,}"],
+            [*_cells(rows), f"{scen_denom.value:,}"],
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "等於第 9 項價格表與商品面額",
         )
     ]
+
+
+def _cells(rows: list[dict]) -> list[str]:
+    """價格表各格依列、欄順序（千分位、保留小數位）。"""
+    return [f"{v:,}" for row in rows for v in row.values()]
+
+
+# ---------------------------------------------------------------- 贖回 % 與重複寫出的值（Issue #319）
+
+
+def repeated_terms(ctx: IssuerContext) -> list[CheckResult]:
+    """第 9 項 (b)、(c) 贖回金額「商品面額 x 100%」；情境一～三重複寫出的配息率 = 配息表配息率、代入的面額 = 第 6 項面額、
+    情境二／三配息月數 = 天期、贖回金額行的 % = 第 9 項 (b)／(c)（比照 BBVA #305；金額、股數、報酬率不重算）。"""
+    f = ctx.ts.f
+    out = [
+        Check("doc.redemption_pct", field, Item.expected(name), ctx.document)
+        .needs(f(field))
+        .compare(Decimal(100), f(field).value, fail_message="贖回金額須為商品面額 x 100%")
+        for field, name in (
+            ("ko_redemption_pct", "第 9 項 (b) 自動提前出場贖回金額"),
+            ("maturity_redemption_pct", "第 9 項 (c) 到期贖回金額"),
+        )
+    ]
+    for container, rid, expected, what in (
+        ("scenario_coupon_mentions", "doc.coupon_mentions", f("monthly_coupon_pct"), "第 9 項配息表的配息率"),
+        ("scenario_denomination_mentions", "doc.scenario_params", f("denomination"), "第一章第 6 項商品面額"),
+        ("scenario_months_mentions", "doc.coupon_periods", f("tenor_months"), "第 13 項天期"),
+        ("scenario_ko_redemption_mentions", "doc.redemption_pct", f("ko_redemption_pct"), "第 9 項 (b) 的 %"),
+        (
+            "scenario_maturity_redemption_mentions",
+            "doc.redemption_pct",
+            f("maturity_redemption_pct"),
+            "第 9 項 (c) 的 %",
+        ),
+    ):
+        pf = f(container)
+        if not pf.ok:
+            out.append(Check(rid, container, Item.expected(what), ctx.document).review(pf))
+            continue
+        for occ in pf.value:
+            out.append(
+                kit.doc_check(ctx, rid, occ.field, f"{occ.where}的{occ.name}", expected, occ.value).compare(
+                    expected.value, occ.value.value, fail_message=f"須等於{what}"
+                )
+            )
+    return out
 
 
 # ---------------------------------------------------------------- 配息表與 KO 觀察日表（核對規則 §3.5）
@@ -272,5 +326,6 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *autocall_terms(ctx),
         *memory(ctx),
         *tables(ctx),
+        *repeated_terms(ctx),
         *schedule(ctx),
     ]
