@@ -18,6 +18,7 @@ from ..standard_fields import ScenarioParam
 from ..text import squash
 from . import barc_schedule as schedule
 from . import money, price_table
+from .common import by_value, derived
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "barc-zh-pd"
@@ -591,6 +592,7 @@ def _scenario_notional(ti: TextIndex) -> ParsedField:
 
 _CASE_IDS = ("i", "ii", "iii")
 SCENARIO_WHERE = "第一章第 16 條情境分析價格表"
+ARTICLE_16 = "第16條"  # 重複出現處的條文（§16 情境試算的月配息率交給共用情境規則）
 
 
 def _currency_occurrences(
@@ -699,9 +701,9 @@ def _repeat_mentions(doc: Document, arts: dict[int, Span], s16: TextIndex) -> li
         key=lambda m: m.start(),
     )
     for m in found:
-        out.append(Mention("第16條", Decimal(m.group(1)), s16.lines_for(m.start(), m.end())))
+        out.append(Mention(ARTICLE_16, Decimal(m.group(1)), s16.lines_for(m.start(), m.end())))
     if not found:
-        out.append(Mention("第16條", Decimal("NaN"), []))
+        out.append(Mention(ARTICLE_16, Decimal("NaN"), []))
     return out
 
 
@@ -858,7 +860,7 @@ def read(lines: Sequence[Line]) -> BarcTermSheet:
     mentions = {
         "monthly": _mentions(doc, arts, _MONTHLY_PATTERNS),
         "annual": _mentions(doc, arts, _ANNUAL_PATTERNS),
-        "repeat": [m for m in repeats if m.article != "第16條"],
+        "repeat": [m for m in repeats if m.article != ARTICLE_16],
     }
     return BarcTermSheet(flds, mentions, TextIndex(all_lines), doc, header_pcts)
 
@@ -867,10 +869,7 @@ def _scenario_params(flds: dict[str, ParsedField], s16: TextIndex, repeats: list
     """交給共用情境規則的 §16 情境假設值（Issue #294）：情境假設每單位商品面額、情境試算的月配息率（同一個值一筆；
     讀不到數值時一筆缺漏）、一般情況平均年化報酬率。"""
     params = [ScenarioParam("scenario_denomination", "第 16 條情境假設", _scenario_notional(s16))]
-    coupons: dict[Decimal, list[Line]] = {}
-    for m in (m for m in repeats if m.article == "第16條"):
-        coupons.setdefault(m.value, []).extend(m.lines)
-    for value, lines in coupons.items():
+    for value, lines in by_value((m.value, m.lines) for m in repeats if m.article == ARTICLE_16).items():
         pf = (
             ParsedField(
                 "scenario_monthly_coupon",
@@ -883,10 +882,6 @@ def _scenario_params(flds: dict[str, ParsedField], s16: TextIndex, repeats: list
         )
         params.append(ScenarioParam("scenario_monthly_coupon", "第 16 條情境試算的", pf))
     general = flds["scenario_general"]
-    annualized = (
-        ParsedField("scenario_general_annualized", FieldStatus.PRESENT, general.value["annualized"], general.evidence)
-        if general.ok
-        else general
-    )
+    annualized = derived("scenario_general_annualized", general, general.value["annualized"] if general.ok else None)
     params.append(ScenarioParam("scenario_annualized_return", "第 16 條(ii)一般情況平均", annualized))
     return params

@@ -203,10 +203,10 @@ class CitiTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
-    coupon_mentions: list[
-        Mention
-    ]  # 月配息率的每個出處（第 13、14(2) 項、第 13 項末段；第 15 項情境的交給共用情境規則）
-    annual_mentions: list[Mention]  # 年息的其他出處（第 13 項其他處、第 14 項(2)、第 13 項末段；第 15 項假設 d) 同上）
+    # 月配息率的每個出處（第 13、14(2) 項、第 13 項末段）與年息的其他出處（第 13 項其他處、第 14 項(2)、第 13 項末段）；
+    # 第 15 項情境的交給共用情境規則
+    coupon_mentions: list[Mention]
+    annual_mentions: list[Mention]
     redemption_mentions: list[Repeat]  # 到期、提前出場給付 100% 的其他出處（第 8、13、15、17 項；Issue #314）
     header_mentions: list[Repeat]  # 第 15 項各情境小表表頭 %，`source` 為對應的 % 欄位（strike_pct 等；Issue #314）
 

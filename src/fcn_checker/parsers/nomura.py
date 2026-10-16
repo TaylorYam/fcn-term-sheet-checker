@@ -222,9 +222,8 @@ class NomuraTermSheet:
     fields: dict[str, ParsedField]
     full_text: TextIndex
     document: Document
-    coupon_mentions: list[
-        Mention
-    ]  # 每期配息率主來源（第 7 項）以外的出處（第 15 項(1)；第 14 項設定參數的交給共用情境規則）
+    # 每期配息率主來源（第 7 項）以外的出處（第 15 項(1)；第 14 項設定參數的交給共用情境規則）
+    coupon_mentions: list[Mention]
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -787,15 +786,15 @@ def _article14(fields: dict[str, ParsedField], art14: list[Line], put: Callable)
     fields["scenario_prices"] = standard_fields.absent("scenario_prices", "要核對的較差情境價格")
     period = fields["coupon_period_pct"]
     fields["monthly_coupon_pct"] = derived("monthly_coupon_pct", period, period.value)  # 第 7 項每期配息率
-    where, line = "第 14 項設定參數", "第 14 項設定參數投資金額算式的"
+    where, formula = "第 14 項設定參數", "第 14 項設定參數投資金額算式的"
     fields["scenario_params"] = standard_fields.occurrences(
         "scenario_params",
         [
             ScenarioParam("scenario_tenor", where, fields["scenario_tenor"]),
             ScenarioParam("scenario_denomination", where, fields["scenario_denomination"]),
             ScenarioParam("scenario_monthly_coupon", f"{where}固定", fields["coupon_art14"]),
-            ScenarioParam("scenario_denomination", line, fields["scenario_investment"]),
-            ScenarioParam("scenario_issue_price", line, fields["scenario_investment_pct"]),
+            ScenarioParam("scenario_denomination", formula, fields["scenario_investment"]),
+            ScenarioParam("scenario_issue_price", formula, fields["scenario_investment_pct"]),
         ],
     )
     sections = {k: t14.text.find(f"情境{k}（") for k in ("一", "二", "三")}

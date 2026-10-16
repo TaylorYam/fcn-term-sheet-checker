@@ -456,24 +456,24 @@ def _scenario(fields: dict[str, ParsedField], sec: list[Line], put: Callable) ->
     best = ti.lines_for(a, b) if a >= 0 and b > a else []
     put("scenario_best_annual_pct", best, r"年化平均報酬率約為" + PCT, Decimal)
     currencies = _scenario_mentions(fields, ti)
-    _shared_scenario(fields)
+    _scenario_standard(fields)
     return currencies
 
 
-def _shared_scenario(fields: dict[str, ParsedField]) -> None:
+def _scenario_standard(fields: dict[str, ParsedField]) -> None:
     """交給共用情境規則的標準欄位（Issue #294）：情境價格表；基本假設的年期、面額、發行價格、投資金額算式的面額與發行價格、
     最大利率值，情境二年化平均報酬率，情境一～三利息算式的最大利率值（`scenario_params`）；情境三最終價格表的期初價格與
     表現最差連結標的的執行價格／下限觸發價格（`scenario_prices`）。"""
     fields["scenario_reprint_table"] = price_table.at(
         "scenario_reprint_table", fields["scenario_table"], SCENARIO_TABLE
     )
-    where, line = "情境分析基本假設", "情境分析基本假設投資金額算式的"
+    where, formula = "情境分析基本假設", "情境分析基本假設投資金額算式的"
     params = [
         ScenarioParam("scenario_tenor", where, fields["scenario_tenor"]),
         ScenarioParam("scenario_denomination", where, fields["scenario_denomination"]),
         ScenarioParam("scenario_issue_price", where, fields["scenario_issue_price_pct"]),
-        ScenarioParam("scenario_denomination", line, fields["scenario_investment_principal"]),
-        ScenarioParam("scenario_issue_price", line, fields["scenario_investment_pct"]),
+        ScenarioParam("scenario_denomination", formula, fields["scenario_investment_principal"]),
+        ScenarioParam("scenario_issue_price", formula, fields["scenario_investment_pct"]),
         ScenarioParam("scenario_monthly_coupon", f"{where}最大利率值的", fields["scenario_monthly_pct"]),
         ScenarioParam("scenario_annualized_return", "情境分析情境二", fields["scenario_best_annual_pct"]),
     ]

@@ -20,7 +20,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence, ScenarioParam
 from ..text import squash
 from . import money, price_table, schedule
-from .common import RawText, capture_group, derived, fee_rates, number, zh_number
+from .common import RawText, by_value, capture_group, derived, fee_rates, number, zh_number
 from .layout import TextIndex, capture, join_wrapped_tickers, parse_date
 
 TEMPLATE_ID = "ubs-zh-pd"
@@ -768,9 +768,7 @@ def _scenarios(fields: dict[str, ParsedField], art15: list[Line]) -> list[Occurr
         code = SCENARIO_MENTIONS[name]
         if not hits:
             params.append(ScenarioParam(code, where, ParsedField.missing(code, "商品基本資料十五情境分析的算式讀不到")))
-        values: dict = {}  # 同一個值一筆（證據為每一處）
-        for _, v, lns in hits:
-            values.setdefault(v, []).extend(lns)
+        values = by_value((v, lns) for _, v, lns in hits)  # 同一個值一筆（證據為每一處）
         params += [ScenarioParam(code, where, ParsedField.present(code, v, lns)) for v, lns in values.items()]
     fields["scenario_params"] = standard_fields.occurrences("scenario_params", params)
     out = []

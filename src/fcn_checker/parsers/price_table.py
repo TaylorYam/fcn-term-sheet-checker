@@ -115,7 +115,8 @@ class TableRow:
 
 @dataclass(frozen=True)
 class PriceTable:
-    """讀出的價格表：`columns` 為價格欄（含 initial）依表頭 x 位置的順序，`pcts` 為表頭百分比（沒有寫時不含該欄），
+    """讀出的價格表：`columns` 為價格欄（含 initial）依表頭 x 位置的順序，`pcts` 為表頭百分比（沒有寫時不含該欄；BNP 標的表
+    轉成這個形狀時為每檔各一個的 tuple，見 `standard_fields.TableAt`），
     `heads` 為各欄（價格欄與代碼欄）表頭去空白的文字，`head_lines` 為各欄表頭的原文行。"""
 
     columns: tuple[str, ...]

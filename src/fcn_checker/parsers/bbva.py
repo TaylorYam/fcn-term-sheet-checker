@@ -622,7 +622,9 @@ def _scenarios(fields: dict[str, ParsedField], art16: list[Line], assumed: list[
         note = "第 16 項找不到情境一～四（到「免責聲明」為止）"
         for name in names:
             fields[name] = ParsedField.missing(name, note)
-        coupons = ScenarioParam("scenario_monthly_coupon", "第 16 項情境第 1 期", ParsedField.missing("scenario", note))
+        coupons = ScenarioParam(
+            "scenario_monthly_coupon", "第 16 項情境第 1 期", ParsedField.missing("scenario_monthly_coupon", note)
+        )
         fields["scenario_params"] = standard_fields.occurrences("scenario_params", [*assumed, coupons])
         return [
             Occurrence(

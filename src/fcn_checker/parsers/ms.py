@@ -140,7 +140,7 @@ class MsTermSheet:
     full_text: TextIndex
     document: Document
     scenarios: ms_scenario.ScenarioSection  # 第 18 項
-    coupon_mentions: list[Mention]  # 月配息率的每個出處（第 15 項、第 18 項假設與各情境算式）
+    coupon_mentions: list[Mention]  # 月配息率的出處（第 15 項；第 18 項的交給共用情境規則）
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)

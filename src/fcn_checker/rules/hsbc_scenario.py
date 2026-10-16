@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from ..parsers.hsbc import SCENARIO_CCY, scenario_formulas, scenario_number, scenario_text, scenario_worst
+from ..parsers.hsbc import SCENARIO_CCY, scenario_formulas, scenario_text, scenario_worst
+from ..parsers.hsbc import scenario_number as number
 from ..schema import CheckStatus as S
 from ..schema import Evidence, Item
 from . import kit
@@ -23,7 +24,6 @@ PROFIT_TOLERANCE = Decimal("0.01")
 
 
 SCENARIO = Item.expected("情境試算")
-number = scenario_number
 
 
 def scenario(i, what):

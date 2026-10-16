@@ -19,7 +19,7 @@ from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
 from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
 from . import money, price_table, schedule
-from .common import RawText, capture_group, derived, fee_rates, number
+from .common import RawText, by_value, capture_group, derived, fee_rates, number
 from .layout import Document, LayoutSpec, Span, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "natixis-zh-pd"
@@ -718,9 +718,8 @@ def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> list[Scenar
     fields["scenario_ko_wording"] = capture(
         "scenario_ko_wording", ti, r"e\.自動提前到期觀察日：(.+?)f\.年利率", scenario_ko_kind, whole_match=True
     )
-    terms: dict[Decimal, list[Line]] = {}  # 各期配息「x (y%/12)」的 y：同一個值一筆
-    for m in ti.finditer(r"x\(" + PCT + r"/12\)"):
-        terms.setdefault(Decimal(m[1]), []).extend(ti.lines_for(m.start(), m.end()))
+    # 各期配息「x (y%/12)」的 y：同一個值一筆
+    terms = by_value((Decimal(m[1]), ti.lines_for(m.start(), m.end())) for m in ti.finditer(r"x\(" + PCT + r"/12\)"))
     assumed += [
         ScenarioParam("scenario_coupon_pa", "第 16 項各期配息的", ParsedField.present("scenario_coupon_pa", v, lns))
         for v, lns in terms.items()
@@ -820,7 +819,7 @@ def _scenarios(
         for name in ("scenario_row_counts", "autocall_redemption_mentions", "maturity_redemption_mentions"):
             fields[name] = ParsedField.missing(name, missing)
         denomination = ScenarioParam(
-            "scenario_denomination", "第 16 項情境的", ParsedField.missing("scenario", missing)
+            "scenario_denomination", "第 16 項情境的", ParsedField.missing("scenario_denomination", missing)
         )
         fields["scenario_params"] = standard_fields.occurrences("scenario_params", [*assumed, denomination])
         fields["scenario_prices"] = _worst_strike(fields, ParsedField.missing("scenario_worst_strike", missing))

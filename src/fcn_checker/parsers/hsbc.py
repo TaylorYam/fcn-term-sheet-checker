@@ -13,6 +13,7 @@ from ..standard_fields import ScenarioParam, ScenarioPrice
 from ..text import full_brackets, squash
 from . import hsbc_tables as tables
 from . import money, price_table, schedule
+from .common import derived
 from .layout import Document, LayoutSpec, TextIndex, capture, parse_date
 
 TEMPLATE_ID = "hsbc-zh-pd"
@@ -186,16 +187,8 @@ def _scenario_standard(fields: dict[str, ParsedField], ti: ScenarioIndex) -> Non
         "scenario_reprint_table", fields["scenario_table"], SCENARIO_TABLE
     )
     annual = fields["coupon_pa_pct"]  # 說明書只寫年利率：固定配息率 = 年利率 ÷ 12 四捨五入 4 位
-    fields["monthly_coupon_pct"] = (
-        ParsedField(
-            "monthly_coupon_pct",
-            FieldStatus.PRESENT,
-            (annual.value / 12).quantize(Decimal("0.0001"), ROUND_HALF_UP),
-            list(annual.evidence),
-        )
-        if annual.ok
-        else replace(annual, name="monthly_coupon_pct")
-    )
+    monthly = (annual.value / 12).quantize(Decimal("0.0001"), ROUND_HALF_UP) if annual.ok else None
+    fields["monthly_coupon_pct"] = derived("monthly_coupon_pct", annual, monthly)
     text = scenario_text(ti, fields["ki_type"])
     if text is None:
         note = "第 18 條情境數量或順序不符已知範本"
