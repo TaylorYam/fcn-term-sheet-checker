@@ -280,8 +280,9 @@ def _article8(d: _Doc, s: Spec) -> None:
         }[s.ki]
         d.text(67, f"觸及下限事件：{watch}，則視同觸及下限事件曾經發生。")
         d.text(67, f"下限價：係指相關連結標的之期初股價的{s.ki_pct:.2f}%，列於下述第9 項")
+    d.text(67, f"惟：(i) 關於每{s.money(s.denom)}，實物交付之股數應以無條件捨去至最接近之整數股數。")
     if s.autocall:
-        event = "記憶式自動提前出場" if s.memory else "自動提前出場"
+        event = _event(s)
         d.text(
             67,
             f"(4) 發生{event}：若發生{event}事件，發行機構就每單位商品將支付相當於每單位商品面額100%之金額，請見下述第13 項",
@@ -370,6 +371,11 @@ def _article13(d: _Doc, s: Spec) -> None:
         d.text(67, f"自動提前出場界限：係指相關連結標的之期初股價的{s.ko:.2f}%")
     d.text(67, "最終收盤價：係指相關連結標的於期末評價日之收盤價格。")
     if s.autocall:
+        d.text(
+            67,
+            f"若發生{_event(s)}事件，於相對應的配息日將由發行機構以對於每一商品支付相等於每單位商品面額的100%之金額"
+            "以及當期固定配息金額之方式，提前強制買回。",
+        )
         days = (
             f"自動提前出場觀察日(即第{k}個配息觀察期間結束日（含當日）起至期末評價日（含當日）)"
             if s.ko_obs == "D"
@@ -394,6 +400,44 @@ def _article13(d: _Doc, s: Spec) -> None:
         67,
         f"配息後本商品的市場價值會相對降低（例如：假設本商品配息日前市場價值為98.00%，配息率為{m:.4f}%（即年化配息率為{a:.2f}%））。",
     )
+
+
+def _event(s: Spec) -> str:
+    return "記憶式自動提前出場" if s.memory else "自動提前出場"
+
+
+def _scenarios(d: _Doc, s: Spec) -> None:
+    """第 15 項各情境（Issue #314）：小表只寫表頭一行（表頭 % 依欄名核對，小表價格不核對）與 (一)、(二) 算式。"""
+    unit, m, denom = s.currency_zh, s.monthly, s.denom
+    coupon = (denom * m / 100).quantize(Decimal("0.01"))
+
+    def head(label: str, pct: Decimal) -> str:
+        return f"連結標的 彭博代碼 期初股價 {label} (期初股價的{pct:.2f}%)(假設) 最終收盤價(假設)"
+
+    cases = [("一般情況2", head("下限價", s.ki_pct) if s.ki != "none" else head("執行價", s.strike), "maturity")]
+    if s.autocall:
+        cases.insert(0, ("極佳情況", head("自動提前出場界限", s.ko), "autocall"))
+    cases.append(("較差情況", head("執行價", s.strike), "delivery"))
+    for name, header, kind in cases:
+        d.text(67, f"情境：{name}")
+        d.text(67, "情境說明（虛構）。")
+        d.text(67, header)
+        d.text(67, "(一) 配息說明")
+        d.text(67, f"每單位固定配息金額 = 每單位商品面額 × {m}% (四捨五入計算至小數點後第2 位)")
+        d.text(67, f"= {s.money(denom)} × {m}% = {s.money(coupon)}")
+        if kind == "autocall":
+            if s.ko_obs == "D":
+                d.text(67, f"自動提前出場配息 = 每單位商品面額 × m/M × {m}% = {s.money(coupon)}")
+            d.text(67, "(二) 自動提前出場發生之給付說明")
+            d.text(67, "自動提前出場發生之強制提前買回金額 = 每單位商品面額 × 投資單位數 × 100%")
+            d.text(67, f"= {s.money(denom)} × {s.units} × 100% = {s.money(denom * s.units)}")
+        elif kind == "maturity":
+            d.text(67, "(二)到期日給付說明")
+            d.text(67, f"每單位最終給付金額 = 每單位商品面額 × 100% = {s.money(denom)} × 100% = {s.money(denom)}")
+        else:
+            d.text(67, "(二)到期日給付說明")
+            d.text(67, "將以實物交付表現最差連結標的之股數如下：每單位商品面額的100% ÷ 表現最差連結標的之執行價")
+            d.text(67, f"發行機構應支付投資人總股數與零股換算之現金金額406.80{unit}")
 
 
 def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[Edit] | None = None) -> Path:
@@ -619,6 +663,13 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         d.article(n, titles.get(n, f"第{n}項說明（不核對）"), s)
         if n == 3:
             d.text(67, f"保證機構名稱及其長期債務信用評等：{GUARANTOR['ch1']}；長期債務信用評等為虛構")
+        elif n == 7:
+            d.text(
+                67,
+                f"註：「原計價幣別投資本金」係指投資人之{unit}實際投資淨額（即商品單位數乘以每單位商品面額）。"
+                f"發行機構到期買回之金額係以{unit}計算，投資人於投資之初若以非{unit}之其他貨幣資金投資本商品，"
+                "須留意到期轉換回其他貨幣資產之匯率風險。",
+            )
         elif n == 5:
             d.numbered("(1)", f"每單位商品面額： {s.money(s.denom)}", legacy=s.legacy, x=67, body_x=90)
             d.numbered("(2)", "發行價格： 每單位商品面額的100%", legacy=s.legacy, x=67, body_x=90)
@@ -653,6 +704,14 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
             d.section = "art15"
             d.text(67, "情境 ： 本金全部損失之最差情況")
             d.text(67, "情境內容為虛構說明，不核對。")
+            _scenarios(d, s)
+        elif n == 17 and s.autocall:
+            d.text(
+                67,
+                f"(C) 發行機構因發生{_event(s)}事件而提前買回本商品之條件及應注意事項：若發生{_event(s)}事件，所有商品"
+                "將會在相對應的配息日，由發行機構以對於每一商品支付相等於每單位商品面額的100%之金額（簡稱「強制提前買回金額」）"
+                "以及當期固定配息金額之方式，提前強制買回。",
+            )
 
     d.chapter("二", "相關機構事業概況")
     d.article(1, "發行機構", s)
@@ -677,7 +736,12 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
 
     d.chapter("三", "商品風險揭露")
     d.article(1, "基本風險資訊：本商品不保本。", s)
-    d.article(2, "個別商品風險資訊：不核對。", s)
+    d.article(2, "個別商品風險資訊：", s)
+    d.text(
+        67,
+        f"(7) 匯兌風險：本商品係以{unit}計價，當投資人以新台幣或其他貨幣轉換成{unit}進行投資時，"
+        "本金加利息轉換回新台幣或其他幣別可能產生匯兌風險。",
+    )
     d.article(3, "依境外結構型商品管理規則第二十三條第一項：不核對。", s)
     d.article(4, "本商品之投資風險警語。", s)
     for n, t in enumerate(warnings, 1):
@@ -754,6 +818,11 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
 
     d.chapter("五", "特別記載事項")
     d.text(42, "一、 不核對。")
+    d.text(
+        42,
+        f"(2) 本中文產品說明書僅為本商品在{zh_date(s.trade_date)}的條款及條件摘要，在本商品發行日{zh_date(s.issue_date)}"
+        "前或會被修訂、變更或補充。",
+    )
     path = w.save(path)
     require_used(edits, used)
     return path
