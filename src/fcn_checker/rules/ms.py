@@ -13,7 +13,7 @@ from ..parsers.ms_wording import MEMORY_NAME
 from ..schema import CheckResult, ParsedField
 from ..schema import CheckStatus as S
 from ..text import full_brackets, squash
-from . import kit, ms_scenario
+from . import kit, ms_scenario, scenario
 from .kit import IssuerContext
 
 ISSUER = "MS"
@@ -47,14 +47,15 @@ def product_type_for(underlying_count: int) -> str:
 
 
 def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
-    """第 15 項、第 18 項假設與各情境算式的每個月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位。"""
+    """第 15 項的月配息率 = 參考條件表年利率 ÷ 12，四捨五入（half-up）到 4 位（第 18 項假設與各情境算式的月配息率由共用
+    情境規則 `scenario.params` 和第 15 項(2) 比，Issue #294）。"""
     return kit.rate_mentions(
         ctx,
         "derive.monthly_coupon",
         "monthly_coupon_pct",
         "月配息率",
         ctx.ts.coupon_mentions,
-        lambda annual, value: (ms_scenario.monthly_rate(annual) == value, ms_scenario.monthly_rate(annual)),
+        lambda annual, value: (kit.monthly_of_annual(annual) == value, kit.monthly_of_annual(annual)),
         "四捨五入（half-up）到 4 位",
         lambda annual: f"推算：年利率 {annual}% ÷ 12",
     )
@@ -228,11 +229,11 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果、審查標準與宣告的參考條件表欄位（年利率）。"""
     return [
         *monthly_coupon(ctx),
-        *kit.annualized_return(ctx),
         *document_info(ctx),
         *periods(ctx),
         *ko_terms(ctx),
         autocall_dates(ctx),
         redemption_start(ctx),
+        *scenario.run(ctx),  # 第 18 項情境的共用檢查（Issue #294）；其餘上手切換後改由單份核對呼叫
         *ms_scenario.run(ctx),
     ]
