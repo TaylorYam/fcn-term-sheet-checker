@@ -29,7 +29,7 @@ NOT_COVERED = [
     {
         "rule_id": "doc.template_variants",
         "description": "依規則推得、待樣本驗證：非美元幣別、新版每期觀察 KI、P 型非記憶式且 Non-Call < 天期、"
-        "D 型 Non-Call > 1、5 檔標的；範本以外的寫法會轉人工覆核",
+        "5 檔標的；範本以外的寫法會轉人工覆核",
     },
 ]
 PRODUCT_TYPES = {  # 封面第 6 項商品種類：依標的數（範本規格 §4.5）
@@ -107,10 +107,11 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def periods(ctx: IssuerContext) -> list[CheckResult]:
-    """天期 = 名稱月數 = 第 15 項期別終點；第 15 項期別起點 D 型為 2、P 型為 1（日期表期數由共用規則 `schedule.period_count`
-    檢查）。"""
+    """天期 = 名稱月數 = 第 15 項期別終點；第 15 項期別起點 D 型為第 17 項 Non-Call k + 1（第 k 期終止日起才觀察提前出場，
+    比例配息最早在第 k+1 期；Issue #310）、P 型為 1（日期表期數由共用規則 `schedule.period_count` 檢查）。"""
     f = ctx.ts.f
     tenor, table, zh, rng = f("tenor_months"), f("date_table"), f("name_zh"), f("coupon_range")
+    obs = f("ko_observation_art17")
     rid = "doc.coupon_periods"
     months = re.search(r"發行(\d+)個月期", squash(zh.value)) if zh.ok else None
     name_months = ParsedField("name_months", zh.status, int(months[1]) if months else None, zh.evidence, note=zh.note)
@@ -121,12 +122,15 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
             tenor.value, name_months.value
         ),
     ]
-    start = 2 if table.ok and table.value["type"] == "D" else 1
+    daily = table.ok and table.value["type"] == "D"
+    start = obs.value["k"] + 1 if daily and obs.ok else 1
     out.append(
-        kit.doc_check(ctx, rid, "coupon_range", "第 15 項配息期別", tenor, table, rng).compare(
+        kit.doc_check(
+            ctx, rid, "coupon_range", "第 15 項配息期別", tenor, table, *([obs] if daily else []), rng
+        ).compare(
             (start, tenor.value),
             rng.value,
-            fail_message="第 15 項「j 係為 a 至 N」：N 須等於天期，a 在 D 型為 2、P 型為 1",
+            fail_message="第 15 項「j 係為 a 至 N」：N 須等於天期，a 在 D 型為第 17 項 Non-Call + 1、P 型為 1",
         )
     )
     return out

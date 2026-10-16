@@ -43,12 +43,14 @@ def test_samples_only_differ_where_the_exploration_said(items):
             ("doc.trustee_product_code", "value_mismatch"): 1,  # 受託機構商品代號空白（文件錯誤）
             # 1 份表上 1 檔標的的價格都是說明書的同一比例：疑為分割調整後的價格，轉人工覆核（Issue #191）
             ("field.underlying_prices", "split_suspected"): 3,
-            # 配息期數範圍的擷取與原文相符，但與日期表推得的天期不同，屬文件錯誤（Issue #310）
-            ("doc.coupon_periods", "value_mismatch"): 1,
         }
     )
+    # 費用表表頭「費率」置中拆兩行的 2 份也讀得到費率（Issue #310）
     fees = [r for i in term_sheets for r in i.report.results if r.rule_id == "standard.fees"]
     assert len(fees) == 21 and all(r.status == S.PASS for r in fees)
+    # D 型 Non-Call 5 的 1 份：第 15 項期別從第 6 期起（Non-Call + 1），照常通過（Issue #310）
+    rng = [r for i in term_sheets for r in i.report.results if r.field == "coupon_range"]
+    assert len(rng) == 7 and all(r.status == S.PASS for r in rng)
     # 第二章受託機構營業所在地都少「松山區」：審查標準的地址等價寫法（2026-10-09 確認視為正確）
     ch2 = [r for i in term_sheets for r in i.report.results if r.field == "distributor_address_ch2"]
     assert len(ch2) == 7 and all(r.status == S.PASS and "address_equivalents" in r.tolerance for r in ch2)
@@ -61,9 +63,9 @@ def test_investor_sheets_pass_and_rows_are_filled_only_when_the_term_sheet_passe
     term_sheets, investor_sheets = items
     assert len(investor_sheets) == 7
     assert all(i.report.template == MS.iis.template_id and i.report.status == S.PASS for i in investor_sheets)
-    # 說明書與投資人須知都通過的 3 檔回填；其餘說明書有上面列出的差異，不回填
+    # 說明書與投資人須知都通過的 5 檔回填；其餘 2 檔說明書有上面列出的差異，不回填
     filled = [i for i in term_sheets if i.fills_sheet]
-    assert len(filled) == 3
+    assert len(filled) == 5
     assert all(i.report.status == S.PASS and i.partner.report.status == S.PASS for i in filled)
 
 

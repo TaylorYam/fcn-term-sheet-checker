@@ -192,16 +192,20 @@ FEE_ROWS = ("申購費用", "提前贖回費用", "管理費用", "分銷費用"
 
 
 def fee(label: str, name: str, lines: list[Line]) -> ParsedField:
-    """第四章費用表：該費用項目那一列「費率」欄的區間（例 0%~5%）。"""
+    """第四章費用表：該費用項目那一列「費率」欄的區間（例 0%~5%）。
+
+    費率欄從表頭「費用項目」的右緣起、到「收取時點」之前：表頭「費率」可能置中拆成兩行（`費率` / `(百分比)`），
+    比費率格右移 20 pt 以上，不能拿它的 x 當左界（Issue #310）；費用項目名稱換行仍從左欄起頭，不會落進這個範圍。"""
     anchors = [ln for ln in lines if ln.x0 < 100 and squash(ln.text).startswith(label)]
     if len(anchors) != 1:
         return ParsedField.missing(name, "費用列錨點缺漏／重複")
     lab = anchors[0]
     rate_hdr = [ln for ln in lines if ln.page == lab.page and squash(ln.text).startswith("費率")]
-    if len(rate_hdr) != 1:
-        return ParsedField.missing(name, "找不到費用表「費率」欄")
-    left = rate_hdr[0].x0 - 25  # 費率數值可能比表頭文字向左 21 pt。
-    right = next((ln.x0 for ln in lines if ln.page == lab.page and squash(ln.text) == "收取時點"), left + 80)
+    item_hdr = [ln for ln in lines if ln.page == lab.page and squash(ln.text) == "費用項目"]
+    if len(rate_hdr) != 1 or len(item_hdr) != 1:
+        return ParsedField.missing(name, "找不到費用表「費用項目」或「費率」欄")
+    left = item_hdr[0].x1
+    right = next((ln.x0 for ln in lines if ln.page == lab.page and squash(ln.text) == "收取時點"), rate_hdr[0].x0 + 65)
     nexts = [
         ln.y0
         for ln in lines
