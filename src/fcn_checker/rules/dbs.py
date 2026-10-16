@@ -40,8 +40,9 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.scenario_calculations",
-        "description": "情境分析只核對基本假設、情境價格表、情境一出場期與情境二年化報酬率；利息金額、股數、零股金額、報酬率、"
-        "假設匯率不重算，累積日數／總日數不推算，利息金額位數不核對（2026-10-15 確認）",
+        "description": "情境分析只核對基本假設、情境價格表、情境一出場期、情境二年化報酬率（2026-10-15 確認）與情境一～三"
+        "重複寫出的最大利率值、k、情境三期初價格與表現最差標的價格、金額旁的幣別（Issue #321）；利息金額、股數、零股金額、"
+        "報酬率、假設匯率不重算，累積日數／總日數不推算，利息金額位數不核對",
     },
     {
         "rule_id": "doc.agents_and_addresses",
@@ -90,11 +91,25 @@ def coupon(ctx: IssuerContext) -> list[CheckResult]:
             ctx, "doc.coupon_mentions", "scenario_best_annual_pct", "情境二年化平均報酬率", annual, best
         ).compare(annual.value, best.value, fail_message="於到期最佳情況的年化平均報酬率須等於年利率")
     )
+    mentions = f("scenario_coupon_mentions")
+    if not mentions.ok:
+        name = "情境一～三利息算式最大利率值"
+        out.append(
+            Check("doc.coupon_mentions", "scenario_coupon_mentions", Item.expected(name), ctx.document).review(mentions)
+        )
+        return out
+    for occ in mentions.value:  # 情境利息算式「面額 X a% X」的 a（Issue #321）
+        out.append(
+            kit.doc_check(ctx, "doc.coupon_mentions", occ.field, f"{occ.where}{occ.name}", monthly, occ.value).compare(
+                monthly.value, occ.value.value, fail_message="須等於配息資料的最大利率值"
+            )
+        )
     return out
 
 
 def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """配息「第1~k個觀察期間」、情境基本假設「第1~k」與「從第k個觀察期間結束日」的 k、情境一出場期 − 1 = Non-Call。"""
+    """配息「第1~k個觀察期間」、情境基本假設「第1~k」與「從第k個觀察期間結束日」、情境一「第1~k個觀察期間之利息金額」
+    的 k、情境一出場期 − 1 = Non-Call。"""
     f = ctx.ts.f
     k = f("first_callable_period")
     rid = "doc.autocall_terms"
@@ -108,6 +123,7 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
             ("full_rate_periods", "配息資料「第1~k個觀察期間」的 k", "利率為最大利率值的期數須等於第一個可提前出場期"),
             ("scenario_full_rate_periods", "情境基本假設「第1~k個觀察期間」的 k", "須等於第一個可提前出場期"),
             ("scenario_ko_start", "情境基本假設自動提前出場決定日的起始期", "須等於強制贖回的自動提前出場決定日起始期"),
+            ("scenario_k_mention", "情境一「第1~k個觀察期間之利息金額」的 k", "須等於第一個可提前出場期（Issue #321）"),
         )
     ]
     out.append(
@@ -229,14 +245,88 @@ def tables(ctx: IssuerContext) -> list[CheckResult]:
     if scen_price.value != price.value:
         issues.append(f"基本假設發行價格 {scen_price.value}% 不等於 {price.value}%")
     return [
-        check.compare(
-            None,
-            None,
+        check.compare(  # 預期值／實際值帶出每一格，看得出比了哪些格（Issue #321，比照 BBVA #305）
+            _cells(own),
+            _cells(rows),
             ok=not issues,
             reason="value_mismatch",
             message="；".join(issues) or "等於表1 與商品面額、發行價格",
         )
     ]
+
+
+def _cells(rows: list[dict]) -> list[str]:
+    """價格表各格依列、欄順序（千分位、保留小數位）。"""
+    return [f"{v:,}" for row in rows for v in row.values()]
+
+
+def scenario_mentions(ctx: IssuerContext) -> list[CheckResult]:
+    """情境重複寫出的值（Issue #321）：基本假設投資金額 = 商品面額 X 發行價格 X 投資單位數；情境三最終價格表的期初價格
+    = 表1；「表現最差連結標的為X，其最終價格(x)低於其執行價格／下限觸發價格(y)」的 x = 最終價格表 X 那一列、y = 表1 X 的
+    執行價格（無 KI）或下限觸發價格（KI 到期觀察）。表現最差是哪一檔、股數與金額不重算。"""
+    f = ctx.ts.f
+    denom, pct, units = f("denomination"), f("issue_price_pct"), f("scenario_units")
+    principal, shown_pct, amount = (
+        f("scenario_investment_principal"),
+        f("scenario_investment_pct"),
+        f("scenario_investment"),
+    )
+    check = kit.doc_check(
+        ctx,
+        "doc.scenario_table",
+        "scenario_investment",
+        "情境基本假設投資金額",
+        denom,
+        pct,
+        units,
+        principal,
+        shown_pct,
+        amount,
+    )
+    out = []
+    if (problem := check.blocked) is not None:
+        out.append(problem)
+    else:
+        expected = denom.value * pct.value / 100 * units.value
+        if expected == expected.to_integral_value():  # 整數金額照說明書寫法不帶小數
+            expected = int(expected)
+        out.append(
+            check.compare(
+                f"{denom.value:,} X {pct.value}% X {units.value} = {expected:,}",
+                f"{principal.value:,} X {shown_pct.value}% X {units.value} = {amount.value:,}",
+                ok=principal.value == denom.value and shown_pct.value == pct.value and amount.value == expected,
+                fail_message="投資金額須為商品面額 X 發行價格 X 投資單位數",
+            )
+        )
+    table, initial = f("underlying_table"), f("scenario3_initial")
+    out.append(
+        kit.doc_check(
+            ctx, "doc.scenario_table", "scenario3_initial", "情境三最終價格表的期初價格", table, initial
+        ).compare(
+            [f"{r['initial']:,}" for r in table.value.prices] if table.ok else None,
+            [f"{v:,}" for v in initial.value] if initial.ok else None,
+            ok=table.ok and initial.ok and [r["initial"] for r in table.value.prices] == initial.value,
+            fail_message="須等於表1 各列期初價格",
+        )
+    )
+    worst, ki = f("scenario3_worst"), f("ki_type")
+    check = kit.doc_check(
+        ctx, "doc.scenario_table", "scenario3_worst", "情境三表現最差連結標的的價格", table, ki, worst
+    )
+    if (problem := check.blocked) is not None:
+        out.append(problem)
+        return out
+    w = worst.value
+    column, word = ("ki", "下限觸發價格") if ki.value == "AM" else ("strike", "執行價格")
+    row = table.value.prices[table.value.tickers.index(w["ticker"])]
+    out.append(
+        check.compare(
+            f"{w['ticker']} 最終價格 {w['table_final']:,}（最終價格表）、{word} {row[column]:,}（表1）",
+            f"{w['ticker']} 最終價格 {w['final']:,}、{w['column']} {w['price']:,}",
+            ok=w["final"] == w["table_final"] and w["column"] == word and w["price"] == row[column],
+        )
+    )
+    return out
 
 
 def schedule(ctx: IssuerContext) -> list[CheckResult]:
@@ -263,4 +353,12 @@ def schedule(ctx: IssuerContext) -> list[CheckResult]:
 
 def run_all(ctx: IssuerContext) -> list[CheckResult]:
     """說明書內部規則：只用讀出結果與審查標準。"""
-    return [*coupon(ctx), *autocall_terms(ctx), *document_info(ctx), *periods(ctx), *tables(ctx), *schedule(ctx)]
+    return [
+        *coupon(ctx),
+        *autocall_terms(ctx),
+        *document_info(ctx),
+        *periods(ctx),
+        *tables(ctx),
+        *scenario_mentions(ctx),
+        *schedule(ctx),
+    ]

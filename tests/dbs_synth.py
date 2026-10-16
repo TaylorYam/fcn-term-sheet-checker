@@ -6,7 +6,7 @@
 「X%）」（全形、沒有「的」），每格幣別字與數字分兩行。費用表的分銷費用子列標籤（報酬／費用／折讓）佔費率欄、費率在右邊一欄。
 每頁頁底「N / M頁」。改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`（第 1–2 頁）、`ts.warn`
 （封面警語）、`ts.basic`（商品基本資料；表1 `ts.basic.table`、日期格 `ts.basic.dates`（表A 各列 `ts.basic.dates.table`）、配息 `ts.basic.coupon`、強制贖回
-`ts.basic.ko`、到期贖回 `ts.basic.maturity`）、`ts.scenario`（情境；情境價格表 `ts.scenario.table`）、`ts.org`（相關機構
+`ts.basic.ko`、到期贖回 `ts.basic.maturity`）、`ts.scenario`（情境；情境價格表 `ts.scenario.table`、情境三最終價格表 `ts.scenario.final`）、`ts.org`（相關機構
 事業概況）、`ts.risk`、`ts.trading`（一般交易事項；費用表 `ts.trading.fees`）、`ts.rest`。
 投資人須知（docs/templates/dbs-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
 （真實文件寫異體字「視爲」，合成字型畫不出來，改寫「視為」；parser 兩種都收）段落代號 `iis.cover`、`iis.warn`、`iis.org`、`iis.summary`（商品簡介；價格表 `iis.summary.table`）、`iis.terms`（收益分配事項、
@@ -446,15 +446,74 @@ def _scenario(d: _Doc, s: Spec) -> None:
     d.section = "scenario.table"
     _scenario_table(d, s)
     d.section = "scenario"
+    _scenario_cases(d, s)
+
+
+def _scenario_cases(d: _Doc, s: Spec) -> None:
+    """情境一～四（真實樣本的寫法，Issue #321）：利息算式「面額 X 最大利率值% X 月數」、情境一「第1~k個觀察期間之利息
+    金額」、情境三最終價格表與「表現最差連結標的為…其最終價格(x)低於其執行價格／下限觸發價格(y)」；金額寫承作幣別
+    （數字是示意，規則不重算）。"""
+    m, k, ccy, denom = s.monthly, s.first_callable, s.currency_zh, f"{s.denom:,}"
     d.text(
         172,
-        f"1. 有利情況：假設本商品於第{s.first_callable + 1}個觀察期間的第2個觀察日發生自動提前出場事件，該觀察期間總日數為20。",
+        f"1. 有利情況：假設本商品於第{k + 1}個觀察期間的第2個觀察日發生自動提前出場事件，該觀察期間總日數為20：",
     )
     d.text(
         172,
-        f"2. 於到期最佳情況：假設本商品未發生自動提前出場事件，較原始投資金額獲利，即年化平均報酬率約為{s.annual}%。",
+        f"(1) 投資人可取得之利息總計91.67{ccy}，(包括第{s.k_text}個觀察期間之利息金額為83.34{ccy}({denom} X {m}% X "
+        f"{k}個月)，及第{k + 1}個觀察期間之利息金額為8.33{ccy}({denom} X {m}% X 2 ÷ 20) )；及",
     )
-    d.text(172, "3. 較差情況：假設本商品未發生自動提前出場事件，年化平均報酬率約為-50.000%。")
+    d.text(
+        172,
+        f"(2) 於強制贖回日可取得之強制贖回金額為100%商品面額, 即{ccy}{denom}。較原始投資金額獲利約0.917%，"
+        "即年化平均報酬率約為11.000%。",
+    )
+    d.text(
+        172,
+        "2. 於到期最佳情況：假設本商品未發生自動提前出場事件，且假設表現最差連結標的之最終價格等於或高於其執行價格 ：",
+    )
+    d.text(172, f"(1) 投資人可取得之利息總計500.04{ccy}({denom} X {m}% X {s.tenor}個月)；及")
+    d.text(
+        172,
+        f"(2) 於到期日可取得之最終贖回金額為100%商品面額，即{ccy}{denom}。較原始投資金額獲利約5.000%，"
+        f"即年化平均報酬率約為{s.annual}%。",
+    )
+    d.text(172, "3. 較差情況：假設本商品未發生自動提前出場事件，且假設表現最差連結標的之最終價格低於其執行價格。")
+    d.text(172, "假設於定價日，各連結標的最終價格如下：")
+    d.section = "scenario.final"
+    x = {"code": 207, "initial": 275, "final": 343, "perf": 450}
+    d.centered_row(
+        [(x["code"], "彭博代碼"), (x["initial"], "期初價格"), (x["final"], "最終價格"), (x["perf"], "表現")], gap=12
+    )
+    finals = [int(u.initial / 2) if n == 0 else int(u.initial) + 10 for n, u in enumerate(s.underlyings)]
+    for u, final in zip(s.underlyings, finals, strict=True):
+        perf = (final / u.initial * 100).quantize(Q4)
+        d.centered_row(
+            [
+                (x["code"], u.ticker),
+                (x["initial"], f"{QUOTE} {u.initial:.4f}"),
+                (x["final"], f"{QUOTE} {final}"),
+                (x["perf"], f"=（{final}/{u.initial:.4f}）X 100% = {perf}%"),
+            ],
+            gap=12,
+        )
+    d.section = "scenario"
+    worst = s.underlyings[0]
+    word, pct = ("執行價格", s.strike) if s.ki == "none" else ("下限觸發價格", s.ki_pct)
+    fx = f"，且假設{s.ccy}USD匯率為0.64" if s.quanto else ""
+    d.text(
+        172,
+        f"依上所示，表現最差連結標的為{worst.ticker}，其最終價格({finals[0]})低於其{word}({price(worst.initial, pct)})"
+        f"{fx}，則：",
+    )
+    d.text(172, f"(1) 投資人可取得之利息總計500.04{ccy}({denom} X {m}% X {s.tenor}個月)；及")
+    d.text(
+        172,
+        f"(2) 發行機構將於到期日就每一單位商品交付99股({denom} ÷ 100.0000 = 99.554)之股票及支付27.70{ccy}"
+        f"((0.554) X {finals[0]})。合計現金價值為5,477.74{ccy}(99 X {finals[0]} + 500.04 + 27.70)，較原始投資金額損失約"
+        "45.223%，即年化平均報酬率約為-90.446%。",
+    )
+    d.text(172, "4. 最大損失情況：假設發行機構破產或無力償還本商品下的付款責任，投資人可能無法收到任何金額。")
 
 
 def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = True) -> Path:
