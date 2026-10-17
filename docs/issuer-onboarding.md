@@ -1,53 +1,54 @@
 # 新增上手（issuer）實作規範
 
-新增一家上手（發行機構）的說明書範本與下單資料格式時，依本文件的步驟、交付物與驗收門檻進行。流程整理自 BARC 的實際經驗（範本規格、核對規則、Issue #7、#9）。
+新增一家上手（發行機構）的說明書／投資人須知範本與參考條件表欄位對照時，依本文件的步驟、交付物與驗收門檻進行。流程整理自 BARC 的實際經驗（範本規格、核對規則、Issue #7、#9）。
 
-- 適用：新增上手，或同一上手的新範本版本（例如說明書改版、詢價表改版）。
+- 適用：新增上手，或同一上手的新範本版本（例如說明書或投資人須知改版）。
 - 通用開發流程（Issue → branch → 實作 → PR）見 [AGENTS.md](../AGENTS.md)；本文件補充新增上手特有的步驟。
-- 參考範例：BARC 的[範本規格](templates/barc-zh-product-description.md)、[詢價格式](order-formats/barc-inquiry.md)、[核對規則](rules/barc-check-rules.md)（各上手共用的規則見[共用核對規則](rules/shared-check-rules.md)）、[審查標準](rules/review-standard.md)。
+- 參考範例：BARC 的[範本規格](templates/barc-zh-product-description.md)、[參考條件表格式](order-formats/reference-sheet.md)、[核對規則](rules/barc-check-rules.md)（各上手共用的規則見[共用核對規則](rules/shared-check-rules.md)）、[審查標準](rules/review-standard.md)。
 
 ## 0. 總覽
 
 | 步驟 | 誰 | 產出 | 進 Git |
 |---|---|---|---|
-| 1. 準備樣本 | 作業人員 | 真實說明書、詢價表、SOP 特殊規定 | 否（`data/`） |
+| 1. 準備樣本 | 作業人員 | 成對的真實說明書／投資人須知、參考條件表、SOP 特殊規定 | 否（`data/`） |
 | 2. 探勘 | 開發者（AI）＋作業人員確認 | 探勘腳本、逐份比對結果、待確認問題 | 否（`data/tmp/`） |
 | 3. 核對範圍：雙方螢光標記 | 開發者與作業人員各畫一份，作業人員決定差異 | 兩份螢光 PDF、逐處對照表、範圍決定 | PDF 否（`data/`）；決定記錄於 Issue |
-| 4. 規格文件 | 開發者 | 範本規格、詢價格式文件與設定、核對規則、審查標準差異 | 是（docs PR） |
+| 4. 規格文件 | 開發者 | 範本規格、參考條件表對照文件與必要設定、核對規則、審查標準差異 | 是（docs PR） |
 | 5. 實作 Issue | 開發者 | 可驗收的 Issue；太大就分階段 | GitHub |
 | 6. 實作與測試 | 開發者 | parser、規則、合成測試、本機真實樣本測試 | 是（實作 PR） |
 | 7. 試跑 | 作業人員 | 新交易實跑紀錄、誤判回饋 | 回饋開 Issue |
 
-第二家上手前，另需一次性的多上手架構工作（§7）。
+多上手架構已完成；§7 保留當時紀錄。現有上手與樣態設定見[支援範圍](support-matrix.md)。
 
 ## 1. 準備樣本
 
 | 項目 | 建議數量 | 說明 |
 |---|---|---|
 | 說明書 PDF | ≥ 10 份 | 盡量涵蓋各型態：記憶式與否、KO 觀察方式、有無 KI 與 KI 型態、幣別、標的數、天期 |
-| 原始詢價表 | ≥ 1 份，最好每種型態 1 份 | 上手寄來的原始格式，不要用整理過的彙總表 |
+| 投資人須知 PDF | 與說明書成對 | 同商品 4 頁須知，涵蓋條件差異及負面樣本 |
+| 共用參考條件表 | 涵蓋上述商品 | 已確認的交易條件；回填驗證另備人工確認的答案，沿用 reference_sheet.toml，不新增上手詢價表 adapter |
 | SOP 特殊規定 | 有就提供 | 固定警語、名稱格式、受託機構審查日期等是否與既有上手不同 |
 | 負面樣本 | 其他上手各 1 份 | 驗證範本辨識不會誤判 |
 
 規則：
 
 - 真實檔案只放本機被 Git 忽略的 `data/`（說明書與投資人須知 `data/term-sheets/IS/`，樣本外驗證用的 `data/term-sheets/OOS/<上手>/`；參考條件表與詢價表 `data/orders/`，OOS 的在 `data/orders/OOS/`、探勘輸出 `data/tmp/`；本機真實樣本測試讀的結構見 `tests/real_data.py`）。
-- 檔名可能不規則（例如中間有空格）；配對一律用商品代號，不靠檔名。
+- 正式流程要求 `<12 位商品代號>_TS.pdf`／`_IIS.pdf`，以檔名前三碼選上手、前 12 碼配對，同時確認說明書封面商品代號。探勘可保留原始檔名，但試跑須備妥符合命名的複本，不把不規則檔名視為可核對。
 - 樣本不足的型態要在規格中註明「依規則推得、待樣本驗證」，不可當成已驗證。
 
 ## 2. 探勘
 
 目標：在寫正式程式前，確認版面、錨點、型態差異與每條規則都能在樣本上成立。
 
-1. **文件特性**：文字層或掃描（掃描需另評估 OCR，見 TODO §3）、頁數、頁尾雜訊、字型、座標系。
+1. **文件特性**：文字層或掃描（掃描需另評估 OCR，見 [TODO §4](TODO.md#4-未來擴充邊界)）、頁數、頁尾雜訊、字型、座標系。
 2. **骨架與錨點**：章、條、子項的編號方式與標題；每個欄位用「章＋條號＋子項＋標籤」定位，**不可用頁碼**。
 3. **型態維度**：列出所有變化（例：記憶式、KO 觀察方式、KI、標的數），每份樣本歸類成總表。
 4. **表格**：表頭文字與 x 座標、列首、跨頁、換行註記、N/A 寫法。
 5. **同一參數的多個出處**：主來源與交叉驗證出處。
 6. **容易誤抓**：數字相同但意義不同、標籤帶符號、全半形混用、單一／多標的寫法差異。
-7. **詢價表**：工作表、商品代號位置、表頭列、欄名、允許值、日期與百分比的儲存方式。
-8. **逐份比對**：探勘腳本把說明書與詢價表逐項比對，所有差異都要能解釋（真實差異、進位規則、或尚未理解的語意）。
-9. **待確認問題**：用白話整理給作業人員，例如容差、進位方式、哪些欄位不核對、詢價表欄位語意。每個決定記錄日期。
+7. **參考條件表**：確認共用必要欄、商品代號、上手名稱、允許值及日期／百分比儲存方式，補該上手的欄位來源對照。
+8. **逐份比對**：探勘腳本把說明書／投資人須知與參考條件表逐項比對，所有差異都要能解釋（真實差異、進位規則、或尚未理解的語意）。
+9. **待確認問題**：用白話整理給作業人員，例如容差、進位方式、哪些欄位不核對、參考條件表欄位語意。每個決定記錄日期。
 
 探勘腳本只是參考邏輯，正式程式依規格重寫並以測試保證，不直接沿用。
 
@@ -67,7 +68,7 @@
    | 類別 | 處理 |
    |---|---|
    | 雙方都畫（交集） | 共同核心，直接列為核對規則 |
-   | 只有作業人員畫 | 逐項決定納入／暫緩／不檢查；納入時指定基準：PDF 內部一致、詢價表、審查標準固定值、重算，或外部來源 |
+   | 只有作業人員畫 | 逐項決定納入／暫緩／不檢查；納入時指定基準：PDF 內部一致、參考條件表、審查標準固定值、重算，或外部來源 |
    | 只有開發者畫 | 逐項決定保留或移除；結構性檢查（日期表關係、格式與來源檢查、禁用語）預設保留 |
    | 部分涵蓋 | 確認要補的是欄位、每次出現、表頭、公式，還是外部數值的正確性 |
 
@@ -101,7 +102,7 @@
 - 依 AGENTS.md 建立實作就緒的 Issue（繁體中文），驗收條件可觀察。
 - 一個 PR 做不完就分階段，例如 BARC：第一階段主要條款與審查標準（#7），第二階段配息表與提前出場表（#9）。未做的規則列入報告「未涵蓋」清單，不得假裝通過。
 - 樣本不足、無法確認寫法的型態（例如 BARC 的 Monthly KI）另開 Issue，先維持人工覆核。
-- 測試切點事先約定：批量入口 `fcn_checker.batch` 與 `fcn-batch` CLI；不直接測擷取或解析的內部函式。
+- 行為測試優先用批量入口、saving、CLI 與 PANEL 工作階段；共用表格／日期／情境工具與重要規則可用既有直接測試模式（§6.3），不為了測試建立另一條正式流程。
 
 ## 6. 實作與測試
 
@@ -109,11 +110,11 @@
 
 | 內容 | 路徑 | 說明 |
 |---|---|---|
-| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`，只有五樣（§6.2a）：識別資料（`code`、`template_id`、`label`、`parser_version`、`not_covered`）、`detect`、`read`、`rules`、`reference_fields`（通常為空） |
+| 上手註冊 | `src/fcn_checker/issuers.py` | 在 `REGISTRY` 登記一筆 `Issuer`，說明書欄位（§6.2a）：識別資料（`code`、`template_id`、`label`、`parser_version`、`not_covered`）、`detect`、`read`、`rules`、`reference_fields`（依規則需要宣告）；另以 `iis` 掛上 `IisTemplate` |
 | 上手編號 | `config/issuer_prefixes.toml`、`config/reference_sheet.toml` | 登記商品代號前三碼 → 上手代號，以及該上手在參考條件表「發行機構」欄的寫法（[參考條件表格式](order-formats/reference-sheet.md)） |
 | 支援樣態 | `config/issuer_prefixes.toml` 的 `[unsupported_variants]` | 確認這家上手已依作業人員的「上手支援樣態清單」登記不支援樣態（沒有時寫空清單，沒登記載入設定就報錯）；不支援樣態的商品在辨識時就攔下，不需要範本（Issue #207） |
 | 說明書 parser | `src/fcn_checker/parsers/<上手>.py`（表格可拆檔；數字、推得欄位、`Hit`／`hits`／`one`、`Mention` 用 `parsers/common.py`，不複製） | 範本辨識 `detect`；讀出 `read` 交出 `standard_fields.STANDARD_FIELDS` 的全部標準欄位（含提前出場排程、各出處清單）與該上手規則需要的專屬資料；`TEMPLATE_ID`、`PARSER_VERSION`；提供自己的 `LayoutSpec` |
-| 投資人須知 parser | `src/fcn_checker/parsers/<上手>_iis.py` | `detect`、`read` 交出 `parsers/iis.py` 的 `IisSheet`（範本有的欄位以 `provides` 宣告），在 `issuers.py` 以 `IisTemplate` 掛到該上手的 `iis`；規則各上手共用（`rules/iis.py`、`review_standard.iis_review_standard_rules`），範本特有的固定警語次數放審查標準 `[iis]`（ADR 0007）；共用規則表達不了的範本專屬檢查（例：MS 商品種類依標的數）才寫在 `rules/<上手>_iis.py`，以 `IisTemplate.rules` 掛上，只拿到投資人須知與同商品說明書的讀出結果 |
+| 投資人須知 parser | `src/fcn_checker/parsers/<上手>_iis.py` | `detect`、`read` 交出 `investor_sheet.py` 的 `IisSheet`（範本有的欄位以 `provides` 宣告），在 `issuers.py` 以 `IisTemplate` 掛到該上手的 `iis`；規則各上手共用（`rules/iis.py`、`review_standard.iis_review_standard_rules`），範本特有的固定警語次數放審查標準 `[iis]`（ADR 0007）；共用規則表達不了的範本專屬檢查（例：MS 商品種類依標的數）才寫在 `rules/<上手>_iis.py`，以 `IisTemplate.rules` 掛上，只拿到投資人須知與同商品說明書的讀出結果 |
 | 版面工具 | `src/fcn_checker/parsers/layout.py` | 共用；章名、條號、子項格式由各上手的 `LayoutSpec` 提供，不複製一份 |
 | 價格表 | `src/fcn_checker/parsers/price_table.py` | 共用；上手只用 `TableSpec` 宣告這張表長什麼樣子（錯訊裡的表名 `where`、期初價格與各價格欄的表頭關鍵字、表頭百分比寫法 `pct`／`pct_label`、列錨點 `number`（`1` 或 `k=1`）／`ticker`／`price`、代碼欄、其他文字欄 `texts`；某欄表頭可不寫 % 時 `Column.pct_optional`），範圍（表在文件的哪裡）由上手切好交進來；`read` 交出 `PriceTable`，`price_rows` 轉成標準欄位 `underlying_prices`。跨頁、彭博代碼換行、幣別字換行、擠成一行的格都在 module 裡處理，不在上手 parser 自己找列或分欄（Issue #287、#288）。代碼從哪裡來、百分比從表頭或定義句讀、沒有 KO 欄時 KO 價 = 期初價格、列名、期初定價、`PriceRow.currency` 留在上手 |
 | 參考條件表 adapter | `src/fcn_checker/orders/reference.py` | 所有上手共用，欄名對應走設定檔；新上手不需新增 adapter |
@@ -128,7 +129,7 @@
 | 識別資料 | 上手代號、範本 ID、名稱、parser 版本、未涵蓋清單 |
 | `detect(lines)` | 是否為這家上手的範本，含證據；條件不成立的原因寫進 `failed` |
 | `read(lines)` | 回傳實作 `standard_fields.TermSheet` 的物件：`f(name)` 交出全部標準欄位（缺漏、歧義、不合法、不適用分開表示），`full_text` 為全文索引（固定警語、風險等級、禁用語規則使用），另可帶該上手規則需要的專屬資料。日期表（`schedule_table`：把讀出的列轉成 `standard_fields.DateTable`，交出表的位置與期始日的定義 `PeriodStart`）、提前出場排程（`autocall_schedule`：呼叫共用推導 `parsers/schedule.autocall_schedule`，上手只交出 KO 觀察方式、k、比價日在哪一欄、末期比價日取表的末列或最終評價日）、最低金額／受理申購日／刊印日期的出處清單（`Occurrence`）也在這裡推好。`f` 不丟例外：沒交出的欄位回傳 `standard_fields.not_provided(name)`，可直接用 `standard_fields.lookup(欄位字典, name)` 實作；範本本身沒有的欄位（例：MS 沒有年利率、受理申購日）要明確交出 `standard_fields.absent(name, 說明)`（不適用），共用規則不核對、不報缺漏 |
-| `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13 提前出場表與配息表比對、§16，HSBC §18 情境；價格推算與日期表結構檢查已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，只有讀出結果、審查標準與上手代號。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
+| `rules(ctx)` | 該上手專屬的說明書內部規則（例：BARC §13 提前出場表與配息表比對、§16，HSBC §18 情境；價格推算、日期表結構及情境參數／價格檢查已是共用規則，不必再寫）；`ctx` 是 `rules/kit.py` 的 `IssuerContext`，含讀出結果、審查標準、上手代號、明確宣告的參考欄位、交易所日曆及頁數；不能任意讀完整參考條件表。結果一律用 `kit.Check` 建：`Check(rule_id, 欄位, Item.expected(項目名稱), ctx.document).needs(依賴的欄位…).compare(預期, 實際, …)`，依賴的欄位讀不到、歧義或不合法時自動轉人工覆核，不必另寫 helper（例：`rules/barc.py` 的 `distributor_product_code`） |
 | `reference_fields` | 說明書內部規則必須讀參考條件表時才宣告的欄位：只有說明書印的值是由參考條件表才有的條件推算出來時才宣告（ADR 0009；BARC 為年利率與天期，MS、BNP、SG、Citi、JPM 為年利率）；讀未宣告的欄位是開發期錯誤 |
 
 自動沿用（不必再寫）：
@@ -187,7 +188,7 @@
 
 ## 7. 第二家上手：一次性的多上手架構工作
 
-**已完成（Issue #28）**。下表保留為紀錄；新上手只需依 §6.1 新增 parser、規則、設定並在 `issuers.py` 登記。
+**已完成（Issue #28）**。下表只記當時的架構，包含已移除的 checker.py、詢價格式旗標及舊規則模組，不能當作目前 API；現行入口與邊界見[架構](architecture.md)、§6。新上手只需依 §6.1 新增 parser、規則、設定並在 `issuers.py` 登記。
 
 | 位置 | 原本 | 調整結果 |
 |---|---|---|
@@ -202,7 +203,7 @@
 
 ## 8. 試跑與維護
 
-- 正式使用前，用未參與開發的新交易實跑一段時間，記錄誤判與人工覆核比例（TODO §2）；步驟與每家上手 × 條件的驗收標準見[上線驗收流程](acceptance.md)。
+- 正式使用前，用未參與開發的新交易實跑一段時間，記錄誤判與人工覆核比例（[TODO §3](TODO.md#3-試行與正式驗收)）；步驟與每家上手 × 條件的驗收標準見[上線驗收流程](acceptance.md)。
 - 誤判依 AGENTS.md 的 Bug 流程處理：原因清楚 → Issue → 修正並加回歸測試；原因不清楚 → 先診斷。
 - 上手改版（新欄位、新寫法）時，工具應轉人工覆核而不是靜默通過；確認新寫法後更新規格與 `PARSER_VERSION`。
 - 審查標準變動（例如受託機構重新審查）只改設定檔，並更新 `version`、`effective_date`。
@@ -211,14 +212,14 @@
 
 - 真實說明書、螢光標記 PDF、詢價表、擷取文字與報告只放被 Git 忽略的 `data/`、`runtime/`。
 - Issue、PR、文件、測試與 CI 不得含真實商品代號、ISIN、價格、報價編號或客戶資料。
-- Repo 若改為公開，以上規定更須嚴格遵守；提交前一律檢查 diff。
+- 本 Repo 是公開的；提交前一律檢查 diff，不放真實交易資料。
 
 ## 10. 檢查清單
 
 - [ ] 樣本放入 `data/`，涵蓋主要型態；負面樣本齊全
 - [ ] 探勘完成，所有比對差異都有解釋；待確認問題已由作業人員回覆並記錄日期
 - [ ] 開發者與作業人員各自完成螢光標記（開發者版本先完成）；交集與差異的決定已記錄
-- [ ] 範本規格、詢價格式文件與設定、核對規則、審查標準差異已合併
+- [ ] 範本規格、參考條件表對照文件與必要設定、核對規則、審查標準差異已合併
 - [ ] 實作 Issue 建立；必要時分階段；樣本不足的型態另開 Issue
 - [ ] 已在 `issuers.py` 登記新上手；既有上手的測試與本機真實樣本測試不變
 - [ ] parser、規則、合成測試、本機真實樣本測試完成；驗收門檻全部達成

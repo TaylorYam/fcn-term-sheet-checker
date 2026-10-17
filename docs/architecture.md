@@ -2,7 +2,7 @@
 
 ## 目標與範圍
 
-協助作業人員將 FCN Term Sheet 與已確認的下單資料逐欄比對，輸出可回溯到原文件的例外清單。第一階段先支援一家 issuer 的一個文字型 PDF 範本；不做產品定價、交易執行、法律條款解釋或無人覆核的交易放行。
+協助作業人員將 FCN Term Sheet 與已確認的下單資料逐欄比對，輸出可回溯到原文件的例外清單。目前支援 14 家上手的文字型說明書與投資人須知（[支援範圍](support-matrix.md)）；不做產品定價、交易執行、法律條款解釋或無人覆核的交易放行。
 
 已實作 BARC／HSBC／MS 文字型 PDF 的核對（Issue #7、#9、#41、#34、#135、#137）、BNP 說明書與投資人須知的核對（Issue #191、#197）、SG 說明書與投資人須知的核對（Issue #194、#213）、Citi 說明書與投資人須知的核對（Issue #220）、JPM 說明書與投資人須知的核對（Issue #233）、Nomura 說明書與投資人須知的核對（Issue #239）、GS 說明書與投資人須知的核對（Issue #248）、Natixis 說明書與投資人須知的核對（Issue #261）、CA 說明書與投資人須知的核對（Issue #274）、BBVA 說明書與投資人須知的核對（Issue #269）、DBS 說明書與投資人須知的核對（Issue #280）與 UBS 說明書與投資人須知的核對（Issue #279），以參考條件表批量核對多份說明書並回填 ISIN 與比價日（Issue #43、#46，[ADR 0008](adr/0008-reference-sheet-and-import-format.md)）；說明書與同商品投資人須知成對核對，兩份都通過或放行才回填（Issue #124，[ADR 0007](adr/0007-iis-paired-with-term-sheet.md)）；OCR 與更多範本仍為目標設計。名詞見 [CONTEXT.md](../CONTEXT.md)。
 
@@ -10,35 +10,29 @@
 
 ```mermaid
 flowchart TD
-    A[Term Sheet PDF] --> B[逐頁檢查文字層與擷取品質]
-    B -->|可用文字| C[Text extraction]
-    B -->|掃描頁或不可用文字層| D[本地 OCR adapter：後續階段]
-    C --> E[文件區塊：頁碼／座標／原文]
-    D --> E
-    E --> F[Issuer 與範本版本辨識]
-    F --> G[已知範本 parser]
-    G --> H[標準化與驗證]
-    O[參考條件表] --> P[參考條件表 adapter 與驗證]
-    H --> R[Rule engine]
-    P --> R
-    R --> S[根目錄 runtime/核對紀錄：整批 JSON]
-    R --> W[核對結果檔：回填後（整份通過或人工放行才回填）＋錯誤清單]
-    R --> RB[回報包：未通過商品的回報總表、參考條件表列、核對紀錄與 PDF]
-    B -->|不支援／失敗| X[待人工覆核]
-    F -->|未知／多重命中| X
-    G -->|缺漏／歧義| X
-    H -->|不合法| X
-    P -->|不合法／配對不明| X
-    X --> S
+    C[四份設定檔與來源快照] --> P[預覽：讀參考條件表與 PDF 文字層]
+    I[參考條件表 Excel、說明書與投資人須知 PDF] --> P
+    P --> D[範本辨識、讀出、商品配對與樣態檢查]
+    D -->|可核對，缺另一份仍執行| R[沿用讀出結果：共用與專屬規則核對]
+    D -->|無法辨識／對列、同種重複或不支援樣態| X[停止一般條件規則]
+    X --> O[批量結果：狀態、錯訊、未涵蓋範圍]
+    R --> O
+    O --> A[檢視／符合條件才人工放行]
+    A --> S[儲存：確認來源快照、雙份回填門檻]
+    S --> W[Excel：匯入格式回填後、錯誤清單]
+    S --> J[JSON：runtime/核對紀錄]
+    O --> B[另行匯出回報包：未通過資料與同商品 PDF]
 ```
 
-OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 PDF 逐頁處理，不因某頁有文字就跳過其他頁。LLM 不在第一版執行路徑內。
+PANEL 先呈現結果，按儲存才寫 Excel 與核對紀錄；CLI 的 `run_batch` 一次完成預覽、核對與儲存。回報包不需先儲存，另行確認來源快照後匯出。讀出缺漏、歧義或不合法由相關規則轉人工覆核；不把所有讀出問題都當成配對失敗。缺同商品另一份時仍核對現有文件，讓條件問題可見，但保留配對問題，不能放行或回填。是否執行條件規則由 `Identification.checked` 決定，不是看 `PairingProblem` 是否為空。
 
-## 建議模組邊界
+目前只使用 PyMuPDF 擷取文字層，沒有 OCR adapter 或逐頁 OCR 品質評分。掃描頁沒有可用文字時無法完成必要欄位核對；混合型 PDF 的圖像內容不會被補讀。LLM 不在正式執行路徑內。
 
-第一階段實際模組如下（OCR adapter 尚未建立）。
+## 現行模組邊界
 
-| 預定路徑 | 職責 | 邊界 |
+以下為目前實際模組（OCR adapter 尚未建立），資料型別詳見[資料契約](data-contract.md)。
+
+| 路徑 | 職責 | 邊界 |
 |---|---|---|
 | `src/fcn_checker/ingestion.py` | 文件 hash、加密／破損檢查；輸入錯誤轉 ERROR 結果；來源快照 `SourceSnapshot`（參考條件表、各份說明書與設定檔的路徑和 hash，各在讀取前取一次：設定檔在載入核對設定前、參考條件表與說明書在預覽前；核對紀錄的檔案資訊取自它，`still_valid` 明確重算比對）；輸出檔一律新建 `write_new`（已存在不覆蓋、無法寫入分開回報） | 不解析金融欄位；不嘗試繞過密碼 |
 | `src/fcn_checker/extraction.py` | PyMuPDF 逐頁文字行、頁碼、bbox 與每個字的 x 範圍（`Line.char_spans`，Issue #264）；排除頁碼雜訊 | 輸出頁碼、座標、文字；不判斷核對結果 |
@@ -68,14 +62,14 @@ OCR 尚未實作時，掃描頁直接回報不支援並要求覆核。混合型 
 | `src/fcn_checker/panel.py` | Tkinter 本機視窗：選檔（參考條件表＋多份 PDF；兩種檔案各自記住上次選檔的資料夾，存在根目錄 `.local/panel_folders.json`）、預覽表、逐份結果與回填決策呈現（預覽表列、結果清單列、明細、回填決策、人工放行確認與放行說明文字由 `PanelOutcome` 組好，視窗只顯示）、人工放行按鈕與確認視窗（結果清單可 Shift／Ctrl 多選，多選時用內文可捲動的 `ConfirmDialog`）、「匯出回報包…」按鈕（資料夾已存在或寫不進去時只顯示原因、保留結果）、「審查通過日期…」視窗（`ApprovalDatesDialog`） | 只依賴 `panel_workflow` 的 `PanelSession`、`PanelOutcome`、`ReleasePlan`、`ReleaseState`（另用 `approval_dates`、`check_config`、`ingestion`、`saving`），不 import 批量、錯訊或結果型別；背景讀檔、主執行緒更新 UI；Windows 啟動前設定 system DPI awareness 與專屬 AppUserModelID，視窗套用 `assets/panel.ico`（原稿 `panel.svg`，32px 以下用簡化版 `panel-small.svg`；含 100%～250% 縮放所需尺寸，改完 SVG 用 `scripts/build_panel_icon.py` 重新產生），載入失敗沿用預設圖示；不建立網路服務；仍接受舊啟動器的 `--order-formats-dir` |
 | `src/fcn_checker/version.py` | 程式版本：`git_revision`（Git 工作目錄的 HEAD）、`program_commit`（正在執行的程式的 commit：開發用 Git，或 `setup_panel.cmd` 安裝時記錄的 `.local/installed.json`，核對紀錄使用）、`record_installation`（安裝時記錄版本） | 公開測試入口 `program_commit`（可指定 `package`）與 `record_installation`；不連網，PANEL 不提供自動更新（ADR 0006） |
 | `panel_bootstrap.py` | 雙擊入口（`launch_panel.pyw`）的啟動器：一律從專案根目錄啟動 PANEL，傳入根目錄 config 與安裝根目錄 | 不連網；不讀舊版自動更新留下的 `.local/current.json` |
-| `tests/synth.py`、`tests/hsbc_synth.py`、`tests/ms_synth.py`、`tests/bnp_synth.py`、`tests/sg_synth.py`、`tests/citi_synth.py`、`tests/jpm_synth.py`、`tests/nomura_synth.py` | 各上手的合成器：把上手中立的商品規格 `ProductSpec`（`tests/reference_synth.py`）的子類別（BARC 以保證配息期 G 推 Non-Call，MS／HSBC 以 `count` 產生標的、由排程推最終比價日與到期日）畫成說明書與投資人須知 PDF，版面文字由規格算出；製造錯誤一律用 `build_pdf(..., edits=[Edit(原文, 改後, 段落代號)])`（三家同一種 `edits`，段落代號見各合成器模組說明；每個 `Edit` 至少要換到一處，否則報錯），子類別除了規格欄位只留少數該上手專屬的文件選項（BARC：`omit`、`extra_text`、跨頁、`guaranteed_text` 等；MS：`breaks`、`ko_column`、`trustee_code`、投資人須知頁數；HSBC：`partial_coupon`；BNP：`breaks`、`trustee_code`、`fx`、`page_total`、投資人須知頁數（警語 5 那段一字一行，同真實樣本）；SG：`autocall`、`legacy`（舊版面空白）、`units`、`fx`（quanto）、`trustee_code`；Citi：`autocall`、`vwap`、`pricing_text`、`legacy`（2024 舊文件）、`trustee_code`，參考條件表列可用 `row(spec, order=…)` 改標的排序，投資人須知 `iis_pages`；JPM：`d4`（每日觀察的日期表 4 欄／3 欄）、`vwap`、`trustee_code`、`row(spec, order=…)`、投資人須知 `iis_pages`；Nomura：`market`（美股／日股價格寫法）、`vwap`、`spaced`（2025 年文件多空白）、`ko_column`、`merged_prices`、`approval`、投資人須知 `iis_pages`）；固定文字取自 `harness.STANDARD` | 數值皆虛構；不提交真實客戶交易資料；上手之間互不引用；不自己產參考條件表列 |
-| `tests/pdf_writer.py`、`tests/reference_synth.py`、`tests/harness.py` | 不分上手的測試工具：PDF 寫入與三家共用的改字 `Edit`（依段落代號 `ts.…`／`iis.…` 整層比對前綴）、商品規格 `ProductSpec` 與唯一的參考條件表列 `reference_row(規格, **Excel 欄名覆寫)`（三家共用、正式版面 `build_reference_sheet`；發行機構寫法取自格式設定）、核對設定 fixture `CONFIG` 與只讀一次的審查標準原文 `STANDARD`（repo config 載入一次；換設定檔用 `load_config`、換上手用 `with_registry`）、單份核對 harness（經預覽＋核對，依 rule_id 取結果） | 新測試用共用 harness 寫 |
+| `tests/synth.py`、`tests/hsbc_synth.py`、`tests/ms_synth.py`、`tests/bnp_synth.py`、`tests/sg_synth.py`、`tests/citi_synth.py`、`tests/jpm_synth.py`、`tests/nomura_synth.py`，以及 `tests/gs_synth.py`、`tests/natixis_synth.py`、`tests/ca_synth.py`、`tests/bbva_synth.py`、`tests/dbs_synth.py`、`tests/ubs_synth.py` | 各上手的合成器：把上手中立的商品規格 `ProductSpec`（`tests/reference_synth.py`）的子類別（BARC 以保證配息期 G 推 Non-Call，MS／HSBC 以 `count` 產生標的、由排程推最終比價日與到期日）畫成說明書與投資人須知 PDF，版面文字由規格算出；製造錯誤一律用 `build_pdf(..., edits=[Edit(原文, 改後, 段落代號)])`（各上手同一種 `edits`，段落代號見各合成器模組說明；每個 `Edit` 至少要換到一處，否則報錯），子類別除了規格欄位只留少數該上手專屬的文件選項（BARC：`omit`、`extra_text`、跨頁、`guaranteed_text` 等；MS：`breaks`、`ko_column`、`trustee_code`、投資人須知頁數；HSBC：`partial_coupon`；BNP：`breaks`、`trustee_code`、`fx`、`page_total`、投資人須知頁數（警語 5 那段一字一行，同真實樣本）；SG：`autocall`、`legacy`（舊版面空白）、`units`、`fx`（quanto）、`trustee_code`；Citi：`autocall`、`vwap`、`pricing_text`、`legacy`（2024 舊文件）、`trustee_code`，參考條件表列可用 `row(spec, order=…)` 改標的排序，投資人須知 `iis_pages`；JPM：`d4`（每日觀察的日期表 4 欄／3 欄）、`vwap`、`trustee_code`、`row(spec, order=…)`、投資人須知 `iis_pages`；Nomura：`market`（美股／日股價格寫法）、`vwap`、`spaced`（2025 年文件多空白）、`ko_column`、`merged_prices`、`approval`、投資人須知 `iis_pages`）；固定文字取自 `harness.STANDARD` | 數值皆虛構；不提交真實客戶交易資料；上手之間互不引用；不自己產參考條件表列 |
+| `tests/pdf_writer.py`、`tests/reference_synth.py`、`tests/harness.py` | 不分上手的測試工具：PDF 寫入與各上手共用的改字 `Edit`（依段落代號 `ts.…`／`iis.…` 整層比對前綴）、商品規格 `ProductSpec` 與唯一的參考條件表列 `reference_row(規格, **Excel 欄名覆寫)`（各上手共用、正式版面 `build_reference_sheet`；發行機構寫法取自格式設定）、核對設定 fixture `CONFIG` 與只讀一次的審查標準原文 `STANDARD`（repo config 載入一次；換設定檔用 `load_config`、換上手用 `with_registry`）、單份核對 harness（經預覽＋核對，依 rule_id 取結果） | 新測試用共用 harness 寫 |
 
-PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版面需要；實際採用順序應由樣本與授權條件評估，首版不必同時依賴兩者。純文字攤平可能破壞欄位關係，應保留列、區塊及跨頁資訊。OCR adapter 待文字流程穩定後加入，不預先綁定引擎。
+目前依賴為 PyMuPDF 與 openpyxl（`pyproject.toml`、`constraints.txt`）；未安裝或使用 pdfplumber。純文字攤平可能破壞欄位關係，應保留列、區塊及跨頁資訊。OCR adapter 待文字流程穩定後加入，不預先綁定引擎。
 
 ## 資料與判定
 
-詳見 [資料契約](data-contract.md)。文件及下單資料各自驗證後，依明確交易識別配對；第一個流程可用人工指定的一對檔案，不用相似度猜配對。
+詳見 [資料契約](data-contract.md)。文件及下單資料各自驗證後，依明確交易識別配對；正式流程以檔名與文件商品代號、參考條件表 `TDCC Code` 配對，不用相似度猜配對。
 
 每項規則產生 `PASS`、`MISMATCH`、`REVIEW_REQUIRED`、`NOT_APPLICABLE` 或 `ERROR`。只有所有適用必核欄位有可靠值且通過驗證／核對，整體才可為 `PASS`；未實作的必核規則不算通過。整體狀態優先順序為 `ERROR > REVIEW_REQUIRED > MISMATCH > PASS`，核對紀錄仍保留全部差異。`NOT_APPLICABLE` 必須由產品範本與明確規則支持，不能以空值推定。
 
@@ -83,17 +77,17 @@ PyMuPDF 優先用於文字區塊與座標擷取，pdfplumber 用於表格／版�
 
 ## 可追溯與部署
 
-首版規劃為本機 Python CLI。執行紀錄包含文件 hash、下單輸入 hash、parser/schema/rule/config 版本、程式 commit、擷取工具版本與執行時間。同輸入與同版本應產生相同的標準化值及判定，時間與 run ID 等 metadata 不列入此保證。
+目前提供本機 Python CLI 與 Tkinter PANEL。執行紀錄包含文件 hash、下單輸入 hash、parser/schema/rule/config 版本、程式 commit、擷取工具版本與執行時間。同輸入與同版本應產生相同的標準化值及判定，時間與 run ID 等 metadata 不列入此保證。
 
-機密輸入與產出只放 `data/`、`runtime/`；console log 以識別碼與錯誤分類為主，詳細證據放根目錄 `runtime/核對紀錄/` 的核對紀錄。保存期限、存取控制及核對紀錄遮蔽在試行前確認。第一版不需 API 金鑰，不會自動載入 `.env`，設定格式在實作時確定。
+機密輸入與產出只放 `data/`、`runtime/`；console log 以識別碼與錯誤分類為主，詳細證據放根目錄 `runtime/核對紀錄/` 的核對紀錄。保存期限、存取控制及核對紀錄遮蔽在試行前確認。第一版不需 API 金鑰，不會自動載入 `.env`，設定格式為四份 TOML，位置與版本由 `CheckConfig` 記錄。
 
 ## 擴充與限制
 
-Issue #13 新增本機 Tkinter PANEL，#14、#15、#17 接上預覽、核對與保存；#46 改為參考條件表＋多份說明書，並刪除 BARC 詢價表流程。唯讀預覽有效後才可核對；每份說明書先確認上手與參考條件表的列，配對失敗的說明書只回報原因、不執行一般條件比對。核對結果先呈現問題，再列通過／不適用項目，保留完整頁碼、原文及參考條件表儲存格；未涵蓋規則獨立列為待處理。
+Issue #13 新增本機 Tkinter PANEL，#14、#15、#17 接上預覽、核對與保存；#46 改為參考條件表＋多份說明書，並刪除 BARC 詢價表流程。唯讀預覽有效後才可核對；每份說明書先確認上手與參考條件表的列，無法建立可核對輸入的文件只回報原因、不執行一般條件比對；缺同商品另一份仍執行現有文件的規則，但不能放行或回填。核對結果先呈現問題，再列通過／不適用項目，保留完整頁碼、原文及參考條件表儲存格；未涵蓋規則獨立列為待處理。
 
 審查標準與三個設定檔（參考條件表格式、上手編號對照、交易所假日表）在載入核對設定前、參考條件表與每份 PDF 在載入預覽前取 hash，合成一份來源快照（路徑與 hash）；預覽讀取期間、核對前、放行與儲存前都以同一份快照明確檢查，任一變更即使預覽與結果失效，儲存前另確認整份快照仍一致（CLI 亦同）。快照仍有效時核對沿用預覽的辨識與讀出，每份說明書只擷取、讀出一次。讀取預覽與結果不讀檔。PANEL 的背景監看只在背景執行緒重算快照，結果回主執行緒才清除狀態；選取說明書、顯示放行原因不重算 hash。UI 更新只在主執行緒，核對期間不能重複提交。所有資料仍在本機處理，僅在使用者按儲存後寫入核對結果檔與核對紀錄（另外，使用者在「審查通過日期…」視窗存檔時改寫審查標準設定檔，之後要重新載入預覽），沒有 Web UI、資料庫或雲端服務。核對結果檔與核對紀錄一律 exclusive create 禁止覆蓋；寫入失敗會回報原因，不清除當次結果。核對紀錄寫在專案根目錄的 `runtime/`，更新程式時保留。雙擊入口讀專案根目錄的 `config`；直接以 `fcn-panel` 指定的 config 資料夾缺 `reference_sheet.toml`／`issuer_prefixes.toml`／`exchange_holidays.toml` 時，才改用程式內建的同名設定。Windows 透過專案獨立 .venv 安裝與雙擊啟動，雙擊入口一律從專案根目錄啟動。
 
-新增 issuer 時加入獨立且版本化的 parser 與對應 fixtures，不把所有文件塞入一組通用 regex。未知格式保留人工覆核入口。步驟、交付物與驗收門檻見[新增上手實作規範](issuer-onboarding.md)；多上手分派已完成（Issue #28）：新上手在 `issuers.py` 登記、在 `config/issuer_prefixes.toml` 登記上手編號後，批量入口、CLI、PANEL 與名稱樣板即依上手運作。上手 adapter 只提供標準欄位與說明書內部規則，參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填規則各上手共用（[ADR 0005](adr/0005-issuer-adapter-and-shared-rules.md)）。
+新增 issuer 時加入獨立且版本化的 parser 與對應 fixtures，不把所有文件塞入一組通用 regex。未知格式保留人工覆核入口。步驟、交付物與驗收門檻見[新增上手實作規範](issuer-onboarding.md)；多上手分派已完成（Issue #28）：新上手在 `issuers.py` 登記、在 `config/issuer_prefixes.toml` 登記上手編號後，批量入口、CLI、PANEL 與名稱樣板即依上手運作。上手 adapter 只提供標準欄位與說明書內部規則，參考條件表欄位、審查標準、Non-Call／ISIN／發行日／比價日與回填規則各上手共用（[ADR 0009](adr/0009-shared-rules-defined-per-rule.md)，取代 ADR 0005）。
 
 未來 LLM fallback 若獲批准，只能作為 extraction adapter 提供候選欄位與來源證據；不得修改預期下單值或取代 rule engine。需另立 ADR、資料傳送政策與驗證門檻；第一版無相關 SDK、開關或外部呼叫。
 

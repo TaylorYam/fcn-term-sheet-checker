@@ -1,5 +1,7 @@
 # 下單資料格式（已停用）：FCN參考條件.xlsx
 
+> 本頁只保存早期版面。現行只讀共用參考條件表的必要欄，輸出另產固定匯入格式；以 [reference-sheet.md](reference-sheet.md) 與 [ADR 0008](../adr/0008-reference-sheet-and-import-format.md) 為準。
+
 > **2026-10-01 起 BARC 停用。** 下單資料改用各家上手的原始詢價格式（BARC 見 [barc-inquiry.md](barc-inquiry.md)）。本文件保留當時的欄位結構與比對規則，供參考與回溯。
 >
 > **2026-10-02 起恢復使用（新版）。** 所有上手的核對條件改用新版整理表 `FCN參考條件_1001.xlsx` 的 `樣本清單` 工作表，見[參考條件表格式](reference-sheet.md)（[ADR 0004](../adr/0004-reference-sheet-as-check-source.md)）。新版的比價日 D 型填法與本文件 §4 相同：填第一個可提前出場的期別與最後一期（Issue #69）。

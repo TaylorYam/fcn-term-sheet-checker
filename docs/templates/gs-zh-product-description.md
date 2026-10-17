@@ -1,5 +1,7 @@
 # 範本規格：高盛（GS）中文產品說明書
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`gs-zh-pd`
 - 發行機構：英商高盛國際公司（Goldman Sachs International，英國）
 - 保證機構：高盛集團有限公司（The Goldman Sachs Group, Inc.）、美商高盛亞洲證券有限公司（Goldman Sachs (Asia) L.L.C.）兩家（**不核對**，2026-10-15 確認）

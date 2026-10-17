@@ -1,5 +1,7 @@
 # 範本規格：摩根大通（JPM）中文產品說明書
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`jpm-zh-pd`
 - 發行機構：荷蘭商 J.P. Morgan Structured Products B.V.（荷蘭；說明書寫 `荷蘭商J.P. Morgan Structured Products B.V.`）
 - 保證機構：美商摩根大通銀行股份有限公司（JPMorgan Chase Bank, N.A.）（封面、第 I 部分第 3 項、第 II 部分 2.、警語 5.）

@@ -36,7 +36,7 @@
 | KO(%)、K(%)、KI(%)、Coupon p.a. (%) | `ko_pct`、`strike_pct`、`ki_pct`、`coupon_pa_pct` | 依說明書顯示位數四捨五入後比對；無 KI 時 KI(%) 必須是 `-` |
 | KO(Freq) | `ko_observation` | `D` 期間每日／`P` 每期定日 |
 | KO(memo) | `ko_memory` | `Y`／`N` |
-| KI(Freq) | `ki_type` | `-` 無／`AM` 到期觀察／`D` 每日觀察／`P` 每期觀察；Monthly KI 轉人工覆核 |
+| KI(Freq) | `ki_type` | `-` 無／`AM` 到期觀察／`D` 每日觀察／`P` 每期觀察；是否允許先由[樣態黑名單](../support-matrix.md)決定，未知寫法或必核欄位缺漏轉人工覆核 |
 | 天期(月) | `tenor_months` | 整數相等 |
 | Non-Call(月) | `autocall_schedule` 的第一個可提前出場期 | 相等（最小為 1） |
 | 期初定價 | `initial_pricing` | 表上須是 `開盤價`／`收盤價`／`VWAP`；表上空白時當成不是 VWAP。說明書寫明期初定價的範本（範本沒有就是 `absent`），表上有值時須相同，表上空白時依說明書判斷（Issue #122、#246） |

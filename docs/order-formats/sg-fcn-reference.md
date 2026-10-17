@@ -7,7 +7,7 @@
 
 與其他上手相同（版面見[參考條件表格式](reference-sheet.md) §1，每列一檔）。SG 列的 `發行機構` 欄寫 `SG`；商品代號前 3 碼為 `037`（`config/issuer_prefixes.toml` 已登記）。
 
-實作時要登記：
+目前已登記：
 
 - `config/reference_sheet.toml`：SG 在 `發行機構` 欄的寫法 `SG`。
 - `src/fcn_checker/issuers.py`：SG 範本（`sg-zh-pd`）。

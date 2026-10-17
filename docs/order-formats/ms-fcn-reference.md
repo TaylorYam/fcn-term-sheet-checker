@@ -7,7 +7,7 @@
 
 與其他上手相同（版面見[參考條件表格式](reference-sheet.md) §1，每列一檔）。MS 列的 `發行機構` 欄寫 `MS`；商品代號前 3 碼為 `147`。
 
-實作時要登記：
+目前已登記：
 
 - `config/issuer_prefixes.toml`：`"147" = "MS"`。
 - `config/reference_sheet.toml`：MS 在 `發行機構` 欄的寫法 `MS`。
