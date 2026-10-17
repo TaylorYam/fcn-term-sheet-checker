@@ -116,12 +116,14 @@ def test_page_count_must_be_four(tmp_path):
     assert rule(r, "iis.pages")[0].status == S.MISMATCH
 
 
-def test_entrusted_investment_wording_is_exempt_up_to_2026_10_15(tmp_path):
-    """警語「受託投資」：交易日 2026-10-15（含）以前特例通過，之後判不一致（共用特例，Issue #247）。"""
+def test_entrusted_investment_wording_is_exempt_up_to_2026_10_30(tmp_path):
+    """警語「受託投資」：交易日 2026-10-30（含）以前特例通過，之後判不一致（共用特例，Issue #338）。"""
     edit = Edit("於中華民國境內受託買賣", "於中華民國境內受託投資", "iis.warn")
-    old = Spec(trade_date=dt.date(2026, 10, 15), issue_date=dt.date(2026, 10, 22))
+    old = Spec(trade_date=dt.date(2026, 10, 30), issue_date=dt.date(2026, 11, 6))
     assert rule(check_iis(tmp_path / "old", old, edits=[edit]).report, "standard.forbidden_wording")[0].status == S.PASS
-    new = check_iis(tmp_path / "new", Spec(), edits=[edit]).report
+    new = check_iis(
+        tmp_path / "new", Spec(trade_date=dt.date(2026, 10, 31), issue_date=dt.date(2026, 11, 6)), edits=[edit]
+    ).report
     assert rule(new, "standard.forbidden_wording")[0].status == S.MISMATCH
 
 
