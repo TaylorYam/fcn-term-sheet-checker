@@ -44,7 +44,7 @@
 
 ## 3. 辨識與規則結果
 
-`Identification` 保存每份 PDF 的文件種類、上手、商品代號、參考條件表列、範本／讀出結果、同商品另一份、是否執行規則與唯一的 `PairingProblem`。全部文件辨識與分組後凍結，核對沿用、不重新讀 PDF。支援範本與樣態黑名單見[支援範圍](support-matrix.md)。
+`Identification` 保存每份 PDF 的文件種類、上手、商品代號、參考條件表列、範本／讀出結果、同商品另一份、是否執行規則與唯一的 `PairingProblem`。全部文件辨識與分組後凍結，核對沿用、不重新讀 PDF。`checked` 決定是否執行條件規則；缺同商品另一份時仍可核對現有文件，但配對問題會阻止放行與回填。支援範本與樣態黑名單見[支援範圍](support-matrix.md)。
 
 `CheckResult` 實際欄位為 `rule_id`、`rule_version`、`field`、`status`、`expected`、`actual`、`tolerance`、`reason_code`、`message`、`document_evidence`、`order_source`、必填 `item` 及文件種類 `document`。Excel 證據是儲存格字串清單 `order_source`，不是草案的 `order_evidence`；欄位名稱是 `field`，不是 `field_path`。
 
