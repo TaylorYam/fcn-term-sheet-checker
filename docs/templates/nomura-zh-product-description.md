@@ -1,5 +1,7 @@
 # 範本規格：野村（Nomura）中文產品說明書
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`nomura-zh-pd`
 - 發行機構：Nomura International Funding Pte. Ltd.（新加坡；說明書只寫英文名）
 - 保證機構：Nomura Holdings, Inc.（封面、第一章第 3 項、第二章 2.(1)）

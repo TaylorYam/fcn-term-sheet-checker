@@ -1,5 +1,7 @@
 # 範本規格：滙豐（HSBC）中文產品說明書
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`hsbc-zh-pd`（暫定）
 - 發行機構：香港商香港上海滙豐銀行股份有限公司（The Hongkong and Shanghai Banking Corporation Limited）
 - 商品家族：股權連結、每月固定配息、自動提前到期結構型商品（Autocallable Fixed Coupon Notes，含記憶式與非記憶式）

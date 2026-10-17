@@ -210,7 +210,7 @@
 | 內容 | 說明 |
 |---|---|
 | 說明書 | 上手登記（`issuers.py`）；GS `LayoutSpec`（`第一章:` 章名六章、頁底 `第- N -頁，共M頁` 與右上角重複章名排除、第 1 頁 1–13 項與第一章 1–36(37) 項分開）；範本辨識；`read` 交出全部標準欄位（`distributor_phone_ch4`、`issue_price_others` 交 `absent`；`subscription_dates` 2 筆；`min_amounts` 由單位數換算；`initial_pricing` 依範本規格 §4.7）；§3.3–§3.8 |
-| 投資人須知 | `parsers/gs_iis.py`（先轉 CJK 相容字 U+F900–U+FAFF）、`IisTemplate`（頁底 `第- N -頁，共4頁` 的 `page_totals`；刊印日期在第 1 行）；沒有範本專屬規則（每月配息率用共用 `iis.monthly_coupon`）；[投資人須知核對規則](iis-check-rules.md) GS 欄 |
+| 投資人須知 | `parsers/gs_iis.py`（先轉 CJK 相容字 U+F900–U+FAFF）、`IisTemplate`（頁底 `第- N -頁，共4頁` 的 `page_totals`；刊印日期在第 1 行）；`rules/gs_iis.py` 專屬核對重複天期 `iis.tenor_mentions` 與到期買回比例 `iis.redemption_pct`（Issue #317）；每月配息率用共用 `iis.monthly_coupon`；[投資人須知核對規則](iis-check-rules.md) GS 欄 |
 | 共用設定 | 審查標準 GS 分節（`fixed_warning_by_issuer.gs`、名稱樣板、`issuer_name.gs`、`product_type.gs`、`min_amount_multiples.gs`、`iis.fixed_warning_occurrences.gs`）；`config/reference_sheet.toml` 的 `[issuer_values] GS`、`[underlyings] any_order_issuers` 加 `GS` |
 | 禁用語特例 | 依 Issue #247（PR #250，已合併）的共用設定 `wording.exempt_until`，GS 不另寫 |
 
@@ -245,7 +245,7 @@
 | 2026-10-15 | 探勘以 `data/orders/核對表格式..xlsx`（公司原始待建檔格式，5 列 GS）為準 |
 | 2026-10-15 | 不畫螢光，以開發者凍結清單逐項決定 |
 | 2026-10-15 | 固定警語 GS 版本（4 處受託或銷售機構、沒有 OSU 段；探勘留言寫成 5 處，規格更正）視為正確；說明書 3 次、投資人須知 1 次 |
-| 2026-10-15 | 投資人須知「受託投資」不加允許片語；交易日 2026-10-30（含）以前特例通過，之後判不一致（已通知上手修改；共用特例 Issue #247） |
+| 2026-10-15 | 投資人須知「受託投資」不加允許片語；當時交易日 2026-10-15（含）以前特例通過，2026-10-17 延至 10/30（Issue #338），之後判不一致（已通知上手修改；共用特例 Issue #247） |
 | 2026-10-15 | 標的依代號配對、不看順序（說明書依彭博代碼排序） |
 | 2026-10-15 | 期初定價核對（開盤價、VWAP 明寫，收盤價間接寫法）；表上空白時照 Issue #246 |
 | 2026-10-15 | GS2 一檔價格為表上 2 倍是表上錯，不改程式 |

@@ -1,5 +1,7 @@
 # 範本規格：花旗（Citi）中文產品說明書
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`citi-zh-pd`
 - 發行機構：Citigroup Global Markets Holdings Inc.（CGMHI，美國；說明書只寫英文法人名）
 - 保證機構：Citigroup Inc. 花旗集團（封面、第一章 §3、第二章 §2、警語 5）

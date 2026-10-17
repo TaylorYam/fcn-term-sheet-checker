@@ -9,7 +9,7 @@
 
 探勘用的參考條件表是作業人員提供的公司原始待建檔格式（`data/orders/核對表格式..xlsx`，工作表 `ELN待建檔_測試`，8 列 Nomura，與 NR1–NR8 全部對上；`ISIN Code`、`發行日`、`比價日_n` 為待回填的空白；沒有 `發行機構` 欄）。
 
-實作時要登記：
+目前已登記：
 
 - `config/reference_sheet.toml` `[issuer_values]`：`NOMURA = "Nomura"`（`發行機構` 欄的寫法，2026-10-15 作業人員確認；待建檔表沒有這欄時以商品代號前 3 碼判定）。
 - `src/fcn_checker/issuers.py`：Nomura 範本（`nomura-zh-pd`、投資人須知 `nomura-zh-iis`）。

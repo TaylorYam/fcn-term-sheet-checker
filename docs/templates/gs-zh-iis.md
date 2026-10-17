@@ -1,9 +1,11 @@
 # 範本規格：高盛（GS）中文投資人須知
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`gs-zh-iis`
 - 對應說明書範本：[`gs-zh-pd`](gs-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-15 對 5 份真實樣本（GS1-IIS～GS5-IIS，與說明書 GS1–GS5 同商品）的探勘與核對範圍決定（Issue #248）
-- 狀態：已實作（Issue #248：`parsers/gs_iis.py`；沒有範本專屬規則，每月配息率由共用規則 `iis.monthly_coupon` 核對）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
+- 狀態：已實作（Issue #248：`parsers/gs_iis.py`；範本專屬規則 `rules/gs_iis.py` 核對重複天期 `iis.tenor_mentions` 與到期買回比例 `iis.redemption_pct`（Issue #317）；每月配息率由共用規則 `iis.monthly_coupon` 核對）；作業人員 2026-10-15 決定不畫螢光，依開發者凍結清單逐項決定
 
 > 真實樣本與擷取文字只放在被 Git 忽略的 `data/`。本文件的數值範例都是虛構的；樣本代號與真實商品代號的對照只存在本機（`data/tmp/gs/sample_map.txt`）。產品條件以參考條件表（`data/orders/核對表格式..xlsx` 有 5 列 GS）與同商品說明書為基準。
 

@@ -1,5 +1,7 @@
 # 範本規格：東方匯理（CA）中文產品說明書
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`ca-zh-pd`
 - 發行機構：Crédit Agricole CIB Financial Solutions（法國）；說明書**只寫英文名稱**
 - 保證機構：法商東方匯理銀行股份有限公司（Crédit Agricole Corporate and Investment Bank；**不核對**，2026-10-15 確認）

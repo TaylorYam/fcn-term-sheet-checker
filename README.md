@@ -2,15 +2,15 @@
 
 FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料轉成相同資料結構，以可追溯規則產生差異與人工覆核清單。
 
-**目前狀態：可用——BARC／HSBC／MS／BNP／SG 中文產品說明書與中文投資人須知（文字型 PDF；MS 只支援新版範本）× 參考條件表的本機批量核對（PANEL 與 CLI），並回填 ISIN 與比價日**，含主要條款、配息表與提前出場表、保證配息期、日期規則、審查標準，以及文件內重複出現處與情境試算的一致性。尚未涵蓋的 Monthly KI、標的名稱、最初價格外部正確性與部分情境試算會列在 PANEL 的「待處理」分頁與核對紀錄的「未涵蓋」清單。第一版 production runtime 不使用 LLM；LLM 可協助開發，但不參與正式擷取或判定。
+**目前實作（2026-10-18）：14 家上手的中文產品說明書與投資人須知 × 共用參考條件表，提供本機 PANEL 與 CLI 批量核對。** 可輸出匯入格式 Excel，回填 ISIN、發行日、比價日，以及 VWAP 商品的標的價格。上手、範本連結與不支援樣態統一列在[支援範圍與文件索引](docs/support-matrix.md)；MS、UBS 只支援已定義的新版範本。正式核對使用固定規則，不使用 LLM；可用範圍與正式上線驗收分開判定。
 
 ## 運作說明
 
-**用途**：把上手給的中文產品說明書（檔名 `_TS`）與中文投資人須知（檔名 `_IIS`）PDF，跟作業人員事先填好的參考條件表逐欄對帳。同一檔商品的兩份都對得上，就在參考條件表最前面的 `TS`、`IIS` 欄打 `V`，並把 ISIN、發行日、比價日自動填回參考條件表；對不上，就列出哪一項對不起來、兩邊各寫多少。
+**用途**：把上手給的中文產品說明書（檔名 `_TS`）與中文投資人須知（檔名 `_IIS`）PDF，跟作業人員事先填好的參考條件表逐欄對帳。同一檔商品的兩份都通過或人工放行，才輸出到核對結果檔「回填後」，把 `TS/IIS完成檢核` 打 `V` 並填入 ISIN、發行日、比價日；VWAP 商品另回填價格。原始參考條件表不修改；對不上時列出哪一項不一致、兩邊各寫多少。
 
 ```text
 說明書 PDF（可多份）──┐
-                     ├→ 用商品代號配對 → 逐項核對 → 整份通過：TS、IIS 打 V，回填 ISIN、發行日、比價日
+                     ├→ 用商品代號配對 → 逐項核對 → 雙份通過／放行：輸出匯入格式並回填
 參考條件表 Excel ─────┘                          └→ 有問題：列入錯誤清單（人工看過可放行）
 ```
 
@@ -32,7 +32,7 @@ FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料�
 
 **判定原則**
 
-- **不猜值**：每一項是「通過」「不一致」或「需人工覆核」。抓不到、同一欄出現不同的值、沒見過的寫法，一律轉人工；整份全部通過才回填。
+- **不猜值**：每一項是「通過」「不一致」或「需人工覆核」。抓不到、同一欄出現不同的值、沒見過的寫法，一律轉人工；同商品兩份都通過或符合條件的人工放行才回填。
 - **人工放行**：作業人員看過錯訊認定可以通過時，可以手動放行；但回填值不確定或和參考條件表已有的值衝突時不能放行。
 - **不使用 AI**：全部是固定規則，同樣的檔案每次結果相同。
 - **可追溯**：每個值都帶說明書頁碼與原文；每次儲存另留核對紀錄（程式版本、檔案指紋、逐項結果），事後可查。
@@ -40,41 +40,22 @@ FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料�
 
 **目前範圍與限制**
 
-- 支援巴克萊、滙豐的中文產品說明書（文字型 PDF），讀法依 14 份巴克萊、8 份滙豐真實說明書建立並驗證。
-- 不核對、列在「待處理」提醒人工看的項目：Monthly KI（尚無樣本）、標的中文名稱、最初價格本身是否正確（沒有外部資料可比）、部分情境試算。
-- 新上手或上手改版：先轉人工，取得樣本後再擴充讀法，流程見[新增上手實作規範](docs/issuer-onboarding.md)。
+- 14 家上手均有說明書與投資人須知範本，包括 SG；實際樣態限制見[支援範圍](docs/support-matrix.md)。KI 每期觀察不是一律未實作，也不是所有上手都能承作，必須同時通過樣態設定與範本判定。
+- 「待處理」列出未涵蓋項目，例如外部標的名稱／價格正確性、部分情境計算與待樣本驗證寫法；不把未涵蓋項目算成已核對。
+- 僅擷取文字層，沒有 OCR；圖像中的文字不會補讀。未知範本、必核資料缺漏或歧義不自動通過。
+- 新上手或改版先取得樣本，再依[新增上手實作規範](docs/issuer-onboarding.md)確認範圍與擴充讀法。
 
-## 預定流程
+## 現行流程
 
 ```text
-PDF → 逐頁文字擷取／必要時 OCR → 已知範本 parser → 標準化條款
-                                                             ↓
-已確認下單資料 → 欄位映射與驗證 → 標準化預期條款 → 規則核對 → 例外報告
+載入設定與來源快照 → 參考條件表＋PDF 預覽／辨識／配對 → 核對
+                                                      ↓
+                                            檢視結果／人工放行
+                                                      ↓
+                                  儲存核對結果 Excel＋核對紀錄 JSON
 ```
 
-- 文字型 PDF：優先評估 PyMuPDF / pdfplumber，保留頁碼與座標。
-- 掃描或混合型 PDF：只有需要的頁面走本地 OCR；OCR 不等於 LLM。
-- 未知範本、欄位缺漏、值衝突、OCR 不可靠：進人工覆核，不猜值、不自動通過。
-- 未來 LLM fallback 僅記錄擴充邊界；第一版不安裝 SDK、不設定金鑰、不呼叫模型。
-
-## 目前進度（2026-10-01）
-
-- 第一個 issuer：巴克萊（BARC）中文產品說明書。14 份真實樣本皆為文字型 PDF，已解構版面、錨點與 4 個變化維度：[BARC 範本規格](docs/templates/barc-zh-product-description.md)。
-- 核對條件來源（2026-10-02 起）：所有上手共用的參考條件表（`FCN參考條件` 的 `樣本清單`，或公司原始的待建檔表；只要必要欄都在）。PANEL 與 `fcn-batch` 批量核對並回填 ISIN 與比價日：[參考條件表格式](docs/order-formats/reference-sheet.md)、[核對規則](docs/rules/barc-check-rules.md)、[ADR 0004](docs/adr/0004-reference-sheet-as-check-source.md)。BARC 詢價表流程已刪除（Issue #46）。
-- 第二家上手（已實作 Issue #34）：滙豐（HSBC）中文產品說明書，8 份文字型 PDF，已完成探勘與規格：[HSBC 範本規格](docs/templates/hsbc-zh-product-description.md)、[下單資料格式](docs/order-formats/hsbc-fcn-reference.md)、[核對規則](docs/rules/hsbc-check-rules.md)。H02 為唯一作業螢光樣本；其他樣本驗證不同型態，已支援參考條件表、價格／日期及情境簡單算式核對。
-- 第三家上手（已實作 Issue #135）：摩根士丹利（MS，`147`）中文產品說明書，只支援新版範本（以 2026 年後的文件為準；舊版範本辨識失敗轉人工覆核）：[MS 範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)。說明書沒有年利率，改核對月配息率（年利率 ÷ 12）與情境年化報酬率；另核對日期表結構、第 18 項情境金額與 MS 版本的固定警語、名稱樣板。投資人須知（已實作 Issue #137，[範本規格](docs/templates/ms-zh-iis.md)）同樣只支援新版範本，另核對交易日、期末定價日、KO／KI 條件、月配息率、開始受理贖回日期與商品種類；說明書與投資人須知都通過或放行才回填。
-- 第四家上手（說明書已實作，Issue #189、#191）：法國巴黎銀行（BNP，`082`）中文產品說明書，7 份文字型 PDF：[BNP 範本規格](docs/templates/bnp-zh-product-description.md)、[下單資料格式](docs/order-formats/bnp-fcn-reference.md)、[核對規則](docs/rules/bnp-check-rules.md)、[審查標準 §2.7](docs/rules/review-standard.md)。BNP 特有：保證機構、半形方括號的風險等級、最低申購／贖回 = 5 × 面額、Non-Call = 天期仍有 KO 價、發行不成立門檻；另新增所有上手共用的「參考條件表某檔標的各價格與說明書差同一比例（疑似分割調整）→ 轉人工覆核」。投資人須知（已實作 Issue #197，[範本規格](docs/templates/bnp-zh-iis.md)）另核對保證機構名稱、商品種類、受理申購日期與發行不成立門檻，固定警語 2 次；說明書與投資人須知都通過或放行才回填。
-- 第五家上手（已實作 Issue #194）：法國興業（SG，`037`）中文產品說明書，6 份文字型 PDF（兩種版面都支援），規格見 [SG 範本規格](docs/templates/sg-zh-product-description.md)、[下單資料格式](docs/order-formats/sg-fcn-reference.md)、[核對規則](docs/rules/sg-check-rules.md)、[審查標準 §2.8](docs/rules/review-standard.md)（作業人員決定跳過雙方螢光取交集，Issue #192）。SG 特有：章名「一、商品基本資料」、§8 集中所有條件、保證機構與總代理人名稱、商品種類「債券」、無自動提前出場型態（表上 KO(Freq)=P、Non-Call=天期）、最低申購依幣別倍數、配息率固定 4 位、第一章警語的半形方括號 `[RR4]`。投資人須知尚無範本（另開 Issue），SG 商品不回填。
-- 第六家上手（說明書與投資人須知已實作，Issue #220）：花旗（Citi，`159`）中文產品說明書與投資人須知各 8 份文字型 PDF：[說明書範本規格](docs/templates/citi-zh-product-description.md)、[投資人須知範本規格](docs/templates/citi-zh-iis.md)、[下單資料格式](docs/order-formats/citi-fcn-reference.md)、[核對規則](docs/rules/citi-check-rules.md)、[審查標準 §2.9](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。Citi 特有：Citi 版本固定警語（沒有 OSU 段：Citi 商品 OSU 客戶不能承作）、標的依代號配對不看順序、參考條件表「期初定價」欄可核對、保證機構與總代理人名稱、發行不成立門檻；新增兩個「受託投資」允許片語（所有上手）。
-- 第七家上手（說明書與投資人須知已實作，Issue #233）：摩根大通（JPM，`076`）中文產品說明書與投資人須知各 5 份文字型 PDF：[說明書範本規格](docs/templates/jpm-zh-product-description.md)、[投資人須知範本規格](docs/templates/jpm-zh-iis.md)、[下單資料格式](docs/order-formats/jpm-fcn-reference.md)、[核對規則](docs/rules/jpm-check-rules.md)、[審查標準 §2.10](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。JPM 特有：羅馬數字章名「I. 商品基本資料」、KI 叫「觸碰價」、JPM 版本固定警語（無【】、OSU 段改寫）、標的依英文公司名稱排序（依代號配對不看順序，比照 Citi）、名稱樣板不分型態、沒有發行不成立門檻與月配息率；新增「受託投資/受託買賣」允許片語（所有上手）。
-- 第八家上手（說明書與投資人須知已實作，Issue #239）：野村（Nomura，`156`）中文產品說明書與投資人須知各 8 份文字型 PDF：[說明書範本規格](docs/templates/nomura-zh-product-description.md)、[投資人須知範本規格](docs/templates/nomura-zh-iis.md)、[下單資料格式](docs/order-formats/nomura-fcn-reference.md)、[核對規則](docs/rules/nomura-check-rules.md)、[審查標準 §2.11](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。Nomura 特有：說明書條款只寫每月配息率（年利率取情境一、二年化報酬率，每月配息率 = 年利率 ÷ 12 四捨五入到 4 位，Issue #297）、K／KO／KI % 只在標的表表頭、KI 叫「下限觸發價」（含每期觀察）、固定警語 SG 版本但說明書只 2 次（審查標準新增上手別說明書次數設定 `risk.fixed_warning_occurrences_by_issuer`）、投資人須知沒有刊印日期與價格表、頁碼「N/4」、名稱依記憶式與標的數變化；受託機構審查日期清單加 2025-06-24（所有上手）。
-- 第九家上手（說明書與投資人須知已實作，Issue #248）：高盛（GS，`148`）中文產品說明書與投資人須知各 5 份文字型 PDF：[說明書範本規格](docs/templates/gs-zh-product-description.md)、[投資人須知範本規格](docs/templates/gs-zh-iis.md)、[下單資料格式](docs/order-formats/gs-fcn-reference.md)、[核對規則](docs/rules/gs-check-rules.md)、[審查標準 §2.13](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。GS 特有：沒有獨立封面（第 1 頁編號項目）、章名「第一章:商品基本資料」六章、KI 叫「下限觸發價格」、GS 版本固定警語（沒有 OSU 段）、標的依彭博代碼排序（依代號配對不看順序）、期初定價欄可核對（收盤價為間接寫法）、最低申購依幣別倍數（USD 5 單位）、只核對發行機構名稱（保證機構兩家與總代理人不核對）、投資人須知有 CJK 相容字「利」；投資人須知「受託投資」依 Issue #247 交易日特例。
-- 第十家上手（說明書與投資人須知已實作，Issue #261）：法國外貿銀行（Natixis，`328`）中文產品說明書與投資人須知各 8 份文字型 PDF（1 份單一標的來自私有 Repo）：[說明書範本規格](docs/templates/natixis-zh-product-description.md)、[投資人須知範本規格](docs/templates/natixis-zh-iis.md)、[下單資料格式](docs/order-formats/natixis-fcn-reference.md)、[核對規則](docs/rules/natixis-check-rules.md)、[審查標準 §2.14](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。Natixis 特有：沒有保證機構與總代理人（改為「發行人」台北分行，不核對）、發行機構只寫中文、章名「第一章、商品基本資料」五章、頁尾每頁英文名稱、KO 有每日與每期兩型、KI 叫「界限價格」（含每期觀察）、記憶式靠「皆曾經高於」、標的表欄序 KO → KI → K、固定警語 Natixis 版本（= BNP 版加「*」，投資人須知 2 次）、名稱只依天期與幣別（單一標的也寫一籃子）、說明書沒寫期初定價（不核對）、投資人須知沒有價格表、受託機構商品代號空白轉人工覆核；受託機構審查日期清單加 2024-03-20、2024-08-28（所有上手）。
-- 第十一家上手（說明書與投資人須知已實作，Issue #274）：東方匯理（CA，`086`）中文產品說明書與投資人須知各 5 份文字型 PDF：[說明書範本規格](docs/templates/ca-zh-product-description.md)、[投資人須知範本規格](docs/templates/ca-zh-iis.md)、[下單資料格式](docs/order-formats/ca-fcn-reference.md)、[核對規則](docs/rules/ca-check-rules.md)、[審查標準 §2.15](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。CA 特有：發行機構只寫英文（Crédit Agricole CIB Financial Solutions）、保證機構與總代理人不核對、章名「第一章、商品基本資料」七章、名稱後接 `(ISIN：…)`、K／KI／KO % 只在價格表表頭（欄序 K → KI → KO，價格表沒有代碼）、交易日取期初訂價日、KO 有每日與每期兩型、KI 叫「界限事件／下限價」、固定警語 CA 版本（= HSBC 版、5 處受託或銷售機構，第一章去【】）、說明書沒寫期初定價（不核對）、投資人須知沒有價格表且有 CJK 相容字「年」；新增 5 個「受託投資」允許片語（所有上手）。
-- 第十二家上手（說明書與投資人須知已實作，Issue #269）：BBVA（`326`）中文產品說明書與投資人須知各 5 份文字型 PDF：[說明書範本規格](docs/templates/bbva-zh-product-description.md)、[投資人須知範本規格](docs/templates/bbva-zh-iis.md)、[下單資料格式](docs/order-formats/bbva-fcn-reference.md)、[核對規則](docs/rules/bbva-check-rules.md)、[審查標準 §2.16](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。BBVA 特有：沒有獨立封面（第 1 頁編號清單、沒有發行機構名稱欄）、章名「一、商品基本資料」六章（含存託憑證條款）、有 CJK 相容字（章名「揭露」）、KO 有每日與每期兩型、KI 叫「下限值」（只有到期觀察）、記憶式看「最佳表現值」句型、價格表在到期贖回條款（欄序 KO → K → KI）、KO 每日型配息依交易日數累計（只核年利率）、固定警語同 GS 版本（投資人須知 2 次）、標的依代號配對不看順序、名稱只依天期與幣別（單一標的也寫一籃子）、說明書沒寫期初定價（不核對）、只核對發行機構名稱（保證機構與總代理人不核對）、投資人須知沒有刊印日期與價格表；第四章「受託投資本商品」依 Issue #247 交易日特例。
-- 第十三家上手（說明書與投資人須知已實作，Issue #279）：瑞銀（UBS，`092`）中文產品說明書與投資人須知各 6 份文字型 PDF（新版 5 份；2024 舊版不支援）：[說明書範本規格](docs/templates/ubs-zh-product-description.md)、[投資人須知範本規格](docs/templates/ubs-zh-iis.md)、[下單資料格式](docs/order-formats/ubs-fcn-reference.md)、[核對規則](docs/rules/ubs-check-rules.md)、[審查標準 §2.17](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。UBS 特有：沒有封面與章號（段名單獨一行、段內項號重新起算）、發行機構 `瑞士銀行` 經由倫敦分行（另核分行）、發行人（台北分行）不核對、沒有保證機構與總代理人、名稱依 KO 觀察方式（每日／定期觀察，要和條文一致）、記憶式與 KI 變化（新增名稱佔位符）、交易日標籤 `交易日/期初訂價日`、KI 叫「觸及下限事件／下限價」（含每期、到期觀察）、價格表只有中文名稱、固定警語 UBS 版本（= 共用版差 3 處）、每頁私用區字元 U+F020、最低交易與申購 5 單位、說明書沒寫期初定價（不核對）、投資人須知沒有商品代號與 ISIN。
-- 第十四家上手（說明書與投資人須知已實作，Issue #280）：星展銀行（DBS，`078`）中文產品說明書與投資人須知各 4 份文字型 PDF：[說明書範本規格](docs/templates/dbs-zh-product-description.md)、[投資人須知範本規格](docs/templates/dbs-zh-iis.md)、[下單資料格式](docs/order-formats/dbs-fcn-reference.md)、[核對規則](docs/rules/dbs-check-rules.md)、[審查標準 §2.18](docs/rules/review-standard.md)（作業人員決定不畫螢光、逐項決定）。DBS 特有：只支援 KO 每日觀察記憶式（KI 到期或無）、說明書沒有章號（段落標題＋「標籤：值」兩欄表）、發行機構中文＋括號英文、發行人（台北分公司）與保證機構（無）不核對、商品種類「股權連結債券」、K／KO／KI % 只在表1 表頭（欄序 K → KO → KI，有彭博代碼）、最終比價日取「定價日」、KI 叫「下限觸發事件」、最大利率值 = 年利率 ÷ 12 無條件進位、名稱依 Quanto 與有無 KI 變化、固定警語 DBS 版本（= CA 版多「OSU相關規範」，說明書 2 次）、最低申購依幣別倍數（USD 5、AUD 7、JPY 8）、說明書沒寫期初定價（不核對）、投資人須知有價格表與每頁頁首刊印日期；受託機構名稱「(含國際證券業務分公司)」與電話「(02)5556-1313」加進等價寫法（所有上手）。
-- 本機探勘：BARC 詢價表樣本與說明書 41 項全部一致；14 份說明書的 PDF 內部規則全部成立；文件資訊、日期規則與[審查標準](docs/rules/review-standard.md)已確認；標的目前只核對英文代號，中文名稱核對擱置（核對規則 §6.2）。
+每份 PDF 在預覽時只擷取、讀出一次，核對沿用讀出結果；來源或設定改變時須重新預覽。PANEL 要按儲存才寫核對結果，CLI 一次完成預覽、核對與儲存；回報包可另外匯出。詳細資料流與模組見[架構](docs/architecture.md)。
 
 ## 安裝
 
@@ -89,6 +70,15 @@ python -m pip install -c constraints.txt -e ".[dev]"
 ### 批量核對與回填（參考條件表）
 
 在專案根目錄執行（設定檔預設讀 `config/`）：
+
+PowerShell（明確展開 PDF 清單）：
+
+```powershell
+$pdfs = (Get-ChildItem data/term-sheets/IS/029*.pdf -File).FullName
+fcn-batch data/orders/核對表格式..xlsx @pdfs --out runtime/reports
+```
+
+Bash：
 
 ```bash
 fcn-batch data/orders/核對表格式..xlsx data/term-sheets/IS/029*.pdf --out runtime/reports
@@ -133,7 +123,7 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
 3. 確認預覽後按「開始核對」，畫面切到「核對結果」：左側列出每份說明書（有問題的排前面），狀態用中文顯示；跟參考條件表配對不起來時直接寫原因，例如「條件表找不到這筆」「條件表有重複列」「多份對到同一列」「條件表發行機構不符」「檔名上手編號不符」。右側是選取那份的逐欄結果。選取結果列可查看原因（與核對結果檔「錯誤清單」同一段中文錯訊）、雙方值、參考條件表儲存格、PDF 頁碼及完整原文；下方列出這份的回填欄位（TS、IIS、ISIN、發行日、比價日）及處理方式。
    - **人工放行**：作業人員看過錯訊，認定一份「不一致」或「需人工覆核」的說明書可以通過時，選取它後按下方「人工放行…」，確認視窗列出這份全部錯訊，確認後視同通過：儲存時回填、進「回填後」，不列入「錯誤清單」；狀態顯示「人工放行（原：不一致）」，摘要另計「X 份人工放行」；放行後清單改選最上面那份（下一份要處理的說明書）。同一個按鈕可「取消放行」，取消後仍選那份。回填值無法確定、參考條件表回填欄位已有不同的值、同一批多份對到同一列、找不到列、未支援上手、不支援樣態或執行錯誤時不能放行，按鈕旁顯示原因。已儲存後再放行或取消放行，上一次的核對結果檔就不是目前的結果，要再按一次儲存。重新載入或重新核對會清除放行；CLI 沒有人工放行。
    - **多選人工放行**（Issue #219）：結果清單可用 Shift／Ctrl 點選多份，按鈕改為「人工放行 N 份…」，旁邊列出可以放行、已放行、已通過、不能放行各幾份與不能放行的原因。只放行其中還沒放行、可以放行的；確認視窗（可捲動）逐份列檔名與全部錯訊，另列略過的與原因；放行前檢查一次來源，任一份不能放行或來源已變更時整批都不變。選取的全部都已放行時按鈕改為「取消放行（N 份）」，取消後仍選那幾份。明細區顯示游標所在那份。
-4. 「待處理」分頁列出未涵蓋的項目（Monthly KI、標的名稱等），不算成通過。
+4. 「待處理」分頁列出未涵蓋的項目（各上手未支援寫法、標的名稱等），不算成通過。
 5. 預覽與結果只能查看（人工放行除外，它不改任何檔案，儲存時才生效）。更換來源會清除舊預覽及結果；外部修改或刪除參考條件表、任一 PDF、審查標準或設定檔時，畫面偵測後要求重新載入。讀檔與核對在背景執行，避免重複提交。
 6. 按「儲存核對結果…」，選擇資料夾：核對結果檔 `<原檔名>_核對結果_<日期時間>.xlsx`（「回填後」＋「錯誤清單」）寫到該資料夾，完成訊息列出核對結果檔路徑。原參考條件表不動。內部核對紀錄自動寫到安裝根目錄的 `runtime/核對紀錄/`（更新程式時保留）；紀錄寫不進去時，完成訊息會列出原因。未按儲存（或匯出回報包）不產生任何檔案；檔名已存在時不覆蓋，寫入失敗時列出原因，核對結果仍可查看與重試。
 7. 有未通過的商品時，可按「匯出回報包…」選擇資料夾（不用先儲存）：寫出 `<原檔名>_回報包_<日期時間>/` 資料夾，交給維護者重現和判斷。內容：
@@ -142,7 +132,7 @@ PANEL 使用 Python 內建 Tkinter，與 `fcn-batch` 共用同一套批量核對
    - `核對紀錄_未通過.json`：核對紀錄中這些商品的部分。
    - `PDF/`：這些商品的說明書與投資人須知。
 
-   未通過以「錯誤清單」為準；未支援上手（例如尚無範本的上手）與不支援樣態不列入，只算進摘要；人工放行過的也不列入。維護者可以直接用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 重跑（PDF 檔名是辨識依據、不改名；有同名的不同 PDF 時另放 `PDF/同名<n>/`，摘要會註明，重跑時一起帶入）。資料夾已存在時不覆蓋；來源檔案核對後被改過時拒絕匯出。**回報包含真實交易資料，只能推到 Private Repo（`TaylorYam/fcn-oos-samples`），不能放進本 Repo、Issue 或 PR。**
+   未通過以「錯誤清單」為準；未支援上手（例如尚無範本的上手）與不支援樣態不列入，只算進摘要；人工放行過的也不列入。維護者可在 Bash 用 `fcn-batch 參考條件表_未通過.xlsx PDF/*.pdf` 重跑；PowerShell 須如上方範例先用 `Get-ChildItem` 展開 PDF 清單（PDF 檔名是辨識依據、不改名；有同名的不同 PDF 時另放 `PDF/同名<n>/`，摘要會註明，重跑時一起帶入）。資料夾已存在時不覆蓋；來源檔案核對後被改過時拒絕匯出。**回報包含真實交易資料，只能推到 Private Repo（`TaylorYam/fcn-oos-samples`），不能放進本 Repo、Issue 或 PR。**
 
 設定檔：PANEL 讀專案根目錄 `config/` 的 `review_standard.toml`、`reference_sheet.toml`、`issuer_prefixes.toml` 與 `exchange_holidays.toml`。畫面上方會顯示實際使用的設定檔路徑。
 
@@ -165,38 +155,22 @@ pytest -q -n auto
 `-n auto` 由 pytest-xdist 依 CPU 核心數平行跑；要逐一除錯時拿掉即可。
 
 ```bash
-ruff check src tests
+ruff check src tests scripts panel_bootstrap.py launch_panel.pyw
+ruff format --check src tests scripts panel_bootstrap.py launch_panel.pyw
 ```
 
-測試只透過公開切點驗證：批量入口 `fcn_checker.batch`（`preview_batch`／`check_batch`）與儲存 `fcn_checker.saving`（`save_batch`／`run_batch`，回傳儲存收據；設定由核對設定 `fcn_checker.check_config.CheckConfig` 傳入）、`fcn-batch` CLI 與 PANEL 工作階段 `fcn_checker.panel_workflow.PanelSession`。合成說明書 PDF 由各上手的合成器（`tests/synth.py`、`tests/hsbc_synth.py`）產生，合成參考條件表與單份核對 harness（含載入一次的核對設定 fixture `CONFIG`）在 `tests/reference_synth.py`、`tests/harness.py`，數值皆虛構。`tests/test_real_samples*.py`、`tests/test_real_hsbc.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過；樣本的資料夾結構與檔名只定義在 `tests/real_data.py`（見[資料管理](#資料管理)），缺檔時略過原因會寫出缺的路徑。
+行為測試主要透過公開切點驗證：批量入口 `fcn_checker.batch`（`preview_batch`／`check_batch`）與儲存 `fcn_checker.saving`（`save_batch`／`run_batch`，回傳儲存收據；設定由核對設定 `fcn_checker.check_config.CheckConfig` 傳入）、`fcn-batch` CLI 與 PANEL 工作階段 `fcn_checker.panel_workflow.PanelSession`。合成說明書 PDF 由各上手的合成器（`tests/synth.py` 為 BARC，其餘為 `tests/<上手>_synth.py`）產生，合成參考條件表與單份核對 harness（含載入一次的核對設定 fixture `CONFIG`）在 `tests/reference_synth.py`、`tests/harness.py`，數值皆虛構；共享表格、日期、情境工具及重要規則另有直接測試。`tests/test_real_*.py` 只在本機 `data/` 有真實樣本時執行，CI 自動略過；樣本的資料夾結構與檔名只定義在 `tests/real_data.py`（見[資料管理](#資料管理)），缺檔時略過原因會寫出缺的路徑。
 
 ## 文件與開發規則
 
-- [架構與模組邊界](docs/architecture.md)
-- [資料契約草案](docs/data-contract.md)
-- [分階段 TODO 與待確認項目](docs/TODO.md)
-- [新增上手（issuer）實作規範](docs/issuer-onboarding.md)
-- [上線驗收流程](docs/acceptance.md)：公司電腦用最新交易逐一驗收每家上手的各種條件
-- [名詞表](CONTEXT.md)、[參考條件表格式](docs/order-formats/reference-sheet.md)（設定檔 `config/reference_sheet.toml`、`config/issuer_prefixes.toml`）
-- [BARC 範本規格](docs/templates/barc-zh-product-description.md)、[BARC 詢價格式（已刪除，僅供回溯）](docs/order-formats/barc-inquiry.md)、[BARC 核對規則](docs/rules/barc-check-rules.md)、[審查標準](docs/rules/review-standard.md)（設定檔 `config/review_standard.toml`）
-- MS（已實作說明書與投資人須知）：[範本規格](docs/templates/ms-zh-product-description.md)、[下單資料格式](docs/order-formats/ms-fcn-reference.md)、[核對規則](docs/rules/ms-check-rules.md)
-- BNP（說明書與投資人須知已實作）：[範本規格](docs/templates/bnp-zh-product-description.md)、[下單資料格式](docs/order-formats/bnp-fcn-reference.md)、[核對規則](docs/rules/bnp-check-rules.md)
-- SG（已實作說明書與投資人須知）：[範本規格](docs/templates/sg-zh-product-description.md)、[下單資料格式](docs/order-formats/sg-fcn-reference.md)、[核對規則](docs/rules/sg-check-rules.md)
-- Citi（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/citi-zh-product-description.md)、[投資人須知範本規格](docs/templates/citi-zh-iis.md)、[下單資料格式](docs/order-formats/citi-fcn-reference.md)、[核對規則](docs/rules/citi-check-rules.md)
-- JPM（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/jpm-zh-product-description.md)、[投資人須知範本規格](docs/templates/jpm-zh-iis.md)、[下單資料格式](docs/order-formats/jpm-fcn-reference.md)、[核對規則](docs/rules/jpm-check-rules.md)
-- Nomura（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/nomura-zh-product-description.md)、[投資人須知範本規格](docs/templates/nomura-zh-iis.md)、[下單資料格式](docs/order-formats/nomura-fcn-reference.md)、[核對規則](docs/rules/nomura-check-rules.md)
-- GS（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/gs-zh-product-description.md)、[投資人須知範本規格](docs/templates/gs-zh-iis.md)、[下單資料格式](docs/order-formats/gs-fcn-reference.md)、[核對規則](docs/rules/gs-check-rules.md)
-- Natixis（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/natixis-zh-product-description.md)、[投資人須知範本規格](docs/templates/natixis-zh-iis.md)、[下單資料格式](docs/order-formats/natixis-fcn-reference.md)、[核對規則](docs/rules/natixis-check-rules.md)
-- CA（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/ca-zh-product-description.md)、[投資人須知範本規格](docs/templates/ca-zh-iis.md)、[下單資料格式](docs/order-formats/ca-fcn-reference.md)、[核對規則](docs/rules/ca-check-rules.md)
-- BBVA（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/bbva-zh-product-description.md)、[投資人須知範本規格](docs/templates/bbva-zh-iis.md)、[下單資料格式](docs/order-formats/bbva-fcn-reference.md)、[核對規則](docs/rules/bbva-check-rules.md)
-- UBS（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/ubs-zh-product-description.md)、[投資人須知範本規格](docs/templates/ubs-zh-iis.md)、[下單資料格式](docs/order-formats/ubs-fcn-reference.md)、[核對規則](docs/rules/ubs-check-rules.md)
-- DBS（已實作說明書與投資人須知）：[說明書範本規格](docs/templates/dbs-zh-product-description.md)、[投資人須知範本規格](docs/templates/dbs-zh-iis.md)、[下單資料格式](docs/order-formats/dbs-fcn-reference.md)、[核對規則](docs/rules/dbs-check-rules.md)
-- 投資人須知（IIS）：[核對規則](docs/rules/iis-check-rules.md)、[BARC 範本規格](docs/templates/barc-zh-iis.md)、[HSBC 範本規格](docs/templates/hsbc-zh-iis.md)、[MS 範本規格](docs/templates/ms-zh-iis.md)、[BNP 範本規格](docs/templates/bnp-zh-iis.md)、[SG 範本規格](docs/templates/sg-zh-iis.md)、[Citi 範本規格](docs/templates/citi-zh-iis.md)、[JPM 範本規格](docs/templates/jpm-zh-iis.md)、[Nomura 範本規格](docs/templates/nomura-zh-iis.md)、[GS 範本規格](docs/templates/gs-zh-iis.md)、[Natixis 範本規格](docs/templates/natixis-zh-iis.md)、[CA 範本規格](docs/templates/ca-zh-iis.md)、[BBVA 範本規格](docs/templates/bbva-zh-iis.md)、[UBS 範本規格](docs/templates/ubs-zh-iis.md)、[DBS 範本規格](docs/templates/dbs-zh-iis.md)
-- ADR：[0001 第一版採規則式核對](docs/adr/0001-deterministic-runtime.md)、[0002 本機 Python CLI／PyMuPDF](docs/adr/0002-python-cli-pymupdf.md)、[0003 PANEL 以公開 GitHub main 更新（已取代）](docs/adr/0003-public-github-panel-update.md)、[0004 核對條件統一改用參考條件表（已取代）](docs/adr/0004-reference-sheet-as-check-source.md)、[0005 上手 adapter 與共用規則（已取代）](docs/adr/0005-issuer-adapter-and-shared-rules.md)、[0006 PANEL 只供維護者使用，移除自動更新](docs/adr/0006-panel-maintainer-only-no-self-update.md)、[0007 投資人須知與說明書成對核對](docs/adr/0007-iis-paired-with-term-sheet.md)、[0008 參考條件表是唯一的核對條件來源，核對結果以匯入格式輸出](docs/adr/0008-reference-sheet-and-import-format.md)、[0009 共用規則只實作一次、語意逐條定義](docs/adr/0009-shared-rules-defined-per-rule.md)
-- [AGENTS.md](AGENTS.md)：共用開發規範；[CLAUDE.md](CLAUDE.md) 沿用此規範。
-- `.github/ISSUE_TEMPLATE/`、PR 範本、CI 皆保留自原始 template。
+- [支援範圍與文件索引](docs/support-matrix.md)：14 家上手的說明書、投資人須知、欄位來源及專屬規則。
+- [架構與模組邊界](docs/architecture.md)、[現行資料契約](docs/data-contract.md)、[名詞表](CONTEXT.md)。
+- [參考條件表格式](docs/order-formats/reference-sheet.md)、[共用核對規則](docs/rules/shared-check-rules.md)、[投資人須知核對規則](docs/rules/iis-check-rules.md)、[審查標準](docs/rules/review-standard.md)。
+- [新增上手流程](docs/issuer-onboarding.md)、[公司上線驗收](docs/acceptance.md)、[現況與待辦](docs/TODO.md)。
+- [ADR 索引](docs/adr/README.md)：現行 0001、0002、0006、0007、0008、0009；0003、0004、0005 已被取代，保留歷史。
+- [AGENTS.md](AGENTS.md) 是共用開發規範，[CLAUDE.md](CLAUDE.md) 沿用此規範。
 
-開發流程：Issue → branch/worktree → plan → implementation → validation → commit/push → PR → review/CI → merge。CI 檢查 patch 空白、ruff lint／format 與 pytest（Python 3.11、3.13，只用合成資料）。
+開發流程：Issue → branch/worktree → plan → implementation → validation → commit/push → PR → review/CI → merge。CI 檢查 patch 空白、ruff lint／format 與 pytest（Python 3.11、3.13）；沒有本機真實樣本時，相關測試自動略過，不代表真實交易已驗收。
 
 ## 資料管理
 

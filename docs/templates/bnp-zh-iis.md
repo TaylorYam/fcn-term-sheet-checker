@@ -1,5 +1,7 @@
 # 範本規格：法國巴黎銀行（BNP）中文投資人須知
 
+> 現行上手／樣態限制見[支援範圍](../support-matrix.md)。本文件的樣本數、探勘結論與日期決策保留當時觀察，不代表目前所有交易或公司上線驗收都已通過。
+
 - 範本代號：`bnp-zh-iis`
 - 對應說明書範本：[`bnp-zh-pd`](bnp-zh-product-description.md)；一檔商品一份說明書＋一份投資人須知（[ADR 0007](../adr/0007-iis-paired-with-term-sheet.md)）
 - 依據：2026-10-14 對 6 份真實樣本（BN1-IIS～BN3-IIS、BN5-IIS～BN7-IIS，與說明書 BN1–BN3、BN5–BN7 同商品；BN4 沒有投資人須知）的探勘與核對範圍決定（Issue #197）
