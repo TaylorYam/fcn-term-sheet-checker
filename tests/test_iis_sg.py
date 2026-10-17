@@ -424,13 +424,23 @@ def test_a_different_issuer_in_the_institutions_is_not_an_sg_iis(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("trade", "status"), [(dt.datetime(2026, 10, 15), PASS), (dt.datetime(2026, 10, 16), MISMATCH)]
+    ("trade", "status"),
+    [
+        (dt.datetime(2026, 10, 15), PASS),
+        (dt.datetime(2026, 10, 16), PASS),
+        (dt.datetime(2026, 10, 30), PASS),
+        (dt.datetime(2026, 10, 31), MISMATCH),
+        (None, MISMATCH),
+    ],
 )
 def test_iis_forbidden_wording_on_or_before_the_exemption_date_passes(tmp_path, trade, status):
-    """投資人須知同說明書：參考條件表交易日在 2026-10-15（含）以前，「受託投資」特例通過並註明（Issue #247）。"""
+    """投資人須知同說明書：特例延至 2026-10-30（含）；之後或缺交易日照原規則判錯（Issue #338）。"""
     _, iis = check_pair(
         tmp_path, edits=[Edit("為於中華民國境內受託買賣", "為於中華民國境內受託投資", "iis.warn")], 交易日=trade
     )
     [res] = [r for r in iis.report.results if r.rule_id == "standard.forbidden_wording"]
     assert res.status == status and res.actual == 1
     assert ("特例通過" in res.message) == (status == PASS)
+    assert res.document_evidence
+    if status == PASS:
+        assert "2026-10-30（含）以前" in res.tolerance

@@ -14,7 +14,7 @@ import synth
 from fcn_checker.issuers import SG
 from fcn_checker.messages import problem_message
 from fcn_checker.schema import CheckStatus as S
-from harness import check_all, flagged
+from harness import REVIEW_STANDARD, check_all, flagged, load_config
 from harness import field_problems as problems
 from harness import results as rule
 from pdf_writer import Edit
@@ -506,11 +506,36 @@ def test_cumulative_coupon_rounded_after_multiplying_passes(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("trade", "status"), [(dt.datetime(2026, 10, 15), S.PASS), (dt.datetime(2026, 10, 16), S.MISMATCH)]
+    ("trade", "status"),
+    [
+        (dt.datetime(2026, 10, 15), S.PASS),
+        (dt.datetime(2026, 10, 16), S.PASS),
+        (dt.datetime(2026, 10, 30), S.PASS),
+        (dt.datetime(2026, 10, 31), S.MISMATCH),
+        (None, S.MISMATCH),
+    ],
 )
 def test_forbidden_wording_on_or_before_the_exemption_date_passes(tmp_path, trade, status):
-    """參考條件表交易日在 2026-10-15（含）以前：「受託投資」特例通過並註明（已通知上手改版，Issue #247）；之後照規則判錯。"""
+    """交易日特例延至 2026-10-30（含）；之後或缺交易日照規則判錯（Issue #338）。"""
     r = check(tmp_path, edits=[Edit("為於中華民國境內受託買賣", "為於中華民國境內受託投資", "ts.cover")], 交易日=trade)
     [res] = rule(r, "standard.forbidden_wording")
     assert res.status == status and res.actual == 1
     assert ("特例通過" in res.message) == (status == S.PASS)
+    assert res.document_evidence
+    if status == S.PASS:
+        assert "2026-10-30（含）以前" in res.tolerance
+
+
+def test_removing_the_wording_exemption_restores_the_original_rule(tmp_path):
+    standard = tmp_path / "review_standard.toml"
+    standard.write_text(
+        REVIEW_STANDARD.read_text(encoding="utf-8").replace("exempt_until = 2026-10-30", ""), encoding="utf-8"
+    )
+    r = check(
+        tmp_path,
+        edits=[Edit("為於中華民國境內受託買賣", "為於中華民國境內受託投資", "ts.cover")],
+        config=load_config(review_standard=standard),
+        交易日=dt.datetime(2026, 10, 30),
+    )
+    [res] = rule(r, "standard.forbidden_wording")
+    assert res.status == S.MISMATCH and res.reason_code == "forbidden_wording"
