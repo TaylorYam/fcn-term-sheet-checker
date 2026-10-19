@@ -52,7 +52,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.template_variants",
-        "description": "依規則推得、待樣本驗證：多標的非記憶式（轉人工覆核）、單一標的記憶式、KO 每期＋KI、"
+        "description": "依規則推得、待樣本驗證：單一標的記憶式、KO 每期＋KI、"
         "KO 每期 Non-Call 介於 2 和天期之間、USD／EUR／JPY 以外的幣別、Crédit Agricole CIB Financial Solutions 以外的發行主體；"
         "範本以外的寫法會轉人工覆核",
     },
@@ -172,10 +172,13 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def memory(ctx: IssuerContext) -> list[CheckResult]:
-    """多標的又沒有記憶式兩句（非記憶式）沒有樣本，句型未知 → 轉人工覆核（2026-10-15 確認）。"""
+    """多標的又沒有記憶式兩句（非記憶式）：寫「所有連結標的於預定自動提前出場觀察日之收盤價…」是已知的非記憶式寫法，
+    交給參考條件表 KO(memo) 比對（Issue #344）；其他句型未知 → 轉人工覆核（2026-10-15 確認）。"""
     f = ctx.ts.f
-    mem, uls = f("ko_memory"), f("underlyings")
+    mem, uls, wording = f("ko_memory"), f("underlyings"), f("ko_memory_wording")
     if not (mem.ok and uls.ok) or mem.value or len(uls.value) == 1:
+        return []
+    if wording.ok and wording.value.all_same_day:
         return []
     return [
         Check("doc.ko_memory", "ko_memory", Item.expected("多標的非記憶式"), ctx.document).result(
@@ -183,7 +186,8 @@ def memory(ctx: IssuerContext) -> list[CheckResult]:
             actual=f"{len(uls.value)} 檔、非記憶式",
             evidence=mem.evidence,
             reason="variant_not_covered",
-            message="多標的又沒有記憶式句型（「或任何先前的觀察日」「無須於同一觀察日」）：沒有樣本，請人工確認是否為非記憶式",
+            message="多標的又沒有記憶式句型（「或任何先前的觀察日」「無須於同一觀察日」），也不是「所有連結標的於預定自動提前出場"
+            "觀察日之收盤價…」：句型未知，請人工確認是否為非記憶式",
         )
     ]
 
