@@ -48,11 +48,15 @@ _NAME_TAIL = re.compile(r"（(?:以下簡稱|下稱)「本商品」）.*$")
 @dataclass
 class IisIssuerContext:
     """上手投資人須知專屬規則的輸入：投資人須知讀出結果與同商品說明書（上手自己 parser 的讀出結果，可讀專屬欄位；
-    這批沒有、讀不到或沒有配對成功時為 None）。不含參考條件表（同 ADR 0009 的說明書內部規則）。"""
+    這批沒有、讀不到或沒有配對成功時為 None）。不含參考條件表（同 ADR 0009 的說明書內部規則），唯一例外是交易日
+    （同共用審查標準規則的刊印日期，取參考條件表）。"""
 
     sheet: IisSheet
     term_sheet: TermSheet | None
     document: DocKind = DocKind.IIS  # 被核對的文件，訊息與結果都以它稱呼
+    trade_date: ParsedField | None = (
+        None  # 參考條件表交易日（`trade_date`）：寫法依交易日改版的規則用（Natixis，Issue #351）
+    )
 
 
 # ---------------------------------------------------------------- 文件本身

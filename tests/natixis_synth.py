@@ -84,11 +84,20 @@ class Spec(ProductSpec):
     split_numbers: bool = False  # 連結標的表界限／執行價格從小數點後拆行（`1,234.56` / `00`）
     approval: dt.date = APPROVAL
     iis_pages: int = 4
+    ko_final_day: str | None = (
+        None  # KO 每日觀察到最終評價日「含」／「不含」；None → 依交易日（2026-10-20 起「含」，Issue #351）
+    )
 
     def __post_init__(self) -> None:
         self.underlyings = underlyings(self.count, self.market)
         self.final_date = self.ends[-1]
         self.maturity_date = self.payments[-1]
+
+    @property
+    def ko_final(self) -> str:
+        if self.ko_final_day is not None:
+            return self.ko_final_day
+        return "含" if self.trade_date >= dt.date(2026, 10, 20) else "不含"
 
     @property
     def ends(self) -> list[dt.date]:
@@ -373,7 +382,7 @@ def _article12(d: _Doc, s: Spec) -> None:
         d.section = "art12"
         d.text(
             90,
-            f"(8) 自動提前到期觀察日：從第{CN[s.first_callable - 1]}個配息觀察期間結束日(含)到最終評價日(不含)之每一預定交易日每日觀察，並依「中斷日」進行調整。",
+            f"(8) 自動提前到期觀察日：從第{CN[s.first_callable - 1]}個配息觀察期間結束日(含)到最終評價日({s.ko_final})之每一預定交易日每日觀察，並依「中斷日」進行調整。",
             117,
         )
         d.text(
@@ -459,7 +468,7 @@ def _article15(d: _Doc, s: Spec) -> None:
 
 def _article16(d: _Doc, s: Spec) -> None:
     ko = (
-        f"從第{CN[s.first_callable - 1]}個配息觀察期間結束日(含)到最終評價日(不含)之每一預定交易日每日觀察，並依「中斷日」進行調整"
+        f"從第{CN[s.first_callable - 1]}個配息觀察期間結束日(含)到最終評價日({s.ko_final})之每一預定交易日每日觀察，並依「中斷日」進行調整"
         if s.ko_obs == "D"
         else "依第一章第12(7)項所列，並依「中斷日」進行調整"
     )
@@ -791,7 +800,7 @@ def build_iis_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), used: set[
     w.line(9, "1. 商品簡介", gap=12)
     m = f"{s.denom:,} {s.currency_zh}"
     ko = (
-        f"從第{CN[s.first_callable - 1]}個配息觀察期間結束日(含)到最終評價日(不含)之每一預定交易日每日觀察，並依「中斷日」進行調整。"
+        f"從第{CN[s.first_callable - 1]}個配息觀察期間結束日(含)到最終評價日({s.ko_final})之每一預定交易日每日觀察，並依「中斷日」進行調整。"
         if s.ko_obs == "D"
         else "如中文產品說明書第一章第12(7)項所列，並依「中斷日」進行調整。"
     )

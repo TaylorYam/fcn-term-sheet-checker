@@ -148,10 +148,11 @@ def check_investor_sheet(pairing: Sequence[CheckResult], paired: PairedIis | Non
             term_sheet=paired.term_sheet,
         )
         results.extend(iis.run_all(ctx))
+        trade = iis.trade_date(ctx)
         template = paired.issuer.iis
         if template is not None and template.rules is not None:
-            results.extend(template.rules(iis.IisIssuerContext(paired.sheet, paired.term_sheet)))
-        results.extend(iis_review_standard_rules(ctx, trade=iis.trade_date(ctx)))
+            results.extend(template.rules(iis.IisIssuerContext(paired.sheet, paired.term_sheet, trade_date=trade)))
+        results.extend(iis_review_standard_rules(ctx, trade=trade))
         report.not_covered = [dict(n) for n in template.not_covered] if template is not None else []
     for r in results:  # 這份 PDF 的結果（含辨識與配對）都屬於投資人須知，錯訊的文件那一邊依此稱呼
         r.document = DocKind.IIS
