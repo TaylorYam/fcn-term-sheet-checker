@@ -603,3 +603,11 @@ def test_offshore_rmb_problems_name_the_document_article(tmp_path, section, old,
     found = [x for x in r.results if x.rule_id == rule_id and x.status != S.PASS]
     assert found, problems(r)
     assert all(where in problem_message(x) for x in found), [problem_message(x) for x in found]
+
+
+def test_missing_article_title_requires_review_and_names_the_usual_article(tmp_path):
+    """第一章依項目名稱找條（Issue #345）：標題改掉找不到那一項時轉人工覆核，錯訊沿用美元版條號。"""
+    r = check(tmp_path, S0, edits=[Edit("配息資料及其計算公式：", "配息資料：", "ts.art15")])
+    assert r.status == S.REVIEW_REQUIRED
+    found = [x for x in rule(r, "derive.monthly_coupon") if x.status == S.REVIEW_REQUIRED]
+    assert found and all("第 15 項" in problem_message(x) for x in found), [problem_message(x) for x in found]
