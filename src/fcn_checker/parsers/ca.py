@@ -13,6 +13,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
+from typing import NamedTuple
 
 from .. import standard_fields
 from ..schema import DetectionResult, Evidence, FieldStatus, Line, ParsedField
@@ -25,8 +26,8 @@ from .layout import Document, LayoutSpec, TextIndex, capture, join_wrapped_ticke
 TEMPLATE_ID = "ca-zh-pd"
 # 2：價格表幣別字換行的那格仍歸到同一列（Issue #278）；3：價格表改由 parsers/price_table.py 讀（Issue #287）；
 # 4：重複寫出處（情境、贖回 %、說明文字幣別、警語的受託機構名稱；Issue #319）；5：日期表標準欄位與共用排程推導（Issue #289）；
-# 6：情境價格表與假設值交成共用情境規則的標準欄位（Issue #294）
-PARSER_VERSION = "6"
+# 6：情境價格表與假設值交成共用情境規則的標準欄位（Issue #294）；7：多標的非記憶式句型（Issue #344）
+PARSER_VERSION = "7"
 # 第七章章名在部分文件拆成兩行（「第七章、股權連結商」／「品的額外條款及條件」），只用前六章定位；辨識另查第七章全文
 CHAPTER_NAMES = {
     1: ("一", "商品基本資料"),
@@ -361,10 +362,18 @@ def _ko(fields: dict[str, ParsedField], ti: TextIndex, b: int, c: int) -> None:
     fields["ko_memory"] = memory_of(fields["ko_memory_wording"])
 
 
-def memory_wording(event: str, tail: str) -> tuple[bool, bool, bool]:
-    """自動提前出場事件句（`KO_EVENT` 的第 1 組）與緊接其後的文字 → (有「或任何先前的觀察日」, 有「無須於同一觀察日」,
-    是多標的非記憶式句「所有連結標的於預定自動提前出場觀察日之收盤價…」)。"""
-    return MEMORY_PRIOR in event, MEMORY_SAME in tail, NON_MEMORY_ALL in event
+class MemoryWording(NamedTuple):
+    """自動提前出場事件的記憶式句型：`prior` 有「或任何先前的觀察日」、`same` 有「無須於同一觀察日」、`all_same_day` 整句
+    就是多標的非記憶式句「所有連結標的於預定自動提前出場觀察日之收盤價高於或等於自動提前出場價」（Issue #344）。"""
+
+    prior: bool
+    same: bool
+    all_same_day: bool
+
+
+def memory_wording(event: str, tail: str) -> MemoryWording:
+    """自動提前出場事件句（`KO_EVENT` 的第 1 組）與緊接其後的文字 → 記憶式句型。"""
+    return MemoryWording(MEMORY_PRIOR in event, MEMORY_SAME in tail, event.rstrip("，,") == NON_MEMORY_ALL)
 
 
 def memory_of(wording: ParsedField) -> ParsedField:
@@ -372,7 +381,7 @@ def memory_of(wording: ParsedField) -> ParsedField:
     由規則轉人工覆核）。"""
     if not wording.ok:
         return derived("ko_memory", wording)
-    prior, same, _ = wording.value
+    prior, same = wording.value.prior, wording.value.same
     if prior != same:
         note = "自動提前出場事件只寫了「或任何先前的觀察日」與「無須於同一觀察日」其中一句"
         return ParsedField("ko_memory", FieldStatus.INVALID, evidence=list(wording.evidence), note=note)

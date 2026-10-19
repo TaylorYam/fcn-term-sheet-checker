@@ -178,7 +178,7 @@ def memory(ctx: IssuerContext) -> list[CheckResult]:
     mem, uls, wording = f("ko_memory"), f("underlyings"), f("ko_memory_wording")
     if not (mem.ok and uls.ok) or mem.value or len(uls.value) == 1:
         return []
-    if wording.ok and wording.value[2]:
+    if wording.ok and wording.value.all_same_day:
         return []
     return [
         Check("doc.ko_memory", "ko_memory", Item.expected("多標的非記憶式"), ctx.document).result(
