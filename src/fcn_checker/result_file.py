@@ -5,7 +5,7 @@
   順序照參考條件表；可以直接匯入資料庫。每格依欄名取參考條件表同名欄（同一標準欄位的其他欄名、fallbacks 的欄也算）
   回填後的值與顯示格式，`checked_column` 一律打勾，表上沒有的欄留空白；欄寬取同名欄。參考條件表的其他欄、
   其他工作表、公式、格式化條件、資料驗證、篩選、合併儲存格都不帶入，所以什麼樣的參考條件表都產生得出來。
-- 「錯誤清單」：每份沒通過的說明書一列，依 PDF 輸入順序：TDCC Code、PDF 檔名、錯訊（多條以換行分隔）。
+- 「錯誤清單」：沒通過的說明書每條錯訊一列，依 PDF 輸入順序：TDCC Code、PDF 檔名、PDF 頁碼（證據頁碼，沒有時空白）、錯訊（Issue #342）。
 
 檔名 `<參考條件表檔名>_核對結果_<YYYYMMDD-HHMMSS>.xlsx`，寫到指定資料夾，不覆蓋既有檔案。
 """
@@ -31,21 +31,30 @@ from .orders.reference import SheetLayout, header_columns, header_names, locate
 
 FILLED_SHEET = "回填後"
 ERROR_SHEET = "錯誤清單"
-ERROR_COLUMNS = (("TDCC Code", 16), ("PDF 檔名", 40), ("錯訊", 100))  # 表頭與欄寬
+ERROR_COLUMNS = (("TDCC Code", 16), ("PDF 檔名", 40), ("PDF 頁碼", 10), ("錯訊", 100))  # 表頭與欄寬
 
 
 @dataclass(frozen=True)
 class ErrorRow:
-    """錯誤清單的一列。"""
+    """錯誤清單的一列：一條錯訊。"""
 
     tdcc_code: str | None
     pdf_name: str
+    pages: tuple[int, ...]
     message: str
 
     @classmethod
-    def of(cls, identification: Identification, messages: Sequence[str]) -> ErrorRow:
-        """一份 PDF 的錯誤清單列（TDCC Code 見 `tdcc_code`）。錯訊多條以換行分隔。"""
-        return cls(tdcc_code(identification), identification.pdf.name, "\n".join(messages))
+    def rows(cls, identification: Identification, problems: Sequence[tuple[str, Sequence[int]]]) -> list[ErrorRow]:
+        """一份 PDF 的錯誤清單列（TDCC Code 見 `tdcc_code`）：每條錯訊一列，帶著證據頁碼；沒有錯訊時一列、錯訊空白。"""
+        code, name = tdcc_code(identification), identification.pdf.name
+        return [cls(code, name, tuple(pages), message) for message, pages in problems] or [cls(code, name, (), "")]
+
+    @property
+    def page_cell(self) -> int | str | None:
+        """「PDF 頁碼」欄：一頁寫數字，多頁以頓號分隔（例 `9、10`），沒有證據頁碼時空白。"""
+        if len(self.pages) == 1:
+            return self.pages[0]
+        return "、".join(map(str, self.pages)) or None
 
 
 def tdcc_code(identification: Identification) -> str | None:
@@ -133,7 +142,7 @@ def _dim_columns(ws: Worksheet, last: int) -> dict[int, ColumnDimension]:
 def _error_sheet(ws: Worksheet, errors: Sequence[ErrorRow]) -> None:
     ws.append([header for header, _ in ERROR_COLUMNS])
     for e in errors:
-        ws.append((e.tdcc_code, e.pdf_name, e.message))
+        ws.append((e.tdcc_code, e.pdf_name, e.page_cell, e.message))
     for k, (_, width) in enumerate(ERROR_COLUMNS, start=1):
         ws.column_dimensions[get_column_letter(k)].width = width
     for row in ws.iter_rows(min_row=2):

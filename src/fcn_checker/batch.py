@@ -179,9 +179,18 @@ class BatchItem:
         return original
 
     @property
+    def problems(self) -> tuple[tuple[str, tuple[int, ...]], ...]:
+        """這份說明書的錯訊與各自的證據頁碼：同一句只列一次，頁碼合併、由小到大（錯誤清單用，Issue #342）。"""
+        pages: dict[str, set[int]] = {}
+        for r in self.report.results:
+            if r.status.is_problem:
+                pages.setdefault(problem_message(r), set()).update(e.page for e in r.document_evidence)
+        return tuple((message, tuple(sorted(p))) for message, p in pages.items())
+
+    @property
     def problem_messages(self) -> tuple[str, ...]:
         """這份說明書的錯訊，同一句只列一次（錯誤清單與 PANEL 放行確認共用）。"""
-        return tuple(dict.fromkeys(problem_message(r) for r in self.report.results if r.status.is_problem))
+        return tuple(message for message, _ in self.problems)
 
     @property
     def release_problem(self) -> str:
