@@ -133,6 +133,7 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
         m = daily[0]
         ev = st.lines_for(m.start(), m.end())
         fields["ko_observation"] = ParsedField.present("ko_observation", "D", ev)
+        fields["ko_final_day"] = ParsedField.present("ko_final_day", m[2], ev)
         k = natixis.CN_NUM.get(m[1])
         fields["first_callable_period"] = (
             ParsedField.present("first_callable_period", k, ev)

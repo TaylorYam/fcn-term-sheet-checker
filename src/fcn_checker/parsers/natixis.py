@@ -62,7 +62,8 @@ CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, 
 CN_NUM.update({f"十{k}": 10 + v for k, v in list(CN_NUM.items())[:9]})
 # 第 12 項 KO 觀察（範本規格 §4.1）
 CN_PERIOD = r"([一二三四五六七八九十]{1,3})"  # 中文數字的期別（第一～第十二）
-KO_DAILY_BODY = r"從第" + CN_PERIOD + r"個配息觀察期間結束日\(含\)到最終評價日\(不含\)之每一預定交易日每日觀察"
+# 第 2 組是最終評價日含不含：交易日 2026-10-20（含）起改寫成「(含)」（上手改條款，Issue #351）
+KO_DAILY_BODY = r"從第" + CN_PERIOD + r"個配息觀察期間結束日\(含\)到最終評價日\((含|不含)\)之每一預定交易日每日觀察"
 KO_DAILY = r"自動提前到期觀察日：" + KO_DAILY_BODY
 # 封面「TDCC 商品代號為…，ISIN 為…」：第 1 組商品代號、第 2 組受託機構商品代號（舊版有標籤、可能空白；沒有時為 None）、第 3 組 ISIN
 PRODUCT_CODES = rf"TDCC商品代號為(\d{{12}})，(?:{DISTRIBUTOR}商品代號為(.*?)，)?ISIN為([A-Z]{{2}}[A-Z0-9]{{10}})"
@@ -590,9 +591,9 @@ def _article12(fields: dict[str, ParsedField], art12: list[Line]) -> None:
                     ev,
                 )
         m = daily[0]
-        fields["ko_wording"] = ParsedField.present(
-            "ko_wording", ("D", CN_NUM.get(m[1])), ti.lines_for(m.start(), m.end())
-        )
+        ev = ti.lines_for(m.start(), m.end())
+        fields["ko_wording"] = ParsedField.present("ko_wording", ("D", CN_NUM.get(m[1])), ev)
+        fields["ko_final_day"] = ParsedField.present("ko_final_day", m[2], ev)
     elif periodic == 1 and not daily:
         head_pay = "(t)配息日"
         head_ko = "(t)自動提前到期觀察日(t)自動提前到期日(t)"
@@ -680,12 +681,12 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
 # ---------------------------------------------------------------- 第 16 項情境分析
 
 
-def scenario_ko_kind(text: str) -> tuple[str, int | None] | None:
-    """情境假設 e. 的 KO 觀察寫法 → (D, k)／(P, None)；不在範本規格內為 None（不合法）。"""
+def scenario_ko_kind(text: str) -> tuple[str, int | None, str | None] | None:
+    """情境假設 e. 的 KO 觀察寫法 → (D, k, 最終評價日含／不含)／(P, None, None)；不在範本規格內為 None（不合法）。"""
     m = re.match(KO_DAILY_BODY, text)
     if m:
-        return "D", CN_NUM.get(m[1])
-    return ("P", None) if text.startswith("依第一章第12(7)項所列") else None
+        return "D", CN_NUM.get(m[1]), m[2]
+    return ("P", None, None) if text.startswith("依第一章第12(7)項所列") else None
 
 
 def _article16(fields: dict[str, ParsedField], art16: list[Line]) -> list[ScenarioParam]:

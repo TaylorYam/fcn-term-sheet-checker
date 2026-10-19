@@ -3,23 +3,26 @@
 算式的執行價格由共用情境規則（rules/scenario.py，Issue #294）核對。
 
 參考條件表欄位、價格推算、審查標準（含 Natixis 分節：固定警語、名稱樣板、發行機構名稱、商品種類）與回填是各上手共用的
-規則。說明書有年利率，不讀參考條件表（REFERENCE_FIELDS 為空）。發行人、保證機構名稱、發行不成立門檻與期初定價依作業人員
-決定不核對（審查標準沒有對應分節；說明書沒寫期初定價）。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
+規則。說明書有年利率；只讀參考條件表的交易日（KO 每日觀察到最終評價日含不含依交易日改版，Issue #351）。發行人、
+保證機構名稱、發行不成立門檻與期初定價依作業人員決定不核對（審查標準沒有對應分節；說明書沒寫期初定價）。抓不到、歧義或寫法不在範本規格內一律轉人工覆核。
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 
-from ..schema import CheckResult, FieldStatus, Item, ParsedField
+from ..schema import CheckResult, DocKind, FieldStatus, Item, OrderValue, ParsedField
 from ..schema import CheckStatus as S
 from ..text import squash
 from . import kit
 from .iis import IisIssuerContext
-from .kit import Check, IssuerContext
+from .kit import Check, IssuerContext, to_date
 
 ISSUER = "NATIXIS"
-REFERENCE_FIELDS: tuple[str, ...] = ()
+REFERENCE_FIELDS = ("trade_date",)
+# KO 每日觀察「到最終評價日(含)」的生效交易日（含）；以前寫「(不含)」（上手改條款，2026-10-19 確認，Issue #351）
+KO_FINAL_INCLUSIVE_FROM = dt.date(2026, 10, 20)
 NOT_COVERED = [
     {
         "rule_id": "doc.fixed_warnings_2_to_11",
@@ -180,15 +183,20 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
         ).compare(k.value, first.value, fail_message="情境一須在第 Non-Call 期提前到期")
     ]
     actual = wording.value if wording.ok else None
-    exp = (obs.value, k.value if obs.value == "D" else None) if obs.ok and k.ok else None
+    final = f("ko_final_day")
+    daily = obs.ok and obs.value == "D"
+    deps = (obs, k, final, wording) if daily else (obs, k, wording)
+    exp = (obs.value, k.value, final.value) if daily else (obs.value, None, None) if obs.ok else None
     label = {"D": "每日觀察", "P": "每期觀察"}
 
     def show(v):
-        return None if v is None else label[v[0]] + (f"、自第 {v[1]} 期" if v[1] else "")
+        if v is None:
+            return None
+        return label[v[0]] + (f"、自第 {v[1]} 期" if v[1] else "") + (f"、到最終評價日({v[2]})" if v[2] else "")
 
     out.append(
         kit.doc_check(
-            ctx, "doc.autocall_terms", "scenario_ko_wording", "第 16 項情境假設 e. 自動提前到期觀察日", obs, k, wording
+            ctx, "doc.autocall_terms", "scenario_ko_wording", "第 16 項情境假設 e. 自動提前到期觀察日", *deps
         ).compare(
             show(exp),
             show(actual),
@@ -197,6 +205,41 @@ def autocall_terms(ctx: IssuerContext) -> list[CheckResult]:
         )
     )
     return out
+
+
+def ko_final_day(document: DocKind, trade: ParsedField, final: ParsedField, where: str) -> CheckResult:
+    """KO 每日觀察「到最終評價日(含)／(不含)」依參考條件表交易日：2026-10-20（含）起只接受「(含)」、以前只接受「(不含)」
+    （上手改條款，2026-10-19 確認，Issue #351）。讀不到交易日或寫法轉人工覆核。說明書與投資人須知共用。"""
+    check = Check(
+        "doc.ko_final_day", "ko_final_day", Item.expected(f"{where}自動提前到期觀察日到最終評價日含不含"), document
+    ).needs(final, trade)
+    if (problem := check.blocked) is not None:
+        return problem
+    since = trade.value >= KO_FINAL_INCLUSIVE_FROM
+    return check.compare(
+        "含" if since else "不含",
+        final.value,
+        tolerance=f"交易日（參考條件表）{KO_FINAL_INCLUSIVE_FROM}（含）起寫「(含)」，以前寫「(不含)」",
+        fail_message=f"交易日 {trade.value} {'在' if since else '早於'} {KO_FINAL_INCLUSIVE_FROM}"
+        + ("（含）以後，須寫「到最終評價日(含)」" if since else "，須寫「到最終評價日(不含)」"),
+    )
+
+
+def reference_trade_date(ov: OrderValue | None) -> ParsedField:
+    """參考條件表交易日 → 欄位；沒有值時是缺漏（同投資人須知刊印日期規則的寫法）。"""
+    value = to_date(ov.value) if ov is not None else None
+    if value is None:
+        return ParsedField.missing("trade_date", "參考條件表沒有交易日，無法決定 KO 觀察日的寫法")
+    return ParsedField.present("trade_date", value, [])
+
+
+def ko_final_day_terms(ctx: IssuerContext) -> list[CheckResult]:
+    """說明書第 12 項 KO 每日觀察到最終評價日含不含（每期型沒有這句，不檢查）；第 16 項情境假設 e. 由 `autocall_terms` 比對。"""
+    obs = ctx.ts.f("ko_observation")
+    if not (obs.ok and obs.value == "D"):
+        return []
+    trade = reference_trade_date(ctx.sheet_field("trade_date"))
+    return [ko_final_day(ctx.document, trade, ctx.ts.f("ko_final_day"), "第 12 項")]
 
 
 def ki_terms(ctx: IssuerContext) -> list[CheckResult]:
@@ -304,6 +347,7 @@ def run_all(ctx: IssuerContext) -> list[CheckResult]:
         *document_info(ctx),
         *periods(ctx),
         *autocall_terms(ctx),
+        *ko_final_day_terms(ctx),
         *ki_terms(ctx),
         *tables(ctx),
         *repeated_terms(ctx),

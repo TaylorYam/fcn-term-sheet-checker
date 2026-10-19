@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -429,3 +430,38 @@ def test_only_one_restart_is_accepted(tmp_path):
     """重編只容許一次（Issue #270）：第 13 條起從 1 重編、第 20 條起又從 1 重編 → 不當成 26 條，仍認不出範本。"""
     item = check_item(tmp_path, edits=[*_renumbered_from(13, 20), *_renumbered_from(20)])
     assert item.report.template != NATIXIS.template_id
+
+
+BEFORE = Spec(trade_date=dt.date(2024, 8, 8), issue_date=dt.date(2024, 8, 15), approval=dt.date(2024, 3, 20))
+
+
+@pytest.mark.parametrize(
+    ("spec", "written", "status"),
+    [
+        (BEFORE, "不含", S.PASS),
+        (BEFORE, "含", S.MISMATCH),
+        (Spec(), "含", S.PASS),
+        (Spec(), "不含", S.MISMATCH),
+    ],
+    ids=["交易日早於 10-20 寫不含", "交易日早於 10-20 寫含", "10-20 起寫含", "10-20 起寫不含"],
+)
+def test_ko_final_day_wording_follows_the_trade_date(tmp_path, spec, written, status):
+    """KO 每日觀察「到最終評價日(含)／(不含)」：參考條件表交易日 2026-10-20（含）起寫「(含)」、以前寫「(不含)」（Issue #351）；
+    兩種寫法都照常讀出 KO 觀察方式與 Non-Call，其他檢查照常核對。"""
+    r = check(tmp_path, spec, pdf_spec=replace(spec, ko_final_day=written))
+    assert [x.status for x in rule(r, "doc.ko_final_day")] == [status]
+    assert {rid for rid, _, _ in problems(r)} <= {"doc.ko_final_day"}
+    assert rule(r, "field.first_callable_period")[0].status == S.PASS
+
+
+def test_scenario_ko_final_day_must_match_article_12(tmp_path):
+    """情境假設 e. 的含不含和第 12 項不同：判不一致（Issue #351）。"""
+    edit = Edit("到最終評價日(含)", "到最終評價日(不含)", "ts.art16")
+    r = check(tmp_path, edits=[edit])
+    assert {(rid, f, st) for rid, f, st in problems(r)} == {("doc.autocall_terms", "scenario_ko_wording", S.MISMATCH)}
+
+
+def test_periodic_ko_has_no_final_day_check(tmp_path):
+    r = check(tmp_path, Spec(ko_obs="P", first_callable=1))
+    assert r.status == S.PASS, problems(r)
+    assert not [x for x in r.results if x.rule_id == "doc.ko_final_day"]

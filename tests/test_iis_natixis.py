@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -12,7 +13,7 @@ from harness import field_problems as problems
 from harness import results as rule
 from natixis_synth import ADDRESS, WARNING, Spec, check_iis
 from pdf_writer import Edit
-from test_check_natixis import VARIANTS
+from test_check_natixis import BEFORE, VARIANTS
 
 
 @pytest.mark.parametrize("spec", VARIANTS.values(), ids=VARIANTS.keys())
@@ -162,3 +163,21 @@ def test_warning_distributor_names_are_read(tmp_path):
         "distributor_name_w6a",
         "distributor_name_w6b",
     }
+
+
+@pytest.mark.parametrize(
+    ("spec", "written", "status"),
+    [
+        (BEFORE, "不含", S.PASS),
+        (BEFORE, "含", S.MISMATCH),
+        (Spec(), "含", S.PASS),
+        (Spec(), "不含", S.MISMATCH),
+    ],
+    ids=["交易日早於 10-20 寫不含", "交易日早於 10-20 寫含", "10-20 起寫含", "10-20 起寫不含"],
+)
+def test_ko_final_day_wording_follows_the_trade_date(tmp_path, spec, written, status):
+    """同說明書：依參考條件表交易日比「到最終評價日(含)／(不含)」（Issue #351）；其他檢查照常核對。"""
+    r = check_iis(tmp_path, replace(spec, ko_final_day=written)).report
+    assert [x.status for x in rule(r, "doc.ko_final_day")] == [status]
+    assert {rid for rid, _, _ in problems(r)} <= {"doc.ko_final_day"}
+    assert rule(r, "field.first_callable_period")[0].status == S.PASS

@@ -10,10 +10,10 @@ import re
 
 from ..investor_sheet import read_iis
 from ..parsers.natixis_iis import KO_DEF_INITIAL, KO_DEF_PCT
-from ..schema import CheckResult, Item
+from ..schema import CheckResult, Item, ParsedField
 from .iis import IisIssuerContext
 from .kit import Check
-from .natixis import distributor_code
+from .natixis import distributor_code, ko_final_day
 
 
 def ko_definition(ctx: IisIssuerContext) -> CheckResult:
@@ -33,5 +33,18 @@ def ko_definition(ctx: IisIssuerContext) -> CheckResult:
     )
 
 
+def ko_final_day_terms(ctx: IisIssuerContext) -> list[CheckResult]:
+    """KO 每日觀察到最終評價日含不含依參考條件表交易日（同說明書，Issue #351）；每期型沒有這句，不檢查。"""
+    obs = read_iis(ctx.sheet, "ko_observation")
+    if not (obs.ok and obs.value == "D"):
+        return []
+    trade = ctx.trade_date or ParsedField.missing("trade_date", "沒有參考條件表交易日，無法決定 KO 觀察日的寫法")
+    return [ko_final_day(ctx.document, trade, read_iis(ctx.sheet, "ko_final_day"), "貳、商品事項 ")]
+
+
 def run_all(ctx: IisIssuerContext) -> list[CheckResult]:
-    return [ko_definition(ctx), *distributor_code(ctx, read_iis(ctx.sheet, "distributor_code"))]
+    return [
+        ko_definition(ctx),
+        *ko_final_day_terms(ctx),
+        *distributor_code(ctx, read_iis(ctx.sheet, "distributor_code")),
+    ]
