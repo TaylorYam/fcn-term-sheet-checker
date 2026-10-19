@@ -36,7 +36,7 @@ NOT_COVERED = [
     },
     {
         "rule_id": "doc.template_variants",
-        "description": "依規則推得、待樣本驗證：單一標的記憶式、P 型 Non-Call > 1 且 < 天期、5 檔標的、CNH／HKD／AUD／EUR／ZAR 計價；"
+        "description": "依規則推得、待樣本驗證：單一標的記憶式、P 型 Non-Call > 1 且 < 天期、5 檔標的、HKD／AUD／EUR／ZAR 計價；"
         "範本以外的寫法會轉人工覆核",
     },
 ]
@@ -65,15 +65,16 @@ def monthly_coupon(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def min_coupon_rate(ctx: IssuerContext) -> CheckResult:
-    """第 17 項「最低配息率為Y%（年化）」= 第 15 項年利率。"""
-    f = ctx.ts.f
+    """第 17 項「最低配息率為Y%（年化）」= 第 15 項年利率（境外人民幣版第 18、16 項；錯訊寫文件上的條號）。"""
+    f, no = ctx.ts.f, ctx.ts.chapter1.no
     annual, low = f("coupon_pa_pct"), f("min_coupon_rate")
-    return kit.doc_check(ctx, "doc.min_coupon_rate", "min_coupon_rate", "第 17 項最低保證配息率", annual, low).compare(
+    name = f"第 {no('maturity')} 項最低保證配息率"
+    return kit.doc_check(ctx, "doc.min_coupon_rate", "min_coupon_rate", name, annual, low).compare(
         annual.value,
         low.value,
         ok=annual.ok and low.ok and kit.shown(annual.value, low.value) == low.value,
         tolerance="依說明書顯示位數四捨五入後比對",
-        fail_message="第 17 項最低保證配息率須等於第 15 項年利率",
+        fail_message=f"{name}須等於第 {no('coupon')} 項年利率",
     )
 
 
@@ -85,7 +86,7 @@ def _norm_name(value: str) -> str:
 
 
 def document_info(ctx: IssuerContext) -> list[CheckResult]:
-    f = ctx.ts.f
+    f, no = ctx.ts.f, ctx.ts.chapter1.no
     code, trustee = f("product_code"), f("trustee_product_code")
     out = [
         kit.doc_check(
@@ -101,7 +102,7 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
     zh = f("name_zh")
     for field, name, where in (
         ("cover_title", "封面標題名稱", "封面標題"),
-        ("name_art1", "第一章第 1 項商品名稱", "第一章第 1 項商品名稱"),
+        ("name_art1", f"第一章第 {no('name')} 項商品名稱", f"第一章第 {no('name')} 項商品名稱"),
     ):
         pf = f(field)
         out.append(
@@ -113,9 +114,9 @@ def document_info(ctx: IssuerContext) -> list[CheckResult]:
         )
     cz, c5 = f("currency_zh"), f("currency_art5")
     out.append(
-        kit.doc_check(ctx, "doc.currency_consistency", "currency_art5", "第一章第 5 項計價幣別", cz, c5).compare(
-            squash(cz.value) if cz.ok else None, squash(c5.value) if c5.ok else None
-        )
+        kit.doc_check(
+            ctx, "doc.currency_consistency", "currency_art5", f"第一章第 {no('currency')} 項計價幣別", cz, c5
+        ).compare(squash(cz.value) if cz.ok else None, squash(c5.value) if c5.ok else None)
     )
     return out
 
@@ -137,29 +138,33 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
 
 
 def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
-    """KO 觀察方式（日期表表頭 = 第 14 項寫法）、記憶式（第 16 項 = 第 20 項(1)）；不一致轉人工覆核（寫法超出範本規格）。"""
-    f = ctx.ts.f
+    """KO 觀察方式（日期表表頭 = 第 14 項寫法）、記憶式（第 16 項 = 第 20 項(1)）；不一致轉人工覆核（寫法超出範本規格）。
+    境外人民幣版條號 +1，錯訊寫文件上的條號。"""
+    f, no = ctx.ts.f, ctx.ts.chapter1.no
+    dates, autocall, early = no("dates"), no("autocall"), no("early_exit")
     table, wording = f("date_table"), f("ko_wording")
     out = [
         kit.doc_check(
-            ctx, "doc.ko_observation", "ko_observation", "KO 觀察方式（日期表與第 14 項寫法）", table, wording
+            ctx, "doc.ko_observation", "ko_observation", f"KO 觀察方式（日期表與第 {dates} 項寫法）", table, wording
         ).compare(
             table.value["type"] if table.ok else None,
             wording.value["type"] if wording.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="第 14 項日期表表頭與 (6)(7)(8) 的寫法不一致",
+            fail_message=f"第 {dates} 項日期表表頭與 (6)(7)(8) 的寫法不一致",
         )
     ]
     mem, mem20 = f("ko_memory"), f("ko_memory_art20")
     label = {True: "記憶式", False: "非記憶式"}
     out.append(
-        kit.doc_check(ctx, "doc.ko_memory", "ko_memory_art20", "記憶式（第 16 項與第 20 項(1)）", mem, mem20).compare(
+        kit.doc_check(
+            ctx, "doc.ko_memory", "ko_memory_art20", f"記憶式（第 {autocall} 項與第 {early} 項(1)）", mem, mem20
+        ).compare(
             label.get(mem.value) if mem.ok else None,
             label.get(mem20.value) if mem20.ok else None,
             fail=S.REVIEW_REQUIRED,
             reason="document_inconsistent",
-            fail_message="第 16 項與第 20 項(1) 的自動提前贖回事件定義句一個是記憶式、一個不是",
+            fail_message=f"第 {autocall} 項與第 {early} 項(1) 的自動提前贖回事件定義句一個是記憶式、一個不是",
         )
     )
     return out
@@ -167,14 +172,14 @@ def ko_terms(ctx: IssuerContext) -> list[CheckResult]:
 
 def redemption(ctx: IssuerContext) -> list[CheckResult]:
     """第 16 項自動提前贖回金額、第 17 項到期贖回金額 = 商品面額 × 100%（固定）。"""
-    f = ctx.ts.f
+    f, no = ctx.ts.f, ctx.ts.chapter1.no
     return [
         kit.doc_check(ctx, "doc.redemption_pct", field, name, f(field)).compare(
             100, f(field).value, fail_message=f"{name}須為商品面額 × 100%"
         )
         for field, name in (
-            ("autocall_redemption_pct", "第 16 項自動提前贖回金額"),
-            ("maturity_redemption_pct", "第 17 項到期贖回金額"),
+            ("autocall_redemption_pct", f"第 {no('autocall')} 項自動提前贖回金額"),
+            ("maturity_redemption_pct", f"第 {no('maturity')} 項到期贖回金額"),
         )
     ]
 

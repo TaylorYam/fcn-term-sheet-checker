@@ -4,6 +4,8 @@
 標題在下一行；子項「(n)」；表格一格一行（標籤格與第一格有時同一行）。`breaks` 在表格某列之後強制換頁。
 改字製造錯誤用 `edits`（tests/pdf_writer.py 的 `Edit`），段落代號：`ts.cover`、第一章各條 `ts.art{n}`
 （標的表 `ts.art11.table`、日期表 `ts.art14.table`、重印表 `ts.art18.table`、情境 `ts.scen.一`…）、其他各章 `ts.ch二`～`ts.ch五`。
+境外人民幣計價（`currency_zh="境外人民幣"`）照真實樣本的寫法：計價幣別後接人民幣定義句、第 10 項後多一項「人民幣付款中斷
+事件」（段落代號 `ts.art_rmb`）使之後條號 +1、英文名稱寫 CNY（Issue #345）；第一章段落代號仍用美元版條號。
 投資人須知（docs/templates/bnp-zh-iis.md）：`build_pdf` 旁邊另寫一份 `_IIS.pdf`（`iis=False` 時不寫），`edits` 兩份都套用；
 段落代號 `iis.cover`、`iis.warn`（警語 5 的「(發行機構)與法國巴黎銀行(保證機構)」一字一個文字單位，同真實樣本）、`iis.org`、
 `iis.summary`（標的表 `iis.summary.table`）、`iis.coupon`、`iis.issue`、`iis.risk`、`iis.fees`、`iis.rest`。
@@ -38,6 +40,8 @@ APPROVAL = dt.date(2026, 6, 11)
 PROSPECTUS = dt.date(2026, 5, 21)
 ZH = "一二三四五六七八九十"
 NUMERIC = set("0123456789,.")
+OFFSHORE_RMB = "境外人民幣"
+RMB_NOTE = "。本中文產品說明書中所述人民幣均係指境外人民幣。就本商品向投資人所支付之款項，均以境外人民幣支付。"
 
 
 def underlyings(count: int) -> tuple[UL, ...]:
@@ -142,10 +146,15 @@ class Spec(ProductSpec):
     def name_en(self) -> str:
         return NAME["en"].format(
             tenor=self.tenor,
-            ccy=self.ccy,
+            ccy=NAME.get("ccy_aliases", {}).get(self.ccy, self.ccy),
             underlying_en=NAME["basket_en"] if self.count > 1 else NAME["single_en"],
             autocall_en=NAME["autocall_en"] if self.autocall else "",
         )
+
+    @property
+    def currency_text(self) -> str:
+        """封面第 9 項與第一章「計價幣別：」的值：境外人民幣後接人民幣定義句。"""
+        return self.currency_zh + (RMB_NOTE if self.currency_zh == OFFSHORE_RMB else "")
 
     def money(self, x: Decimal | int) -> str:
         return f"{Decimal(x):,.{self.decimals}f}"
@@ -543,7 +552,7 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         "發行機構註冊地：荷蘭",
         "發行機構註冊辦公地點：1 Fictional Street, Amsterdam，電話：+31 (0) 000 0000",
         "商品註冊地：不適用",
-        f"計價幣別： {s.currency_zh}",
+        f"計價幣別： {s.currency_text}",
         "總代理人之名稱、電話及地址：虛構總代理人台北分公司(下稱「總代理人」)，電話：+886 (2) 0000 0000，地址：臺北市110 虛構路1 號",
         f"保證機構之名稱及地址：{GUARANTOR['cover']}(下稱「法國巴黎銀行」)，地址：1 Fictional Boulevard, Paris, France",
         f"受託機構之名稱、電話及地址：{DIST['name']}，電話：{PHONE}，地址：{ADDRESS}",
@@ -573,8 +582,9 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
     titles = {
         1: f"商品名稱：{s.name_zh}",
         2: f"商品風險程度：{WARNING}",
+        3: f"發行機構：{ISSUER}",
         4: "商品之發行評等：無",
-        5: f"計價幣別：{s.currency_zh}",
+        5: f"計價幣別：{s.currency_text}",
         6: f"商品面額：每單位商品{s.denom:,} {unit}",
         7: "發行價格：100.00%",
         11: "連結標的資產價格，及其相對權重、與投資績效之關連情形：",
@@ -585,10 +595,14 @@ def build_pdf(path: Path, s: Spec, *, edits: Sequence[Edit] = (), iis: bool = Tr
         18: "投資收益計算方法，包含本金虧損之機率及以情境分析解說最大可能獲利、損失及其他狀況之年化平均報酬率：",
         20: "發行機構得提前買回或投資人得提前贖回之條件及應注意事項：",
     }
-    for n in range(1, 28):
-        d.article(n, titles.get(n, "範本說明。"))
+    rmb = [None] if s.currency_zh == OFFSHORE_RMB else []  # 境外人民幣版第 10 項後多一項
+    for printed, n in enumerate([*range(1, 11), *rmb, *range(11, 28)], 1):
+        if n is None:
+            d.article(printed, "人民幣付款中斷事件：", "art_rmb")
+            d.text(87, "若發生人民幣付款中斷事件，發行機構得以等值美元支付。")
+            continue
+        d.article(printed, titles.get(n, "範本說明。"), f"art{n}")
         if n == 3:
-            d.text(80, f"發行機構：{ISSUER}")
             d.text(80, "發行機構長期債務信用評等(截至本產品說明書刊印日期)：不核對")
             d.text(80, f"保證機構：{GUARANTOR['ch1']}")
             d.text(80, "計算代理機構：BNP Paribas Financial Markets S.N.C.")

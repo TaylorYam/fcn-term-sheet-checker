@@ -157,7 +157,7 @@ def test_phone_form_not_listed_in_standard_is_mismatch(tmp_path):
             "minimum_subscription = { USD = 10, JPY = 0, CNH = 1 }",
             "min_amount_multiples.sg",
         ),
-        ('ccy_aliases = { CNH = "CNY" }', "ccy_aliases = { CNH = 1 }", "product_name.sg.ccy_aliases"),
+        ('ccy_aliases = { CNH = "CNY" }', "ccy_aliases = { CNH = 1 }", "product_name.bnp.ccy_aliases"),
         # Nomura 分節（Issue #239）：上手別說明書固定警語次數須是正整數
         ("nomura = 2\n", "nomura = 0\n", "risk.fixed_warning_occurrences_by_issuer.nomura"),
         ("nomura = 2\n", 'nomura = "2"\n', "risk.fixed_warning_occurrences_by_issuer.nomura"),

@@ -252,7 +252,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     else:
         fields["ko_memory"] = bnp.ko_memory("ko_memory", redemption, KO_EVENT, "找不到自動提前贖回事件定義句")
         fields["ki_type"] = bnp.ki_type(redemption)
-    bnp.pct_fields(fields)
+    bnp.pct_fields(fields, "商品簡介標的表")
     put("minimum_issue_size", r"至少達(\(等值\)[^之]*?)之總申購價值")
     provided = set(PROVIDED)
     if "first_callable_period" in fields:  # 只有 D 型寫出第一個可提前出場期
