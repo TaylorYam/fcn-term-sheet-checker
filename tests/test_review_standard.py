@@ -35,6 +35,13 @@ def standard_with(tmp_path: Path, old: str, new: str) -> Path:
     return path
 
 
+class _Filled(dict):
+    """沒給的佔位符填空字串。"""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
 def check_hsbc(
     tmp_path: Path,
     spec: hsbc_synth.Spec | None = None,
@@ -131,15 +138,8 @@ def test_english_name_is_singular_only_for_a_one_month_tenor(tmp_path, tenor, wr
 def test_months_templates_take_the_singular_for_one_month(issuer, one, three):
     """所有用 `{tenor} Months`／`{tenor}Months` 的樣板天期 1 時改單數；寫 `-Month` 的上手不受影響（Issue #343）。"""
     tpl = load_config().review_standard.for_issuer(issuer).product_name
-    assert one in tpl.text("en", 1).format_map(_Filled(tenor=1, ccy="USD"))
-    assert three in tpl.text("en", 3).format_map(_Filled(tenor=3, ccy="USD"))
-
-
-class _Filled(dict):
-    """沒給的佔位符填空字串。"""
-
-    def __missing__(self, key: str) -> str:
-        return ""
+    assert one in tpl.template("en", 1).format_map(_Filled(tenor=1, ccy="USD"))
+    assert three in tpl.template("en", 3).format_map(_Filled(tenor=3, ccy="USD"))
 
 
 def test_missing_issuer_name_requires_review(tmp_path):

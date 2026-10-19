@@ -564,7 +564,7 @@ def _product_name(ctx: Context) -> list[CheckResult]:
         if {"ko_observation_zh", "ko_observation_en"} & tpl.placeholders(lang):
             for code in ("zh", "en"):
                 values[f"ko_observation_{code}"] = tpl.ko_observation_text(flags["daily"], code)
-        expected = tpl.text(lang, tenor.value).format(**values)
+        expected = tpl.template(lang, tenor.value).format(**values)
         if lang == "zh":
             norm = (lambda s: full_brackets(squash(s))) if tpl.normalize_brackets else squash
             tol = "忽略空白；全形／半形括號不計" if tpl.normalize_brackets else "忽略空白"

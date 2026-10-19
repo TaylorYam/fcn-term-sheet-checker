@@ -367,11 +367,12 @@ def table_spec(region: list[Line], where: str) -> price_table.TableSpec:
     return spec
 
 
+_MONTHLY = r"每[月次]之配息率"  # 1 個月期寫「每次之配息率」（Issue #343）
 _MONTHLY_PATTERNS = {
-    "第9條": r"每[月次]之配息率[（(]?為([\d.]+)%",
-    "第14條": r"每[月次]之配息率[（(]?為([\d.]+)%",
+    "第9條": _MONTHLY + r"[（(]?為([\d.]+)%",
+    "第14條": _MONTHLY + r"[（(]?為([\d.]+)%",
     "第15條(2)": r"商品面額×([\d.]+)%\(顯示",
-    "第17條": r"每[月次]之配息率[（(]?為([\d.]+)%",
+    "第17條": _MONTHLY + r"[（(]?為([\d.]+)%",
 }
 _ANNUAL_PATTERNS = {
     "第9條": r"年利率為([\d.]+)%",
@@ -397,7 +398,7 @@ def _mentions(doc: Document, arts: dict[int, Span], patterns: dict[str, str]) ->
 def _coupon(doc: Document, art14: Span | None) -> tuple[ParsedField, ParsedField]:
     ti = TextIndex(doc.span_lines(art14))
     hits_m, hits_a = [], []
-    for m in ti.finditer(r"「配息率」係指每[月次]之配息率為([\d.]+)%.*?年利率為([\d.]+)%"):
+    for m in ti.finditer(r"「配息率」係指" + _MONTHLY + r"為([\d.]+)%.*?年利率為([\d.]+)%"):
         lns = ti.lines_for(m.start(), m.end())
         hits_m.append((Decimal(m.group(1)), lns))
         hits_a.append((Decimal(m.group(2)), lns))
