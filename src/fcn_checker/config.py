@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import string
 import tomllib
 from collections.abc import Callable, Iterable
@@ -59,6 +60,11 @@ class ProductNameTemplate:
     single_unsupported: bool = False
     periodic_zh: str = ""  # {ko_observation_*}：KO 每期觀察時填入（每日時填 daily_*；UBS）
     periodic_en: str = ""
+
+    def text(self, lang: str, tenor: int) -> str:
+        """樣板（zh／en）；天期 1 個月時英文 `{tenor} Months`／`{tenor}Months` 改成單數 `Month`（只接受單數，Issue #343）。"""
+        tpl = getattr(self, lang)
+        return re.sub(r"(\{tenor\}\s*)Months\b", r"\1Month", tpl) if tenor == 1 else tpl
 
     def placeholders(self, lang: str) -> frozenset[str]:
         """樣板（zh／en）用到的佔位符名稱。"""

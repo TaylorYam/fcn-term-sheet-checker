@@ -33,7 +33,7 @@ def test_all_consistent_passes_with_evidence_and_metadata(tmp_path):
     meta = report.metadata
     assert len(meta["inputs"]["term_sheet"]["sha256"]) == 64
     assert len(meta["inputs"]["reference_sheet"]["sha256"]) == 64
-    assert meta["review_standard"]["version"] == 23
+    assert meta["review_standard"]["version"] == 24
     assert meta["reference_format"]["version"] == 17
     assert meta["program_version"] and meta["extractor"].startswith("PyMuPDF")
     assert report.not_covered, "第二階段規則應列在未涵蓋清單"
@@ -294,6 +294,15 @@ def test_chinese_name_half_width_brackets_are_fine(tmp_path):
 def test_english_name_format(tmp_path):
     report = check(tmp_path, edits=[Edit("Memory ", "")])
     assert problems(report) == {("standard.product_name", MISMATCH)}
+
+
+def test_one_month_wording_is_read_like_the_monthly_wording(tmp_path):
+    """1 個月期寫「每次之配息率」、英文名稱「1 Month」：和「每月之配息率」「N Months」一樣讀、通過（Issue #343）。"""
+    edits = [Edit("每月之配息率", "每次之配息率", "ts"), Edit("1 Months", "1 Month", "ts")]
+    report = check(tmp_path, Spec(tenor=1), edits=edits)
+    assert problems(report) == set()
+    assert {r.status for r in results(report, "doc.coupon_consistency")} == {PASS}
+    assert results(report, "field.coupon_pa_pct")[0].status == PASS
 
 
 @pytest.mark.parametrize("printed", [dt.date(2030, 1, 6), dt.date(2030, 1, 14)], ids=["交易日前一天", "發行日當天"])

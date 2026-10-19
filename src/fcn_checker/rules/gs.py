@@ -163,7 +163,7 @@ def periods(ctx: IssuerContext) -> list[CheckResult]:
             return ParsedField.invalid("name_months", [], f"{what}找不到月數")
         return ParsedField("name_months", pf.status, int(m[1]) if m else None, pf.evidence, note=pf.note)
 
-    zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)Months", "商品英文名稱")
+    zh_months, en_months = months(zh, r"(\d+)個月", "商品中文名稱"), months(en, r"(\d+)Months?", "商品英文名稱")
     return [
         kit.doc_check(ctx, rid, "name_months_zh", "商品中文名稱月數", tenor, zh_months).compare(
             tenor.value, zh_months.value

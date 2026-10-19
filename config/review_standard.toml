@@ -7,8 +7,8 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 23
-effective_date = 2026-10-16
+version = 24
+effective_date = 2026-10-19
 
 [distributor]
 # 受託或銷售機構審查通過之日期（說明書封面 p1）：歷次日期都保留，由舊到新。
@@ -251,6 +251,8 @@ allowed_phrases = [
 # 各上手改版，改版前的舊範本不再判錯（Issue #247）；2026-10-17 延至 10/30（含）（Issue #338）。拿掉這行即恢復一律判錯。
 exempt_until = 2026-10-30
 
+# 商品名稱樣板（所有上手）：天期 1 個月時，英文樣板的 `{tenor} Months`／`{tenor}Months` 改成單數 `Month` 比對（只接受單數；
+# BARC、MS、BNP、JPM、GS 適用，寫 `-Month` 的上手不受影響；2026-10-19 確認，Issue #343）。
 [product_name.barc]
 # 商品名稱格式（依最新 5 份 BARC 說明書，2026-10-01 確認）
 # 佔位符：{tenor} 天期月數、{ccy_zh}／{ccy} 幣別中文／ISO 代碼、{memory_zh}／{memory_en} 記憶式時填入
