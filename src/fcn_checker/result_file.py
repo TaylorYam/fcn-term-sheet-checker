@@ -27,6 +27,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from .config import ReferenceFormat
 from .identification import Identification, name_code
 from .ingestion import write_new
+from .messages import Problem
 from .orders.reference import SheetLayout, header_columns, header_names, locate
 
 FILLED_SHEET = "回填後"
@@ -44,10 +45,10 @@ class ErrorRow:
     message: str
 
     @classmethod
-    def rows(cls, identification: Identification, problems: Sequence[tuple[str, Sequence[int]]]) -> list[ErrorRow]:
+    def rows(cls, identification: Identification, problems: Sequence[Problem]) -> list[ErrorRow]:
         """一份 PDF 的錯誤清單列（TDCC Code 見 `tdcc_code`）：每條錯訊一列，帶著證據頁碼；沒有錯訊時一列、錯訊空白。"""
         code, name = tdcc_code(identification), identification.pdf.name
-        return [cls(code, name, tuple(pages), message) for message, pages in problems] or [cls(code, name, (), "")]
+        return [cls(code, name, p.pages, p.message) for p in problems] or [cls(code, name, (), "")]
 
     @property
     def page_cell(self) -> int | str | None:

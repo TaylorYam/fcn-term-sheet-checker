@@ -16,10 +16,10 @@ import pytest
 
 import hsbc_synth
 from fcn_checker.issuers import by_code
-from fcn_checker.messages import problem_message
+from fcn_checker.messages import Problem, problem_message, problems
 from fcn_checker.panel_workflow import PanelOutcome
 from fcn_checker.rules import kit
-from fcn_checker.schema import CheckResult, CheckStatus, DocKind, Item, ItemSource
+from fcn_checker.schema import CheckResult, CheckStatus, DocKind, Evidence, Item, ItemSource
 from fcn_checker.standard_fields import not_provided
 from harness import CONFIG, check_all
 from pdf_writer import Edit
@@ -263,6 +263,24 @@ def test_panel_detail_uses_the_shared_message_without_rule_id(tmp_path):
     detail = PanelOutcome.detail(r, item)
     assert detail.startswith("UL_2 進場價｜不一致\n原因：" + problem_message(r))
     assert r.rule_id not in detail and r.reason_code not in detail
+
+
+def test_problems_list_each_message_once_with_merged_evidence_pages():
+    def result(message: str, status: CheckStatus, *pages: int) -> CheckResult:
+        evidence = [Evidence(p, (0.0, 0.0, 1.0, 1.0), "x") for p in pages]
+        return CheckResult(
+            "doc.x", "x", status, message=message, document_evidence=evidence, item=Item.expected("項目")
+        )
+
+    results = [
+        result("乙", CheckStatus.MISMATCH, 10),
+        result("甲", CheckStatus.PASS, 1),
+        result("丙", CheckStatus.REVIEW_REQUIRED),
+        result("乙", CheckStatus.REVIEW_REQUIRED, 9, 10),
+    ]
+    assert problems(results) == (Problem("項目：乙", (9, 10)), Problem("項目：丙", ())), (
+        "通過的不列；同一句只列一次、依第一次出現的順序，頁碼合併由小到大；沒有證據時頁碼為空"
+    )
 
 
 # ---------------------------------------------------------------- 新規則沒寫錯訊時的預設

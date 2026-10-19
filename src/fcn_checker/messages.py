@@ -10,14 +10,15 @@
   不比對值的項目（配對、範本、讀檔、寫檔、參考條件表表頭）只寫說明。
 - 規則沒寫說明時，依原因與狀態給中文預設。
 
-核對結果檔「錯誤清單」的錯訊與 PANEL 結果明細都用 `problem_message`。
+核對結果檔「錯誤清單」的錯訊與 PANEL 結果明細都用 `problem_message`；錯誤清單另用 `problems` 帶每句錯訊的證據頁碼（Issue #342）。
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 from .schema import CheckResult, CheckStatus, DocKind, ItemSource, column_label
 
@@ -115,3 +116,19 @@ def problem_message(r: CheckResult) -> str:
         values = f"（{SOURCE_ZH[source]} {show(r.expected)}／{document} {show(r.actual)}）"
     head = "" if detail.startswith(where) else f"{where}："  # 說明已經以項目開頭時不重複
     return f"{head}{detail}{values}"
+
+
+class Problem(NamedTuple):
+    """一句錯訊與它的證據頁碼（由小到大，沒有證據時為空）。"""
+
+    message: str
+    pages: tuple[int, ...]
+
+
+def problems(results: Iterable[CheckResult]) -> tuple[Problem, ...]:
+    """有問題的結果的錯訊：同一句只列一次（依第一次出現的順序），各結果的證據頁碼合併。"""
+    pages: dict[str, set[int]] = {}
+    for r in results:
+        if r.status.is_problem:
+            pages.setdefault(problem_message(r), set()).update(e.page for e in r.document_evidence)
+    return tuple(Problem(message, tuple(sorted(p))) for message, p in pages.items())
