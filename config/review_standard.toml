@@ -7,7 +7,7 @@
 # 本檔只放公開的條款文字與日期，不放客戶或交易資料。
 # 規則說明見 docs/rules/review-standard.md。
 
-version = 24
+version = 25
 effective_date = 2026-10-19
 
 [distributor]
@@ -293,7 +293,8 @@ ignore_whitespace_en = true
 
 [product_name.bnp]
 # 商品名稱格式（依 7 份 BNP 說明書推得，2026-10-13 確認照此核對）
-# 佔位符同 MS；{autocall_zh}／{autocall_en} 只在 Non-Call < 天期（會提前出場）時填入；沒有記憶式字樣
+# 佔位符同 MS；{autocall_zh}／{autocall_en} 只在 Non-Call < 天期（會提前出場）時填入；沒有記憶式字樣。
+# 境外人民幣（CNH）在英文名稱寫 CNY（ccy_aliases；2026-10-19 使用者決定，Issue #345）。
 zh = "法國巴黎銀行{tenor}個月期{ccy_zh}計價固定配息{autocall_zh}連結{underlying_zh}股票/交易所買賣基金結構型商品(不保本)(無擔保)"
 en = "{tenor} Months {ccy} Fixed Coupon {autocall_en}Note linked to {underlying_en} issued by BNP Paribas Issuance B.V. (unsecured)"
 memory_zh = ""
@@ -304,6 +305,7 @@ basket_zh = "一籃子"
 basket_en = "a Basket of Shares/ETIs"
 autocall_zh = "自動提前贖回"
 autocall_en = "Early Redeemable "
+ccy_aliases = { CNH = "CNY" }
 normalize_brackets = true
 # 英文名稱在 PDF 換行處常黏字，比對時忽略所有空白
 ignore_whitespace_en = true

@@ -268,8 +268,8 @@ def _scenario(number: str, title: str, lines: list[Line]) -> Scenario:
     return s
 
 
-def section(lines: list[Line]) -> ScenarioSection:
-    """第 18 項(3)：假設（到重印表之前）、重印標的表（「連結標的相關價格如下：」到情境一之前）、各情境（依「情境X：」切開）。"""
+def section(lines: list[Line], where: str) -> ScenarioSection:
+    """第 18 項(3)（境外人民幣版第 19 項，`where` 為文件上的「第 N 項」）：假設（到重印表之前）、重印標的表（「連結標的相關價格如下：」到情境一之前）、各情境（依「情境X：」切開）。"""
     heads = [i for i, ln in enumerate(lines) if SCENARIO_HEAD.match(squash(ln.text))]
     head_end = heads[0] if heads else len(lines)
     titles = [i for i, ln in enumerate(lines[:head_end]) if squash(ln.text) == TABLE_TITLE]
@@ -279,7 +279,7 @@ def section(lines: list[Line]) -> ScenarioSection:
         table = bnp_tables.price_table("scenario_table", lines[titles[0] + 1 : head_end], with_tickers=False)
     else:
         table = ParsedField.missing(
-            "scenario_table", "找不到第 18 項重印標的表（「連結標的相關價格如下：」到情境一之前）"
+            "scenario_table", f"找不到{where}重印標的表（「連結標的相關價格如下：」到情境一之前）"
         )
     scenarios = []
     for k, i in enumerate(heads):

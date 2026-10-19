@@ -563,3 +563,51 @@ def test_cumulative_coupon_matching_neither_method_lists_both(tmp_path):
     [res] = rule(r, "doc.scenario_calculations", "情境一_cumulative")
     assert res.status == S.MISMATCH
     assert f"= {rounded}，或 " in res.message and res.message.endswith(f"= {exact}")
+
+
+RMB = Spec(currency_zh="境外人民幣", ki="AM")
+
+
+def test_offshore_rmb_version_is_read_by_item_names_and_passes(tmp_path):
+    """境外人民幣版（Issue #345）：第 10 項後多一項「人民幣付款中斷事件」（不核對）、之後條號 +1，各項依項目名稱讀到；
+    「境外人民幣」= CNH（計價幣別後的人民幣定義句不核對）；英文名稱的 CNY 對參考條件表的 CNH。"""
+    r = check(tmp_path, RMB)
+    assert r.status == S.PASS, problems(r)
+    assert {x.expected for x in rule(r, "field.currency")} == {"CNH"}
+    assert rule(r, "doc.currency_consistency")[0].actual == "境外人民幣"
+    [name_en] = rule(r, "standard.product_name", "name_en")
+    assert "6 Months CNY Fixed Coupon" in name_en.actual
+    # 美元版第 11、14～18、20 項在人民幣版是第 12、15～19、21 項：錯訊與項目名稱寫文件上的條號
+    assert rule(r, "doc.min_coupon_rate")[0].item.name == "第 18 項最低保證配息率"
+    assert rule(r, "doc.scenario_parameters")[0].item.name == "第 19 項情境標題"
+    assert {x.item.name for x in rule(r, "doc.redemption_pct")} == {"第 17 項自動提前贖回金額", "第 18 項到期贖回金額"}
+
+
+@pytest.mark.parametrize(
+    ("section", "old", "new", "rule_id", "where"),
+    [
+        ("art15", "月配息率：0.8333%", "月配息率：0.8334%", "derive.monthly_coupon", "第 16 項月配息率"),
+        (
+            "art20",
+            "每一連結標的皆曾經於該自動提前贖回評價日或之前任一自動提前贖回評價日之收盤價格大於或等於其各自自動提前贖回價格",
+            "每一連結標的之收盤價格皆大於或等於其各自自動提前贖回價格",
+            "doc.ko_memory",
+            "第 17 項與第 21 項(1)",
+        ),
+        ("cover", "6 Months CNY", "6 Months CNH", "standard.product_name", ""),
+    ],
+    ids=["coupon", "art21", "name_en"],
+)
+def test_offshore_rmb_problems_name_the_document_article(tmp_path, section, old, new, rule_id, where):
+    r = check(tmp_path, RMB, edits=[Edit(old, new, f"ts.{section}")])
+    found = [x for x in r.results if x.rule_id == rule_id and x.status != S.PASS]
+    assert found, problems(r)
+    assert all(where in problem_message(x) for x in found), [problem_message(x) for x in found]
+
+
+def test_missing_article_title_requires_review_and_names_the_usual_article(tmp_path):
+    """第一章依項目名稱找條（Issue #345）：標題改掉找不到那一項時轉人工覆核，錯訊沿用美元版條號。"""
+    r = check(tmp_path, S0, edits=[Edit("配息資料及其計算公式：", "配息資料：", "ts.art15")])
+    assert r.status == S.REVIEW_REQUIRED
+    found = [x for x in rule(r, "derive.monthly_coupon") if x.status == S.REVIEW_REQUIRED]
+    assert found and all("第 15 項" in problem_message(x) for x in found), [problem_message(x) for x in found]

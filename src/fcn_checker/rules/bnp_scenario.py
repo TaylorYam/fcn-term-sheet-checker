@@ -50,7 +50,7 @@ def titles(ctx: IssuerContext) -> list[CheckResult]:
     out = []
     ki = f("ki_type")
     kinds = [s.kind for s in sec.scenarios]
-    check = Check(rid, "scenario_titles", Item.expected("第 18 項情境標題"), ctx.document)
+    check = Check(rid, "scenario_titles", Item.expected(f"{ctx.ts.chapter1.label('scenario')}情境標題"), ctx.document)
     doc_ki = kit.doc_ki(ki)
     if doc_ki is None or doc_ki not in SCENARIO_KINDS:
         out.append(check.review(ki))

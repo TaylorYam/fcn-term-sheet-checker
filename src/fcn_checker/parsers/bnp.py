@@ -16,10 +16,11 @@ from ..standard_fields import Occurrence, ScenarioParam, ScenarioPrice
 from ..text import squash
 from . import bnp_scenario, bnp_tables, money, price_table, schedule
 from .common import NUM, Hit, Mention, derived, number
-from .layout import Document, LayoutSpec, TextIndex, capture, join_text, parse_date
+from .layout import Document, LayoutSpec, Span, TextIndex, capture, join_text, parse_date
 
 TEMPLATE_ID = "bnp-zh-pd"
-PARSER_VERSION = "3"  # 2：日期表標準欄位與共用排程推導（Issue #289）；3：情境交成共用情境規則的標準欄位（Issue #294）
+PARSER_VERSION = "4"  # 2：日期表標準欄位與共用排程推導（Issue #289）；3：情境交成共用情境規則的標準欄位（Issue #294）
+# 4：第一章依項目名稱對應條號、境外人民幣版（Issue #345）
 CHAPTER_NAMES = {
     1: ("一", "商品相關基本資料"),
     2: ("二", "相關機構事業概況"),
@@ -55,7 +56,25 @@ KI_WORDINGS = (  # 定義句開頭 → KI 型態（範本規格 §4.4）
     ("自期初訂價日(不含)起至期末評價日(含)止之每一個預定交易日", "D"),
     ("每一個配息期結束日", "P"),
 )
+# 境外人民幣版計價幣別後接的定義句開頭（「。本中文產品說明書中所述人民幣均係指境外人民幣。…」），內容不核對（Issue #345）
+RMB_NOTE = "。本中文產品說明書中所述人民幣"
 NO_KI = re.compile(r"若於期末評價日，(?:表現最差)?連結標的之收盤價格大於或等於其執行價格")
+# 第一章要讀的各項依項目名稱（條號右側標題去空白後的開頭）對應，不寫死條號：境外人民幣版在第 10 項後多一項「人民幣付款
+# 中斷事件」（不核對），之後條號全部 +1（Issue #345）。值為（美元版條號, 標題開頭）；美元版條號只在找不到標題時給錯訊用。
+CH1_ITEMS = {
+    "name": (1, "商品名稱："),
+    "issuer": (3, "發行機構："),
+    "currency": (5, "計價幣別："),
+    "denomination": (6, "商品面額："),
+    "issue_price": (7, "發行價格："),
+    "underlying": (11, "連結標的資產價格"),
+    "dates": (14, "商品年期、"),
+    "coupon": (15, "配息資料及其計算公式"),
+    "autocall": (16, "自動提前贖回事件計算公式"),
+    "maturity": (17, "到期贖回計算公式"),
+    "scenario": (18, "投資收益計算方法"),
+    "early_exit": (20, "發行機構得提前買回或投資人得提前贖回"),
+}
 
 
 def document(lines: Sequence[Line]) -> Document:
@@ -71,6 +90,37 @@ def page_headers(lines: Sequence[Line]) -> list[tuple[int, int, Line]]:
         if m:
             out.append((int(m[1]), int(m[2]), ln))
     return out
+
+
+@dataclass(frozen=True)
+class Chapter1:
+    """第一章依項目名稱找到的各項（`CH1_ITEMS` 的鍵）：範圍與文件上的條號。標題找不到或重複的項目沒有範圍，條號沿用美元版。"""
+
+    spans: dict[str, Span]
+    numbers: dict[str, int]
+
+    def label(self, key: str) -> str:
+        """錯訊與項目名稱用的「第 N 項」。"""
+        return f"第 {self.numbers[key]} 項"
+
+
+def chapter1(doc: Document) -> Chapter1:
+    arts = doc.articles(1)
+    spans, numbers = {}, {}
+    for key, (default, title) in CH1_ITEMS.items():
+        found = [n for n, sp in arts.items() if _article_title(doc, sp).startswith(title)]
+        if len(found) == 1:
+            spans[key], numbers[key] = arts[found[0]], found[0]
+        else:
+            numbers[key] = default
+    return Chapter1(spans, numbers)
+
+
+def _article_title(doc: Document, sp: Span) -> str:
+    """條號右側的標題（去空白）；同一列沒有字時取下一行。"""
+    if sp.title:
+        return squash(sp.title)
+    return squash(doc.lines[sp.start + 1].text) if sp.start + 1 < sp.end else ""
 
 
 # ---------------------------------------------------------------- 封面項目
@@ -170,6 +220,7 @@ class BnpTermSheet:
     scenarios: bnp_scenario.ScenarioSection  # 第 18 項(3)
     coupon_mentions: list[Mention]  # 月配息率的每個出處（第 15 項兩處；第 18 項的交給共用情境規則）
     page_headers: list[tuple[int, int, Line]]  # 每頁頁首的（頁碼, 總頁數, 原文行）
+    chapter1: Chapter1  # 第一章各項的範圍與條號（錯訊寫文件上的條號）
 
     def f(self, name: str) -> ParsedField:
         return standard_fields.lookup(self.fields, name)
@@ -230,13 +281,14 @@ def ki_type(lines: list[Line]) -> ParsedField:
 def read(lines: Sequence[Line]) -> BnpTermSheet:
     """讀出標準欄位與 BNP 規則需要的專屬資料（範本辨識另由 `detect` 負責，不在這裡重做）。"""
     doc = document(lines)
-    arts = doc.articles(1)
+    ch1 = chapter1(doc)
+    art_label = ch1.label
     cover = doc.before_chapter1()
     items = cover_items(cover)
     fields: dict[str, ParsedField] = {}
 
-    def article(n: int, chapter: int = 1) -> list[Line]:
-        return doc.span_lines((arts if chapter == 1 else doc.articles(chapter)).get(n))
+    def article(key: str) -> list[Line]:
+        return doc.span_lines(ch1.spans.get(key))
 
     def put(name: str, lns: list[Line], pattern: str, convert: Callable = lambda x: x) -> None:
         fields[name] = capture(name, TextIndex(lns), pattern, convert, whole_match=True)
@@ -263,7 +315,9 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     fields["name_en"] = _item(items, 3, "name_en", "英文名稱")
     fields["product_type"] = _item(items, 4, "product_type", "商品種類")
     fields["issuer_name_cover"] = _item(items, 5, "issuer_name_cover", "發行機構名稱")
-    fields["currency_zh"] = _item(items, 9, "currency_zh", "計價幣別", r"([^\s(（]+)")
+    fields["currency_zh"] = _item(
+        items, 9, "currency_zh", "計價幣別", r"([^\s(（。]+)(?:" + re.escape(RMB_NOTE) + r".*)?"
+    )
     fields["guarantor_name_cover"] = _item(items, 11, "guarantor_name_cover", "保證機構之名稱及地址", r"(.+?)\(下稱.*")
     distributor = _item(items, 12, "distributor", "受託機構之名稱、電話及地址")
     parts = re.fullmatch(r"(.+?)，電話：(.+?)，地址：(.+)", distributor.value, re.S) if distributor.ok else None
@@ -291,36 +345,39 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
     fields["base_prospectus_dates"] = capture("base_prospectus_dates", full, r"發行機構於?" + D + r"公告之", parse_date)
 
     # 第一章
-    art1 = article(1)
+    art1 = article("name")
     fields["name_art1"] = (
         ParsedField.present("name_art1", join_text(art1).split("：", 1)[1].strip(), art1)
         if art1 and "：" in join_text(art1)
         else ParsedField.missing("name_art1", "找不到第一章第 1 項商品名稱")
     )
-    art3 = article(3)
+    art3 = article("issuer")
     fields["issuer_name_ch1"] = labelled("issuer_name_ch1", art3, "發行機構：")
     fields["guarantor_name_ch1"] = labelled("guarantor_name_ch1", art3, "保證機構：")
-    fields["currency_art5"] = labelled("currency_art5", article(5), "計價幣別：")
-    art6 = article(6)
+    currency5 = labelled("currency_art5", article("currency"), "計價幣別：")
+    fields["currency_art5"] = derived(
+        "currency_art5", currency5, currency5.value.split(RMB_NOTE, 1)[0].strip() if currency5.ok else None
+    )
+    art6 = article("denomination")
     put("denomination", art6, r"商品面額：每單位商品" + NUM + CCY, number)
     put("denomination_currency", art6, rf"商品面額：每單位商品{money.NUMBER}({CCY})")
-    put("issue_price_pct", article(7), r"發行價格：" + PCT, Decimal)
-    art11 = article(11)
+    put("issue_price_pct", article("issue_price"), r"發行價格：" + PCT, Decimal)
+    art11 = article("underlying")
     table = bnp_tables.price_table("underlying_table", _art11_region(art11), with_tickers=True)
     fields["underlying_table"] = table
     price_fields(fields, table, art11)
 
-    art14 = article(14)
+    art14 = article("dates")
     put("tenor_months", art14, r"商品年期：(\d+)個月期", int)
     put("trade_date", art14, r"期初訂價日：" + D, parse_date)
     put("issue_date", art14, r"發行日：" + D, parse_date)
     put("final_valuation_date", art14, r"期末評價日：" + D, parse_date)
     put("maturity_date", art14, r"到期日：[^(]*?預定為" + D, parse_date)
     fields["date_table"] = bnp_tables.date_table(art14)
-    fields["ko_wording"] = _ko_wording(art14)
-    _schedule(fields)
+    fields["ko_wording"] = _ko_wording(art14, art_label("dates"))
+    _schedule(fields, art_label("dates"))
 
-    art15 = article(15)
+    art15 = article("coupon")
     put("coupon_pa_pct", art15, r"月配息率：\d+(?:\.\d+)?%\(即年利率" + PCT + r"\)", Decimal)
     put("monthly_coupon_pct", art15, r"月配息率：" + PCT + r"\(即年利率", Decimal)
     put("coupon_formula_pct", art15, r"固定配息金額=每單位面額×" + PCT, Decimal)
@@ -331,28 +388,30 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
         lambda x: bnp_scenario.DECIMALS[x],
     )
     put("coupon_currency_art15", art15, rf"計算以({CCY})計值的配息款項")
-    art16 = article(16)
+    art16 = article("autocall")
     put("autocall_redemption_pct", art16, r"自動提前贖回金額=商品面額×" + PCT, Decimal)
     put("currency_art16", art16, rf"計算之({CCY})金額\(「自動提前贖回金額」\)")
     fields["ko_memory"] = ko_memory(
         "ko_memory",
         art16,
         r"「自動提前贖回事件」：計算代理機構將依專業合理的方式釐定，若於任一自動提前贖回評價日，(.+?)，則視為發生自動提前贖回事件",
-        "找不到第 16 項自動提前贖回事件定義句",
+        f"找不到{art_label('autocall')}自動提前贖回事件定義句",
     )
-    art17 = article(17)
+    art17 = article("maturity")
     put("maturity_redemption_pct", art17, r"商品面額×" + PCT + r"；或", Decimal)
     put("min_coupon_rate", art17, r"最低配息率為" + PCT + r"[（(]年化[）)]", Decimal)
     put("currency_art17", art17, rf"計算之({CCY})金額或實體連結標的")
     fields["ki_type"] = ki_type(art17)
     fields["ko_memory_art20"] = ko_memory(
         "ko_memory_art20",
-        doc.span_lines(doc.subitems(arts.get(20)).get(1)),
+        doc.span_lines(doc.subitems(ch1.spans.get("early_exit")).get(1)),
         r"自動提前贖回事件：若於任一自動提前贖回評價日，(.+?)，則視為發生自動提前贖回事件",
-        "找不到第 20 項(1) 自動提前贖回事件定義句",
+        f"找不到{art_label('early_exit')}(1) 自動提前贖回事件定義句",
     )
-    pct_fields(fields)
-    scenarios = bnp_scenario.section(doc.span_lines(doc.subitems(arts.get(18)).get(3)))
+    pct_fields(fields, art_label("underlying"))
+    scenarios = bnp_scenario.section(
+        doc.span_lines(doc.subitems(ch1.spans.get("scenario")).get(3)), art_label("scenario")
+    )
 
     # 第二章
     ch2 = doc.articles(2)
@@ -440,30 +499,36 @@ def read(lines: Sequence[Line]) -> BnpTermSheet:
             occ(
                 "issue_price_scenario",
                 "issue_price_scenario",
-                "第 18 項假設發行價格",
-                _hit_field("issue_price_scenario", scenarios.issue_price, "第 18 項假設找不到發行價格或出現多次"),
+                f"{art_label('scenario')}假設發行價格",
+                _hit_field(
+                    "issue_price_scenario",
+                    scenarios.issue_price,
+                    f"{art_label('scenario')}假設找不到發行價格或出現多次",
+                ),
             ),
             occ(
                 "issue_price_principal",
                 "issue_price_principal",
-                "第 18 項投資本金算式",
+                f"{art_label('scenario')}投資本金算式",
                 _hit_field(
                     "issue_price_principal",
                     scenarios.principal,
-                    "第 18 項假設找不到投資本金算式或出現多次",
+                    f"{art_label('scenario')}假設找不到投資本金算式或出現多次",
                     lambda v: v.pct,
                 ),
             ),
             occ("issue_price_ch4", "issue_price_subscription", "第四章第 5 項申購價金", fields["issue_price_ch4"]),
         ],
     )
-    fields["currency_others"] = standard_fields.occurrences("currency_others", _currency_occurrences(fields, scenarios))
-    _scenario_standard(fields, scenarios)
+    fields["currency_others"] = standard_fields.occurrences(
+        "currency_others", _currency_occurrences(fields, scenarios, ch1)
+    )
+    _scenario_standard(fields, scenarios, ch1)
     coupons = [
-        Mention.of_field("第 15 項月配息率", fields["monthly_coupon_pct"]),
-        Mention.of_field("第 15 項固定配息金額算式", fields["coupon_formula_pct"]),
+        Mention.of_field(f"{art_label('coupon')}月配息率", fields["monthly_coupon_pct"]),
+        Mention.of_field(f"{art_label('coupon')}固定配息金額算式", fields["coupon_formula_pct"]),
     ]
-    return BnpTermSheet(fields, full, doc, scenarios, coupons, page_headers(lines))
+    return BnpTermSheet(fields, full, doc, scenarios, coupons, page_headers(lines), ch1)
 
 
 def _hit_field(name: str, hit: Hit | None, missing: str, pick: Callable = lambda v: v) -> ParsedField:
@@ -485,7 +550,7 @@ def _art11_region(art11: list[Line]) -> list[Line]:
     return art11[start:end]
 
 
-def _ko_wording(art14: list[Line]) -> ParsedField:
+def _ko_wording(art14: list[Line], where: str) -> ParsedField:
     """第 14 項 (6)(7)(8) 的寫法 → KO 觀察方式與 D 型的第一個可提前出場期：{"type": "D"|"P", "k": int | None}。"""
     name = "ko_wording"
     ti = TextIndex(art14)
@@ -497,27 +562,27 @@ def _ko_wording(art14: list[Line]) -> ParsedField:
     if p_hit and not d_hits:
         lns = [ln for ln in art14 if any(re.search(p, squash(ln.text)) for p in KO_P)]
         return ParsedField.present(name, {"type": "P", "k": None}, lns)
-    return ParsedField.invalid(name, art14, "第 14 項配息日／自動提前贖回評價日的寫法缺漏或不在範本規格內")
+    note = f"{where}配息日／自動提前贖回評價日的寫法缺漏或不在範本規格內"
+    return ParsedField.invalid(name, art14, note)
 
 
-SCHEDULE_WHERE = "第 14 項日期表"
 # D 型配息期開始日 = 前期結束日後的下一個一籃子預定交易日；第 1 期開始日 = 發行日（範本規格 §6）
 SCHEDULE_START = standard_fields.PeriodStart("next_trading_day", "issue_date")
 
 
-def _schedule_table(value: dict) -> standard_fields.DateTable:
+def _schedule_table(value: dict, where: str) -> standard_fields.DateTable:
     """日期表：D 觀察日 = 配息期結束日；P 觀察日 = 自動提前贖回評價日（第 1～k−1 期「不適用」為空），沒有開始日欄。"""
     if value["type"] == "D":
         rows = schedule.rows_of(value["rows"], "end", value["row_lines"])
-        return standard_fields.DateTable(SCHEDULE_WHERE, rows, SCHEDULE_START)
-    return standard_fields.DateTable(SCHEDULE_WHERE, schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
+        return standard_fields.DateTable(where, rows, SCHEDULE_START)
+    return standard_fields.DateTable(where, schedule.rows_of(value["rows"], "pricing", value["row_lines"]))
 
 
-def _schedule(fields: dict[str, ParsedField]) -> None:
+def _schedule(fields: dict[str, ParsedField], where: str) -> None:
     """日期表、KO 觀察方式（日期表表頭與第 14 項寫法一致）、第一個可提前出場期、提前出場排程（`parsers/schedule.py`，
     範本規格 §4.1、§4.3）：D 型 k 取第 14 項(8)，P 型為第一個有自動提前贖回評價日的期別。"""
     table, wording = fields["date_table"], fields["ko_wording"]
-    fields["schedule_table"] = schedule.table_field(table, _schedule_table)
+    fields["schedule_table"] = schedule.table_field(table, lambda v: _schedule_table(v, f"{where}日期表"))
     bad = next((p for p in (table, wording) if not p.ok), None)
     if bad is not None:
         fields.update(schedule.failed(bad))
@@ -526,7 +591,7 @@ def _schedule(fields: dict[str, ParsedField]) -> None:
     ev = table.evidence + wording.evidence
     note = ""
     if wording.value["type"] != kind:
-        note = "第 14 項日期表表頭與 (6)(7)(8) 的寫法不一致（一個是每日觀察、一個是每期觀察）"
+        note = f"{where}日期表表頭與 (6)(7)(8) 的寫法不一致（一個是每日觀察、一個是每期觀察）"
     elif kind == "D":
         k = wording.value["k"]
     elif dated := [r["period"] for r in rows if r["pricing"] is not None]:
@@ -561,8 +626,8 @@ def price_fields(fields: dict[str, ParsedField], table: ParsedField, art11: list
     )
 
 
-def pct_fields(fields: dict[str, ParsedField]) -> None:
-    """執行價／自動提前贖回價／下限價的百分比：第 11 項每檔都寫，須全部相同（否則歧義）；無 KI 時下限價不適用。"""
+def pct_fields(fields: dict[str, ParsedField], where: str) -> None:
+    """執行價／自動提前贖回價／下限價的百分比：標的表（`where`）每檔都寫，須全部相同（否則歧義）；無 KI 時下限價不適用。"""
     table, ki = fields["underlying_table"], fields["ki_type"]
     for key, col in (("strike_pct", "strike"), ("ko_pct", "ko"), ("ki_pct", "ki")):
         if col == "ki" and ki.ok and ki.value == "none":
@@ -578,7 +643,7 @@ def pct_fields(fields: dict[str, ParsedField]) -> None:
             )
             continue
         hits = [(p, lns) for p, lns in zip(pcts, table.value["row_lines"], strict=True)]
-        fields[key] = ParsedField.from_hits(key, hits, ambiguous_note="第 11 項各檔的百分比不同")
+        fields[key] = ParsedField.from_hits(key, hits, ambiguous_note=f"{where}各檔的百分比不同")
 
 
 def _trustee_block(art3: list[Line]) -> list[Line]:
@@ -591,15 +656,38 @@ def _trustee_block(art3: list[Line]) -> list[Line]:
     return art3[a:b]
 
 
-def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenario.ScenarioSection) -> list[Occurrence]:
+def _currency_occurrences(
+    fields: dict[str, ParsedField], scenarios: bnp_scenario.ScenarioSection, ch1: Chapter1
+) -> list[Occurrence]:
     """金額旁的幣別字（標準欄位 `currency_others`，Issue #170）：第一章 §6 面額、§15 配息款項、§16／§17 金額、
     第四章四個最低金額、§18 假設（面額、投資本金）各一處；§18 每個情境一處（股價、剩餘金額算式與含「股」的算式不算）。"""
-    occ = Occurrence
+    occ, art_label = Occurrence, ch1.label
+    scenario_item = art_label("scenario")
     out = [
-        occ("denomination_currency", "denomination_currency", "第一章第 6 項商品面額", fields["denomination_currency"]),
-        occ("coupon_currency_art15", "coupon_currency", "第一章第 15 項配息款項", fields["coupon_currency_art15"]),
-        occ("currency_art16", "autocall_amount_currency", "第一章第 16 項自動提前贖回金額", fields["currency_art16"]),
-        occ("currency_art17", "maturity_amount_currency", "第一章第 17 項到期贖回金額", fields["currency_art17"]),
+        occ(
+            "denomination_currency",
+            "denomination_currency",
+            f"第一章{art_label('denomination')}商品面額",
+            fields["denomination_currency"],
+        ),
+        occ(
+            "coupon_currency_art15",
+            "coupon_currency",
+            f"第一章{art_label('coupon')}配息款項",
+            fields["coupon_currency_art15"],
+        ),
+        occ(
+            "currency_art16",
+            "autocall_amount_currency",
+            f"第一章{art_label('autocall')}自動提前贖回金額",
+            fields["currency_art16"],
+        ),
+        occ(
+            "currency_art17",
+            "maturity_amount_currency",
+            f"第一章{art_label('maturity')}到期贖回金額",
+            fields["currency_art17"],
+        ),
         occ(
             "minimum_subscription_currency",
             "minimum_subscription_currency",
@@ -627,22 +715,22 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
         occ(
             "scenario_denomination_currency",
             "scenario_denomination_currency",
-            "第 18 項假設商品面額",
+            f"{scenario_item}假設商品面額",
             _hit_field(
                 "scenario_denomination_currency",
                 scenarios.denomination,
-                "第 18 項假設找不到商品面額或出現多次",
+                f"{scenario_item}假設找不到商品面額或出現多次",
                 lambda v: v.currency,
             ),
         ),
         occ(
             "scenario_principal_currency",
             "scenario_principal_currency",
-            "第 18 項假設投資本金",
+            f"{scenario_item}假設投資本金",
             _hit_field(
                 "scenario_principal_currency",
                 scenarios.principal,
-                "第 18 項假設找不到投資本金或出現多次",
+                f"{scenario_item}假設找不到投資本金或出現多次",
                 lambda v: v.currency,
             ),
         ),
@@ -653,7 +741,7 @@ def _currency_occurrences(fields: dict[str, ParsedField], scenarios: bnp_scenari
         field = f"情境{s.number}_currency"
         out.append(
             money.scenario_occurrence(
-                field, "scenario_currency", f"第 18 項情境{s.number}", s.money, s.lines[:1], f"情境{s.number}"
+                field, "scenario_currency", f"{scenario_item}情境{s.number}", s.money, s.lines[:1], f"情境{s.number}"
             )
         )
     return out
@@ -688,13 +776,16 @@ def _worst_row(s: bnp_scenario.Scenario, rows: ParsedField) -> int | None:
     return found[0] if len(found) == 1 else None
 
 
-def _scenario_standard(fields: dict[str, ParsedField], sec: bnp_scenario.ScenarioSection) -> None:
+def _scenario_standard(fields: dict[str, ParsedField], sec: bnp_scenario.ScenarioSection, ch1: Chapter1) -> None:
     """第 18 項(3) 交給共用情境規則的標準欄位（Issue #294）：重印標的表；假設的商品面額、投資本金、每月配息率，各情境
     配息算式的月配息率與獲利情境（自動提前贖回、最佳）的年化報酬率（`scenario_params`）；較差／最差情境假設句與股數
     算式的執行價格（`scenario_prices`）。發行價格的出處在 `issue_price_others`。"""
-    fields["main_price_table"] = _table_at("main_price_table", fields["underlying_table"], "第 11 項標的表")
-    fields["scenario_reprint_table"] = _table_at("scenario_reprint_table", sec.table, "第 18 項重印標的表")
-    where = "第 18 項假設"
+    scenario_item = ch1.label("scenario")
+    fields["main_price_table"] = _table_at(
+        "main_price_table", fields["underlying_table"], f"{ch1.label('underlying')}標的表"
+    )
+    fields["scenario_reprint_table"] = _table_at("scenario_reprint_table", sec.table, f"{scenario_item}重印標的表")
+    where = f"{scenario_item}假設"
     monthly = sec.monthly[0] if len(sec.monthly) == 1 else None
     params = [
         ScenarioParam(
@@ -719,7 +810,7 @@ def _scenario_standard(fields: dict[str, ParsedField], sec: bnp_scenario.Scenari
     for s in sec.scenarios:
         if s.kind == "extreme":
             continue
-        where = f"第 18 項情境{s.number}"
+        where = f"{scenario_item}情境{s.number}"
         coupon = Mention.of_optional_hit(f"{where}配息算式", s.coupon, lambda v: v.rate, s.lines[:1])
         params.append(
             ScenarioParam("scenario_monthly_coupon", f"{where}配息算式的", coupon.parsed("scenario_monthly_coupon"))

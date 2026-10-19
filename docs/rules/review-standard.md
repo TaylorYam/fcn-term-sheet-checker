@@ -85,7 +85,7 @@
 | `{ko_observation_zh}`／`{ko_observation_en}` | 提前出場每日觀察（KO D 型）時填入 `daily_zh`／`daily_en`、每期觀察（P 型）時填入 `periodic_zh`／`periodic_en`（UBS 名稱兩種都有字樣，`{daily_*}` 在每期時是空白不夠用；Issue #279） |
 | `{ki_zh}`／`{ki_en}` | 有 KI（KI 型態不是「無」）時填入 `ki_zh`／`ki_en`，否則空白（DBS 中文「及定價日觸發(歐式)」、英文「European Knock-In 」，Issue #280；UBS 中文「（含觸及下限價事件）」、英文「Kick-In Event and 」，Issue #279） |
 | `{quanto_zh}`／`{quanto_en}` | 承作幣別和任一檔標的報價幣別（說明書價格旁的幣別字）不同時填入 `quanto_zh`／`quanto_en`，否則空白；幣別字讀不到或不在幣別對照時轉人工覆核（DBS「Quanto」，Issue #280） |
-| `{ccy}` 的別名 | 樣板的 `ccy_aliases`（ISO 代碼 → 名稱用的代碼）：SG 英文名稱把 CNH 寫成 CNY（Issue #194） |
+| `{ccy}` 的別名 | 樣板的 `ccy_aliases`（ISO 代碼 → 名稱用的代碼）：SG 英文名稱把 CNH 寫成 CNY（Issue #194）；GS、BNP 同（BNP 境外人民幣版，Issue #345）；DBS 寫 RMB（Issue #296） |
 
 樣板設 `single_unsupported = true` 時，標的只有 1 檔的名稱轉人工覆核（沒有樣本、寫法未知；`single_*` 可不設，DBS，Issue #280）。樣板出現上表以外的佔位符，或用了 `{underlying_*}` 卻沒設定 `single_*`（`single_unsupported` 時免設）／`basket_*` 時，載入審查標準就回報設定錯誤（`config_invalid`，整批不核對），不會在核對途中才出錯。`risk.level_formats`、`risk.fixed_warning_openings`、`issuer_name_ignore` 寫法有誤時同樣在載入時回報。
 
