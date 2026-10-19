@@ -185,7 +185,7 @@ def read(lines: Sequence[Line]) -> iis.IisSheet:
     put("tenor_months", r"商品年期[:：](\d+)個月", int)
     put("issue_date", r"發行日[:：]" + iis.DATE, parse_date)
     put("maturity_date", r"到期日或最終實物贖回日[:：]" + iis.DATE, parse_date)
-    put("monthly_coupon_pct", r"每月之配息率（為([\d.]+)%", Decimal)
+    put("monthly_coupon_pct", r"每[月次]之配息率（為([\d.]+)%", Decimal)
     put("coupon_pa_pct", r"即年利率為([\d.]+)%", Decimal)
     fields.update(_price_table(lines))
     provided = (PROVIDED - {"ko_pct"}) | {f for f in ("ko_pct", "ki_pct") if f in fields}

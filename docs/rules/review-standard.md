@@ -75,7 +75,7 @@
 
 | 佔位符 | 填入內容 |
 |---|---|
-| `{tenor}` | 天期月數 |
+| `{tenor}` | 天期月數；天期 1 個月時英文樣板緊接的 `Months` 改成單數 `Month`（`{tenor} Months`、`{tenor}Months` 都適用，只接受單數；其他天期照舊 `Months`；寫 `-Month` 的上手不受影響；2026-10-19 確認，Issue #343） |
 | `{ccy_zh}`／`{ccy}` | 幣別中文／ISO 代碼 |
 | `{memory_zh}`／`{memory_en}` | 記憶式時填入該上手樣板的 `memory_zh`／`memory_en`，否則空白 |
 | `{maxi_zh}`／`{maxi_en}` | 標的數 ≥ 2 時填入 `maxi_zh`／`maxi_en`，否則空白 |

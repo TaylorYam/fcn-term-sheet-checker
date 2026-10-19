@@ -379,6 +379,15 @@ def test_barc_knock_in_price_on_the_iis_is_compared_with_the_sheet(tmp_path):
     assert problems(sheet) == ["UL_1 下限價對不起來：參考條件表 74.0700／投資人須知 74.0701"]
 
 
+def test_barc_iis_reads_the_coupon_written_per_payment(tmp_path):
+    """1 個月期投資人須知寫「每次之配息率」：和「每月之配息率」一樣讀出月配息率（Issue #343）。"""
+    spec = Spec()
+    ts, iis = pair(tmp_path, spec, edits=[Edit("每月之配息率", "每次之配息率")])
+    _, sheet = check_all(build_reference_sheet(tmp_path / "ref.xlsx", [reference_row(spec)]), [ts, iis]).items
+    assert sheet.report.status == PASS, problems(sheet)
+    assert {r.status for r in sheet.report.results if r.rule_id == "iis.monthly_coupon"} == {PASS}
+
+
 def test_unreadable_iis_price_table_requires_review_naming_the_iis(tmp_path):
     spec = Spec()
     ts, iis = pair(tmp_path, spec, edits=[Edit("最初價格", "期初價格")])

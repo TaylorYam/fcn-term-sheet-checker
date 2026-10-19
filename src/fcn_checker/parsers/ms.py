@@ -152,6 +152,12 @@ def _ki_type(lines: list[Line]) -> ParsedField:
     return ms_wording.ki_type(TextIndex(lines), invalid_note=note)
 
 
+def _coupon_range(text: str) -> tuple[int, int]:
+    """第 15 項期別範圍 (a, N)：「j 係為a 至N 的數字」；只有一個數字（1 個月期「j 係為1 的數字」）時 a = N。"""
+    nums = tuple(map(int, re.findall(r"\d+", text)))
+    return nums if len(nums) == 2 else (nums[0], nums[0])
+
+
 def _art17(lines: list[Line]) -> tuple[ParsedField, ParsedField]:
     """第 17 項：記憶式（`ko_memory`：要有記憶事件定義句與觀察日）與觀察寫法（`ko_observation_art17`：表型 D／P、
     第一個可提前出場期 k、D 型觀察起訖日）。寫法不在範本規格內一律不合法。"""
@@ -242,7 +248,8 @@ def read(lines: Sequence[Line]) -> MsTermSheet:
     art15 = article(15)
     put("monthly_coupon_pct", art15, r"固定配息率（(\d+(?:\.\d+)?)%）", Decimal)
     put("coupon_formula_pct", art15, r"\{(\d+(?:\.\d+)?)%×n（j）/N（j）\}", Decimal)
-    put("coupon_range", art15, r"(j係為\d+至\d+的數字)", lambda x: tuple(map(int, re.findall(r"\d+", x))))
+    # 「j 係為a 至N 的數字」；1 個月期只寫「j 係為1 的數字」，讀成 a = N（Issue #343）
+    put("coupon_range", art15, r"(j係為\d+(?:至\d+)?的數字)", _coupon_range)
     art16 = article(16)
     fields["ki_type"] = _ki_type(art16)
     region = ms_tables.price_region(art16, ("（1）最低保證贖回率",))
