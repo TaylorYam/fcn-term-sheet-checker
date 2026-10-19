@@ -108,7 +108,7 @@ def _fill_and_save(wb: Workbook, outcome: BatchOutcome, to_fill: Sequence[BatchI
         ws.unmerge_cells(str(merged))
     backfill.apply(wb, rfmt, [i.report for i in to_fill])
     keep = [i.reference_row for i in to_fill if i.reference_row]
-    error_rows = [_error_row(i) for i in outcome.items if not i.fillable]
+    error_rows = [row for i in outcome.items if not i.fillable for row in _error_rows(i)]
     return result_file.save(wb, rfmt, keep, error_rows, out)
 
 
@@ -116,8 +116,8 @@ def _status(outcome: BatchOutcome, errors: Sequence[CheckResult]) -> CheckStatus
     return overall_status([outcome.status, *(e.status for e in errors)])
 
 
-def _error_row(item: BatchItem) -> result_file.ErrorRow:
-    return result_file.ErrorRow.of(item.identification, item.problem_messages)
+def _error_rows(item: BatchItem) -> list[result_file.ErrorRow]:
+    return result_file.ErrorRow.rows(item.identification, item.problems)
 
 
 def _record_item(item: BatchItem, filled: bool) -> reporting.RecordItem:

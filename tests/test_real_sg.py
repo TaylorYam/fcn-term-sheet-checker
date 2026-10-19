@@ -126,10 +126,8 @@ def test_term_sheets_that_pass_are_filled_with_their_investor_sheets(tmp_path, i
         assert row[head["TS/IIS完成檢核"]] == "V"
         assert row[head["ISIN Code"]] == sheet.f("isin").value  # 回填的 ISIN 也等於投資人須知
         assert row[head["發行日"]].date() == sheet.f("issue_date").value
-    errors = [
-        r for r in wb["錯誤清單"].iter_rows(values_only=True) if r and any(str(c).startswith("037") for c in r if c)
-    ]
-    assert len(errors) == 2  # 舊範本那 1 檔的說明書與投資人須知
+    errors = {r[1] for r in wb["錯誤清單"].iter_rows(min_row=2, values_only=True) if str(r[1]).startswith("037")}
+    assert len(errors) == 2  # 舊範本那 1 檔的說明書與投資人須知（一條錯訊一列，依 PDF 檔名算）
 
 
 def _lines(path):

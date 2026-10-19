@@ -144,7 +144,7 @@ def test_reference_sheet_variant_stops_both_documents_without_rules_or_release(t
             outcome.release(item)
         assert not receipt.filled(item)
     ws = openpyxl.load_workbook(receipt.output)["錯誤清單"]
-    assert [r[2] for r in ws.iter_rows(min_row=2, values_only=True)] == [message] * 2
+    assert [r[3] for r in ws.iter_rows(min_row=2, values_only=True)] == [message] * 2
     assert spec.product_code not in filled_codes(receipt.output)
 
 

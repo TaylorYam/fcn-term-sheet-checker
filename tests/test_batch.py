@@ -10,6 +10,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import fitz
 import openpyxl
 import pytest
 from openpyxl.formatting.rule import CellIsRule
@@ -341,7 +342,7 @@ def test_file_name_not_ending_with_ts_or_iis_cannot_be_recognized_or_released(tm
     with pytest.raises(IngestionError, match="檔名無法辨識"):
         outcome.release(item)
     assert iis.status_label == "這批缺說明書", "辨識不了的檔案不算同商品的說明書"
-    assert [e["PDF 檔名"] for e in error_rows(receipt.output)] == [name, iis.term_sheet.name]
+    assert list(dict.fromkeys(e["PDF 檔名"] for e in error_rows(receipt.output))) == [name, iis.term_sheet.name]
     assert sheet_rows(receipt.output) == {}
 
 
@@ -615,7 +616,7 @@ def test_columns_the_import_format_does_not_have_are_left_out(tmp_path):
     assert "中間的註記" not in values and "已到期" not in values and "庫存狀態" not in values
 
 
-def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
+def test_error_list_has_one_row_per_message_in_input_order(tmp_path):
     ok, bad, missing = Spec(), Spec(product_code="029199990002"), Spec(product_code="029199990003")
     unsupported = Spec(product_code="999199990001")
     unreadable = tmp_path / "029199990009_TS.pdf"
@@ -627,18 +628,22 @@ def test_error_list_has_one_row_per_failing_pdf_in_input_order(tmp_path):
     outcome, receipt, _ = batch(tmp_path, pdfs, rows)
 
     errors = error_rows(receipt.output)
-    assert [(e["TDCC Code"], e["PDF 檔名"]) for e in errors] == [
+    assert list(errors[0]) == ["TDCC Code", "PDF 檔名", "PDF 頁碼", "錯訊"]
+    assert list(dict.fromkeys((e["TDCC Code"], e["PDF 檔名"]) for e in errors)) == [
         (bad.product_code, pdfs[0].name),
         (missing.product_code, pdfs[2].name),
         (unsupported.product_code, pdfs[3].name),
         ("029199990009", unreadable.name),
         (None, nameless.name),
         *((s.product_code, f"{s.product_code}_IIS.pdf") for s in (bad, missing, unsupported)),
-    ], "每份沒通過的 PDF 一列，依輸入順序；TDCC Code 取封面商品代號、檔名前 12 碼，都取不到時留白"
-    lines = errors[0]["錯訊"].split("\n")
-    assert len(lines) == 2 and "K(%)對不起來：參考條件表 71.00／說明書 70.00" in lines, "多條錯訊在同一格，以換行分隔"
+    ], "沒通過的 PDF 依輸入順序；TDCC Code 取封面商品代號、檔名前 12 碼，都取不到時留白"
+    bad_rows = [e for e in errors if e["PDF 檔名"] == pdfs[0].name]
+    assert [e["錯訊"] for e in bad_rows] == list(outcome.items[0].problem_messages), "一條錯訊一列"
+    assert len(bad_rows) == 2 and all(e["TDCC Code"] == bad.product_code for e in bad_rows), "每列都有 TDCC Code"
+    k = next(e for e in bad_rows if e["錯訊"] == "K(%)對不起來：參考條件表 71.00／說明書 70.00")
+    assert isinstance(k["PDF 頁碼"], int), "有證據的錯訊寫頁碼"
     assert all(e["錯訊"] for e in errors)
-    assert openpyxl.load_workbook(receipt.output)["錯誤清單"]["C2"].alignment.wrap_text
+    assert openpyxl.load_workbook(receipt.output)["錯誤清單"]["D2"].alignment.wrap_text
     assert list(sheet_rows(receipt.output)) == [ok.product_code]
 
 
@@ -1078,11 +1083,15 @@ def test_release_problem_messages_match_the_error_list(tmp_path):
     outcome = checked(tmp_path, [pdf_for(tmp_path, spec)], [reference_row(spec, **{"K(%)": 71, "KO(%)": 99})])
     item, iis = outcome.items
     receipt, _ = saved(outcome, tmp_path)
-    error, iis_error = error_rows(receipt.output)
+    errors = error_rows(receipt.output)
     assert len(item.problem_messages) == 2
-    assert error["錯訊"] == "\n".join(item.problem_messages), "放行確認視窗與錯誤清單列出同樣的錯訊"
-    assert iis_error["錯訊"] == "\n".join(iis.problem_messages)
+    for doc in (item, iis):
+        rows = [e["錯訊"] for e in errors if e["PDF 檔名"] == doc.term_sheet.name]
+        assert rows == list(doc.problem_messages), "放行確認視窗與錯誤清單列出同樣的錯訊、同樣的順序"
     assert "K(%)對不起來：參考條件表 71.00／投資人須知 70.00" in iis.problem_messages
+    iis_k = next(e for e in errors if e["錯訊"] == "K(%)對不起來：參考條件表 71.00／投資人須知 70.00")
+    with fitz.open(iis.term_sheet) as doc:
+        assert 1 <= iis_k["PDF 頁碼"] <= doc.page_count, "投資人須知那一列寫投資人須知 PDF 的頁碼"
 
 
 def _unreadable(tmp_path: Path, spec: Spec) -> Path:

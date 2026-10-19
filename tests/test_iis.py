@@ -46,7 +46,7 @@ def error_names(receipt) -> list[str]:
     import openpyxl
 
     ws = openpyxl.load_workbook(receipt.output)["錯誤清單"]
-    return [r[1] for r in ws.iter_rows(min_row=2, values_only=True)]
+    return list(dict.fromkeys(r[1] for r in ws.iter_rows(min_row=2, values_only=True)))  # 一條錯訊一列，同一份只算一次
 
 
 def filled_codes(receipt) -> list[str]:

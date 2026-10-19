@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from fcn_checker.identification import Identification, PairingProblem, identify
+from fcn_checker.messages import Problem
 from fcn_checker.orders.reference import load_reference_sheet
 from fcn_checker.result_file import ErrorRow
 from fcn_checker.schema import CheckStatus, DocKind
@@ -155,10 +156,20 @@ def test_unrecognized_file_name_has_no_kind_and_is_nobody_s_counterpart(tmp_path
     [r] = bad.results
     assert (r.rule_id, r.status, r.reason_code) == ("batch.file_name", REVIEW, "file_name_unrecognized")
     assert sheet.problem == P.MISSING_TS and sheet.partner is None, "辨識不了的檔案不算同商品的說明書"
-    assert ErrorRow.of(bad, ("錯訊",)) == ErrorRow(spec.product_code, name, "錯訊"), (
+    assert ErrorRow.rows(bad, [Problem("錯訊", ())]) == [ErrorRow(spec.product_code, name, (), "錯訊")], (
         "錯誤清單的 TDCC Code 用檔名前 12 碼"
     )
-    assert ErrorRow.of(sheet, ("甲", "乙")) == ErrorRow(spec.product_code, iis.name, "甲\n乙")
+    assert ErrorRow.rows(sheet, [Problem("甲", (3,)), Problem("乙", (9, 10))]) == [
+        ErrorRow(spec.product_code, iis.name, (3,), "甲"),
+        ErrorRow(spec.product_code, iis.name, (9, 10), "乙"),
+    ], "一條錯訊一列"
+    assert [
+        r.page_cell for r in ErrorRow.rows(sheet, [Problem("甲", (3,)), Problem("乙", (9, 10)), Problem("丙", ())])
+    ] == [
+        3,
+        "9、10",
+        None,
+    ]
 
 
 def test_product_code_prefix_differing_from_the_file_name_prefix_is_an_issuer_prefix_mismatch(tmp_path):

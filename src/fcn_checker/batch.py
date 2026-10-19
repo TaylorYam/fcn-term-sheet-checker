@@ -35,7 +35,7 @@ from .check_config import CheckConfig
 from .config import ReferenceFormat
 from .identification import Identification, PairingProblem, identify, unexpected_result
 from .ingestion import IngestionError, SourceSnapshot, error_result
-from .messages import STATUS_ZH, problem_message
+from .messages import STATUS_ZH, Problem, problems
 from .orders.reference import load_reference_sheet
 from .schema import CheckReport, CheckResult, CheckStatus, DocKind, Evidence, overall_status
 from .single_check import Paired, PairedIis, check_document, check_investor_sheet
@@ -179,9 +179,14 @@ class BatchItem:
         return original
 
     @property
+    def problems(self) -> tuple[Problem, ...]:
+        """這份文件的錯訊與各自的證據頁碼，同一句只列一次（錯誤清單用，Issue #342）。"""
+        return problems(self.report.results)
+
+    @property
     def problem_messages(self) -> tuple[str, ...]:
         """這份說明書的錯訊，同一句只列一次（錯誤清單與 PANEL 放行確認共用）。"""
-        return tuple(dict.fromkeys(problem_message(r) for r in self.report.results if r.status.is_problem))
+        return tuple(p.message for p in self.problems)
 
     @property
     def release_problem(self) -> str:
