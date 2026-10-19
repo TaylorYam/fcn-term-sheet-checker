@@ -324,6 +324,18 @@ def test_d_type_coupon_range_starts_after_non_call(tmp_path):
     assert [x.status for x in rule(r, "doc.coupon_periods") if x.field == "coupon_range"] == [S.MISMATCH]
 
 
+def test_one_month_coupon_range_with_a_single_period(tmp_path):
+    """1 個月期第 15 項只寫「j 係為1 的數字」：讀成 a = N = 1，照現行規則核對；英文名稱寫單數「1 Month」（Issue #343）。"""
+    edits = [
+        Edit("j 係為1 至1 的數字，代表第1 至1 個", "j 係為1 的數字，代表第1 個", "ts.art15"),
+        Edit("1 Months", "1 Month"),
+    ]
+    r = check(tmp_path, Spec(ko_obs="P", tenor=1), edits=edits)
+    assert r.status == S.PASS, problems(r)
+    [rng] = [x for x in rule(r, "doc.coupon_periods") if x.field == "coupon_range"]
+    assert (rng.status, rng.actual) == (S.PASS, (1, 1))
+
+
 def test_fee_rates_are_read_under_a_centred_two_line_header(tmp_path):
     """表頭「費率」置中拆成兩行、比費率格右移時費率仍讀得到（Issue #310）。"""
     r = check(tmp_path, Spec(fee_header_split=True))

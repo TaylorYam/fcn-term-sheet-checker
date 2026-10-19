@@ -299,9 +299,19 @@ def test_ki_definition_must_match_the_maturity_wording(tmp_path):
     assert rule(r, "field.ki_type")[0].status == S.REVIEW_REQUIRED
 
 
-def test_multi_underlying_without_memory_wording_needs_review(tmp_path):
-    """多標的又沒有記憶式兩句：沒有樣本，轉人工覆核（2026-10-15 確認）。"""
-    r = check(tmp_path, Spec(memory=False))
+@pytest.mark.parametrize(("memo", "status"), [("N", S.PASS), ("Y", S.MISMATCH)])
+def test_multi_underlying_all_on_the_same_day_is_non_memory(tmp_path, memo, status):
+    """多標的「所有連結標的於預定自動提前出場觀察日之收盤價…」是非記憶式，和參考條件表 KO(memo) 比對（Issue #344）。"""
+    r = check(tmp_path, Spec(memory=False), **{"KO(memo)": memo})
+    assert all(x.rule_id != "doc.ko_memory" for x in r.results)
+    assert rule(r, "field.ko_memory")[0].status == status
+    assert {rid for rid, _, _ in problems(r)} == ({"field.ko_memory"} if memo == "Y" else set())
+
+
+def test_multi_underlying_without_known_memory_wording_needs_review(tmp_path):
+    """多標的又沒有記憶式兩句、也不是「所有連結標的於預定…」：句型未知，轉人工覆核（2026-10-15 確認）。"""
+    edit = Edit("所有連結標的於預定自動提前出場觀察日", "連結標的於預定自動提前出場觀察日", "ts.art9")
+    r = check(tmp_path, Spec(memory=False), edits=[edit])
     assert {(rid, f) for rid, f, _ in problems(r)} == {("doc.ko_memory", "ko_memory")}
 
 

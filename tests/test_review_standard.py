@@ -35,6 +35,13 @@ def standard_with(tmp_path: Path, old: str, new: str) -> Path:
     return path
 
 
+class _Filled(dict):
+    """沒給的佔位符填空字串。"""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
 def check_hsbc(
     tmp_path: Path,
     spec: hsbc_synth.Spec | None = None,
@@ -103,6 +110,36 @@ def test_product_name_placeholders_are_filled_from_the_document_for_any_issuer(t
     r = results(report, "standard.product_name", "name_en")[0]
     assert r.status == MISMATCH
     assert r.expected.startswith("6 Months USD Daily Memory Autocallable")
+
+
+@pytest.mark.parametrize(
+    ("tenor", "written", "status"),
+    [(1, None, MISMATCH), (1, "1 Month USD", PASS), (3, None, PASS), (3, "3 Month USD", MISMATCH)],
+    ids=["1-Months", "1-Month", "3-Months", "3-Month"],
+)
+def test_english_name_is_singular_only_for_a_one_month_tenor(tmp_path, tenor, written, status):
+    """天期 1 個月時英文名稱樣板的 Months 改成 Month、只接受單數；其他天期照舊 Months（Issue #343）。"""
+    edits = [Edit(f"{tenor} Months USD", written, "ts")] if written else []
+    report = check(tmp_path, Spec(tenor=tenor), edits=edits)
+    assert results(report, "standard.product_name", "name_en")[0].status == status
+
+
+@pytest.mark.parametrize(
+    ("issuer", "one", "three"),
+    [
+        ("BARC", "1 Month USD", "3 Months USD"),
+        ("MS", "issuance of 1 Month USD", "issuance of 3 Months USD"),
+        ("BNP", "1 Month USD", "3 Months USD"),
+        ("JPM", "JPMorgan 1Month USD", "JPMorgan 3Months USD"),
+        ("GS", "1 Month USD", "3 Months USD"),
+        ("CITI", "1-Month USD", "3-Month USD"),
+    ],
+)
+def test_months_templates_take_the_singular_for_one_month(issuer, one, three):
+    """所有用 `{tenor} Months`／`{tenor}Months` 的樣板天期 1 時改單數；寫 `-Month` 的上手不受影響（Issue #343）。"""
+    tpl = load_config().review_standard.for_issuer(issuer).product_name
+    assert one in tpl.template("en", 1).format_map(_Filled(tenor=1, ccy="USD"))
+    assert three in tpl.template("en", 3).format_map(_Filled(tenor=3, ccy="USD"))
 
 
 def test_missing_issuer_name_requires_review(tmp_path):

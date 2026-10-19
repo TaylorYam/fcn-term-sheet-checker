@@ -151,7 +151,7 @@ def _product_terms(ti: TextIndex, fields: dict[str, ParsedField], provided: set[
         m = events[0]
         tail = st.text[m.end() : m.end() + 40]
         wording = ParsedField.present(
-            "ko_memory_wording", (ca.MEMORY_PRIOR in m[1], ca.MEMORY_SAME in tail), st.lines_for(m.start(), m.end())
+            "ko_memory_wording", ca.memory_wording(m[1], tail), st.lines_for(m.start(), m.end())
         )
         fields["ko_memory"] = ca.memory_of(wording)
     ki, plain = ca.KI_MATURITY in st.text, "期末訂價低於執行價" in st.text
