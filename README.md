@@ -1,5 +1,9 @@
 # FCN Term Sheet Checker
 
+> **本 repo 已停止維護（2026-10-20）**：核對程式連同 commit 歷史已併入 [TaylorYam/structured-product-workflow](https://github.com/TaylorYam/structured-product-workflow)（程式在 `src/fcn_checker/`、文件在 `docs/checker/`，決策見該 repo 的 ADR 0005）。之後的修改、Issue 與安裝都在那邊；這裡只留作歷史紀錄。
+>
+> **This repository is no longer maintained (2026-10-20)**: the checker, with its commit history, has moved into [TaylorYam/structured-product-workflow](https://github.com/TaylorYam/structured-product-workflow) (code in `src/fcn_checker/`, documents in `docs/checker/`, decision in that repository's ADR 0005). Make changes, file issues, and install from there; this repository is kept as history only.
+
 FCN Term Sheet 自動核對專案：將條款文件與已確認的下單資料轉成相同資料結構，以可追溯規則產生差異與人工覆核清單。
 
 **目前實作（2026-10-18）：14 家上手的中文產品說明書與投資人須知 × 共用參考條件表，提供本機 PANEL 與 CLI 批量核對。** 可輸出匯入格式 Excel，回填 ISIN、發行日、比價日，以及 VWAP 商品的標的價格。上手、範本連結與不支援樣態統一列在[支援範圍與文件索引](docs/support-matrix.md)；MS、UBS 只支援已定義的新版範本。正式核對使用固定規則，不使用 LLM；可用範圍與正式上線驗收分開判定。
